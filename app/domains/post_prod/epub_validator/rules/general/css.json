@@ -5,14 +5,16 @@
       "name": "XHTML CSS Validation",
       "target_path": "OEBPS/xhtml",
       "enabled": false,
-      "file_name_pattern": "*.xhtml"
+      "file_name_pattern": "*.xhtml",
+      "category": "CSS Check"
     },
     {
       "id": "CSS002",
       "name": "CSS File Validation",
       "target_path": "OEBPS/css",
       "enabled": true,
-      "file_name_pattern": "*.css"
+      "file_name_pattern": "*.css",
+      "category": "CSS Check"
     }
   ]
 }

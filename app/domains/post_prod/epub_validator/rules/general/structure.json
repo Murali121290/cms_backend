@@ -4,25 +4,29 @@
       "id": "STRUCT001",
       "name": "EPUB Folder Structure Check",
       "scope": "book",
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     },
     {
       "id": "STRUCT002",
       "name": "Container File Check",
       "scope": "book",
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     },
     {
       "id": "STRUCT003",
       "name": "EPUB Content Folder Check",
       "scope": "book",
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     },
     {
       "id": "STRUCT004",
       "name": "EPUB File Extension Check",
       "scope": "book",
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     }
   ]
 }

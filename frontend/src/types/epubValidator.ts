@@ -65,6 +65,7 @@ export interface ValidationIssue {
   snippet?: string | null;
   file_path?: string | null;
   extract?: string;
+  is_ignored?: boolean;
   [key: string]: unknown;
 }
 
@@ -98,6 +99,8 @@ export interface ValidationApiResponse {
   files: ValidationFileEntry[];
   // v2 engine only; when present the modal + page render the general/customer split.
   customer?: string | null;
+  // Custom sorting order for UI categories, configured in customer.json
+  category_order?: string[];
 }
 export interface AceViolation {
   rule_id: string;

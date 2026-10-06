@@ -33,6 +33,25 @@ def docx_has_changes(path1: str, path2: str) -> bool:
         return True
 
 
+def resolve_physical_file_path(path: str, upload_dir: str) -> str:
+    """Resolve a relative or absolute file path to a verified existing physical file path under upload_dir."""
+    if not path:
+        return path
+    if os.path.isabs(path) and os.path.exists(path):
+        return path
+    cleaned = path.lstrip("/\\")
+    alt1 = os.path.abspath(os.path.join(upload_dir, cleaned))
+    if os.path.exists(alt1):
+        return alt1
+    if cleaned.startswith("app/") or cleaned.startswith("app\\"):
+        alt2 = os.path.abspath(os.path.join(upload_dir, cleaned[4:]))
+        if os.path.exists(alt2):
+            return alt2
+    if not os.path.isabs(path):
+        return alt1
+    return os.path.abspath(path)
+
+
 def _run_via_pph(file_path: str, endpoint: str, extra_data: dict = None, file_field: str = "files") -> list:
     """Submit a single file to a PPH endpoint and return extracted output file paths."""
     from app.integrations.pph.client import PPHClient
@@ -65,6 +84,7 @@ PROCESS_PERMISSIONS = {
     "permissions": ["PermissionsManager", "ProjectManager", "Admin"],
     "reference_validation": ["Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator"],
     "structuring": ["ProjectManager","Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator", "XML Manager", "XML Operator", "Senior XML Operator"],
+    "structuring_qa": ["ProjectManager","Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator", "XML Manager", "XML Operator", "Senior XML Operator"],
     "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
@@ -180,7 +200,8 @@ def background_processing_task(
             update_job_status(db, job_id, "failed", "File not found", 100, "File not found in database.")
             return
 
-        file_path = os.path.abspath(file_record.path)
+        from app.services.file_service import UPLOAD_DIR
+        file_path = resolve_physical_file_path(file_record.path, UPLOAD_DIR)
         success_msg = ""
         generated_files = []
 
@@ -391,11 +412,79 @@ def background_processing_task(
                         logger.error(f"Manual structuring failed: {error_msg}")
                         raise Exception(f"Manual structuring failed: {error_msg}")
                     generated_files = [output_path]
+                    try:
+                        from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
+                        xhtml_dir = os.path.join(dir_name, "xhtml")
+                        os.makedirs(xhtml_dir, exist_ok=True)
+                        xhtml_path = os.path.join(xhtml_dir, f"{name_only}_Processed.html")
+                        content = DocxToXhtmlRunsEngine().convert(output_path)
+                        with open(xhtml_path, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        generated_files.append(xhtml_path)
+                        logger.info(f"Auto-generated XHTML for manual structuring: {xhtml_path}")
+                    except Exception as xe:
+                        logger.warning(f"Could not auto-generate XHTML for manual structuring: {xe}")
                     success_msg = f"Manual structuring completed (mode: {mode})"
                 else:
                     update_job_status(db, job_id, "processing", "Offloading document to AI Structuring...", 30)
                     generated_files = structuring_engine_cls().process_document(file_path, mode=mode, tag_set=tag_set)
                     success_msg = f"Structuring completed (mode: {mode})"
+
+                # Auto-generate QA report for structured document
+                try:
+                    from app.processing.structuring_qa_analyzer import generate_qa_report_html
+                    docx_target = [f for f in generated_files if f.endswith(".docx")]
+                    if docx_target:
+                        target_docx = docx_target[0]
+                        dir_name = os.path.dirname(target_docx)
+                        base_name = os.path.basename(target_docx)
+                        name_stem = os.path.splitext(base_name)[0]
+                        if name_stem.endswith("_Processed"):
+                            name_stem = name_stem[:-10]
+                        
+                        # Store in Manuscript folder if available, else current directory
+                        manuscript_dir = dir_name
+                        if "xml" in dir_name.lower() or "xhtml" in dir_name.lower():
+                            parent_dir = os.path.dirname(dir_name)
+                            man_candidate = os.path.join(parent_dir, "Manuscript")
+                            if os.path.exists(man_candidate):
+                                manuscript_dir = man_candidate
+                        
+                        qa_report_filename = f"{name_stem}_QA_Report.html"
+                        qa_report_path = os.path.join(manuscript_dir, qa_report_filename)
+                        generate_qa_report_html(target_docx, qa_report_path, document_title=f"{name_stem}.docx")
+                        if qa_report_path not in generated_files:
+                            generated_files.append(qa_report_path)
+                        logger.info(f"Auto-generated Structuring QA Report: {qa_report_path}")
+                except Exception as qae:
+                    logger.warning(f"Could not auto-generate Structuring QA Report: {qae}")
+
+            elif process_type == "structuring_qa":
+                update_job_status(db, job_id, "processing", "Running Structuring QA Analysis...", 50)
+                from app.processing.structuring_qa_analyzer import generate_qa_report_html
+                dir_name = os.path.dirname(file_path)
+                base_name = os.path.basename(file_path)
+                name_stem = os.path.splitext(base_name)[0]
+                if name_stem.endswith("_Processed"):
+                    name_stem = name_stem[:-10]
+                
+                target_docx = file_path
+                processed_candidate = os.path.join(dir_name, f"{name_stem}_Processed.docx")
+                if os.path.exists(processed_candidate):
+                    target_docx = processed_candidate
+
+                manuscript_dir = dir_name
+                if "xml" in dir_name.lower() or "xhtml" in dir_name.lower():
+                    parent_dir = os.path.dirname(dir_name)
+                    man_candidate = os.path.join(parent_dir, "Manuscript")
+                    if os.path.exists(man_candidate):
+                        manuscript_dir = man_candidate
+
+                qa_report_filename = f"{name_stem}_QA_Report.html"
+                qa_report_path = os.path.join(manuscript_dir, qa_report_filename)
+                generate_qa_report_html(target_docx, qa_report_path, document_title=f"{name_stem}.docx")
+                generated_files = [qa_report_path]
+                success_msg = "Structuring QA Report generated successfully"
 
             elif process_type == "bias_scan":
                 generated_files = bias_engine_cls().process_document(file_path)
@@ -840,6 +929,8 @@ def background_processing_task(
                             keep = True
                         elif processed_filename.endswith("_log.txt") and not processed_filename.endswith("_conversion_log.txt") and not processed_filename.endswith("_fix_log.txt"):
                             keep = True
+                        elif processed_filename.endswith(".html") and not processed_filename.lower().endswith("_result.html"):
+                            keep = True
                         
                         if not keep:
                             logger.info(f"Deleting intermediate reference job output file: {processed_filename}")
@@ -955,10 +1046,16 @@ def background_processing_task(
                         elif processed_filename.endswith(".xhtml"):
                             mime = "application/xhtml+xml"
 
+                        is_misc_delivery_file = (
+                            any(processed_filename.lower().endswith(x) for x in ("_final_layout.html", "_epub_layout.html", "_final.xml", "_epub.xml", "_final.log", "_epub.log", ".epub"))
+                            or (file_record and file_record.category == "Misc")
+                        )
+
                         new_category = (
-                            ("Proof" if processed_filename.lower().endswith((".pdf", ".xhtml", ".css")) else "Misc")
+                            "Manuscript" if (process_type == "structuring_qa" or processed_filename.lower().endswith(("_qa_report.html", "qa_report.html")))
+                            else ("Proof" if processed_filename.lower().endswith((".pdf", ".xhtml", ".css")) else "Misc")
                             if process_type == "indesign_to_xml"
-                            else "Misc" if process_type == "extract_design_css"
+                            else "Misc" if (process_type == "extract_design_css" or is_misc_delivery_file)
                             else "Manuscript" if (process_type in ("style_validation", "style_match_design", "ppd") or processed_filename.lower().endswith(("_dashboard.html", "_style_match_report.html", "_style_match_report.json")))
                             else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
                             else "InDesign" if process_type == "xml_to_indesign"
@@ -1098,10 +1195,7 @@ def start_process(
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if os.path.isabs(file_record.path):
-        file_path = file_record.path
-    else:
-        file_path = os.path.abspath(os.path.join(upload_dir, file_record.path))
+    file_path = resolve_physical_file_path(file_record.path, upload_dir)
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"Physical file missing: {file_path}")

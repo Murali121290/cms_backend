@@ -11,6 +11,7 @@ completely untouched - it is never forced down to a generic tag.
 """
 
 import os
+import tempfile
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -21,7 +22,7 @@ from app.utils.utils.structuring_lib.heading_classifier import classify_headings
 from app.utils.utils.structuring_lib.hierarchy_manager import enforce_hierarchy
 from app.utils.utils.structuring_lib.styler import process_docx
 
-SCRATCH_DIR = r"C:\Users\DELL\AppData\Local\Temp\claude\d--S4-git-new-main-cms-backend\f26b9e87-4c1e-4808-918f-db4119b2ad18\scratchpad"
+SCRATCH_DIR = os.path.join(tempfile.gettempdir(), "structuring_lib_tests")
 
 
 def test_no_formatting_cues_falls_back_gracefully():

@@ -1,0 +1,20 @@
+{
+  "name": "Canadian English House Style",
+  "description": "Standard Canadian English spelling and style rules",
+  "variant_to_canonical": {
+    "color": "colour",
+    "colors": "colours",
+    "center": "centre",
+    "centered": "centred",
+    "behavior": "behaviour",
+    "favor": "favour",
+    "organize": "organize",
+    "analyze": "analyze",
+    "traveled": "travelled"
+  },
+  "rules": [
+    { "id": "GP001", "category": "grammar", "type": "regex", "pattern": " {2,}", "replacement": " ", "message": "Collapse multiple spaces to one.", "severity": "error", "enabled": true },
+    { "id": "SP000", "category": "spelling", "type": "dictionary", "message": "Canadian house style spelling.", "enabled": true },
+    { "id": "SL001", "category": "sentence", "type": "function", "function": "max_sentence_length", "params": { "limit": 40 }, "enabled": true }
+  ]
+}

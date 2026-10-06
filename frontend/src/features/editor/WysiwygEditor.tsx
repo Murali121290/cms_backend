@@ -1,7 +1,24 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { OrderedList } from "@tiptap/extension-ordered-list";
 import { Bold as TiptapBold } from "@tiptap/extension-bold";
 import { Italic as TiptapItalic } from "@tiptap/extension-italic";
+
+const CustomOrderedList = OrderedList.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      type: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("type"),
+        renderHTML: (attributes) => {
+          if (!attributes.type) return {};
+          return { type: attributes.type };
+        },
+      },
+    };
+  },
+});
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
@@ -120,83 +137,83 @@ const SHORTCUT_GROUPS: {
   accent: SectionAccent;
   items: { label: string; combo: string }[];
 }[] = [
-  {
-    title: "Text Formatting",
-    accent: {
-      icon: Bold,
-      iconWrap: "bg-indigo-50 border-indigo-100",
-      iconColor: "text-indigo-600",
-      ring: "hover:ring-indigo-100",
+    {
+      title: "Text Formatting",
+      accent: {
+        icon: Bold,
+        iconWrap: "bg-indigo-50 border-indigo-100",
+        iconColor: "text-indigo-600",
+        ring: "hover:ring-indigo-100",
+      },
+      items: [
+        { label: "Bold", combo: "Ctrl+B" },
+        { label: "Italic", combo: "Ctrl+I" },
+        { label: "Underline", combo: "Ctrl+U" },
+        { label: "Strikethrough", combo: "Ctrl+Shift+X" },
+        { label: "Superscript", combo: "Ctrl+Shift+=" },
+        { label: "Subscript", combo: "Ctrl+=" },
+      ],
     },
-    items: [
-      { label: "Bold", combo: "Ctrl+B" },
-      { label: "Italic", combo: "Ctrl+I" },
-      { label: "Underline", combo: "Ctrl+U" },
-      { label: "Strikethrough", combo: "Ctrl+Shift+X" },
-      { label: "Superscript", combo: "Ctrl+Shift+=" },
-      { label: "Subscript", combo: "Ctrl+=" },
-    ],
-  },
-  {
-    title: "Paragraph & Alignment",
-    accent: {
-      icon: AlignLeft,
-      iconWrap: "bg-emerald-50 border-emerald-100",
-      iconColor: "text-emerald-600",
-      ring: "hover:ring-emerald-100",
+    {
+      title: "Paragraph & Alignment",
+      accent: {
+        icon: AlignLeft,
+        iconWrap: "bg-emerald-50 border-emerald-100",
+        iconColor: "text-emerald-600",
+        ring: "hover:ring-emerald-100",
+      },
+      items: [
+        { label: "Align Left", combo: "Ctrl+L" },
+        { label: "Align Center", combo: "Ctrl+E" },
+        { label: "Align Right", combo: "Ctrl+R" },
+        { label: "Justify", combo: "Ctrl+J" },
+        { label: "Heading 1–6", combo: "Ctrl+Alt+1…6" },
+      ],
     },
-    items: [
-      { label: "Align Left", combo: "Ctrl+L" },
-      { label: "Align Center", combo: "Ctrl+E" },
-      { label: "Align Right", combo: "Ctrl+R" },
-      { label: "Justify", combo: "Ctrl+J" },
-      { label: "Heading 1–6", combo: "Ctrl+Alt+1…6" },
-    ],
-  },
-  {
-    title: "Lists",
-    accent: {
-      icon: List,
-      iconWrap: "bg-amber-50 border-amber-100",
-      iconColor: "text-amber-600",
-      ring: "hover:ring-amber-100",
+    {
+      title: "Lists",
+      accent: {
+        icon: List,
+        iconWrap: "bg-amber-50 border-amber-100",
+        iconColor: "text-amber-600",
+        ring: "hover:ring-amber-100",
+      },
+      items: [
+        { label: "Bullet List", combo: "Ctrl+Shift+L" },
+        { label: "Numbered List", combo: "Ctrl+Shift+O" },
+      ],
     },
-    items: [
-      { label: "Bullet List", combo: "Ctrl+Shift+L" },
-      { label: "Numbered List", combo: "Ctrl+Shift+O" },
-    ],
-  },
-  {
-    title: "Insert",
-    accent: {
-      icon: Plus,
-      iconWrap: "bg-violet-50 border-violet-100",
-      iconColor: "text-violet-600",
-      ring: "hover:ring-violet-100",
+    {
+      title: "Insert",
+      accent: {
+        icon: Plus,
+        iconWrap: "bg-violet-50 border-violet-100",
+        iconColor: "text-violet-600",
+        ring: "hover:ring-violet-100",
+      },
+      items: [
+        { label: "Insert / Edit Link", combo: "Ctrl+K" },
+        { label: "Insert Table 3×3", combo: "Ctrl+Alt+T" },
+        { label: "Insert Page Break", combo: "Ctrl+Enter" },
+        { label: "Insert Math Equation", combo: "Ctrl+Alt+E" },
+        { label: "Add Comment", combo: "Ctrl+Alt+M" },
+      ],
     },
-    items: [
-      { label: "Insert / Edit Link", combo: "Ctrl+K" },
-      { label: "Insert Table 3×3", combo: "Ctrl+Alt+T" },
-      { label: "Insert Page Break", combo: "Ctrl+Enter" },
-      { label: "Insert Math Equation", combo: "Ctrl+Alt+E" },
-      { label: "Add Comment", combo: "Ctrl+Alt+M" },
-    ],
-  },
-  {
-    title: "File & History",
-    accent: {
-      icon: HistoryIcon,
-      iconWrap: "bg-amber-50 border-amber-100",
-      iconColor: "text-amber-600",
-      ring: "hover:ring-amber-100",
+    {
+      title: "File & History",
+      accent: {
+        icon: HistoryIcon,
+        iconWrap: "bg-amber-50 border-amber-100",
+        iconColor: "text-amber-600",
+        ring: "hover:ring-amber-100",
+      },
+      items: [
+        { label: "Save & Convert to DOCX", combo: "Ctrl+S" },
+        { label: "Undo", combo: "Ctrl+Z" },
+        { label: "Redo", combo: "Ctrl+Y" },
+      ],
     },
-    items: [
-      { label: "Save & Convert to DOCX", combo: "Ctrl+S" },
-      { label: "Undo", combo: "Ctrl+Z" },
-      { label: "Redo", combo: "Ctrl+Y" },
-    ],
-  },
-];
+  ];
 
 const escapeHtml = (s: string) =>
   s
@@ -435,6 +452,7 @@ export interface WysiwygEditorProps {
   exportHref?: string;
   documentTitle?: string;
   sidePanel?: React.ReactNode;
+  leftSidebarSlot?: React.ReactNode;
   height?: string;
   trackChangesEnabled?: boolean;
   onTrackChangesToggle?: (v: boolean) => void;
@@ -462,6 +480,8 @@ export interface WysiwygEditorProps {
   // Used when an external panel (e.g. Reference Review's "Save & Export")
   // owns the save action to avoid a duplicate button.
   hideSaveButton?: boolean;
+  onSelectionChange?: (selectedText: string) => void;
+  onCommentClick?: (commentId: string) => void;
 }
 
 const ToolbarButton = ({
@@ -500,6 +520,13 @@ const ToolbarDivider = () => <div className="w-px h-5 bg-slate-700 mx-1" />;
 export interface WysiwygEditorHandle {
   editor: any; // TipTap Editor instance
   triggerCommentDialog: () => void;
+  addCommentToSelection: (commentId: string) => void;
+  scrollToComment: (commentId: string) => void;
+  replaceOccurrence: (
+    occ: Occurrence,
+    replacementText: string,
+    options?: { asTrackChanges?: boolean; highlightOnly?: boolean }
+  ) => boolean;
 }
 
 export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>(
@@ -526,14 +553,21 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       currentUser,
       fileId,
       toolbarExtras,
+      leftSidebarSlot,
       hideToolbar = false,
       inlineSaveBar = true,
       hideSaveButton = false,
+      onSelectionChange,
+      onCommentClick,
     }: WysiwygEditorProps,
     ref
   ) {
     const sidebarCollapsed = useSidebarStore((s) => s.collapsed);
     const [tcEnabled, setTcEnabled] = useState(trackChangesEnabled);
+
+    useEffect(() => {
+      setTcEnabled(trackChangesEnabled);
+    }, [trackChangesEnabled]);
     const [activeGutter, setActiveGutter] = useState<{
       pos: number;
       element: HTMLElement;
@@ -599,11 +633,13 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           heading: false,
           bold: false,
           italic: false,
+          orderedList: false,
           // Underline and Link are registered explicitly below; disable the
           // StarterKit-bundled copies to avoid duplicate-extension warnings.
           link: false,
           underline: false,
         }),
+        CustomOrderedList,
         CustomBold,
         CustomItalic,
         CustomParagraph,
@@ -653,6 +689,13 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         setIsDirty(true);
         onContentChange?.();
       },
+      onSelectionUpdate: ({ editor }) => {
+        if (onSelectionChange) {
+          const { from, to } = editor.state.selection;
+          const text = editor.state.doc.textBetween(from, to, " ").trim();
+          onSelectionChange(text);
+        }
+      },
     });
 
     const prevInitialContentRef = useRef<string | null>(null);
@@ -672,8 +715,24 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         // paragraph text is deterministic and immune to that race.
         originalParagraphsRef.current = extractParagraphs(initialContent);
         setIsDirty(false);
+
+        // Re-dispatch occurrences onto the newly populated document
+        if (occurrences.length > 0) {
+          const store = (editor as any).storage?.occurrenceHighlight;
+          if (store) {
+            store.occurrences = occurrences;
+            store.selectedIndex = selectedOccurrenceIndex;
+            store.onOccurrenceClick = onOccurrenceClick ?? null;
+          }
+          const tr = editor.state.tr.setMeta("occurrenceHighlight", {
+            occurrences,
+            selectedIndex: selectedOccurrenceIndex,
+            onOccurrenceClick,
+          });
+          editor.view.dispatch(tr);
+        }
       }
-    }, [editor, initialContent]);
+    }, [editor, initialContent, occurrences, selectedOccurrenceIndex, onOccurrenceClick]);
 
     // Eye toggle: switch between editable current view and read-only diff view.
     // setContent uses { emitUpdate: false } so the toggle never flags the
@@ -793,12 +852,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
     // Update occurrences highlighting and wire click callback
     useEffect(() => {
-      if (editor) {
-        const ext = editor.extensionManager.extensions.find((e: any) => e.name === "occurrenceHighlight");
-        if (ext) {
-          (ext as any).storage.occurrences = occurrences;
-          (ext as any).storage.selectedIndex = selectedOccurrenceIndex;
-          (ext as any).storage.onOccurrenceClick = onOccurrenceClick ?? null;
+      if (editor && !editor.isDestroyed) {
+        const store = (editor as any).storage?.occurrenceHighlight;
+        if (store) {
+          store.occurrences = occurrences;
+          store.selectedIndex = selectedOccurrenceIndex;
+          store.onOccurrenceClick = onOccurrenceClick ?? null;
         }
 
         const tr = editor.state.tr.setMeta("occurrenceHighlight", {
@@ -808,35 +867,69 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         });
         editor.view.dispatch(tr);
 
-        // Scroll to selected occurrence
+        // Scroll to selected occurrence with center alignment
         if (selectedOccurrenceIndex >= 0 && occurrences.length > selectedOccurrenceIndex) {
           const occ = occurrences[selectedOccurrenceIndex];
-          const blocks: { pos: number; size: number; text: string }[] = [];
+          const blocks: { pos: number; size: number; text: string; paraIdx: number | null }[] = [];
           editor.state.doc.descendants((node, pos) => {
             if (node.isBlock && (node.type.name === "paragraph" || node.type.name.startsWith("heading"))) {
-              blocks.push({ pos, size: node.content.size, text: node.textContent });
+              const rawParaIdx = node.attrs?.paraIdx != null ? parseInt(node.attrs.paraIdx, 10) : null;
+              blocks.push({
+                pos,
+                size: node.content.size,
+                text: node.textContent,
+                paraIdx: Number.isFinite(rawParaIdx) ? rawParaIdx : null,
+              });
             }
           });
 
-          let bestBlockIdx = -1;
+          let bestBlock: typeof blocks[0] | null = null;
           let bestScore = Infinity;
           let bestMatchStart = -1;
 
-          blocks.forEach((block, blockIdx) => {
-            const surfaceIdx = block.text.indexOf(occ.surface);
-            if (surfaceIdx !== -1) {
-              const score = Math.abs(blockIdx - occ.para_index);
-              if (score < bestScore) {
-                bestScore = score;
-                bestBlockIdx = blockIdx;
-                bestMatchStart = surfaceIdx;
+          for (let blockIdx = 0; blockIdx < blocks.length; blockIdx++) {
+            const block = blocks[blockIdx];
+            if (!block.text || !block.text.includes(occ.surface)) continue;
+
+            const paraDistance =
+              block.paraIdx !== null
+                ? Math.abs(block.paraIdx - occ.para_index)
+                : Math.abs(blockIdx - occ.para_index);
+
+            let matchPos = -1;
+            if (
+              occ.match_start >= 0 &&
+              occ.match_start + occ.surface.length <= block.text.length &&
+              block.text.substring(occ.match_start, occ.match_start + occ.surface.length) === occ.surface
+            ) {
+              matchPos = occ.match_start;
+            } else {
+              let searchIdx = 0;
+              let closestDist = Infinity;
+              while (searchIdx <= block.text.length - occ.surface.length) {
+                const foundAt = block.text.indexOf(occ.surface, searchIdx);
+                if (foundAt === -1) break;
+                const dist = Math.abs(foundAt - occ.match_start);
+                if (dist < closestDist) {
+                  closestDist = dist;
+                  matchPos = foundAt;
+                }
+                searchIdx = foundAt + 1;
               }
             }
-          });
 
-          if (bestBlockIdx !== -1) {
-            const matchedBlock = blocks[bestBlockIdx];
-            const from = matchedBlock.pos + 1 + bestMatchStart;
+            if (matchPos !== -1) {
+              const score = paraDistance * 1000 + Math.abs(matchPos - occ.match_start);
+              if (score < bestScore) {
+                bestScore = score;
+                bestBlock = block;
+                bestMatchStart = matchPos;
+              }
+            }
+          }
+
+          if (bestBlock && bestMatchStart !== -1) {
+            const from = bestBlock.pos + 1 + bestMatchStart;
             try {
               const domInfo = editor.view.domAtPos(from);
               const el =
@@ -918,17 +1011,21 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         if (!target) return;
         const uuid = target.getAttribute("data-comment-id");
         if (!uuid) return;
-        const existing = comments[uuid];
-        setCommentDialog({
-          mode: "edit",
-          commentUuid: uuid,
-          initialText: existing?.text ?? "",
-          quotedText: (target.textContent || "").trim(),
-        });
+        if (onCommentClick) {
+          onCommentClick(uuid);
+        } else {
+          const existing = comments[uuid];
+          setCommentDialog({
+            mode: "edit",
+            commentUuid: uuid,
+            initialText: existing?.text ?? "",
+            quotedText: (target.textContent || "").trim(),
+          });
+        }
       };
       dom.addEventListener("click", handle);
       return () => dom.removeEventListener("click", handle);
-    }, [editor, comments]);
+    }, [editor, comments, onCommentClick]);
 
     const searchResults = (editor?.storage as any)?.searchReplace?.results || [];
     const activeSearchIndex = (editor?.storage as any)?.searchReplace?.activeIndex ?? -1;
@@ -947,20 +1044,206 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         alert("Please select some text to comment on.");
         return;
       }
-      if (!Number.isFinite(numericFileId)) {
-        alert("Cannot add comments until the file is loaded.");
-        return;
-      }
       const quoted = editor.state.doc.textBetween(from, to, " ").trim();
       const commentId = crypto.randomUUID();
       setCommentDialog({ mode: "create", commentUuid: commentId, quotedText: quoted });
-    }, [editor, numericFileId]);
+    }, [editor]);
 
-    // Expose editor instance + imperative comment trigger to parent via ref
+    // Imperative replace occurrence logic: replaces the matched occurrence text with the
+    // replacement text in the editor. Supports revision marks (track changes) or direct edit.
+    const replaceOccurrence = useCallback(
+      (
+        occ: Occurrence,
+        replacementText: string,
+        options?: { asTrackChanges?: boolean; highlightOnly?: boolean }
+      ): boolean => {
+        if (!editor || editor.isDestroyed || !occ?.surface) return false;
+
+        const doc = editor.state.doc;
+        const blocks: { pos: number; size: number; text: string; paraIdx: number | null }[] = [];
+        doc.descendants((node, pos) => {
+          if (node.isBlock && (node.type.name === "paragraph" || node.type.name.startsWith("heading"))) {
+            const rawParaIdx = node.attrs?.paraIdx != null ? parseInt(node.attrs.paraIdx, 10) : null;
+            blocks.push({
+              pos,
+              size: node.content.size,
+              text: node.textContent,
+              paraIdx: Number.isFinite(rawParaIdx) ? rawParaIdx : null,
+            });
+          }
+        });
+
+        let bestBlock: typeof blocks[0] | null = null;
+        let bestScore = Infinity;
+        let bestMatchStart = -1;
+
+        for (let blockIdx = 0; blockIdx < blocks.length; blockIdx++) {
+          const block = blocks[blockIdx];
+          if (!block.text || !block.text.includes(occ.surface)) continue;
+
+          const paraDistance =
+            block.paraIdx !== null
+              ? Math.abs(block.paraIdx - occ.para_index)
+              : Math.abs(blockIdx - occ.para_index);
+
+          let matchPos = -1;
+          if (
+            occ.match_start >= 0 &&
+            occ.match_start + occ.surface.length <= block.text.length &&
+            block.text.substring(occ.match_start, occ.match_start + occ.surface.length) === occ.surface
+          ) {
+            matchPos = occ.match_start;
+          } else {
+            let searchIdx = 0;
+            let closestDist = Infinity;
+            while (searchIdx <= block.text.length - occ.surface.length) {
+              const foundAt = block.text.indexOf(occ.surface, searchIdx);
+              if (foundAt === -1) break;
+              const dist = Math.abs(foundAt - occ.match_start);
+              if (dist < closestDist) {
+                closestDist = dist;
+                matchPos = foundAt;
+              }
+              searchIdx = foundAt + 1;
+            }
+          }
+
+          if (matchPos !== -1) {
+            const score = paraDistance * 1000 + Math.abs(matchPos - occ.match_start);
+            if (score < bestScore) {
+              bestScore = score;
+              bestBlock = block;
+              bestMatchStart = matchPos;
+            }
+          }
+        }
+
+        if (!bestBlock || bestMatchStart === -1) return false;
+
+        const from = bestBlock.pos + 1 + bestMatchStart;
+        const to = from + occ.surface.length;
+
+        // Protection: Guard against double-replacement on text that was already deleted / track-changed
+        let isAlreadyTracked = false;
+        doc.nodesBetween(from, to, (n) => {
+          if (n.marks && n.marks.some((m) => m.type.name === "del")) {
+            isAlreadyTracked = true;
+          }
+        });
+        if (isAlreadyTracked && options?.asTrackChanges) {
+          // Already replaced with revision mark — do not insert duplicates!
+          return false;
+        }
+
+        const tr = editor.state.tr;
+        const schema = editor.schema;
+        const asTrack = options?.asTrackChanges ?? false;
+        const isHighlightOnly = options?.highlightOnly ?? false;
+        const delMarkType = schema.marks.del;
+        const insMarkType = schema.marks.ins;
+        const highlightMarkType = schema.marks.highlight;
+
+        if (isHighlightOnly || (!asTrack && !replacementText)) {
+          // Highlight Only: Apply yellow highlight mark without modifying/deleting the text!
+          if (highlightMarkType) {
+            tr.addMark(from, to, highlightMarkType.create({ color: "#fef08a" }));
+          }
+        } else if (asTrack && delMarkType && insMarkType) {
+          const author = currentUser || "Reviewer";
+          const date = new Date().toISOString();
+          const changeId = crypto.randomUUID();
+
+          tr.addMark(from, to, delMarkType.create({ author, date, changeId }));
+          if (replacementText) {
+            tr.insert(to, schema.text(replacementText, [insMarkType.create({ author, date, changeId })]));
+          }
+        } else if (replacementText) {
+          tr.insertText(replacementText, from, to);
+        }
+
+        tr.setMeta("preventTrackChanges", true);
+        editor.view.dispatch(tr);
+        setIsDirty(true);
+        onContentChange?.();
+
+        // Scroll to the modified position safely after DOM update
+        setTimeout(() => {
+          try {
+            if (editor && !editor.isDestroyed && editor.view?.dom) {
+              const domInfo = editor.view.domAtPos(from);
+              const el =
+                domInfo.node.nodeType === Node.TEXT_NODE
+                  ? domInfo.node.parentElement
+                  : (domInfo.node as Element);
+              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          } catch {
+            /* ignore safely */
+          }
+        }, 50);
+
+        return true;
+      },
+      [editor, currentUser, onContentChange]
+    );
+
+    const addCommentToSelection = useCallback(
+      (commentId: string) => {
+        if (!editor || editor.isDestroyed) return;
+        editor.chain().focus().setMark("comment", { commentId }).run();
+      },
+      [editor]
+    );
+
+    const scrollToComment = useCallback(
+      (commentId: string) => {
+        if (!editor || editor.isDestroyed) return;
+        let targetPos: number | null = null;
+        editor.state.doc.descendants((node, pos) => {
+          if (targetPos === null) {
+            const mark = node.marks.find(
+              (m) => m.type.name === "comment" && m.attrs.commentId === commentId
+            );
+            if (mark) {
+              targetPos = pos;
+            }
+          }
+        });
+
+        let el: HTMLElement | null = null;
+        if (targetPos !== null) {
+          try {
+            const domInfo = editor.view.domAtPos(targetPos);
+            el = (domInfo.node.nodeType === Node.TEXT_NODE ? domInfo.node.parentElement : domInfo.node) as HTMLElement;
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!el) {
+          el = editor.view.dom.querySelector(`span[data-comment-id="${commentId}"]`);
+        }
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("bg-amber-300", "text-slate-900");
+          setTimeout(() => {
+            el.classList.remove("bg-amber-300", "text-slate-900");
+          }, 2000);
+        }
+      },
+      [editor]
+    );
+
+    // Expose editor instance + imperative comment & occurrence triggers to parent via ref
     useImperativeHandle(
       ref,
-      () => ({ editor: editor as any, triggerCommentDialog: openCommentDialog }),
-      [editor, openCommentDialog],
+      () => ({
+        editor: editor as any,
+        triggerCommentDialog: openCommentDialog,
+        addCommentToSelection,
+        scrollToComment,
+        replaceOccurrence,
+      }),
+      [editor, openCommentDialog, addCommentToSelection, scrollToComment, replaceOccurrence],
     );
 
     // ── Keyboard shortcuts ───────────────────────────────────────────────────
@@ -984,7 +1267,6 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         // Mod + key (no Shift / Alt)
         if (!e.shiftKey && !e.altKey) {
           switch (code) {
-            case "KeyS": return fire(() => handleSaveRef.current());
             case "KeyL": return fire(() => editor.chain().focus().setTextAlign("left").run());
             case "KeyE": return fire(() => editor.chain().focus().setTextAlign("center").run());
             case "KeyR": return fire(() => editor.chain().focus().setTextAlign("right").run());
@@ -1159,20 +1441,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       };
     }, [editor]);
 
-    // Autosave check: runs every 10s if the editor is dirty.
-    // If 30 seconds pass without any keystrokes/updates, trigger handleSave.
-    useEffect(() => {
-      if (!isDirty || isSaving) return;
-
-      const interval = setInterval(() => {
-        const timeSinceLastEdit = Date.now() - lastEditTimeRef.current;
-        if (timeSinceLastEdit >= 30000) {
-          handleSave();
-        }
-      }, 10000);
-
-      return () => clearInterval(interval);
-    }, [isDirty, isSaving, handleSave]);
+    // Autosave disabled: manual save via Save button or Ctrl+S
 
     const applyStyle = (styleName: string, pos: number) => {
       if (!editor) return;
@@ -1269,432 +1538,431 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         {/* â”€â”€ Toolbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {!hideToolbar && (
-        <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
+          <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
 
-          {/* Font Family */}
-          <select
-            value={currentFontFamily}
-            onChange={(e) => {
-              const font = e.target.value;
-              if (patchSelectedMathNode({ wrapperFontFamily: font === "default" ? "" : font })) {
+            {/* Font Family */}
+            <select
+              value={currentFontFamily}
+              onChange={(e) => {
+                const font = e.target.value;
+                if (patchSelectedMathNode({ wrapperFontFamily: font === "default" ? "" : font })) {
+                  setCurrentFontFamily(font);
+                  return;
+                }
+                if (font === "default") {
+                  editor?.chain().focus().unsetFontFamily().run();
+                } else {
+                  editor?.chain().focus().setFontFamily(font).run();
+                }
                 setCurrentFontFamily(font);
-                return;
-              }
-              if (font === "default") {
-                editor?.chain().focus().unsetFontFamily().run();
-              } else {
-                editor?.chain().focus().setFontFamily(font).run();
-              }
-              setCurrentFontFamily(font);
-            }}
-            className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none max-w-[110px] shrink-0"
-            title="Font Family"
-          >
-            <option value="default">Font</option>
-            {["Calibri", "Cambria", "Arial", "Times New Roman", "Georgia", "Garamond", "Verdana", "Tahoma", "Trebuchet MS", "Courier New", "Consolas", "Helvetica"].map(f => (
-              <option key={f} value={f}>{f}</option>
-            ))}
-          </select>
+              }}
+              className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none max-w-[110px] shrink-0"
+              title="Font Family"
+            >
+              <option value="default">Font</option>
+              {["Calibri", "Cambria", "Arial", "Times New Roman", "Georgia", "Garamond", "Verdana", "Tahoma", "Trebuchet MS", "Courier New", "Consolas", "Helvetica"].map(f => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
 
-          {/* Font Size */}
-          <select
-            value={currentFontSize}
-            onChange={(e) => {
-              const size = e.target.value;
-              if (patchSelectedMathNode({ wrapperFontSize: size === "default" ? "" : size })) {
+            {/* Font Size */}
+            <select
+              value={currentFontSize}
+              onChange={(e) => {
+                const size = e.target.value;
+                if (patchSelectedMathNode({ wrapperFontSize: size === "default" ? "" : size })) {
+                  setCurrentFontSize(size);
+                  return;
+                }
+                if (size === "default") {
+                  editor?.chain().focus().unsetFontSize().run();
+                } else {
+                  editor?.chain().focus().setFontSize(`${size}pt`).run();
+                }
                 setCurrentFontSize(size);
-                return;
-              }
-              if (size === "default") {
-                editor?.chain().focus().unsetFontSize().run();
-              } else {
-                editor?.chain().focus().setFontSize(`${size}pt`).run();
-              }
-              setCurrentFontSize(size);
-            }}
-            className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none w-16 shrink-0"
-            title="Font Size"
-          >
-            <option value="default">Size</option>
-            {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map(s => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-
-          <ToolbarDivider />
-
-          {/* Text Formatting */}
-          <ToolbarButton
-            active={editor?.isActive("bold") || !!getSelectedMathNodeInfo()?.attrs.wrapperBold}
-            onClick={() => {
-              const info = getSelectedMathNodeInfo();
-              if (info) {
-                patchSelectedMathNode({ wrapperBold: !info.attrs.wrapperBold });
-                return;
-              }
-              editor?.chain().focus().toggleBold().run();
-            }}
-            title={`Bold (${kbd("Ctrl+B")})`}
-          >
-            <Bold className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton
-            active={editor?.isActive("italic") || !!getSelectedMathNodeInfo()?.attrs.wrapperItalic}
-            onClick={() => {
-              const info = getSelectedMathNodeInfo();
-              if (info) {
-                patchSelectedMathNode({ wrapperItalic: !info.attrs.wrapperItalic });
-                return;
-              }
-              editor?.chain().focus().toggleItalic().run();
-            }}
-            title={`Italic (${kbd("Ctrl+I")})`}
-          >
-            <Italic className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${kbd("Ctrl+U")})`}>
-            <Type className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("strike")} onClick={() => editor?.chain().focus().toggleStrike().run()} title={`Strikethrough (${kbd("Ctrl+Shift+X")})`}>
-            <Strikethrough className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("superscript")} onClick={() => editor?.chain().focus().toggleSuperscript().run()} title={`Superscript (${kbd("Ctrl+Shift+=")})`}>
-            <SuperscriptIcon className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("subscript")} onClick={() => editor?.chain().focus().toggleSubscript().run()} title={`Subscript (${kbd("Ctrl+=")})`}>
-            <SubscriptIcon className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* Color Controls */}
-          {/* Text Color */}
-          <div className="relative" title="Text Color">
-            <button
-              onClick={() => textColorRef.current?.click()}
-              className="p-1.5 rounded-md text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all duration-150 cursor-pointer flex flex-col items-center gap-0.5"
-            >
-              <span className="text-[10px] font-bold leading-none">A</span>
-              <span
-                className="h-1 w-4 rounded-full"
-                style={{ backgroundColor: editor?.getAttributes("textStyle").color || "#ffffff" }}
-              />
-            </button>
-            <input
-              ref={textColorRef}
-              type="color"
-              defaultValue="#000000"
-              onChange={(e) => {
-                if (patchSelectedMathNode({ wrapperColor: e.target.value })) return;
-                editor?.chain().focus().setColor(e.target.value).run();
               }}
-              className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
-            />
-          </div>
-
-          {/* Highlight Color */}
-          <div className="relative" title="Highlight Color">
-            <button
-              onClick={() => highlightColorRef.current?.click()}
-              className="p-1.5 rounded-md text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all duration-150 cursor-pointer"
+              className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none w-16 shrink-0"
+              title="Font Size"
             >
-              <Highlighter className="w-4 h-4" />
-            </button>
-            <input
-              ref={highlightColorRef}
-              type="color"
-              defaultValue="#fef08a"
-              onChange={(e) => {
-                if (patchSelectedMathNode({ wrapperBgColor: e.target.value })) return;
-                editor?.chain().focus().toggleHighlight({ color: e.target.value }).run();
+              <option value="default">Size</option>
+              {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+
+            <ToolbarDivider />
+
+            {/* Text Formatting */}
+            <ToolbarButton
+              active={editor?.isActive("bold") || !!getSelectedMathNodeInfo()?.attrs.wrapperBold}
+              onClick={() => {
+                const info = getSelectedMathNodeInfo();
+                if (info) {
+                  patchSelectedMathNode({ wrapperBold: !info.attrs.wrapperBold });
+                  return;
+                }
+                editor?.chain().focus().toggleBold().run();
               }}
-              className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
-            />
-          </div>
+              title={`Bold (${kbd("Ctrl+B")})`}
+            >
+              <Bold className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor?.isActive("italic") || !!getSelectedMathNodeInfo()?.attrs.wrapperItalic}
+              onClick={() => {
+                const info = getSelectedMathNodeInfo();
+                if (info) {
+                  patchSelectedMathNode({ wrapperItalic: !info.attrs.wrapperItalic });
+                  return;
+                }
+                editor?.chain().focus().toggleItalic().run();
+              }}
+              title={`Italic (${kbd("Ctrl+I")})`}
+            >
+              <Italic className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${kbd("Ctrl+U")})`}>
+              <Type className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("strike")} onClick={() => editor?.chain().focus().toggleStrike().run()} title={`Strikethrough (${kbd("Ctrl+Shift+X")})`}>
+              <Strikethrough className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("superscript")} onClick={() => editor?.chain().focus().toggleSuperscript().run()} title={`Superscript (${kbd("Ctrl+Shift+=")})`}>
+              <SuperscriptIcon className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("subscript")} onClick={() => editor?.chain().focus().toggleSubscript().run()} title={`Subscript (${kbd("Ctrl+=")})`}>
+              <SubscriptIcon className="w-4 h-4" />
+            </ToolbarButton>
 
-          <ToolbarDivider />
+            <ToolbarDivider />
 
-          {/* Alignment */}
-          <ToolbarButton active={editor?.isActive({ textAlign: "left" })} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title={`Align Left (${kbd("Ctrl+L")})`}>
-            <AlignLeft className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "center" })} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title={`Align Center (${kbd("Ctrl+E")})`}>
-            <AlignCenter className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "right" })} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title={`Align Right (${kbd("Ctrl+R")})`}>
-            <AlignRight className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "justify" })} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title={`Justify (${kbd("Ctrl+J")})`}>
-            <AlignJustify className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* Lists */}
-          <ToolbarButton active={editor?.isActive("bulletList")} onClick={() => editor?.chain().focus().toggleBulletList().run()} title={`Bullet List (${kbd("Ctrl+Shift+L")})`}>
-            <List className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("orderedList")} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Numbered List (${kbd("Ctrl+Shift+O")})`}>
-            <ListOrdered className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton
-            onClick={() => {
-              if (editor?.isActive("bulletList") || editor?.isActive("orderedList")) {
-                editor.chain().focus().sinkListItem("listItem").run();
-              }
-            }}
-            disabled={!editor?.isActive("bulletList") && !editor?.isActive("orderedList")}
-            title="Indent (List Item)"
-          >
-            <Indent className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton
-            onClick={() => {
-              if (editor?.isActive("bulletList") || editor?.isActive("orderedList")) {
-                editor.chain().focus().liftListItem("listItem").run();
-              }
-            }}
-            disabled={!editor?.isActive("bulletList") && !editor?.isActive("orderedList")}
-            title="Outdent (List Item)"
-          >
-            <Outdent className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* Insert Table */}
-          <ToolbarButton onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title={`Insert Table 3×3 (${kbd("Ctrl+Alt+T")})`}>
-            <Table2 className="w-4 h-4" />
-          </ToolbarButton>
-
-          {/* Insert Page Break */}
-          <ToolbarButton onClick={() => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run()} title={`Insert Page Break (${kbd("Ctrl+Enter")})`}>
-            <SeparatorHorizontal className="w-4 h-4 text-emerald-400" />
-          </ToolbarButton>
-
-          {/* Table Tools (Only visible when cursor is inside a table) */}
-          {editor?.isActive("table") && (
-            <>
-              <ToolbarDivider />
-              <div className="flex items-center gap-1 bg-[#131b2e] border border-slate-700/60 rounded-md p-0.5" title="Table Tools">
-                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">+ Row Above</button>
-                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">+ Row Below</button>
-                <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">+ Col Left</button>
-                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">+ Col Right</button>
-                <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().mergeCells().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Merge Cells">Merge</button>
-                <button onClick={() => editor.chain().focus().splitCell().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Split Cell">Split</button>
-                <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().deleteRow().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Row">Delete Row</button>
-                <button onClick={() => editor.chain().focus().deleteColumn().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Column">Delete Col</button>
-                <button onClick={() => editor.chain().focus().deleteTable().run()} className="px-1.5 py-1 hover:bg-slate-850 text-[10px] font-bold text-rose-500 rounded" title="Delete Table">Delete Table</button>
-              </div>
-            </>
-          )}
-
-          {/* Insert Link */}
-          <ToolbarButton
-            active={editor?.isActive("link")}
-            onClick={() => {
-              if (editor?.isActive("link")) {
-                editor.chain().focus().unsetLink().run();
-              } else {
-                const url = editor?.getAttributes("link").href ?? "";
-                setLinkUrl(url);
-                setShowLinkDialog(true);
-              }
-            }}
-            title={`Insert / Remove Link (${kbd("Ctrl+K")})`}
-          >
-            <LinkIcon className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* History */}
-          <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title={`Undo (${kbd("Ctrl+Z")})`}>
-            <Undo className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title={`Redo (${kbd("Ctrl+Y")})`}>
-            <Redo className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* Character Style Dropdown (Gated) */}
-          {charStyles && charStyles.length > 0 && (
-            <>
-              <select
-                onChange={(e) => {
-                  const styleClass = e.target.value;
-                  if (!styleClass || styleClass === "CLEAR") {
-                    editor?.chain().focus().unsetMark("charStyle").run();
-                  } else {
-                    editor?.chain().focus().setMark("charStyle", { class: styleClass }).run();
-                  }
-                  e.target.value = "";
-                }}
-                className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none shrink-0"
-                title="Character Style"
+            {/* Color Controls */}
+            {/* Text Color */}
+            <div className="relative" title="Text Color">
+              <button
+                onClick={() => textColorRef.current?.click()}
+                className="p-1.5 rounded-md text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all duration-150 cursor-pointer flex flex-col items-center gap-0.5"
               >
-                <option value="">Character Style</option>
-                <option value="CLEAR">Clear Style</option>
-                <optgroup label="Bibliography Styles">
-                  {charStyles
-                    .filter((s) => s.startsWith("bib_"))
-                    .map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label="Citation Styles">
-                  {charStyles
-                    .filter((s) => s.startsWith("cite_"))
-                    .map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                </optgroup>
-              </select>
-              <ToolbarDivider />
-            </>
-          )}
+                <span className="text-[10px] font-bold leading-none">A</span>
+                <span
+                  className="h-1 w-4 rounded-full"
+                  style={{ backgroundColor: editor?.getAttributes("textStyle").color || "#ffffff" }}
+                />
+              </button>
+              <input
+                ref={textColorRef}
+                type="color"
+                defaultValue="#000000"
+                onChange={(e) => {
+                  if (patchSelectedMathNode({ wrapperColor: e.target.value })) return;
+                  editor?.chain().focus().setColor(e.target.value).run();
+                }}
+                className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
+              />
+            </div>
 
-          {/* Add Comment Button — opens the dialog; the Tiptap mark and the
+            {/* Highlight Color */}
+            <div className="relative" title="Highlight Color">
+              <button
+                onClick={() => highlightColorRef.current?.click()}
+                className="p-1.5 rounded-md text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all duration-150 cursor-pointer"
+              >
+                <Highlighter className="w-4 h-4" />
+              </button>
+              <input
+                ref={highlightColorRef}
+                type="color"
+                defaultValue="#fef08a"
+                onChange={(e) => {
+                  if (patchSelectedMathNode({ wrapperBgColor: e.target.value })) return;
+                  editor?.chain().focus().toggleHighlight({ color: e.target.value }).run();
+                }}
+                className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
+              />
+            </div>
+
+            <ToolbarDivider />
+
+            {/* Alignment */}
+            <ToolbarButton active={editor?.isActive({ textAlign: "left" })} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title={`Align Left (${kbd("Ctrl+L")})`}>
+              <AlignLeft className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive({ textAlign: "center" })} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title={`Align Center (${kbd("Ctrl+E")})`}>
+              <AlignCenter className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive({ textAlign: "right" })} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title={`Align Right (${kbd("Ctrl+R")})`}>
+              <AlignRight className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive({ textAlign: "justify" })} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title={`Justify (${kbd("Ctrl+J")})`}>
+              <AlignJustify className="w-4 h-4" />
+            </ToolbarButton>
+
+            <ToolbarDivider />
+
+            {/* Lists */}
+            <ToolbarButton active={editor?.isActive("bulletList")} onClick={() => editor?.chain().focus().toggleBulletList().run()} title={`Bullet List (${kbd("Ctrl+Shift+L")})`}>
+              <List className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("orderedList")} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Numbered List (${kbd("Ctrl+Shift+O")})`}>
+              <ListOrdered className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={() => {
+                if (editor?.isActive("bulletList") || editor?.isActive("orderedList")) {
+                  editor.chain().focus().sinkListItem("listItem").run();
+                }
+              }}
+              disabled={!editor?.isActive("bulletList") && !editor?.isActive("orderedList")}
+              title="Indent (List Item)"
+            >
+              <Indent className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={() => {
+                if (editor?.isActive("bulletList") || editor?.isActive("orderedList")) {
+                  editor.chain().focus().liftListItem("listItem").run();
+                }
+              }}
+              disabled={!editor?.isActive("bulletList") && !editor?.isActive("orderedList")}
+              title="Outdent (List Item)"
+            >
+              <Outdent className="w-4 h-4" />
+            </ToolbarButton>
+
+            <ToolbarDivider />
+
+            {/* Insert Table */}
+            <ToolbarButton onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title={`Insert Table 3×3 (${kbd("Ctrl+Alt+T")})`}>
+              <Table2 className="w-4 h-4" />
+            </ToolbarButton>
+
+            {/* Insert Page Break */}
+            <ToolbarButton onClick={() => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run()} title={`Insert Page Break (${kbd("Ctrl+Enter")})`}>
+              <SeparatorHorizontal className="w-4 h-4 text-emerald-400" />
+            </ToolbarButton>
+
+            {/* Table Tools (Only visible when cursor is inside a table) */}
+            {editor?.isActive("table") && (
+              <>
+                <ToolbarDivider />
+                <div className="flex items-center gap-1 bg-[#131b2e] border border-slate-700/60 rounded-md p-0.5" title="Table Tools">
+                  <button onClick={() => editor.chain().focus().addRowBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">+ Row Above</button>
+                  <button onClick={() => editor.chain().focus().addRowAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">+ Row Below</button>
+                  <div className="w-px h-3.5 bg-slate-800" />
+                  <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">+ Col Left</button>
+                  <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">+ Col Right</button>
+                  <div className="w-px h-3.5 bg-slate-800" />
+                  <button onClick={() => editor.chain().focus().mergeCells().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Merge Cells">Merge</button>
+                  <button onClick={() => editor.chain().focus().splitCell().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Split Cell">Split</button>
+                  <div className="w-px h-3.5 bg-slate-800" />
+                  <button onClick={() => editor.chain().focus().deleteRow().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Row">Delete Row</button>
+                  <button onClick={() => editor.chain().focus().deleteColumn().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Column">Delete Col</button>
+                  <button onClick={() => editor.chain().focus().deleteTable().run()} className="px-1.5 py-1 hover:bg-slate-850 text-[10px] font-bold text-rose-500 rounded" title="Delete Table">Delete Table</button>
+                </div>
+              </>
+            )}
+
+            {/* Insert Link */}
+            <ToolbarButton
+              active={editor?.isActive("link")}
+              onClick={() => {
+                if (editor?.isActive("link")) {
+                  editor.chain().focus().unsetLink().run();
+                } else {
+                  const url = editor?.getAttributes("link").href ?? "";
+                  setLinkUrl(url);
+                  setShowLinkDialog(true);
+                }
+              }}
+              title={`Insert / Remove Link (${kbd("Ctrl+K")})`}
+            >
+              <LinkIcon className="w-4 h-4" />
+            </ToolbarButton>
+
+            <ToolbarDivider />
+
+            {/* History */}
+            <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title={`Undo (${kbd("Ctrl+Z")})`}>
+              <Undo className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title={`Redo (${kbd("Ctrl+Y")})`}>
+              <Redo className="w-4 h-4" />
+            </ToolbarButton>
+
+            <ToolbarDivider />
+
+            {/* Character Style Dropdown (Gated) */}
+            {charStyles && charStyles.length > 0 && (
+              <>
+                <select
+                  onChange={(e) => {
+                    const styleClass = e.target.value;
+                    if (!styleClass || styleClass === "CLEAR") {
+                      editor?.chain().focus().unsetMark("charStyle").run();
+                    } else {
+                      editor?.chain().focus().setMark("charStyle", { class: styleClass }).run();
+                    }
+                    e.target.value = "";
+                  }}
+                  className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none shrink-0"
+                  title="Character Style"
+                >
+                  <option value="">Character Style</option>
+                  <option value="CLEAR">Clear Style</option>
+                  <optgroup label="Bibliography Styles">
+                    {charStyles
+                      .filter((s) => s.startsWith("bib_"))
+                      .map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Citation Styles">
+                    {charStyles
+                      .filter((s) => s.startsWith("cite_"))
+                      .map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+                <ToolbarDivider />
+              </>
+            )}
+
+            {/* Add Comment Button — opens the dialog; the Tiptap mark and the
               backend record are only created once the user submits text. */}
-          <ToolbarButton
-            onClick={openCommentDialog}
-            title={`Add Comment on selection (${kbd("Ctrl+Alt+M")})`}
-          >
-            <MessageSquare className="w-4 h-4 text-sky-400" />
-          </ToolbarButton>
+            <ToolbarButton
+              onClick={openCommentDialog}
+              title={`Add Comment on selection (${kbd("Ctrl+Alt+M")})`}
+            >
+              <MessageSquare className="w-4 h-4 text-sky-400" />
+            </ToolbarButton>
 
-          {/* Insert Equation Button */}
-          <ToolbarButton
-            onClick={() => {
-              if (!editor) return;
-              (editor.chain().focus() as any).insertMathNode({ openOnMount: true }).run();
-            }}
-            title={`Insert Math Equation (${kbd("Ctrl+Alt+E")})`}
-          >
-            <Sigma className="w-4 h-4 text-amber-500" />
-          </ToolbarButton>
+            {/* Insert Equation Button */}
+            <ToolbarButton
+              onClick={() => {
+                if (!editor) return;
+                (editor.chain().focus() as any).insertMathNode({ openOnMount: true }).run();
+              }}
+              title={`Insert Math Equation (${kbd("Ctrl+Alt+E")})`}
+            >
+              <Sigma className="w-4 h-4 text-amber-500" />
+            </ToolbarButton>
 
-          {/* Keyboard Shortcuts Reference */}
-          <ToolbarButton
-            onClick={() => setShowShortcuts(true)}
-            title="Keyboard Shortcuts"
-          >
-            <Keyboard className="w-4 h-4" />
-          </ToolbarButton>
+            {/* Keyboard Shortcuts Reference */}
+            <ToolbarButton
+              onClick={() => setShowShortcuts(true)}
+              title="Keyboard Shortcuts"
+            >
+              <Keyboard className="w-4 h-4" />
+            </ToolbarButton>
 
-          <ToolbarDivider />
+            <ToolbarDivider />
 
-          {/* Review-mode (compare with original) Toggle */}
-          <button
-            onClick={handleToggleReviewMode}
-            className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${reviewMode
+            {/* Review-mode (compare with original) Toggle */}
+            <button
+              onClick={handleToggleReviewMode}
+              className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${reviewMode
                 ? "bg-sky-950/40 text-sky-300 border-sky-800/80 shadow-sm"
                 : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
-              }`}
-            title={
-              reviewMode
-                ? "Reviewing changes vs. original — click to return to current view"
-                : "Show changes vs. original (review mode)"
-            }
-            aria-pressed={reviewMode}
-          >
-            {reviewMode ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-          </button>
+                }`}
+              title={
+                reviewMode
+                  ? "Reviewing changes vs. original — click to return to current view"
+                  : "Show changes vs. original (review mode)"
+              }
+              aria-pressed={reviewMode}
+            >
+              {reviewMode ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+            </button>
 
-          {/* Track Changes Toggle */}
-          <button
-            onClick={handleToggleTrackChanges}
-            disabled={reviewMode}
-            className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all duration-150 border shrink-0 ${tcEnabled
-              ? "bg-emerald-950/40 text-emerald-400 border-emerald-800/80 shadow-sm"
-              : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
-              } ${reviewMode ? "opacity-40 cursor-not-allowed" : ""}`}
-            title={reviewMode ? "Track Changes is disabled in review mode" : "Toggle Track Changes"}
-          >
-            TC {tcEnabled ? "ON" : "OFF"}
-          </button>
+            {/* Track Changes Toggle */}
+            <button
+              onClick={handleToggleTrackChanges}
+              disabled={reviewMode}
+              className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all duration-150 border shrink-0 ${tcEnabled
+                ? "bg-emerald-950/40 text-emerald-400 border-emerald-800/80 shadow-sm"
+                : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
+                } ${reviewMode ? "opacity-40 cursor-not-allowed" : ""}`}
+              title={reviewMode ? "Track Changes is disabled in review mode" : "Toggle Track Changes"}
+            >
+              TC {tcEnabled ? "ON" : "OFF"}
+            </button>
 
-          {/* Accept/Reject All Buttons (when TC is ON) */}
-          {tcEnabled && (
-            <div className="flex items-center gap-1 bg-[#0c1b30] border border-emerald-900/60 rounded-md p-0.5 shrink-0" title="Bulk Resolve Changes">
-              <button
-                onClick={() => {
-                  editor?.commands.acceptAllChanges();
-                  setTimeout(updateCommentPositions, 50);
-                }}
-                className="p-1 hover:bg-slate-800 text-[10px] font-bold text-emerald-400 rounded flex items-center gap-0.5 cursor-pointer border-none bg-transparent"
-                title="Accept All Changes"
-              >
-                <Check className="w-3 h-3" /> All
-              </button>
-              <div className="w-px h-3 bg-emerald-900/40" />
-              <button
-                onClick={() => {
-                  editor?.commands.rejectAllChanges();
-                  setTimeout(updateCommentPositions, 50);
-                }}
-                className="p-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded flex items-center gap-0.5 cursor-pointer border-none bg-transparent"
-                title="Reject All Changes"
-              >
-                <X className="w-3.5 h-3.5" /> All
-              </button>
-            </div>
-          )}
+            {/* Accept/Reject All Buttons (when TC is ON) */}
+            {tcEnabled && (
+              <div className="flex items-center gap-1 bg-[#0c1b30] border border-emerald-900/60 rounded-md p-0.5 shrink-0" title="Bulk Resolve Changes">
+                <button
+                  onClick={() => {
+                    editor?.commands.acceptAllChanges();
+                    setTimeout(updateCommentPositions, 50);
+                  }}
+                  className="p-1 hover:bg-slate-800 text-[10px] font-bold text-emerald-400 rounded flex items-center gap-0.5 cursor-pointer border-none bg-transparent"
+                  title="Accept All Changes"
+                >
+                  <Check className="w-3 h-3" /> All
+                </button>
+                <div className="w-px h-3 bg-emerald-900/40" />
+                <button
+                  onClick={() => {
+                    editor?.commands.rejectAllChanges();
+                    setTimeout(updateCommentPositions, 50);
+                  }}
+                  className="p-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded flex items-center gap-0.5 cursor-pointer border-none bg-transparent"
+                  title="Reject All Changes"
+                >
+                  <X className="w-3.5 h-3.5" /> All
+                </button>
+              </div>
+            )}
 
-          <ToolbarDivider />
+            <ToolbarDivider />
 
-          {/* Find & Replace Toggle */}
-          <ToolbarButton
-            active={showFindReplace}
-            onClick={() => setShowFindReplace(!showFindReplace)}
-            title="Find & Replace (Ctrl+F)"
-          >
-            <Search className="w-4 h-4" />
-          </ToolbarButton>
+            {/* Find & Replace Toggle */}
+            <ToolbarButton
+              active={showFindReplace}
+              onClick={() => setShowFindReplace(!showFindReplace)}
+              title="Find & Replace (Ctrl+F)"
+            >
+              <Search className="w-4 h-4" />
+            </ToolbarButton>
 
-          {/* Clear Formatting */}
-          <ToolbarButton
-            onClick={() => editor?.chain().focus().clearNodes().unsetAllMarks().run()}
-            title="Clear All Formatting"
-          >
-            <Maximize2 className="w-4 h-4" />
-          </ToolbarButton>
+            {/* Clear Formatting */}
+            <ToolbarButton
+              onClick={() => editor?.chain().focus().clearNodes().unsetAllMarks().run()}
+              title="Clear All Formatting"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </ToolbarButton>
 
-          <ToolbarDivider />
+            <ToolbarDivider />
 
-          {/* Top Toolbar Save Button */}
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving}
-            title={`Save edits to DOCX (${kbd("Ctrl+S")})`}
-            className={`px-3 py-1 text-xs font-bold rounded-md transition-all duration-150 shrink-0 inline-flex items-center gap-1.5 cursor-pointer shadow-sm ${
-              isSaving
-                ? "bg-blue-900/60 text-blue-300 border border-blue-700/50 opacity-75 cursor-not-allowed"
-                : isDirty
-                ? "bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 shadow-amber-900/30"
-                : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500 shadow-blue-900/30"
-            }`}
-          >
-            <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
-            <span>{isSaving ? "Saving..." : isDirty ? "Save *" : "Save"}</span>
-          </button>
+            {/* Top Toolbar Save Button */}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving}
+              title={`Save edits to DOCX (${kbd("Ctrl+S")})`}
+              className={`px-3 py-1 text-xs font-bold rounded-md transition-all duration-150 shrink-0 inline-flex items-center gap-1.5 cursor-pointer shadow-sm ${isSaving
+                  ? "bg-blue-900/60 text-blue-300 border border-blue-700/50 opacity-75 cursor-not-allowed"
+                  : isDirty
+                    ? "bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 shadow-amber-900/30"
+                    : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500 shadow-blue-900/30"
+                }`}
+            >
+              <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
+              <span>{isSaving ? "Saving..." : isDirty ? "Save *" : "Save"}</span>
+            </button>
 
-          {toolbarExtras && (
-            <div className="ml-auto flex items-center gap-1.5 shrink-0 pl-2">
-              {toolbarExtras}
-            </div>
-          )}
-        </div>
+            {toolbarExtras && (
+              <div className="ml-auto flex items-center gap-1.5 shrink-0 pl-2">
+                {toolbarExtras}
+              </div>
+            )}
+          </div>
         )}
 
         {/* â”€â”€ Find & Replace Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -1804,10 +2072,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               ...g,
               items: q
                 ? g.items.filter(
-                    (it) =>
-                      it.label.toLowerCase().includes(q) ||
-                      it.combo.toLowerCase().includes(q),
-                  )
+                  (it) =>
+                    it.label.toLowerCase().includes(q) ||
+                    it.combo.toLowerCase().includes(q),
+                )
                 : g.items,
             }))
             .filter((g) => g.items.length > 0);
@@ -1829,7 +2097,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                 {/* Header */}
                 <div className="relative px-6 pt-5 pb-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
                   <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
-                       style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "16px 16px" }} />
+                    style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "16px 16px" }} />
                   <div className="relative flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center backdrop-blur-sm">
@@ -1951,154 +2219,157 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         })()}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 pt-0 pb-20 flex items-start justify-center overflow-x-auto">
-          <div className={sidePanel ? "flex gap-6 max-w-[1400px] justify-start lg:justify-center" : "flex justify-center"}>
-            {/* Word-style A4 Document Page — fixed width so it looks like a
+        <div className="flex-1 flex overflow-hidden min-h-0 relative">
+          {leftSidebarSlot}
+          <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 pt-0 pb-20 flex items-start justify-center overflow-x-auto">
+            <div className={sidePanel ? "flex gap-6 max-w-[1400px] justify-start lg:justify-center" : "flex justify-center"}>
+              {/* Word-style A4 Document Page — fixed width so it looks like a
                 physical sheet on the canvas, regardless of viewport width. */}
-            <div
-              className="bg-white text-sm transition-shadow duration-300 relative shrink-0"
-              style={{
-                fontFamily: "'Times New Roman', Times, serif",
-                lineHeight: "2",
-                width: "8.27in",          // A4 width (210mm)
-                minHeight: "11.69in",     // A4 height (297mm)
-                padding: "1in 1in",       // Word default margins
-                boxShadow: "0 4px 20px rgba(0,0,0,0.08), 0 12px 36px rgba(0,0,0,0.06)",
-                border: "1px solid rgba(203, 213, 225, 0.9)",
-                overflow: "visible",
-                borderRadius: "2px",
-              }}
-              onClick={(e) => {
-                if (!editor) return;
-                const target = e.target as HTMLElement;
-                const blockEl = target.closest(".ProseMirror > p, .ProseMirror > h1, .ProseMirror > h2, .ProseMirror > h3, .ProseMirror > h4, .ProseMirror > h5, .ProseMirror > h6");
-                if (!blockEl) return;
-
-                const rect = blockEl.getBoundingClientRect();
-                const offsetLeft = e.clientX - rect.left;
-
-                if (offsetLeft >= -130 && offsetLeft <= -10) {
-                  e.preventDefault();
-                  e.stopPropagation();
-
-                  try {
-                    const pos = editor.view.posAtDOM(blockEl, 0);
-                    const styleLabel = blockEl.getAttribute("data-style-label") || blockEl.tagName;
-
-                    const pageRect = e.currentTarget.getBoundingClientRect();
-                    const pageLeft = rect.left - pageRect.left;
-                    const pageTop = rect.top - pageRect.top;
-
-                    setActiveGutter({
-                      pos,
-                      element: blockEl as HTMLElement,
-                      styleLabel,
-                      clientX: e.clientX,
-                      clientY: e.clientY,
-                      pageLeft: pageLeft - 105,
-                      pageTop: pageTop,
-                    });
-                  } catch (err) {
-                    console.error(err);
-                  }
-                }
-              }}
-            >
-              {documentTitle && (
-                <div className="text-center text-sm text-slate-400 mb-8 pb-4 border-b border-slate-100 font-sans tracking-wide">
-                  {documentTitle}
-                </div>
-              )}
-              <EditorContent editor={editor} />
-
-              {/* Gutter Style Selector Popup */}
-              {activeGutter && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40 bg-transparent"
-                    onClick={() => setActiveGutter(null)}
-                  />
-                  <div
-                    className="absolute z-50 bg-[#0c1222]/98 border border-slate-700/80 text-slate-200 rounded-lg shadow-2xl p-2.5 w-60 flex flex-col backdrop-blur-md transition-all duration-200"
-                    style={{
-                      left: `${activeGutter.pageLeft}px`,
-                      top: `${activeGutter.pageTop + 24}px`,
-                      boxShadow: "0 10px 30px -10px rgba(0,0,0,0.5), 0 1px 3px rgba(255,255,255,0.05)"
-                    }}
-                  >
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-slate-400 border-b border-slate-800 mb-1.5 flex items-center justify-between">
-                      <span>Change Style</span>
-                      <span className="px-1.5 py-0.5 bg-slate-800 text-blue-400 rounded text-[9px] font-mono">
-                        {activeGutter.styleLabel}
-                      </span>
-                    </div>
-                    <div className="max-h-60 overflow-y-auto pr-1 flex flex-col gap-0.5 styles-scrollbar">
-                      {(styles || [
-                        "Normal",
-                        "H1",
-                        "H2",
-                        "H3",
-                        "H4",
-                        "H5",
-                        "H6",
-                        "CN",
-                        "APX-TXT-FLUSH",
-                        "EPI",
-                        "ACKTXT",
-                        "FootnoteText",
-                        "EndnoteText"
-                      ]).map((style) => (
-                        <button
-                          key={style}
-                          onClick={() => {
-                            applyStyle(style, activeGutter.pos);
-                            setActiveGutter(null);
-                          }}
-                          className={`w-full text-left px-2.5 py-1.5 rounded text-xs transition-colors font-semibold flex items-center justify-between cursor-pointer ${activeGutter.styleLabel === style
-                            ? "bg-blue-600 text-white font-bold"
-                            : "hover:bg-slate-800 text-slate-300 hover:text-white"
-                            }`}
-                        >
-                          <span>{style}</span>
-                          {activeGutter.styleLabel === style && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Inline Add Style input */}
-                    <div className="border-t border-slate-800/80 mt-2 pt-2">
-                      <input
-                        type="text"
-                        placeholder="Add new style..."
-                        className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700/60 rounded text-xs text-slate-200 focus:outline-none focus:border-blue-500 placeholder-slate-500 font-semibold"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            handleAddNewStyleFromGutter(e.currentTarget.value, activeGutter.pos);
-                          }
-                        }}
-                      />
-                      <p className="text-[9px] text-slate-500 mt-1 px-1 font-medium">Press Enter to create and apply style</p>
-                    </div>
-                  </div>
-                </>
-              )}
-              {/* Comments managed via Comments popover in toolbar + click dialog;
-                  old margin rail retired (its disclaimer was stale once Phase 2
-                  wired comments into DOCX export). */}
-            </div>
-
-            {/* Side Panel */}
-            {sidePanel && (
               <div
-                className="w-80 flex-shrink-0 min-h-0 sticky top-0 self-start"
+                className="bg-white text-sm transition-shadow duration-300 relative shrink-0"
                 style={{
-                  height: `calc(${height} - 180px)`,
-                  maxHeight: `calc(${height} - 180px)`,
+                  fontFamily: "'Times New Roman', Times, serif",
+                  lineHeight: "2",
+                  width: "8.27in",          // A4 width (210mm)
+                  minHeight: "11.69in",     // A4 height (297mm)
+                  padding: "1in 1in",       // Word default margins
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.08), 0 12px 36px rgba(0,0,0,0.06)",
+                  border: "1px solid rgba(203, 213, 225, 0.9)",
+                  overflow: "visible",
+                  borderRadius: "2px",
+                }}
+                onClick={(e) => {
+                  if (!editor) return;
+                  const target = e.target as HTMLElement;
+                  const blockEl = target.closest(".ProseMirror > p, .ProseMirror > h1, .ProseMirror > h2, .ProseMirror > h3, .ProseMirror > h4, .ProseMirror > h5, .ProseMirror > h6");
+                  if (!blockEl) return;
+
+                  const rect = blockEl.getBoundingClientRect();
+                  const offsetLeft = e.clientX - rect.left;
+
+                  if (offsetLeft >= -130 && offsetLeft <= -10) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    try {
+                      const pos = editor.view.posAtDOM(blockEl, 0);
+                      const styleLabel = blockEl.getAttribute("data-style-label") || blockEl.tagName;
+
+                      const pageRect = e.currentTarget.getBoundingClientRect();
+                      const pageLeft = rect.left - pageRect.left;
+                      const pageTop = rect.top - pageRect.top;
+
+                      setActiveGutter({
+                        pos,
+                        element: blockEl as HTMLElement,
+                        styleLabel,
+                        clientX: e.clientX,
+                        clientY: e.clientY,
+                        pageLeft: pageLeft - 105,
+                        pageTop: pageTop,
+                      });
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }
                 }}
               >
-                {sidePanel}
+                {documentTitle && (
+                  <div className="text-center text-sm text-slate-400 mb-8 pb-4 border-b border-slate-100 font-sans tracking-wide">
+                    {documentTitle}
+                  </div>
+                )}
+                <EditorContent editor={editor} />
+
+                {/* Gutter Style Selector Popup */}
+                {activeGutter && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40 bg-transparent"
+                      onClick={() => setActiveGutter(null)}
+                    />
+                    <div
+                      className="absolute z-50 bg-[#0c1222]/98 border border-slate-700/80 text-slate-200 rounded-lg shadow-2xl p-2.5 w-60 flex flex-col backdrop-blur-md transition-all duration-200"
+                      style={{
+                        left: `${activeGutter.pageLeft}px`,
+                        top: `${activeGutter.pageTop + 24}px`,
+                        boxShadow: "0 10px 30px -10px rgba(0,0,0,0.5), 0 1px 3px rgba(255,255,255,0.05)"
+                      }}
+                    >
+                      <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-slate-400 border-b border-slate-800 mb-1.5 flex items-center justify-between">
+                        <span>Change Style</span>
+                        <span className="px-1.5 py-0.5 bg-slate-800 text-blue-400 rounded text-[9px] font-mono">
+                          {activeGutter.styleLabel}
+                        </span>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto pr-1 flex flex-col gap-0.5 styles-scrollbar">
+                        {(styles || [
+                          "Normal",
+                          "H1",
+                          "H2",
+                          "H3",
+                          "H4",
+                          "H5",
+                          "H6",
+                          "CN",
+                          "APX-TXT-FLUSH",
+                          "EPI",
+                          "ACKTXT",
+                          "FootnoteText",
+                          "EndnoteText"
+                        ]).map((style) => (
+                          <button
+                            key={style}
+                            onClick={() => {
+                              applyStyle(style, activeGutter.pos);
+                              setActiveGutter(null);
+                            }}
+                            className={`w-full text-left px-2.5 py-1.5 rounded text-xs transition-colors font-semibold flex items-center justify-between cursor-pointer ${activeGutter.styleLabel === style
+                              ? "bg-blue-600 text-white font-bold"
+                              : "hover:bg-slate-800 text-slate-300 hover:text-white"
+                              }`}
+                          >
+                            <span>{style}</span>
+                            {activeGutter.styleLabel === style && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Inline Add Style input */}
+                      <div className="border-t border-slate-800/80 mt-2 pt-2">
+                        <input
+                          type="text"
+                          placeholder="Add new style..."
+                          className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700/60 rounded text-xs text-slate-200 focus:outline-none focus:border-blue-500 placeholder-slate-500 font-semibold"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleAddNewStyleFromGutter(e.currentTarget.value, activeGutter.pos);
+                            }
+                          }}
+                        />
+                        <p className="text-[9px] text-slate-500 mt-1 px-1 font-medium">Press Enter to create and apply style</p>
+                      </div>
+                    </div>
+                  </>
+                )}
+                {/* Comments managed via Comments popover in toolbar + click dialog;
+                  old margin rail retired (its disclaimer was stale once Phase 2
+                  wired comments into DOCX export). */}
               </div>
-            )}
+
+              {/* Side Panel */}
+              {sidePanel && (
+                <div
+                  className="w-80 flex-shrink-0 min-h-0 sticky top-0 self-start"
+                  style={{
+                    height: `calc(${height} - 180px)`,
+                    maxHeight: `calc(${height} - 180px)`,
+                  }}
+                >
+                  {sidePanel}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2107,9 +2378,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           className={
             inlineSaveBar
               ? "border-t border-slate-200 bg-white px-4 py-2 flex items-center gap-3 flex-wrap shrink-0"
-              : `fixed bottom-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)] ${
-                  sidebarCollapsed ? "left-16" : "left-60"
-                }`
+              : `fixed bottom-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)] ${sidebarCollapsed ? "left-16" : "left-60"
+              }`
           }
         >
           {!hideSaveButton && (
@@ -2385,11 +2655,20 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           position: relative;
           word-wrap: break-word;
           white-space: normal;
+          color: #0f172a !important;
         }
-        .ProseMirror p {
-          margin: 0;
-          padding: 0;
-          line-height: 2;
+        .ProseMirror p,
+        .ProseMirror div,
+        .ProseMirror h1,
+        .ProseMirror h2,
+        .ProseMirror h3,
+        .ProseMirror h4,
+        .ProseMirror h5,
+        .ProseMirror h6,
+        .ProseMirror li,
+        .ProseMirror td,
+        .ProseMirror th {
+          color: #0f172a;
         }
         .ProseMirror p.is-editor-empty:first-child::before {
           color: #adb5bd;
@@ -2398,21 +2677,28 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           height: 0;
           pointer-events: none;
         }
-        .tc-insert {
-          background-color: rgba(34, 197, 94, 0.2);
-          text-decoration: underline;
-          text-decoration-color: rgb(22, 163, 74);
+        ins, .tc-insert {
+          background-color: rgba(34, 197, 94, 0.2) !important;
+          text-decoration: underline !important;
+          text-decoration-color: rgb(22, 163, 74) !important;
+          color: rgb(21, 128, 61) !important;
         }
-        .tc-delete {
-          background-color: rgba(239, 68, 68, 0.15);
-          text-decoration: line-through;
-          text-decoration-color: rgb(220, 38, 38);
-          color: rgba(127, 29, 29, 0.8);
-          padding: 2px 4px;
-          border-radius: 2px;
+        del, .tc-delete {
+          background-color: rgba(239, 68, 68, 0.15) !important;
+          text-decoration: line-through !important;
+          text-decoration-color: rgb(220, 38, 38) !important;
+          color: rgba(127, 29, 29, 0.8) !important;
+          padding: 2px 4px !important;
+          border-radius: 2px !important;
         }
-        .tc-delete:hover {
-          background-color: rgba(239, 68, 68, 0.25);
+        del:hover, .tc-delete:hover {
+          background-color: rgba(239, 68, 68, 0.25) !important;
+        }
+        mark, .tc-highlight {
+          background-color: #fef08a !important;
+          color: #854d0e !important;
+          padding: 1px 3px !important;
+          border-radius: 2px !important;
         }
         /* ── Review mode (eye toggle) — original vs current diff overlay ───── */
         .rv-del {
@@ -2432,35 +2718,46 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         /* Occurrence highlights */
         .occurrence-highlight {
           padding: 1px 3px !important;
-          border-radius: 2px !important;
+          border-radius: 3px !important;
           cursor: pointer !important;
           transition: all 0.18s ease-in-out !important;
-          background-color: rgba(249, 115, 22, 0.20) !important;
+          background-color: rgba(249, 115, 22, 0.22) !important;
           border-bottom: 2px solid rgba(249, 115, 22, 0.85) !important;
           color: inherit !important;
         }
 
         .occurrence-highlight:hover {
-          background-color: rgba(249, 115, 22, 0.3) !important;
+          background-color: rgba(249, 115, 22, 0.38) !important;
         }
 
         /* --- Active Selection (Vivid Focus Pulsating Highlights) --- */
         @keyframes green-highlight-pulse {
-          0% { box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3); }
-          50% { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.55); }
-          100% { box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3); }
+          0% {
+            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.5), 0 0 10px rgba(34, 197, 94, 0.35);
+          }
+          50% {
+            box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.85), 0 0 16px rgba(34, 197, 94, 0.55);
+          }
+          100% {
+            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.5), 0 0 10px rgba(34, 197, 94, 0.35);
+          }
         }
 
-        .occurrence-highlight-selected {
-          background-color: rgba(34, 197, 94, 0.40) !important;
-          border-bottom: 2.5px solid rgba(34, 197, 94, 0.95) !important;
-          color: #14532d !important;
+        .occurrence-highlight-selected,
+        .occurrence-stylesheet-selected,
+        [class*="occurrence-"][class*="-selected"] {
+          background-color: rgba(34, 197, 94, 0.55) !important;
+          border-bottom: 3px solid #16a34a !important;
+          color: #052e16 !important;
           font-weight: 700 !important;
-          padding: 2px 3px !important;
-          border-radius: 3px !important;
-          animation: green-highlight-pulse 2s infinite ease-in-out !important;
+          padding: 2px 5px !important;
+          border-radius: 4px !important;
+          outline: 2px solid #22c55e !important;
+          outline-offset: 1px !important;
+          animation: green-highlight-pulse 1.8s infinite ease-in-out !important;
           transition: all 0.18s ease-in-out !important;
           opacity: 1 !important;
+          display: inline !important;
         }
 
 
@@ -2520,11 +2817,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
         }
 
-        /* Suppress empty/Normal style margin badges */
+        /* Fallback badge text for elements missing data-style-label */
         .ProseMirror p:not([data-style-label])::after,
         .ProseMirror p[data-style-label=""]::after,
-        .ProseMirror p[data-style-label="Normal"]::after,
-        .ProseMirror p[data-style-label="MsoNormal"]::after,
         .ProseMirror h1:not([data-style-label])::after,
         .ProseMirror h1[data-style-label=""]::after,
         .ProseMirror h2:not([data-style-label])::after,
@@ -2537,7 +2832,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror h5[data-style-label=""]::after,
         .ProseMirror h6:not([data-style-label])::after,
         .ProseMirror h6[data-style-label=""]::after {
-          display: none !important;
+          content: "Normal" !important;
         }
 
         /* Bullet & Numbered List Styling */
@@ -2559,23 +2854,40 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
 
         .ProseMirror ol {
-          list-style-type: decimal !important;
           margin-left: 2rem !important;
           padding-left: 0.5rem !important;
           margin-top: 0.5rem !important;
           margin-bottom: 0.5rem !important;
         }
-        .ProseMirror ol ol {
+        /* Fallback nested list styles when type attribute is not explicitly set */
+        .ProseMirror ol:not([type]) {
+          list-style-type: decimal !important;
+        }
+        .ProseMirror ol ol:not([type]) {
           list-style-type: lower-alpha !important;
         }
-        .ProseMirror ol ol ol {
+        .ProseMirror ol ol ol:not([type]) {
           list-style-type: lower-roman !important;
         }
-        .ProseMirror ol ol ol ol {
+        .ProseMirror ol ol ol ol:not([type]) {
           list-style-type: upper-alpha !important;
         }
-        .ProseMirror ol ol ol ol ol {
+
+        /* Pure HTML type attribute selectors (A, 1, a, I, i) */
+        .ProseMirror ol[type="A"] {
+          list-style-type: upper-alpha !important;
+        }
+        .ProseMirror ol[type="1"] {
+          list-style-type: decimal !important;
+        }
+        .ProseMirror ol[type="a"] {
+          list-style-type: lower-alpha !important;
+        }
+        .ProseMirror ol[type="I"] {
           list-style-type: upper-roman !important;
+        }
+        .ProseMirror ol[type="i"] {
+          list-style-type: lower-roman !important;
         }
 
         .ProseMirror li {
@@ -3030,7 +3342,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label="GLOS-NL-FIRST"],
         .ProseMirror p[data-style-label="GLOS-NL-MID"],
         .ProseMirror p[data-style-label="UNBX-NL"],
-        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"],
+        .ProseMirror p[data-style-label*="NumberList"] {
           position: relative !important;
           margin-left: 2rem !important;
           padding-left: 0.5rem !important;
@@ -3044,10 +3357,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
 
         /* Reset the counter for a new sequence of consecutive numbered list items */
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label^="NL-"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label*="-NL-"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label$="-NL"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label^="NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label*="-NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label$="-NL"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label^="EXER-"][data-style-label*="-NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label*="NumberList"] {
           counter-reset: structured-num-list;
         }
 
@@ -3055,7 +3369,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label^="NL-"],
         .ProseMirror p[data-style-label*="-NL-"],
         .ProseMirror p[data-style-label$="-NL"],
-        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"],
+        .ProseMirror p[data-style-label*="NumberList"] {
           counter-increment: structured-num-list;
         }
 
@@ -3063,7 +3378,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label^="NL-"]::before,
         .ProseMirror p[data-style-label*="-NL-"]::before,
         .ProseMirror p[data-style-label$="-NL"]::before,
-        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"]::before {
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"]::before,
+        .ProseMirror p[data-style-label*="NumberList"]::before {
           content: counter(structured-num-list) ". " !important;
           position: absolute !important;
           left: -1rem !important;

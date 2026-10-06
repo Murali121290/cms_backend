@@ -203,6 +203,16 @@ def _get_all_paragraph_runs(para):
             alias, tag = _sdt_props(child)
             _collect_sdt_runs(child, alias, tag)
 
+        elif child_tag == qn('w:hyperlink'):
+            # Keep the link text (e.g. "Medline: 39044186" in a reference). Leaving it out
+            # hid it from the editor, and the next save then deleted it from the DOCX.
+            for h_child in child:
+                if h_child.tag == qn('w:r'):
+                    all_runs.append((Run(h_child, para), None, None, None))
+                elif h_child.tag in (qn('w:ins'), qn('w:del')):
+                    for r_elem in h_child.findall(qn('w:r')):
+                        all_runs.append((Run(r_elem, para), h_child, None, None))
+
     return all_runs
 
 
@@ -436,7 +446,7 @@ def _get_run_formatting(run) -> dict:
     return res
 
 
-def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) -> str:
+def _run_to_html(run, para, doc, track_change_element=None, para_findings=None, inside_track_change=False) -> str:
     """Render a run as a run-anchored span with direct formatting and its run bookmark.
 
     Args:
@@ -445,6 +455,7 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
         doc: The Document
         track_change_element: The w:ins or w:del XML element if this run is inside one, else None
         para_findings: Optional list of scan findings in this paragraph
+        inside_track_change: True if this run is already inside an enclosing ins or del tag
     """
     text = run.text or ""
 
@@ -484,6 +495,9 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
         inner = f"<em>{inner}</em>"
     if fmt["bold"]:
         inner = f"<strong>{inner}</strong>"
+    if fmt["highlight"]:
+        hl_color = fmt["highlight"]
+        inner = f'<mark class="tc-highlight" data-color="{html.escape(hl_color, quote=True)}">{inner}</mark>'
 
     style = _run_inline_style(fmt)
     rpr = _rpr_b64(run)
@@ -545,6 +559,10 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
 
     span_html = f"<span{attrs}>{inner}</span>"
 
+    # If the run is already inside an enclosing <ins> or <del> block, don't duplicate tags
+    if inside_track_change:
+        return span_html
+
     # Check for track changes and wrap accordingly
     # First try the passed track_change_element (runs inside w:ins/w:del are passed explicitly)
     if track_change_element is not None:
@@ -552,11 +570,11 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
         if tc_tag == qn('w:ins'):
             author_attr = f' data-author="{html.escape(track_change_element.get(qn("w:author"), ""))}"'
             date_attr = f' data-date="{html.escape(track_change_element.get(qn("w:date"), ""))}"'
-            return f"<ins{author_attr}{date_attr}>{span_html}</ins>"
+            return f'<ins class="tc-insert"{author_attr}{date_attr}>{span_html}</ins>'
         elif tc_tag == qn('w:del'):
             author_attr = f' data-author="{html.escape(track_change_element.get(qn("w:author"), ""))}"'
             date_attr = f' data-date="{html.escape(track_change_element.get(qn("w:date"), ""))}"'
-            return f"<del{author_attr}{date_attr}>{span_html}</del>"
+            return f'<del class="tc-delete"{author_attr}{date_attr}>{span_html}</del>'
 
     # Fall back to checking the run's parent hierarchy
     tc_info = _get_run_track_change_info(run)
@@ -564,16 +582,17 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
         if tc_info['type'] == 'insertion':
             author_attr = f' data-author="{html.escape(tc_info["author"])}"' if tc_info["author"] else ""
             date_attr = f' data-date="{html.escape(tc_info["date"])}"' if tc_info["date"] else ""
-            return f"<ins{author_attr}{date_attr}>{span_html}</ins>"
+            return f'<ins class="tc-insert"{author_attr}{date_attr}>{span_html}</ins>'
         elif tc_info['type'] == 'deletion':
             author_attr = f' data-author="{html.escape(tc_info["author"])}"' if tc_info["author"] else ""
             date_attr = f' data-date="{html.escape(tc_info["date"])}"' if tc_info["date"] else ""
-            return f"<del{author_attr}{date_attr}>{span_html}</del>"
+            return f'<del class="tc-delete"{author_attr}{date_attr}>{span_html}</del>'
 
     return span_html
 
 
-def _block_sdt_to_html(sdt_elem, doc, body_p_map=None, findings_by_para=None) -> str:
+
+def _block_sdt_to_html(sdt_elem, doc, body_p_map=None, findings_by_para=None, numbering_map=None) -> str:
     """Render a block-level w:sdt as <div class="sdt-block" data-alias="..." data-tag="...">."""
     alias, tag = _sdt_props(sdt_elem)
     esc_alias = html.escape(alias, quote=True)
@@ -593,9 +612,9 @@ def _block_sdt_to_html(sdt_elem, doc, body_p_map=None, findings_by_para=None) ->
         if child_localname == "p":
             para = docx.text.paragraph.Paragraph(child, doc)
             para_idx = body_p_map.get(child, 0) if body_p_map else 0
-            is_list, list_type, ilvl = _get_list_info(para)
+            is_list, list_type, ilvl, html_type = _get_list_info(para, numbering_map=numbering_map)
             if is_list:
-                current_list.append((para, para_idx, list_type, ilvl))
+                current_list.append((para, para_idx, list_type, ilvl, html_type))
             else:
                 if current_list:
                     inner_blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
@@ -643,7 +662,7 @@ def _is_user_visible_bookmark_name(name: str) -> bool:
     return True
 
 
-def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_idx=0) -> str:
+def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_idx=0, inside_track_change=False) -> str:
     """
     Recursively renders the children of a paragraph element to HTML.
     Supports nested w:sdt, w:ins, w:del, w:hyperlink, and w:r elements, preserving hierarchy.
@@ -709,19 +728,20 @@ def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_id
 
         if tag_local == 'r':
             run = Run(child, para)
-            parts.append(_run_to_html(run, para, doc, track_change_element=None, para_findings=para_findings))
+            parts.append(_run_to_html(run, para, doc, track_change_element=None, para_findings=para_findings, inside_track_change=inside_track_change))
 
         elif tag_local == 'ins':
             author_attr = f' data-author="{html.escape(child.get(qn("w:author"), ""))}"' if child.get(qn("w:author")) else ""
             date_attr = f' data-date="{html.escape(child.get(qn("w:date"), ""))}"' if child.get(qn("w:date")) else ""
-            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx)
-            parts.append(f"<ins{author_attr}{date_attr}>{inner_html}</ins>")
+            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx, inside_track_change=True)
+            parts.append(f'<ins class="tc-insert"{author_attr}{date_attr}>{inner_html}</ins>')
             
         elif tag_local == 'del':
             author_attr = f' data-author="{html.escape(child.get(qn("w:author"), ""))}"' if child.get(qn("w:author")) else ""
             date_attr = f' data-date="{html.escape(child.get(qn("w:date"), ""))}"' if child.get(qn("w:date")) else ""
-            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx)
-            parts.append(f"<del{author_attr}{date_attr}>{inner_html}</del>")
+            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx, inside_track_change=True)
+            parts.append(f'<del class="tc-delete"{author_attr}{date_attr}>{inner_html}</del>')
+
             
         elif tag_local == 'sdt':
             alias, tag_val = _sdt_props(child)
@@ -887,15 +907,63 @@ def _footnote_endnote_to_html(doc, findings_by_para=None) -> str:
     return "\n".join(blocks)
 
 
-def _get_list_info(para) -> tuple[bool, str, int]:
+def _build_numbering_map(doc) -> dict:
+    """Build a mapping of (numId, ilvl) -> numFmt from the document's numbering part."""
+    num_fmt_map = {}
+    try:
+        if not hasattr(doc, "part") or not hasattr(doc.part, "numbering_part"):
+            return num_fmt_map
+        num_part = doc.part.numbering_part
+        if num_part is None:
+            return num_fmt_map
+        num_xml = num_part._element
+
+        abstract_map = {}
+        for abs_num in num_xml.findall(qn("w:abstractNum")):
+            abs_id = abs_num.get(qn("w:abstractNumId"))
+            levels = {}
+            for lvl in abs_num.findall(qn("w:lvl")):
+                ilvl_val = lvl.get(qn("w:ilvl"))
+                num_fmt = lvl.find(qn("w:numFmt"))
+                val = num_fmt.get(qn("w:val")) if num_fmt is not None else "decimal"
+                if ilvl_val is not None:
+                    levels[int(ilvl_val)] = val
+            if abs_id is not None:
+                abstract_map[abs_id] = levels
+
+        num_id_to_abs = {}
+        for num in num_xml.findall(qn("w:num")):
+            nid = num.get(qn("w:numId"))
+            abs_ref = num.find(qn("w:abstractNumId"))
+            if nid is not None and abs_ref is not None:
+                num_id_to_abs[nid] = abs_ref.get(qn("w:val"))
+
+        for nid, abs_id in num_id_to_abs.items():
+            if abs_id in abstract_map:
+                for lvl, fmt in abstract_map[abs_id].items():
+                    num_fmt_map[(nid, lvl)] = fmt
+    except Exception as e:
+        logger.warning(f"Could not build numbering map: {e}")
+    return num_fmt_map
+
+
+def _get_list_info(para, numbering_map=None) -> tuple[bool, str, int, str]:
     """
-    Determine if a paragraph is a list item, its type (bullet/number), and level (0-indexed).
+    Determine if a paragraph is a list item, its type (bullet/number), level (0-indexed), and html_type attribute ('A', '1', 'a', etc.).
+    Returns (is_list, list_type, ilvl, html_type)
     """
     style_name = para.style.name if para.style else "Normal"
+    style_lower = style_name.lower()
     pPr = para._p.pPr
     ilvl = 0
     numId = None
     
+    # Reference entries ("Reference-Numbered", REF-N, ...) carry their number as text, so they
+    # are never an HTML list - the "num" style-name heuristic below would render "1. 1. ...".
+    if pPr is None or pPr.find(qn("w:numPr")) is None:
+        if "reference" in style_lower or re.match(r"ref[-_ ]", style_lower):
+            return False, "bullet", 0, "1"
+
     if pPr is not None:
         numPr = pPr.find(qn("w:numPr"))
         if numPr is not None:
@@ -911,28 +979,69 @@ def _get_list_info(para) -> tuple[bool, str, int]:
                 
     is_list = False
     list_type = "bullet"
+    html_type = "1"
     
+    doc_fmt = None
+    if numId is not None and numbering_map:
+        doc_fmt = numbering_map.get((numId, ilvl))
+
     if numId is not None:
         is_list = True
-        if any(x in style_name.lower() for x in ("number", "num", "enum", "ordered")):
+        if doc_fmt == "bullet":
+            list_type = "bullet"
+        elif doc_fmt in ("upperLetter", "upperAlpha"):
             list_type = "number"
-    elif any(x in style_name.lower() for x in ("bullet", "listbullet")):
+            html_type = "A"
+        elif doc_fmt in ("lowerLetter", "lowerAlpha"):
+            list_type = "number"
+            html_type = "a"
+        elif doc_fmt == "upperRoman":
+            list_type = "number"
+            html_type = "I"
+        elif doc_fmt == "lowerRoman":
+            list_type = "number"
+            html_type = "i"
+        elif doc_fmt == "decimal":
+            list_type = "number"
+            html_type = "1"
+        else:
+            if "bullet" in style_lower or style_lower.endswith("-bl") or style_lower.endswith("_bl"):
+                list_type = "bullet"
+            else:
+                list_type = "number"
+                if ilvl == 0:
+                    html_type = "A" if ("ou" in style_lower or "ll" in style_lower) else "1"
+                elif ilvl == 1:
+                    html_type = "1" if ("ou" in style_lower or "ll" in style_lower) else "a"
+                elif ilvl == 2:
+                    html_type = "a"
+                else:
+                    html_type = "1"
+    elif any(x in style_lower for x in ("bullet", "listbullet")) or style_lower.endswith("-bl") or style_lower.endswith("_bl"):
         is_list = True
         list_type = "bullet"
         match = re.search(r"List Bullet\s*(\d+)", style_name, re.IGNORECASE)
         if match:
             ilvl = int(match.group(1)) - 1
-    elif any(x in style_name.lower() for x in ("number", "num", "enum", "ordered")):
+    elif any(x in style_lower for x in ("number", "num", "enum", "ordered", "ou1", "ou2", "ou3", "ou4", "ll1", "ll2", "ol1", "ol2")):
         is_list = True
         list_type = "number"
-        match = re.search(r"(List Number|List Num|Number)\s*(\d+)", style_name, re.IGNORECASE)
+        match = re.search(r"(List Number|List Num|Number|OU|LL|OL)\s*(\d+)", style_name, re.IGNORECASE)
         if match:
             ilvl = int(match.group(2)) - 1
+        if "ou1" in style_lower or "ll1" in style_lower or (ilvl == 0 and "ou" in style_lower):
+            html_type = "A"
+        elif "ou2" in style_lower or (ilvl == 1 and "ou" in style_lower):
+            html_type = "1"
+        elif "ou3" in style_lower or "ll2" in style_lower or (ilvl == 2 and "ou" in style_lower):
+            html_type = "a"
+        else:
+            html_type = "1"
             
     if ilvl < 0:
         ilvl = 0
         
-    return is_list, list_type, ilvl
+    return is_list, list_type, ilvl, html_type
 
 
 def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
@@ -941,39 +1050,46 @@ def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
     
     html_parts = []
     stack = []
+    first_item = True
     
-    for para, para_idx, list_type, ilvl in list_items:
+    for para, para_idx, list_type, ilvl, html_type in list_items:
         target_tag = "ul" if list_type == "bullet" else "ol"
+        tag_open = f'<ol type="{html_type}">' if list_type == "number" else "<ul>"
         
         if not stack:
-            html_parts.append(f"<{target_tag}>")
-            stack.append((target_tag, 0))
+            html_parts.append(tag_open)
+            stack.append((target_tag, 0, html_type))
+            first_item = True
         
         current_level = len(stack) - 1
         
         if ilvl > current_level:
             while len(stack) - 1 < ilvl:
-                html_parts.append(f"<{target_tag}>")
-                stack.append((target_tag, len(stack)))
+                html_parts.append(tag_open)
+                stack.append((target_tag, len(stack), html_type))
+            first_item = True
         elif ilvl < current_level:
             while len(stack) - 1 > ilvl:
-                closed_tag, _ = stack.pop()
+                closed_tag, _, _ = stack.pop()
                 html_parts.append(f"</li></{closed_tag}>")
-            if stack and stack[-1][0] != target_tag:
-                closed_tag, _ = stack.pop()
+            if stack and (stack[-1][0] != target_tag or stack[-1][2] != html_type):
+                closed_tag, _, _ = stack.pop()
                 html_parts.append(f"</li></{closed_tag}>")
-                html_parts.append(f"<{target_tag}>")
-                stack.append((target_tag, ilvl))
+                html_parts.append(tag_open)
+                stack.append((target_tag, ilvl, html_type))
+                first_item = True
             else:
                 html_parts.append("</li>")
         else:
-            if stack[-1][0] != target_tag:
-                closed_tag, _ = stack.pop()
+            if stack[-1][0] != target_tag or stack[-1][2] != html_type:
+                closed_tag, _, _ = stack.pop()
                 html_parts.append(f"</li></{closed_tag}>")
-                html_parts.append(f"<{target_tag}>")
-                stack.append((target_tag, ilvl))
+                html_parts.append(tag_open)
+                stack.append((target_tag, ilvl, html_type))
+                first_item = True
             else:
-                html_parts.append("</li>")
+                if not first_item:
+                    html_parts.append("</li>")
                 
         style_name = para.style.name if para.style else "Normal"
         label = html.escape(style_name, quote=True)
@@ -990,9 +1106,10 @@ def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
             f'{runs_html}'
             f'</p>'
         )
+        first_item = False
         
     while stack:
-        closed_tag, _ = stack.pop()
+        closed_tag, _, _ = stack.pop()
         html_parts.append(f"</li></{closed_tag}>")
         
     return "\n".join(html_parts)
@@ -1027,6 +1144,8 @@ class DocxToXhtmlRunsEngine:
             except Exception as e:
                 logger.warning(f"Could not load scan cache for file_id {file_id}: {e}")
 
+        numbering_map = _build_numbering_map(doc)
+
         # Build map of body paragraph element -> sequential index (matching extractor.py)
         body_p_map = {}
         for idx, p_elem in enumerate(doc.element.body.iter(qn("w:p"))):
@@ -1042,9 +1161,9 @@ class DocxToXhtmlRunsEngine:
                 para = docx.text.paragraph.Paragraph(element, doc)
                 para_idx = body_p_map.get(element, 0)
 
-                is_list, list_type, ilvl = _get_list_info(para)
+                is_list, list_type, ilvl, html_type = _get_list_info(para, numbering_map=numbering_map)
                 if is_list:
-                    current_list.append((para, para_idx, list_type, ilvl))
+                    current_list.append((para, para_idx, list_type, ilvl, html_type))
                 else:
                     if current_list:
                         blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
@@ -1077,3 +1196,4 @@ class DocxToXhtmlRunsEngine:
 
         body = "\n".join(blocks)
         return f"<!DOCTYPE html>\n<html><body>{body}</body></html>"
+

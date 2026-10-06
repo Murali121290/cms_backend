@@ -10,6 +10,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, FileText, Save, Loader2, Download, Maximize2, Minimize2 } from 'lucide-react'
 import { DocxViewer } from '@/components/DocxViewer'
 import { SourceEditor, SourceEditorRef, formatXmlString } from '@/components/epub_validator/SourceEditor'
+import { OutlineNode, parseXmlOutline } from '@/components/epub_validator/XmlOutline'
 import 'pdfjs-viewer-element'
 import { projectsApi } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
@@ -23,11 +24,6 @@ interface LintError {
   message: string;
 }
 
-interface OutlineItem {
-  tagName: string;
-  line: number;
-  children: OutlineItem[];
-}
 
 const parseLogErrors = (log: string | null): LintError[] => {
   if (!log) return [];
@@ -48,91 +44,6 @@ const parseLogErrors = (log: string | null): LintError[] => {
   return errors;
 };
 
-const parseXmlOutline = (xml: string | null): OutlineItem[] => {
-  if (!xml) return [];
-  const outline: OutlineItem[] = [];
-  const lines = xml.split('\n');
-  const stack: OutlineItem[] = [];
-  
-  for (let i = 0; i < lines.length; i++) {
-    const lineText = lines[i];
-    const tagRegex = /<(\/)?([a-zA-Z0-9_\-]+)(?:\s+[^>]*)*(\/)?>/g;
-    let match;
-    while ((match = tagRegex.exec(lineText)) !== null) {
-      const isClosing = !!match[1];
-      const tagName = match[2];
-      const isSelfClosing = !!match[3];
-      
-      if (tagName.startsWith('?') || tagName.startsWith('!')) continue;
-      
-      if (['strong', 'em', 'italic', 'bold', 'sub', 'sup', 'xref', 'link', 'mml:math', 'mml:mrow', 'tab'].includes(tagName.toLowerCase())) {
-        continue;
-      }
-      
-      if (isClosing) {
-        stack.pop();
-      } else {
-        const item: OutlineItem = {
-          tagName,
-          line: i + 1,
-          children: []
-        };
-        
-        if (stack.length === 0) {
-          outline.push(item);
-        } else {
-          stack[stack.length - 1].children.push(item);
-        }
-        
-        if (!isSelfClosing) {
-          stack.push(item);
-        }
-      }
-    }
-  }
-  return outline;
-};
-
-function OutlineNode({ node, onSelect }: { node: OutlineItem; onSelect: (line: number) => void }) {
-  const [expanded, setExpanded] = useState(true);
-  const hasChildren = node.children.length > 0;
-  
-  return (
-    <div className="pl-3 font-sans text-xs select-none">
-      <div className="flex items-center py-1 hover:bg-gray-100 rounded cursor-pointer group">
-        {hasChildren ? (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(!expanded);
-            }}
-            className="w-4 h-4 flex items-center justify-center text-gray-400 hover:text-gray-600 mr-1"
-          >
-            {expanded ? '▼' : '▶'}
-          </button>
-        ) : (
-          <span className="w-4 mr-1" />
-        )}
-        <span
-          onClick={() => onSelect(node.line)}
-          className="text-blue-600 hover:underline font-mono"
-        >
-          &lt;{node.tagName}&gt;
-        </span>
-        <span className="text-[10px] text-gray-400 ml-auto pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          L{node.line}
-        </span>
-      </div>
-      {hasChildren && expanded && (
-        <div className="border-l border-gray-200 ml-2">
-          {node.children.map((child, idx) => (
-            <OutlineNode key={idx} node={child} onSelect={onSelect} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 interface EpubViewerProps {
   src: string;
@@ -702,6 +613,9 @@ export function ChapterEditorPage() {
           prevCleaned = cleaned;
           cleaned = cleaned.replace(/(<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>)(.*?)<\/(?:span|ins)>\s*<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>(.*?)<\/(?:span|ins)>/gi, '$1$2$3</span>');
         }
+
+        // Clean raw MS Word HYPERLINK bookmark field instruction codes (e.g., HYPERLINK \l "ref_4")
+        cleaned = cleaned.replace(/HYPERLINK\s+(?:\\[a-zA-Z0-9_-]+\s*)*(?:"[^"]*"|'[^']*'|[^\s<>()]+)\s*/gi, "");
 
         // Transform InDesign XML tables with direct child cell spans into valid HTML table rows and cells
         const transformInDesignTables = (html: string): string => {

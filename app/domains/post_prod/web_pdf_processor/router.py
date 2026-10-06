@@ -1,0 +1,703 @@
+import os
+import shutil
+from typing import Optional, Any
+from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException, Query
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from datetime import datetime
+
+from app.database import get_db
+from app.core.config import get_settings
+from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.rbac_config import has_post_prod_access
+
+from .models import WebPdfProject
+from .services import web_pdf_projects_db, font_service, security_service
+from .services.upload_service import process_upload
+from .services.merge_service import categorize_file, merge_pdfs
+from .services.trim_service import trim_crop_engine
+from .services import toc_service
+from .services import url_service
+from .services import email_service
+from .services import endnote_service
+from .services import crossref_service
+
+
+def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
+    if not user or not has_post_prod_access(user):
+        raise HTTPException(
+            status_code=403, detail="Access denied to Post Production / Backlist."
+        )
+    return user
+
+
+router = APIRouter(
+    prefix="/post-prod/web-pdf-processor",
+    tags=["Web PDF Processor"],
+)
+
+
+@router.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+
+@router.get("/projects")
+def list_projects(
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """List all non-deleted Web PDF projects."""
+    return web_pdf_projects_db.list_projects(db)
+
+
+@router.post("/projects")
+async def create_project(
+    client: str = Form(...),
+    client_code: str = Form(""),
+    project_name: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    # Check if an active project with the same name already exists
+    existing = web_pdf_projects_db.get_project_by_folder(db, project_name.strip())
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project name '{project_name.strip()}' is already taken."
+        )
+
+    result = await process_upload(
+        file=file,
+        client_code=client_code,
+        project_name=project_name,
+    )
+
+    if not result.get("status"):
+        raise HTTPException(status_code=400, detail=result.get("message", "Upload failed"))
+
+    project = web_pdf_projects_db.create_project(
+        db,
+        client=client,
+        client_code=client_code or None,
+        project_name=project_name,
+        folder_name=result["folder_name"],
+        pdf_path=result["pdf_path"],
+        total_files=result.get("total_files", 0),
+        user_id=user.id if user else None,
+        assignee=None,
+    )
+    return {"message": "Project created successfully", "project": project}
+
+
+class ProjectUpdateRequest(BaseModel):
+    assignee: Optional[str] = None
+
+
+@router.put("/projects/{project_id}")
+def update_project(
+    project_id: int,
+    body: ProjectUpdateRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    updated = web_pdf_projects_db.update_project(
+        db,
+        project_id,
+        assignee=body.assignee,
+        user_id=user.id if user else None,
+        username=user.username if user else None,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return updated
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Delete project folder from disk
+    folder = project.get("folder_name") if isinstance(project, dict) else getattr(project, "folder_name", None)
+    if folder and os.path.exists(folder):
+        try:
+            shutil.rmtree(folder)
+        except Exception as e:
+            print(f"Warning: Could not delete project folder {folder}: {e}")
+
+    # Hard delete DB record
+    success = web_pdf_projects_db.hard_delete_project(db, project_id=project_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"message": "Project deleted successfully"}
+
+
+@router.get("/projects/{project_id}/files")
+def get_project_files(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    extract_dir = os.path.join(project["folder_name"], "extract")
+    if not os.path.isdir(extract_dir):
+        return []
+    
+    files_list = []
+    for root, _, files in os.walk(extract_dir):
+        for f in files:
+            if f.lower().endswith((".pdf", ".jpg", ".jpeg", ".png")) and not f.startswith("._"):
+                full_path = os.path.join(root, f)
+                rel_path = os.path.relpath(full_path, extract_dir)
+                category, order = categorize_file(full_path)
+                files_list.append({
+                    "filename": f,
+                    "relative_path": rel_path,
+                    "absolute_path": full_path,
+                    "category": category,
+                    "order": order,
+                    "size": os.path.getsize(full_path)
+                })
+                
+    # Sort by suggested order
+    files_list.sort(key=lambda x: (x["order"], x["filename"]))
+    return files_list
+
+
+class MergeFile(BaseModel):
+    filename: str
+    absolute_path: str
+    category: str
+
+
+class MergeRequest(BaseModel):
+    files: list[MergeFile]
+
+class LinkRequest(BaseModel):
+    link_type: str = "one_way"
+    analyze_only: bool = False
+
+class ManualLinkRequest(BaseModel):
+    type: str
+    title: str
+    source_page: int
+    target_page: int
+
+
+class TrimRequest(BaseModel):
+    mode: str
+    margins: Optional[list[float]] = None
+    standardize_size: bool = False
+    remove_marks: bool = False
+
+
+class BookmarkItem(BaseModel):
+    level: int
+    title: str
+    page: int
+
+
+@router.post("/projects/{project_id}/merge")
+def merge_project_files(
+    project_id: int,
+    body: MergeRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    project_obj = db.query(WebPdfProject).filter(
+        WebPdfProject.id == project_id,
+        WebPdfProject.is_deleted.is_(False)
+    ).first()
+    if not project_obj:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Extract absolute paths for merge operation
+    file_paths = [f.absolute_path for f in body.files]
+    merged_output_path = os.path.join(project_obj.folder_name, "output.pdf")
+
+    # Perform merge
+    result = merge_pdfs(file_paths, merged_output_path)
+
+    # Record merge history
+    merged_files_data = [
+        {"filename": f.filename, "category": f.category, "absolute_path": f.absolute_path}
+        for f in body.files
+    ]
+
+    if result['success']:
+        web_pdf_projects_db.record_merge_history(
+            db,
+            project_id=project_id,
+            user_id=user.id if user else None,
+            username=user.username if user else None,
+            merged_files=merged_files_data,
+            merged_output_path=merged_output_path,
+            total_pages=result['total_pages'],
+            merge_status="success",
+            error_message=None,
+        )
+        project_obj.status = "Merged"
+        project_obj.validation_status = "pass"
+        db.commit()
+        return {"message": "PDF files merged successfully", "output_path": merged_output_path}
+    else:
+        web_pdf_projects_db.record_merge_history(
+            db,
+            project_id=project_id,
+            user_id=user.id if user else None,
+            username=user.username if user else None,
+            merged_files=merged_files_data,
+            merged_output_path=merged_output_path,
+            total_pages=0,
+            merge_status="failed",
+            error_message=result.get('error'),
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to merge PDF files: {result.get('error', 'Unknown error')}")
+
+
+@router.post("/projects/{project_id}/trim")
+def trim_project_pdf(
+    project_id: int,
+    body: TrimRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    output_pdf = os.path.join(project["folder_name"], "output.pdf")
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=400, detail="Output PDF not found. Please merge files first.")
+
+    success, result_msg = trim_crop_engine(
+        pdf_path=output_pdf,
+        mode=body.mode,
+        margins=body.margins,
+        standardize_size=body.standardize_size,
+        remove_marks=body.remove_marks,
+        output_path=output_pdf
+    )
+    
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Trim failed: {result_msg}")
+        
+    project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+    if project_obj:
+        project_obj.status = "Processing"
+        db.commit()
+
+    return {"message": "PDF trimmed successfully", "output_path": output_pdf}
+
+
+@router.get("/projects/{project_id}/final-pdf")
+def get_merged_pdf(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Serve the correct version based on project status
+    if project.get("status") == "Bookmarked":
+        pdf_path = os.path.join(project["folder_name"], "output.pdf")
+    elif project.get("status") == "Trimmed":
+        pdf_path = os.path.join(project["folder_name"], "output.pdf")
+    else:
+        pdf_path = os.path.join(project["folder_name"], "output.pdf")
+        
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="PDF not found. Please merge files first.")
+
+    return FileResponse(pdf_path, media_type="application/pdf")
+
+
+def _serialize_history(h: Any) -> dict:
+    return {
+        "id": h.id,
+        "project_id": h.project_id,
+        "changed_by_id": h.changed_by_id,
+        "changed_by_username": h.changed_by_username,
+        "old_assignee": h.old_assignee,
+        "new_assignee": h.new_assignee,
+        "result_type": h.result_type,
+        "created_at": h.created_at.isoformat() if h.created_at else None,
+        "merged_files": h.merged_files,
+        "merged_output_path": h.merged_output_path,
+        "total_pages": h.total_pages,
+        "merge_status": h.merge_status,
+        "error_message": h.error_message,
+    }
+
+
+@router.get("/projects/{project_id}/merge-history")
+def get_merge_history(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Get all merge history records for a project."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from .models import WebPdfHistory
+    history_rows = (
+        db.query(WebPdfHistory)
+        .filter(WebPdfHistory.project_id == project_id, WebPdfHistory.result_type == "merge")
+        .order_by(WebPdfHistory.created_at.desc())
+        .all()
+    )
+    return [_serialize_history(h) for h in history_rows]
+
+@router.get("/projects/{project_id}/fonts-status")
+def check_fonts_status(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Check if all fonts in the current PDF are fully embedded."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    settings = get_settings()
+    base_dir = project["folder_name"]
+    
+    output_pdf = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
+
+    try:
+        font_status = font_service.check_fonts_embedded(output_pdf)
+        return font_status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/projects/{project_id}/security-status")
+def check_security_status(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Check if the current PDF is free of password protection."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    settings = get_settings()
+    base_dir = project["folder_name"]
+    
+    
+    output_pdf = os.path.join(base_dir, "output.pdf")
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
+
+    try:
+        security_status = security_service.check_pdf_security(output_pdf)
+        return security_status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+from .services import toc_service
+
+@router.post("/projects/{project_id}/generate-bookmarks")
+def generate_bookmarks(
+    project_id: int,
+    include_subheadings: bool = Query(True),
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Generate Bookmarks based on TOC and subheadings."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    
+    output_pdf = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
+
+    try:
+        result = toc_service.generate_bookmarks_for_pdf(output_pdf, output_pdf, include_subheadings=include_subheadings)
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Unknown error generating bookmarks"))
+            
+        # Update project status
+        project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+        if project_obj:
+            project_obj.status = "Bookmarked"
+            db.commit()
+            
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/projects/{project_id}/bookmarks")
+def get_bookmarks(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Get current bookmarks from the bookmarked PDF."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+    
+    if not os.path.exists(bookmarked_pdf_path):
+        raise HTTPException(status_code=404, detail="Bookmarked PDF not found")
+        
+    bookmarks = toc_service.get_bookmarks_from_pdf(bookmarked_pdf_path)
+    return {"bookmarks": bookmarks}
+
+@router.put("/projects/{project_id}/bookmarks")
+def update_bookmarks(
+    project_id: int,
+    bookmarks: list[BookmarkItem],
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Update bookmarks in the bookmarked PDF."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+    
+    if not os.path.exists(bookmarked_pdf_path):
+        raise HTTPException(status_code=404, detail="Bookmarked PDF not found")
+        
+    bookmarks_dict = [b.dict() for b in bookmarks]
+    success = toc_service.update_bookmarks_in_pdf(bookmarked_pdf_path, bookmarks_dict)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update bookmarks in PDF")
+        
+    return {"success": True, "message": "Bookmarks updated successfully"}
+
+
+@router.post("/projects/{project_id}/generate-links")
+def generate_links(
+    project_id: int,
+    request: LinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Generate internal links (TOC -> Chapter)"""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    output_pdf = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
+            
+    try:
+        result = toc_service.create_links_in_pdf(output_pdf, request.link_type, request.analyze_only)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/projects/{project_id}/generate-links/manual")
+def generate_link_manual(
+    project_id: int,
+    request: ManualLinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Manually create a single link"""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+    
+    if not os.path.exists(bookmarked_pdf_path):
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available to link.")
+            
+    try:
+        success = toc_service.create_manual_link(
+            bookmarked_pdf_path, 
+            request.source_page, 
+            request.target_page
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail="Invalid page numbers")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class UrlLinkRequest(BaseModel):
+    analyze_only: bool = True
+
+
+@router.post("/projects/{project_id}/generate-url-links")
+def generate_url_links(
+    project_id: int,
+    request: UrlLinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Scan PDF for plain-text URLs and optionally hyperlink them."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(bookmarked_pdf_path):
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available.")
+
+    try:
+        result = url_service.find_urls_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class EmailLinkRequest(BaseModel):
+    analyze_only: bool = True
+
+
+@router.post("/projects/{project_id}/generate-email-links")
+def generate_email_links(
+    project_id: int,
+    request: EmailLinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Scan PDF for plain-text email addresses and optionally hyperlink them."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(bookmarked_pdf_path):
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available.")
+
+    try:
+        result = email_service.find_emails_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class EndnoteRequest(BaseModel):
+    analyze_only: bool = True
+
+
+class CrossrefRequest(BaseModel):
+    analyze_only: bool = True
+
+
+@router.post("/projects/{project_id}/generate-endnote-links")
+def generate_endnote_links(
+    project_id: int,
+    request: EndnoteRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Scan PDF for superscript note references and link them to endnotes."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(bookmarked_pdf_path):
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available.")
+
+    try:
+        result = endnote_service.find_endnotes_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/projects/{project_id}/generate-crossref-links")
+def generate_crossref_links(
+    project_id: int,
+    request: CrossrefRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Scan PDF for cross-references (Figures, Tables, Chapters, Pages) and link them."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(bookmarked_pdf_path):
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available.")
+
+    try:
+        result = crossref_service.find_crossrefs_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -1,0 +1,2562 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  ArrowLeft,
+  CheckCircle2, Lock, Unlock, ShieldAlert, AlertCircle,
+  Edit,
+  Filter,
+  FolderOpen,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  Upload,
+  User as UserIcon,
+  XCircle,
+  ChevronUp,
+  ChevronDown,
+  Play,
+  FileText,
+} from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
+import { toast } from '@/store/useToastStore';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useSessionStore } from '@/stores/sessionStore';
+import { useRBAC } from '@/hooks/useRBAC';
+import {
+  listProjects,
+  createProject,
+  updateProject,
+  deleteProject,
+  listProjectFiles,
+  mergeProjectFiles,
+  trimProjectPDF,
+  generateBookmarks,
+  getBookmarks,
+  updateBookmarks,
+  generateLinks,
+  generateLinkManual,
+  generateUrlLinks,
+  generateEmailLinks,
+  generateEndnoteLinks,
+  generateCrossrefLinks,
+  type UrlLinkDetail,
+  type EmailLinkDetail,
+  type EndnoteDetail,
+  type CrossrefDetail,
+  type BookmarkItem,
+  type WebPdfProject,
+  type ProjectFile,
+} from '@/api/webPdfProcessor';
+import { usersApi, type User } from '@/api/users';
+
+interface ClientCompany {
+  id: number;
+  company?: string;
+  name_company?: string;
+  first_name?: string;
+  surname?: string;
+  division?: string;
+}
+
+// ── Validation Badge ──────────────────────────────────────────────────────────
+
+function ValidationBadge({ status }: { status: string | null }) {
+  if (!status || status === 'YTS') {
+    return (
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-muted/20 text-muted">
+        YTS
+      </span>
+    );
+  }
+  if (status === 'pass' || status === 'validated') {
+    return (
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+        Passed
+      </span>
+    );
+  }
+  return (
+    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
+      Failed
+    </span>
+  );
+}
+
+// ── Assignee Dropdown ────────────────────────────────────────────────────────
+
+function AssigneeDropdown({
+  value,
+  onChange,
+  users,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  users: User[];
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) document.addEventListener('mousedown', onClickOutside);
+    if (!isOpen) setSearchQuery('');
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [isOpen]);
+
+  const activeUsers = users.filter((u) => u.active_status);
+
+  const filteredUsers = activeUsers.filter((u) => {
+    if (!searchQuery) return true;
+    const display = u.first_name || u.last_name
+      ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+      : u.user_name;
+    return display.toLowerCase().includes(searchQuery.toLowerCase());
+  });
+
+  const currentLabel = (() => {
+    if (!value) return '— Unassigned —';
+    const u = activeUsers.find((u) => u.user_name === value);
+    if (!u) return value;
+    return u.first_name || u.last_name
+      ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+      : u.user_name;
+  })();
+
+  return (
+    <div className="relative flex items-center" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setIsOpen((prev) => !prev); }}
+        className={`flex items-center justify-between min-w-[130px] max-w-[200px] text-[11px] bg-transparent border rounded-md pl-2 pr-6 py-0.5 text-primary font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors relative ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-transparent hover:border-border'
+          } cursor-pointer`}
+        title={currentLabel}
+      >
+        <span className="truncate leading-tight block w-full text-left">{currentLabel}</span>
+        <span
+          className="pointer-events-none absolute right-1.5 text-muted transition-transform duration-200 flex-shrink-0 text-[9px]"
+          style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }}
+        >▾</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-[calc(100%+6px)] left-0 min-w-[200px] w-max max-w-[260px] bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] rounded-xl py-1.5 z-[200] max-h-72 flex flex-col backdrop-blur-3xl ring-1 ring-black/5">
+          {/* Search */}
+          <div className="px-1.5 pb-1 mb-1 border-b border-border/50 shrink-0 space-y-1">
+            <div className="relative px-1 pt-1 pb-1">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search assignee..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-muted/50 border-none text-[11px] rounded-md pl-6 pr-2 py-1.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
+            </div>
+            {/* Unassigned option */}
+            <button
+              type="button"
+              className="w-full text-left px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground rounded-md transition-all flex items-center gap-2 group"
+              onClick={(e) => { e.stopPropagation(); setIsOpen(false); if (value !== '') onChange(''); }}
+            >
+              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${value === '' ? 'text-primary' : 'text-transparent'}`}>
+                {value === '' && <CheckCircle2 size={12} strokeWidth={3} />}
+              </div>
+              <span className="group-hover:translate-x-0.5 transition-transform duration-200">— Unassigned —</span>
+            </button>
+          </div>
+
+          {/* User list */}
+          <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
+            {filteredUsers.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground px-2.5 py-3 text-center">No results found</div>
+            ) : (
+              filteredUsers.map((u) => {
+                const label = u.first_name || u.last_name
+                  ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+                  : u.user_name;
+                const isSelected = value === u.user_name;
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-muted/40'
+                      }`}
+                    onClick={(e) => { e.stopPropagation(); setIsOpen(false); if (value !== u.user_name) onChange(u.user_name); }}
+                  >
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'}`}>
+                      {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
+                      {!isSelected && <UserIcon size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
+                    </div>
+                    <span className={`truncate transition-transform duration-200 ${!isSelected && 'group-hover:translate-x-0.5'}`}>{label}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Project Card ──────────────────────────────────────────────────────────────
+
+interface ProjectCardProps {
+  project: WebPdfProject;
+  users: User[];
+  onDelete: (id: number) => void;
+  onEdit: (project: WebPdfProject) => void;
+  onRefresh: () => void;
+  onSelect: (project: WebPdfProject) => void;
+}
+
+function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: ProjectCardProps) {
+  const viewer = useSessionStore((s) => s.viewer);
+  const { isTeamLead } = useRBAC();
+  const myUsername = (viewer?.username || '').trim().toLowerCase();
+
+  const handleCardClick = () => {
+    const assigned = (project.assignee || '').trim().toLowerCase();
+
+    if (!assigned) {
+      toast.error('This project is not assigned to anyone. Assign it to open it.');
+      return;
+    }
+
+    if (assigned && myUsername && assigned !== myUsername) {
+      const assignedUser = users.find((u) =>
+        (u.user_name || '').toLowerCase() === assigned ||
+        String(u.id) === assigned
+      );
+      const assigneeName = assignedUser
+        ? ((assignedUser.first_name || assignedUser.last_name)
+          ? `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim()
+          : assignedUser.user_name)
+        : project.assignee;
+      toast.error(`This project is assigned to ${assigneeName}. You cannot open it.`);
+      return;
+    }
+
+    onSelect(project);
+  };
+
+  const handleAssigneeChange = async (newAssignee: string) => {
+    try {
+      await updateProject(project.id, { assignee: newAssignee });
+      let displayName = 'Unassigned';
+      if (newAssignee) {
+        const user = users.find((u) => u.user_name === newAssignee || String(u.id) === newAssignee);
+        if (user) {
+          displayName = user.first_name || user.last_name
+            ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+            : user.user_name;
+        } else {
+          displayName = newAssignee;
+        }
+      }
+      toast.success(`Assigned to ${displayName} successfully`);
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to update assignee', err);
+      toast.error('Failed to update assignee');
+    }
+  };
+
+  return (
+    <div
+      onClick={handleCardClick}
+      className="p-4 rounded-xl border bg-card border-border cursor-pointer shadow-sm hover:shadow-md hover:border-primary/40 transition-all duration-300 flex flex-col justify-between group"
+    >
+      <div>
+        {/* Header row */}
+        <div className="flex justify-between items-start gap-2">
+          <div className="min-w-0">
+            <h3
+              className="font-semibold text-sm text-text truncate m-0 group-hover:text-primary transition-colors"
+              title={project.project_name}
+            >
+              {project.project_name}
+            </h3>
+            <p className="text-[11px] text-muted mt-0.5">
+              {project.client} {project.client_code && `(${project.client_code})`}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(project); }}
+              className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10"
+              title="Edit Assignee"
+            >
+              <Edit size={14} />
+            </button>
+            {isTeamLead && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(project.id); }}
+                className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                title="Delete Project"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Assignee + Status badge row */}
+        <div className="mt-3 flex items-center justify-between text-[11px] gap-2">
+          <div className="flex items-center gap-1 text-muted min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+            <UserIcon size={12} className="text-muted/70 shrink-0" />
+            <AssigneeDropdown
+              value={project.assignee || ''}
+              onChange={handleAssigneeChange}
+              users={users}
+            />
+          </div>
+          <ValidationBadge status={project.validation_status} />
+        </div>
+
+        {/* Progress bar visual indicator */}
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
+            <span>PDF Files</span>
+            <span>{project.total_files} Files</span>
+          </div>
+          <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-500 rounded-full"
+              style={{ width: project.status === 'Merged' ? '100%' : '0%' }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
+        <span>
+          Created:{' '}
+          {new Date(
+            project.uploaded_at.endsWith('Z') ? project.uploaded_at : project.uploaded_at + 'Z',
+          ).toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            dateStyle: 'short',
+            timeStyle: 'short',
+          })}
+        </span>
+        <span className={project.status === 'Merged' ? 'text-emerald-600' : ''}>
+          {project.status === 'Merged' ? '✓ Merged' : 'Ready'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Category Label ────────────────────────────────────────────────────────────
+
+const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
+  FC: { label: 'Cover', color: 'bg-violet-500/10 text-violet-600 border-violet-500/20' },
+  FM: { label: 'Front Matter', color: 'bg-blue-500/10 text-blue-600 border-blue-500/20' },
+  TEXT: { label: 'Chapter', color: 'bg-primary/10 text-primary border-primary/20' },
+  BM: { label: 'Back Matter', color: 'bg-amber-500/10 text-amber-600 border-amber-500/20' },
+  BC: { label: 'Back Cover', color: 'bg-pink-500/10 text-pink-600 border-pink-500/20' },
+};
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+export function PostProdWebPdfProcessor() {
+  useDocumentTitle('Web PDF Processor — S4Carlisle CMS');
+  const navigate = useNavigate();
+  const { isTeamLead } = useRBAC();
+  const { projectId } = useParams<{ projectId: string }>();
+
+  const [projects, setProjects] = useState<WebPdfProject[]>([]);
+  const [clients, setClients] = useState<ClientCompany[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Workspace state
+  const [selectedProject, setSelectedProject] = useState<WebPdfProject | null>(null);
+  const [projectFiles, setProjectFiles] = useState<(ProjectFile & { selected: boolean })[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [merging, setMerging] = useState(false);
+
+  // Trim
+  const [trimMode, setTrimMode] = useState('auto');
+  const [trimMargins, setTrimMargins] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
+  const [standardizeSize, setStandardizeSize] = useState(false);
+  const [removeMarks, setRemoveMarks] = useState(false);
+  const [trimming, setTrimming] = useState(false);
+
+  // Fonts Check
+  const [activeStep, setActiveStep] = useState(1);
+  const [checkingFonts, setCheckingFonts] = useState(false);
+  const [fontsStatus, setFontsStatus] = useState<any>(null);
+  const [checkingSecurity, setCheckingSecurity] = useState(false);
+  const [securityStatus, setSecurityStatus] = useState<any>(null);
+
+  const [showEditBookmarksModal, setShowEditBookmarksModal] = useState(false);
+  const [editingBookmarksList, setEditingBookmarksList] = useState<BookmarkItem[]>([]);
+  const [loadingBookmarks, setLoadingBookmarks] = useState(false);
+  const [savingBookmarks, setSavingBookmarks] = useState(false);
+
+  // Bookmarks
+  const [generatingBookmarks, setGeneratingBookmarks] = useState(false);
+  const [includeSubheadings, setIncludeSubheadings] = useState(true);
+  const [bookmarksStatus, setBookmarksStatus] = useState<any>(null);
+
+  // TOC Links (Step 6)
+  const [generatingLinks, setGeneratingLinks] = useState(false);
+  const [analyzingLinks, setAnalyzingLinks] = useState(false);
+  const [linkType, setLinkType] = useState<'one_way' | 'two_way' | 'none'>('one_way');
+  const [linksStatus, setLinksStatus] = useState<any>(null);
+  const [linksAnalysisStatus, setLinksAnalysisStatus] = useState<any>(null);
+
+  // URL Links (Step 7)
+  const [urlLinksAnalysis, setUrlLinksAnalysis] = useState<any>(null);
+  const [analyzingUrlLinks, setAnalyzingUrlLinks] = useState(false);
+  const [applyingUrlLinks, setApplyingUrlLinks] = useState(false);
+
+  // Email Links (Step 8)
+  const [emailLinksAnalysis, setEmailLinksAnalysis] = useState<any>(null);
+  const [analyzingEmailLinks, setAnalyzingEmailLinks] = useState(false);
+  const [applyingEmailLinks, setApplyingEmailLinks] = useState(false);
+
+  // Endnote Links (Step 9)
+  const [endnoteLinksAnalysis, setEndnoteLinksAnalysis] = useState<any>(null);
+  const [analyzingEndnoteLinks, setAnalyzingEndnoteLinks] = useState(false);
+  const [applyingEndnoteLinks, setApplyingEndnoteLinks] = useState(false);
+
+  // Cross-Reference Links (Step 10)
+  const [crossrefLinksAnalysis, setCrossrefLinksAnalysis] = useState<any>(null);
+  const [analyzingCrossrefLinks, setAnalyzingCrossrefLinks] = useState(false);
+  const [applyingCrossrefLinks, setApplyingCrossrefLinks] = useState(false);
+
+  const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
+
+  // Modals
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<number | null>(null);
+  const [editingProject, setEditingProject] = useState<WebPdfProject | null>(null);
+  const [editAssignee, setEditAssignee] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Form
+  const [customerName, setCustomerName] = useState('');
+  const [clientCode, setClientCode] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [zipFile, setZipFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [assigneeFilter, setAssigneeFilter] = useState('all');
+
+  // ── Data fetching ───────────────────────────────────────────────────────
+
+  useEffect(() => {
+    let mounted = true;
+
+    const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number = 10000): Promise<T> => {
+      return Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error(`Request timeout after ${timeoutMs}ms`)), timeoutMs)
+        )
+      ]);
+    };
+
+    const load = async () => {
+      try {
+        const [projectsData, clientsRes, usersList] = await Promise.all([
+          withTimeout(listProjects()),
+          withTimeout(fetch('/api/v2/clients/active').then(r => r.ok ? r.json() : null)),
+          withTimeout(usersApi.list()).catch(() => []),
+        ]);
+
+        if (mounted) {
+          setProjects(projectsData || []);
+          if (clientsRes) setClients(clientsRes);
+          setUsers(usersList || []);
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : 'Unknown error';
+        console.error('Failed to load data', err);
+        // Set empty defaults so page still shows (just no projects)
+        if (mounted) {
+          setProjects([]);
+          setUsers([]);
+          setLoadError(`Failed to load projects: ${errMsg}`);
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    load();
+    return () => { mounted = false; };
+  }, []);
+
+  // Sync selectedProject based on URL param
+  useEffect(() => {
+    if (!projects.length) return;
+
+    if (projectId) {
+      const p = projects.find(proj => proj.id === Number(projectId));
+      if (p && (!selectedProject || selectedProject.id !== p.id)) {
+        // Load project files when URL changes
+        setSelectedProject(p);
+        setProjectFiles([]);
+        setLoadingFiles(true);
+        listProjectFiles(p.id)
+          .then(files => {
+            setProjectFiles(files.map(f => ({ ...f, selected: true })));
+          })
+          .catch(err => {
+            toast.error(err.message || 'Failed to load project files');
+          })
+          .finally(() => setLoadingFiles(false));
+      }
+    } else {
+      setSelectedProject(null);
+      setProjectFiles([]);
+    }
+  }, [projectId, projects]);
+
+  const fetchProjects = useCallback(async () => {
+    try {
+      const data = await listProjects();
+      setProjects(data);
+    } catch {
+      /* silent */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // ── Derived metrics ─────────────────────────────────────────────────────
+
+  const totalCount = projects.length;
+  const passedCount = projects.filter(
+    (p) => p.validation_status === 'pass' || p.validation_status === 'validated',
+  ).length;
+  const failedCount = projects.filter(
+    (p) => p.validation_status === 'fail' || p.validation_status === 'failed',
+  ).length;
+
+  // ── Handlers ────────────────────────────────────────────────────────────
+
+
+
+  const handleSelectProject = async (p: WebPdfProject) => {
+    navigate(`/post-production/web-pdf-processor/${p.id}`);
+  };
+
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!projectName.trim()) { setErrorMsg('Project Name is required'); return; }
+    if (!customerName) { setErrorMsg('Please select a client'); return; }
+    if (!zipFile) { setErrorMsg('Please choose a ZIP file'); return; }
+
+    setUploading(true);
+    setErrorMsg(null);
+
+    const formData = new FormData();
+    formData.append('client', customerName);
+    formData.append('client_code', clientCode);
+    formData.append('project_name', projectName.trim());
+    formData.append('file', zipFile);
+
+    try {
+      await createProject(formData);
+      toast.success('Project created and ZIP uploaded successfully!');
+      setShowAddModal(false);
+      setProjectName(''); setCustomerName(''); setClientCode(''); setZipFile(null);
+      fetchProjects();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (projectToDelete === null) return;
+    try {
+      await deleteProject(projectToDelete);
+      toast.success('Project deleted successfully');
+      if (selectedProject?.id === projectToDelete) setSelectedProject(null);
+      setProjectToDelete(null);
+      fetchProjects();
+    } catch {
+      toast.error('Failed to delete project');
+    }
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProject) return;
+    setSavingEdit(true);
+    try {
+      await updateProject(editingProject.id, { assignee: editAssignee });
+      toast.success('Project updated');
+      setEditingProject(null);
+      fetchProjects();
+    } catch {
+      toast.error('Failed to update project');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const moveFile = (index: number, dir: 'up' | 'down') => {
+    const next = dir === 'up' ? index - 1 : index + 1;
+    if (next < 0 || next >= projectFiles.length) return;
+    const list = [...projectFiles];
+    [list[index], list[next]] = [list[next], list[index]];
+    setProjectFiles(list);
+  };
+
+  const toggleFile = (index: number) => {
+    const list = [...projectFiles];
+    list[index].selected = !list[index].selected;
+    setProjectFiles(list);
+  };
+
+  const changeCategory = (index: number, cat: ProjectFile['category']) => {
+    const list = [...projectFiles];
+    list[index].category = cat;
+    setProjectFiles(list);
+  };
+
+  const handleMerge = async () => {
+    if (!selectedProject) return;
+    const selectedFiles = projectFiles
+      .filter((f) => f.selected)
+      .map((f) => ({
+        filename: f.filename,
+        absolute_path: f.absolute_path,
+        category: f.category,
+      }));
+    if (selectedFiles.length === 0) {
+      toast.error('Select at least one PDF file to merge.');
+      return;
+    }
+    setMerging(true);
+    try {
+      await mergeProjectFiles(selectedProject.id, selectedFiles);
+      toast.success('PDF files merged successfully!');
+      setPdfRefreshKey(Date.now());
+      setSelectedProject(prev => prev ? { ...prev, status: "Merged" } : prev);
+      fetchProjects();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to merge PDF files.');
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const handleTrim = async () => {
+    if (!selectedProject) return;
+    setTrimming(true);
+    try {
+      await trimProjectPDF(selectedProject.id, {
+        mode: trimMode,
+        margins: trimMode === 'fixed' ? [trimMargins.top, trimMargins.right, trimMargins.bottom, trimMargins.left] : undefined,
+        standardize_size: standardizeSize,
+        remove_marks: removeMarks,
+      });
+      toast.success('PDF trimmed successfully!');
+      setPdfRefreshKey(Date.now()); setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
+      setPdfRefreshKey(Date.now()); setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
+      fetchProjects();
+
+      // Force iframe refresh by updating the project slightly or we can just rely on the key/src reload
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to trim PDF.');
+    } finally {
+      setTrimming(false);
+    }
+  };
+
+
+  const handleCheckSecurity = async () => {
+    if (!selectedProject) return;
+    setCheckingSecurity(true);
+    setSecurityStatus(null);
+    try {
+      const res = await fetch(`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/security-status`);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || 'Failed to check security');
+      }
+      const data = await res.json();
+      setSecurityStatus(data);
+      toast.success('Security check completed');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to check security');
+    } finally {
+      setCheckingSecurity(false);
+    }
+  };
+
+  const handleGenerateBookmarks = async () => {
+    if (!selectedProject) return;
+    setGeneratingBookmarks(true);
+    setBookmarksStatus(null);
+    try {
+      const data = await generateBookmarks(selectedProject.id, includeSubheadings);
+      setBookmarksStatus(data);
+      toast.success('Bookmarks generated successfully!');
+
+      // Update selected project state
+      setSelectedProject(prev => prev ? { ...prev, status: 'Bookmarked' } : prev);
+      setPdfRefreshKey(Date.now());
+      fetchProjects();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to generate bookmarks.');
+    } finally {
+      setGeneratingBookmarks(false);
+    }
+  };
+
+  const handleOpenEditBookmarks = async () => {
+    if (!selectedProject) return;
+    setShowEditBookmarksModal(true);
+    setLoadingBookmarks(true);
+    try {
+      const bm = await getBookmarks(selectedProject.id);
+      setEditingBookmarksList(bm);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to fetch bookmarks');
+      setShowEditBookmarksModal(false);
+    } finally {
+      setLoadingBookmarks(false);
+    }
+  };
+
+  const handleSaveBookmarks = async () => {
+    if (!selectedProject) return;
+    setSavingBookmarks(true);
+    try {
+      await updateBookmarks(selectedProject.id, editingBookmarksList);
+      toast.success('Bookmarks updated!');
+      setPdfRefreshKey((prev) => prev + 1);
+      setShowEditBookmarksModal(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update bookmarks');
+    } finally {
+      setSavingBookmarks(false);
+    }
+  };
+
+  const moveBookmark = (index: number, direction: 'up' | 'down') => {
+    const list = [...editingBookmarksList];
+    if (direction === 'up' && index > 0) {
+      [list[index - 1], list[index]] = [list[index], list[index - 1]];
+    } else if (direction === 'down' && index < list.length - 1) {
+      [list[index + 1], list[index]] = [list[index], list[index + 1]];
+    }
+    setEditingBookmarksList(list);
+  };
+
+  const changeBookmarkLevel = (index: number, change: number) => {
+    const list = [...editingBookmarksList];
+    const newLevel = list[index].level + change;
+    if (newLevel >= 1 && newLevel <= 6) {
+      list[index].level = newLevel;
+      setEditingBookmarksList(list);
+    }
+  };
+
+  const removeBookmark = (index: number) => {
+    const list = [...editingBookmarksList];
+    list.splice(index, 1);
+    setEditingBookmarksList(list);
+  };
+
+  const addBookmark = (index: number) => {
+    const list = [...editingBookmarksList];
+    const sourceBm = list[index];
+    list.splice(index + 1, 0, {
+      title: 'New Bookmark',
+      level: sourceBm ? sourceBm.level : 1,
+      page: sourceBm ? sourceBm.page : 1
+    });
+    setEditingBookmarksList(list);
+  };
+
+  const handleAnalyzeLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingLinks(true);
+    setLinksAnalysisStatus(null);
+    setLinksStatus(null);
+    try {
+      const result = await generateLinks(selectedProject.id, linkType === 'none' ? 'one_way' : linkType, true);
+      setLinksAnalysisStatus(result);
+      toast.success('Link analysis complete');
+    } catch (err: any) {
+      setLinksAnalysisStatus({ success: false, error: err.message });
+      toast.error(err.message || 'Failed to analyze links');
+    } finally {
+      setAnalyzingLinks(false);
+    }
+  };
+
+  const handleApplyLinks = async () => {
+    if (!selectedProject) return;
+    setGeneratingLinks(true);
+    setLinksStatus(null);
+    try {
+      const result = await generateLinks(selectedProject.id, linkType === 'none' ? 'one_way' : linkType, false);
+      setLinksStatus(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Successfully generated ${result.total_links} internal links`);
+      // Re-run analysis automatically
+      handleAnalyzeLinks();
+    } catch (err: any) {
+      setLinksStatus({ success: false, error: err.message });
+      toast.error(err.message || 'Failed to generate links');
+    } finally {
+      setGeneratingLinks(false);
+    }
+  };
+
+  const handleManualLink = async (link: any, index: number) => {
+    if (!selectedProject) return;
+    try {
+      await generateLinkManual(selectedProject.id, link.type, link.title, link.source_page, link.target_page);
+      toast.success('Link created manually');
+
+      // Update UI optimistically
+      const updatedStatus = { ...linksAnalysisStatus };
+      if (updatedStatus.details) {
+        updatedStatus.details[index].is_linked = true;
+      }
+      setLinksAnalysisStatus(updatedStatus);
+      setPdfRefreshKey((prev) => prev + 1);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to manually link');
+    }
+  };
+
+  const handleAnalyzeUrlLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingUrlLinks(true);
+    setUrlLinksAnalysis(null);
+    try {
+      const result = await generateUrlLinks(selectedProject.id, true);
+      setUrlLinksAnalysis(result);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze URL links');
+    } finally {
+      setAnalyzingUrlLinks(false);
+    }
+  };
+
+  const handleApplyUrlLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingUrlLinks(true);
+    try {
+      const result = await generateUrlLinks(selectedProject.id, false);
+      setUrlLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Hyperlinked ${result.not_linked} URL(s) successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply URL links');
+    } finally {
+      setApplyingUrlLinks(false);
+    }
+  };
+
+  const handleAnalyzeEmailLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingEmailLinks(true);
+    setEmailLinksAnalysis(null);
+    try {
+      const result = await generateEmailLinks(selectedProject.id, true);
+      setEmailLinksAnalysis(result);
+      toast.success('Email scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze emails');
+    } finally {
+      setAnalyzingEmailLinks(false);
+    }
+  };
+
+  const handleApplyEmailLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingEmailLinks(true);
+    try {
+      const result = await generateEmailLinks(selectedProject.id, false);
+      setEmailLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Hyperlinked ${result.not_linked} email(s) successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply email links');
+    } finally {
+      setApplyingEmailLinks(false);
+    }
+  };
+
+  const handleAnalyzeEndnoteLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingEndnoteLinks(true);
+    setEndnoteLinksAnalysis(null);
+    try {
+      const result = await generateEndnoteLinks(selectedProject.id, true);
+      setEndnoteLinksAnalysis(result);
+      toast.success('Endnote scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze endnotes');
+    } finally {
+      setAnalyzingEndnoteLinks(false);
+    }
+  };
+
+  const handleApplyEndnoteLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingEndnoteLinks(true);
+    try {
+      const result = await generateEndnoteLinks(selectedProject.id, false);
+      setEndnoteLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Created ${result.not_linked} endnote link(s) successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply endnote links');
+    } finally {
+      setApplyingEndnoteLinks(false);
+    }
+  };
+
+  const handleAnalyzeCrossrefLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingCrossrefLinks(true);
+    setCrossrefLinksAnalysis(null);
+    try {
+      const result = await generateCrossrefLinks(selectedProject.id, true);
+      setCrossrefLinksAnalysis(result);
+      toast.success('Cross-reference scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze cross-references');
+    } finally {
+      setAnalyzingCrossrefLinks(false);
+    }
+  };
+
+  const handleApplyCrossrefLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingCrossrefLinks(true);
+    try {
+      const result = await generateCrossrefLinks(selectedProject.id, false);
+      setCrossrefLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Applied cross-reference links - ${result.linked} linked, ${result.not_linked} remaining`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply cross-reference links');
+    } finally {
+      setApplyingCrossrefLinks(false);
+    }
+  };
+
+  const handleCheckFonts = async () => {
+    if (!selectedProject) return;
+    setCheckingFonts(true);
+    setFontsStatus(null);
+    try {
+      const res = await fetch(`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/fonts-status`);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || 'Failed to check fonts');
+      }
+      const data = await res.json();
+      setFontsStatus(data);
+      toast.success('Font check completed');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to check fonts');
+    } finally {
+      setCheckingFonts(false);
+    }
+  };
+
+  // ── Filtered list ───────────────────────────────────────────────────────
+
+  const filteredProjects = projects.filter((p) => {
+    const searchMatch =
+      p.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.client.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.client_code || '').toLowerCase().includes(searchQuery.toLowerCase());
+
+    let statusMatch = true;
+    if (statusFilter === 'passed') statusMatch = p.validation_status === 'pass' || p.validation_status === 'validated';
+    else if (statusFilter === 'failed') statusMatch = p.validation_status === 'fail' || p.validation_status === 'failed';
+    else if (statusFilter === 'unvalidated') statusMatch = !p.validation_status;
+
+    let assigneeMatch = true;
+    if (assigneeFilter !== 'all') {
+      if (assigneeFilter === 'unassigned') assigneeMatch = !p.assignee;
+      else assigneeMatch = (p.assignee || '').toLowerCase() === assigneeFilter.toLowerCase();
+    }
+
+    return searchMatch && statusMatch && assigneeMatch;
+  });
+
+  // ── Render ──────────────────────────────────────────────────────────────
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
+      {/* Header */}
+      <header className="px-6 py-4 border-b border-border/80 flex items-center justify-between bg-card shrink-0 shadow-sm">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (selectedProject) {
+                navigate('/post-production/web-pdf-processor');
+                setFontsStatus(null);
+                setActiveStep(1);
+              } else {
+                navigate('/post-production');
+              }
+            }}
+            className="p-1.5 h-auto rounded-lg text-muted hover:text-text hover:bg-border/60 shrink-0"
+          >
+            <ArrowLeft size={16} />
+          </Button>
+          <div>
+            <h1 className="text-base font-semibold m-0 text-text">
+              {selectedProject ? selectedProject.project_name : 'Web PDF Processor'}
+            </h1>
+            <p className="text-xs text-muted m-0 mt-0.5">
+              {selectedProject
+                ? `${selectedProject.client}${selectedProject.client_code ? ` (${selectedProject.client_code})` : ''} • Step 1: Merge PDFs`
+                : 'Upload, extract and audit Web PDF projects and configurations'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {!selectedProject && isTeamLead && (
+            <Button
+              onClick={() => setShowAddModal(true)}
+              leftIcon={<Plus size={15} />}
+            >
+              Create Project
+            </Button>
+          )}
+        </div>
+      </header>
+
+      {/* ── WORKSPACE (split-screen) ───────────────────────────────────────── */}
+      {selectedProject ? (
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-x divide-border overflow-hidden">
+
+          {/* LEFT — PDF Preview */}
+          <div className="flex flex-col p-6 overflow-hidden bg-background">
+            <h2 className="text-sm font-bold text-text mb-3 flex items-center gap-2 shrink-0">
+              <FileText size={16} className="text-primary" />
+              {selectedProject ? `${selectedProject.status === 'Bookmarked' ? 'Bookmarked' : selectedProject.status === 'Trimmed' ? 'Trimmed' : 'Merged'} PDF Preview` : 'PDF Preview'}
+              {(selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked') && (
+                <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                  ✓ {selectedProject.status}
+                </span>
+              )}
+            </h2>
+
+            <div className="flex-1 rounded-xl overflow-hidden bg-card border border-border relative">
+              {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked' ? (
+                <iframe
+                  key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}`} // force reload if status or key changes
+                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf?t=${pdfRefreshKey}${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
+                  className="w-full h-full border-0"
+                  title={`${selectedProject.status} PDF Preview`}
+                />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
+                  <FolderOpen size={48} className="text-muted/30 mb-4" />
+                  <h3 className="text-sm font-semibold text-text m-0">No Merged PDF Yet</h3>
+                  <p className="text-xs text-muted max-w-xs mt-2">
+                    Categorize and order the files on the right panel, then click <strong>Merge &amp; Convert</strong> to generate the combined book PDF.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT — Stepper Panel */}
+          <div className="flex flex-col overflow-hidden bg-card border-l border-border/80">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+
+              {/* Step 1: Merge PDFs */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 1 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => setActiveStep(1)}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed'
+                      ? 'bg-emerald-500/20 text-emerald-600'
+                      : activeStep === 1 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
+                      {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '1'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Merge PDF</h2>
+                  </div>
+                  {activeStep === 1 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 1 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4 h-[500px]">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Auto-detected below. Check/uncheck, reorder, or re-categorize files, then merge.
+                      </p>
+                      <Button
+                        onClick={handleMerge}
+                        disabled={merging || loadingFiles}
+                        leftIcon={merging ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
+                      >
+                        {merging ? 'Merging...' : 'Merge & Convert'}
+                      </Button>
+                    </div>
+
+                    {/* Category legend */}
+                    <div className="flex flex-wrap gap-1.5 shrink-0">
+                      {Object.entries(CATEGORY_LABELS).map(([cat, { label, color }]) => (
+                        <span key={cat} className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${color}`}>
+                          {cat} — {label}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* File list */}
+                    {loadingFiles ? (
+                      <div className="flex-1 flex items-center justify-center text-xs text-muted">
+                        <RefreshCw size={18} className="animate-spin mr-2" />
+                        Scanning package files...
+                      </div>
+                    ) : (
+                      <div className="flex-1 overflow-y-auto rounded-xl border border-border divide-y divide-border/50">
+                        {projectFiles.length === 0 ? (
+                          <div className="p-8 text-center text-xs text-muted">
+                            No PDF files found in this package's extract folder.
+                          </div>
+                        ) : (
+                          projectFiles.map((file, idx) => {
+                            const catStyle = CATEGORY_LABELS[file.category] || CATEGORY_LABELS.TEXT;
+                            return (
+                              <div
+                                key={file.relative_path}
+                                className={`p-3 flex items-center gap-3 text-xs transition-colors ${file.selected ? 'bg-card' : 'bg-muted/10'
+                                  }`}
+                              >
+                                {/* Checkbox */}
+                                <input
+                                  type="checkbox"
+                                  checked={file.selected}
+                                  onChange={() => toggleFile(idx)}
+                                  className="rounded border-border text-primary focus:ring-primary w-4 h-4 cursor-pointer shrink-0"
+                                />
+
+                                {/* File info */}
+                                <div className={`min-w-0 flex-1 ${!file.selected ? 'opacity-50' : ''}`}>
+                                  <p className="font-semibold text-text truncate m-0" title={file.filename}>
+                                    {file.filename}
+                                  </p>
+                                  <p className="text-[10px] text-muted m-0 mt-0.5">
+                                    {(file.size / 1024 / 1024).toFixed(2)} MB
+                                  </p>
+                                </div>
+
+                                {/* Category selector */}
+                                <select
+                                  value={file.category}
+                                  onChange={(e) => changeCategory(idx, e.target.value as ProjectFile['category'])}
+                                  className={`text-[11px] font-semibold rounded-lg border py-1 px-2 focus:outline-none bg-background ${catStyle.color}`}
+                                  disabled={!file.selected}
+                                >
+                                  <option value="FC">Cover (FC)</option>
+                                  <option value="FM">Front Matter (FM)</option>
+                                  <option value="TEXT">Chapter (TEXT)</option>
+                                  <option value="BM">Back Matter (BM)</option>
+                                  <option value="BC">Back Cover (BC)</option>
+                                </select>
+
+                                {/* Order controls */}
+                                <div className="flex flex-col shrink-0">
+                                  <button
+                                    onClick={() => moveFile(idx, 'up')}
+                                    disabled={idx === 0}
+                                    className="p-0.5 hover:bg-border/60 rounded text-muted hover:text-text disabled:opacity-25 transition-colors"
+                                  >
+                                    <ChevronUp size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => moveFile(idx, 'down')}
+                                    disabled={idx === projectFiles.length - 1}
+                                    className="p-0.5 hover:bg-border/60 rounded text-muted hover:text-text disabled:opacity-25 transition-colors"
+                                  >
+                                    <ChevronDown size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 2: Trim PDF */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 2 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
+                      setActiveStep(2);
+                    }
+                  }}
+                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Trimmed'
+                      ? 'bg-emerald-500/20 text-emerald-600'
+                      : activeStep === 2 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
+                      {selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '2'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Trim PDF</h2>
+                  </div>
+                  {activeStep === 2 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 2 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Select a trim mode to crop the PDF pages.
+                      </p>
+                      <Button
+                        onClick={handleTrim}
+                        disabled={trimming}
+                        leftIcon={trimming ? <RefreshCw size={14} className="animate-spin" /> : <Edit size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
+                      >
+                        {trimming ? 'Trimming...' : 'Trim PDF'}
+                      </Button>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[11px] font-semibold text-text block mb-1">Crop Mode</label>
+                        <select
+                          value={trimMode}
+                          onChange={(e) => setTrimMode(e.target.value)}
+                          className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                        >
+                          <option value="auto">Auto Fix Bounds</option>
+                          <option value="fixed">Fixed Margins</option>
+                          <option value="trimbox">PDF TrimBox</option>
+                          <option value="bleedbox">PDF BleedBox</option>
+                        </select>
+                      </div>
+
+                      {trimMode === 'fixed' && (
+                        <div className="grid grid-cols-2 gap-3 p-3 rounded border border-border bg-muted/10">
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted block mb-1">Top Margin</label>
+                            <input
+                              type="number"
+                              value={trimMargins.top}
+                              onChange={(e) => setTrimMargins({ ...trimMargins, top: Number(e.target.value) })}
+                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted block mb-1">Right Margin</label>
+                            <input
+                              type="number"
+                              value={trimMargins.right}
+                              onChange={(e) => setTrimMargins({ ...trimMargins, right: Number(e.target.value) })}
+                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted block mb-1">Bottom Margin</label>
+                            <input
+                              type="number"
+                              value={trimMargins.bottom}
+                              onChange={(e) => setTrimMargins({ ...trimMargins, bottom: Number(e.target.value) })}
+                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted block mb-1">Left Margin</label>
+                            <input
+                              type="number"
+                              value={trimMargins.left}
+                              onChange={(e) => setTrimMargins({ ...trimMargins, left: Number(e.target.value) })}
+                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <label className="flex items-center gap-2 mt-4 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={standardizeSize}
+                          onChange={(e) => setStandardizeSize(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary w-4 h-4"
+                        />
+                        <div>
+                          <p className="text-xs font-semibold text-text m-0">Standardize Size</p>
+                          <p className="text-[10px] text-muted m-0">Ensures all pages end up the same dimension.</p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={removeMarks}
+                          onChange={(e) => setRemoveMarks(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary w-4 h-4"
+                        />
+                        <div>
+                          <p className="text-xs font-semibold text-text m-0">Remove Marks outside bounds</p>
+                          <p className="text-[10px] text-muted m-0">Sanitizes crop box edge artifacts.</p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 3: Check Fonts */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 3 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
+                      setActiveStep(3);
+                    }
+                  }}
+                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${fontsStatus && fontsStatus.all_embedded
+                      ? 'bg-emerald-500/20 text-emerald-600'
+                      : fontsStatus && !fontsStatus.all_embedded
+                        ? 'bg-amber-500/20 text-amber-600'
+                        : activeStep === 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
+                      {fontsStatus ? (
+                        fontsStatus.all_embedded ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : '3'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Check Fonts</h2>
+                  </div>
+                  {activeStep === 3 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 3 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Check if all fonts in the current PDF are fully embedded.
+                      </p>
+                      <Button
+                        onClick={handleCheckFonts}
+                        disabled={checkingFonts}
+                        leftIcon={checkingFonts ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
+                      >
+                        {checkingFonts ? 'Checking...' : 'Check Fonts'}
+                      </Button>
+                    </div>
+
+                    {fontsStatus && (
+                      <div className={`p-4 rounded-lg border ${fontsStatus.all_embedded ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-amber-500/10 border-amber-500/20 text-amber-700'}`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          {fontsStatus.all_embedded ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                          <h4 className="font-bold text-sm m-0">
+                            {fontsStatus.all_embedded ? 'All Fonts Embedded' : 'Missing Embedded Fonts'}
+                          </h4>
+                        </div>
+                        <p className="text-xs m-0 mb-3 opacity-90">
+                          Total Fonts Detected: {fontsStatus.total_fonts}
+                        </p>
+
+                        {!fontsStatus.all_embedded && fontsStatus.missing_fonts.length > 0 && (
+                          <div className="bg-background/50 p-3 rounded border border-amber-500/20">
+                            <h5 className="text-[10px] uppercase tracking-wider font-bold mb-2">Unembedded Fonts</h5>
+                            <ul className="list-disc pl-4 text-xs space-y-1">
+                              {fontsStatus.missing_fonts.map((f: string, i: number) => (
+                                <li key={i}>{f}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 4: Check Security */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 4 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
+                      setActiveStep(4);
+                    }
+                  }}
+                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${securityStatus && securityStatus.is_free_of_protection
+                      ? 'bg-emerald-500/20 text-emerald-600'
+                      : securityStatus && !securityStatus.is_free_of_protection
+                        ? 'bg-amber-500/20 text-amber-600'
+                        : activeStep === 4 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
+                      {securityStatus ? (
+                        securityStatus.is_free_of_protection ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : '4'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Check Security</h2>
+                  </div>
+                  {activeStep === 4 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 4 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Check if the current PDF is free of password protection and encryption.
+                      </p>
+                      <Button
+                        onClick={handleCheckSecurity}
+                        disabled={checkingSecurity}
+                        leftIcon={checkingSecurity ? <RefreshCw size={14} className="animate-spin" /> : <ShieldAlert size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
+                      >
+                        {checkingSecurity ? 'Checking...' : 'Check Security'}
+                      </Button>
+                    </div>
+
+                    {securityStatus && (
+                      <div className={`p-4 rounded-lg border ${securityStatus.is_free_of_protection ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-amber-500/10 border-amber-500/20 text-amber-700'}`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          {securityStatus.is_free_of_protection ? <Unlock size={16} /> : <Lock size={16} />}
+                          <h4 className="font-bold text-sm m-0">
+                            {securityStatus.is_free_of_protection ? 'Free of Password Protection' : 'Security Protection Detected!'}
+                          </h4>
+                        </div>
+
+                        {!securityStatus.is_free_of_protection && (
+                          <div className="bg-background/50 p-3 rounded border border-amber-500/20 mt-3">
+                            <ul className="list-disc pl-4 text-xs space-y-1">
+                              {securityStatus.needs_pass && <li>Needs Password to open.</li>}
+                              {securityStatus.is_encrypted && <li>File is Encrypted.</li>}
+                              {securityStatus.error && <li className="text-red-500">{securityStatus.error}</li>}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 5: Generate Bookmarks */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 5 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked') {
+                      setActiveStep(5);
+                    }
+                  }}
+                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed' && selectedProject.status !== 'Bookmarked'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${bookmarksStatus && bookmarksStatus.success
+                      ? 'bg-emerald-500/20 text-emerald-600'
+                      : activeStep === 5 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
+                      {bookmarksStatus ? (
+                        bookmarksStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : '5'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Generate Bookmarks</h2>
+                  </div>
+                  {activeStep === 5 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 5 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <div className="flex flex-col gap-3">
+                        <p className="text-[11px] text-muted m-0">
+                          Automatically scan for Table of Contents, extract headings, and generate PDF bookmarks.
+                        </p>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-text">
+                          <input
+                            type="checkbox"
+                            checked={includeSubheadings}
+                            onChange={(e) => setIncludeSubheadings(e.target.checked)}
+                            className="rounded border-border bg-background focus:ring-primary accent-primary w-3.5 h-3.5"
+                          />
+                          Include Chapter Subheadings (H3)
+                        </label>
+                      </div>
+                      <Button
+                        onClick={handleGenerateBookmarks}
+                        disabled={generatingBookmarks}
+                        leftIcon={generatingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
+                      >
+                        {generatingBookmarks ? 'Generating...' : 'Generate'}
+                      </Button>
+                    </div>
+
+                    {bookmarksStatus && (
+                      <div className={`p-4 rounded-lg border ${bookmarksStatus.success ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-amber-500/10 border-amber-500/20 text-amber-700'}`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          {bookmarksStatus.success ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                          <h4 className="font-bold text-sm m-0">
+                            {bookmarksStatus.success ? 'Bookmarks Generated' : 'Error Generating Bookmarks'}
+                          </h4>
+                        </div>
+
+                        {bookmarksStatus.success ? (
+                          <div className="bg-background/50 p-3 rounded border border-emerald-500/20 mt-3 flex items-center gap-4 text-xs font-medium">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground">TOC Detected</span>
+                              <span className="text-text">{bookmarksStatus.toc_entries_detected} entries</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground">Bookmarks Created</span>
+                              <span className="text-text">{bookmarksStatus.bookmarks_generated} items</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-background/50 p-3 rounded border border-amber-500/20 mt-3 text-xs text-red-500">
+                            {bookmarksStatus.error || "Unknown error"}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedProject.status === 'Bookmarked' && !showEditBookmarksModal && (
+                      <div className="mt-2 text-right border-t border-border pt-4">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={handleOpenEditBookmarks}
+                          leftIcon={<Edit size={14} />}
+                          className="text-xs"
+                        >
+                          Edit Bookmarks
+                        </Button>
+                      </div>
+                    )}
+
+                    {showEditBookmarksModal && (
+                      <div className="mt-4 pt-4 border-t border-border flex flex-col gap-4">
+                        {loadingBookmarks ? (
+                          <div className="py-12 flex justify-center items-center">
+                            <RefreshCw size={24} className="animate-spin text-primary" />
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <h4 className="font-bold text-sm text-text m-0">Edit Bookmarks</h4>
+                              <p className="text-[10px] text-muted m-0">
+                                You can manually rename, reorganize, or delete bookmarks.
+                              </p>
+                            </div>
+
+                            <div className="flex-1 max-h-[50vh] overflow-y-auto border border-border rounded-lg bg-background p-2 space-y-1">
+                              {editingBookmarksList.length === 0 ? (
+                                <div className="p-8 flex flex-col items-center justify-center border border-dashed border-border rounded-lg bg-card text-center mt-2">
+                                  <p className="text-xs text-muted mb-3">No bookmarks found.</p>
+                                  <Button size="sm" variant="secondary" leftIcon={<Plus size={14} />} onClick={() => setEditingBookmarksList([{ title: 'New Bookmark', level: 1, page: 1 }])}>
+                                    Add Bookmark
+                                  </Button>
+                                </div>
+                              ) : (
+                                editingBookmarksList.map((bm, index) => (
+                                  <div key={index} className="flex items-center gap-2 group hover:bg-muted/10 p-1.5 rounded" style={{ paddingLeft: `${(bm.level - 1) * 1.5 + 0.5}rem` }}>
+                                    <div className="flex flex-col gap-0.5 shrink-0 opacity-20 group-hover:opacity-100 transition-opacity">
+                                      <button onClick={() => moveBookmark(index, 'up')} disabled={index === 0} className="hover:text-primary disabled:opacity-30">
+                                        <ChevronUp size={12} />
+                                      </button>
+                                      <button onClick={() => moveBookmark(index, 'down')} disabled={index === editingBookmarksList.length - 1} className="hover:text-primary disabled:opacity-30">
+                                        <ChevronDown size={12} />
+                                      </button>
+                                    </div>
+
+                                    <div className="flex gap-1 shrink-0 opacity-20 group-hover:opacity-100 transition-opacity mr-2">
+                                      <button onClick={() => changeBookmarkLevel(index, -1)} disabled={bm.level <= 1} className="p-1 hover:bg-muted/20 rounded disabled:opacity-30" title="Outdent (Level Up)">
+                                        <ArrowLeft size={12} />
+                                      </button>
+                                      <button onClick={() => changeBookmarkLevel(index, 1)} disabled={bm.level >= 6} className="p-1 hover:bg-muted/20 rounded disabled:opacity-30 rotate-180" title="Indent (Level Down)">
+                                        <ArrowLeft size={12} />
+                                      </button>
+                                    </div>
+
+                                    <div className="flex-1 flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        value={bm.title}
+                                        onChange={(e) => {
+                                          const list = [...editingBookmarksList];
+                                          list[index].title = e.target.value;
+                                          setEditingBookmarksList(list);
+                                        }}
+                                        className="flex-1 text-xs px-2 py-1 bg-transparent hover:bg-background border border-transparent hover:border-border rounded focus:border-primary focus:bg-background outline-none transition-colors"
+                                      />
+                                    </div>
+
+                                    <div className="shrink-0 flex items-center gap-2">
+                                      <div className="flex items-center bg-muted/10 rounded px-1 border border-transparent focus-within:border-primary focus-within:bg-background transition-colors">
+                                        <span className="text-[10px] text-muted pr-1 pl-1 font-mono">p.</span>
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          value={bm.page}
+                                          onChange={(e) => {
+                                            const list = [...editingBookmarksList];
+                                            list[index].page = parseInt(e.target.value) || 1;
+                                            setEditingBookmarksList(list);
+                                          }}
+                                          className="w-10 text-[10px] font-mono text-muted bg-transparent py-0.5 outline-none"
+                                        />
+                                      </div>
+                                      <button onClick={() => addBookmark(index)} className="p-1.5 text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Insert below">
+                                        <Plus size={14} />
+                                      </button>
+                                      <button onClick={() => removeBookmark(index)} className="p-1.5 text-muted hover:text-red-500 hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Remove">
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-end gap-3 pt-2">
+                              <Button variant="ghost" size="sm" onClick={() => setShowEditBookmarksModal(false)} disabled={savingBookmarks} className="text-xs">Cancel</Button>
+                              <Button size="sm" onClick={handleSaveBookmarks} disabled={savingBookmarks || loadingBookmarks} leftIcon={savingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : undefined} className="text-xs">
+                                Save Changes
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 6: Generate TOC Links */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 6 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Bookmarked') setActiveStep(6);
+                  }}
+                  disabled={selectedProject.status !== 'Bookmarked'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${linksStatus && linksStatus.success
+                      ? 'bg-emerald-500/20 text-emerald-600'
+                      : activeStep === 6 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
+                      {linksStatus ? (
+                        <CheckCircle2 size={14} className="text-emerald-500" />
+                      ) : (
+                        "6"
+                      )}
+                    </div>
+                    <h3 className={`font-bold m-0 text-left ${activeStep === 6 ? 'text-primary' : 'text-text'}`}>
+                      Generate TOC Links
+                    </h3>
+                  </div>
+                  {activeStep === 6 ? <ChevronUp size={20} className="text-muted" /> : <ChevronDown size={20} className="text-muted" />}
+                </button>
+
+                {activeStep === 6 && (
+                  <div className="p-4 border-t border-border space-y-4">
+                    <p className="text-sm text-muted">
+                      Automatically create clickable links in the PDF from the Table of Contents to the corresponding chapters.
+                    </p>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-muted uppercase tracking-wider block">Link Type</label>
+
+                      <div className="flex flex-col gap-2">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
+                          <input type="radio" name="link_type" value="none" checked={linkType === 'none'} onChange={() => setLinkType('none')} className="text-primary accent-primary" />
+                          <span className={linkType === 'none' ? 'font-medium' : ''}>No Links</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
+                          <input type="radio" name="link_type" value="one_way" checked={linkType === 'one_way'} onChange={() => setLinkType('one_way')} className="text-primary accent-primary" />
+                          <div>
+                            <span className={linkType === 'one_way' ? 'font-medium block' : 'block'}>One-Way Links</span>
+                            <span className="text-xs text-muted block">Table of Contents entries link to the respective chapters.</span>
+                          </div>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
+                          <input type="radio" name="link_type" value="two_way" checked={linkType === 'two_way'} onChange={() => setLinkType('two_way')} className="text-primary accent-primary" />
+                          <div>
+                            <span className={linkType === 'two_way' ? 'font-medium block' : 'block'}>Two-Way Links</span>
+                            <span className="text-xs text-muted block">TOC links to chapters AND chapter titles link back to the TOC.</span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
+                    {linksAnalysisStatus && linksAnalysisStatus.success && (
+                      <div className="p-3 bg-blue-500/10 border border-blue-500/20 text-blue-700 rounded text-sm mt-3 mb-2 space-y-1">
+                        <p className="font-bold">Analysis Report:</p>
+                        <ul className="list-disc pl-5">
+                          <li>One-Way Links to create: {linksAnalysisStatus.one_way_links}</li>
+                          {linkType === 'two_way' && <li>Two-Way (Back) Links to create: {linksAnalysisStatus.two_way_links}</li>}
+                          <li className="font-medium">Total Links: {linksAnalysisStatus.total_links}</li>
+                        </ul>
+
+                        {linksAnalysisStatus.details && linksAnalysisStatus.details.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-blue-500/20 max-h-48 overflow-y-auto">
+                            <table className="w-full text-xs text-left">
+                              <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
+                                <tr>
+                                  <th className="pb-1">Title</th>
+                                  <th className="pb-1 w-16">Type</th>
+                                  <th className="pb-1 w-12 text-center">From</th>
+                                  <th className="pb-1 w-12 text-center">To</th>
+                                  <th className="pb-1 w-16 text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {linksAnalysisStatus.details.map((link: any, i: number) => (
+                                  <tr key={i} className="border-b border-blue-500/10 last:border-0">
+                                    <td className="py-1 truncate max-w-[150px] pr-2" title={link.title}>{link.title}</td>
+                                    <td className="py-1">{link.type === 'one_way' ? 'TOC→Ch' : 'Ch→TOC'}</td>
+                                    <td className="py-1 text-center">{link.source_page}</td>
+                                    <td className="py-1 text-center">{link.target_page}</td>
+                                    <td className="py-1 text-center">
+                                      {link.is_linked ? (
+                                        <span className="text-emerald-600 font-bold" title="Already linked">✓</span>
+                                      ) : (
+                                        <button
+                                          onClick={() => handleManualLink(link, i)}
+                                          className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                                          title="Fix / Link manually"
+                                        >
+                                          Link
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 mt-4">
+                      <Button
+                        onClick={handleAnalyzeLinks}
+                        disabled={analyzingLinks || generatingLinks || linkType === 'none'}
+                        variant={linksAnalysisStatus ? 'outline' : 'primary'}
+                        leftIcon={analyzingLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
+                      >
+                        {analyzingLinks ? 'Analyzing...' : 'Analyze Links'}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyLinks}
+                        disabled={generatingLinks || analyzingLinks || !linksAnalysisStatus || linkType === 'none'}
+                        leftIcon={generatingLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
+                      >
+                        {generatingLinks ? 'Applying Links...' : 'Apply / Fix'}
+                      </Button>
+                    </div>
+
+                    {linksStatus && linksStatus.error && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 rounded text-sm mt-3">
+                        {linksStatus.error}
+                      </div>
+                    )}
+                    {linksAnalysisStatus && linksAnalysisStatus.error && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 rounded text-sm mt-3">
+                        {linksAnalysisStatus.error}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 7: URL Hyperlinking */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 7 ? 0 : 7)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">7</div>
+                    <span className="font-medium text-sm">URL Hyperlinking</span>
+                    {urlLinksAnalysis && (
+                      <span className="text-xs bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full">
+                        {urlLinksAnalysis.total_urls} URLs · {urlLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 7 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 7 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Scan the PDF for plain-text web addresses and convert them into active clickable hyperlinks.
+                    </p>
+
+                    {/* Summary */}
+                    {urlLinksAnalysis && (
+                      <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1 text-sm text-blue-800">
+                        <p className="font-semibold">URL Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total URLs found: <strong>{urlLinksAnalysis.total_urls}</strong></li>
+                          <li className="text-emerald-700">Already linked: <strong>{urlLinksAnalysis.already_linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{urlLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* URL Table */}
+                    {urlLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-blue-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-blue-200">URL</th>
+                              <th className="p-2 border-b border-blue-200 w-12 text-center">Page</th>
+                              <th className="p-2 border-b border-blue-200 w-20 text-center">PDF Link</th>
+                              <th className="p-2 border-b border-blue-200 w-28 text-center">URL Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {urlLinksAnalysis.details.map((item: UrlLinkDetail, i: number) => (
+                              <tr key={i} className="border-b border-blue-100 last:border-0 hover:bg-blue-50/30">
+                                <td className="p-2 max-w-[160px]">
+                                  <span className="truncate block text-blue-700" title={item.url}>{item.display_text}</span>
+                                </td>
+                                <td className="p-2 text-center text-muted">{item.page}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <span className="text-emerald-600 font-bold" title="Hyperlinked in PDF">✓ Linked</span>
+                                  ) : (
+                                    <span className="text-red-500 font-bold" title="Not hyperlinked in PDF">✗ Not linked</span>
+                                  )}
+                                </td>
+                                <td className="p-2 text-center">
+                                  {item.http_ok ? (
+                                    <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                                      {item.http_status} {item.http_description}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-red-500 font-semibold" title={item.http_description}>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
+                                      {item.http_status ? `${item.http_status} ${item.http_description}` : item.http_description}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {urlLinksAnalysis?.total_urls === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No plain-text URLs found in the PDF.</p>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeUrlLinks}
+                        disabled={analyzingUrlLinks || applyingUrlLinks}
+                        variant={urlLinksAnalysis ? 'outline' : 'primary'}
+                        leftIcon={analyzingUrlLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
+                      >
+                        {analyzingUrlLinks ? 'Analyzing...' : 'Analyze URLs'}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyUrlLinks}
+                        disabled={applyingUrlLinks || analyzingUrlLinks || !urlLinksAnalysis || urlLinksAnalysis.not_linked === 0}
+                        leftIcon={applyingUrlLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
+                      >
+                        {applyingUrlLinks ? 'Applying...' : 'Apply / Fix'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 8: Email Hyperlinking */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 8 ? 0 : 8)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">8</div>
+                    <span className="font-medium text-sm">Email Hyperlinking</span>
+                    {emailLinksAnalysis && (
+                      <span className="text-xs bg-purple-500/10 text-purple-600 px-2 py-0.5 rounded-full">
+                        {emailLinksAnalysis.total_emails} Emails · {emailLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 8 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 8 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Scan the PDF for plain-text email addresses and convert them into active mailto: hyperlinks.
+                    </p>
+
+                    {/* Status Legend */}
+                    <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-xs space-y-1">
+                      <p className="font-semibold text-purple-800">Status Guide:</p>
+                      <div className="space-y-1 ml-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 font-bold">✓ Linked</span>
+                          <span className="text-muted">= Already a clickable mailto: hyperlink in PDF</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-500 font-bold">✗ Not linked</span>
+                          <span className="text-muted">= Plain text email, needs "Apply/Fix" to make it clickable</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    {emailLinksAnalysis && (
+                      <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg space-y-1 text-sm text-purple-800">
+                        <p className="font-semibold">Email Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total emails found: <strong>{emailLinksAnalysis.total_emails}</strong></li>
+                          <li className="text-emerald-700">Already linked: <strong>{emailLinksAnalysis.already_linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{emailLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Email Table */}
+                    {emailLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-purple-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-purple-50/90 text-purple-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-purple-200">Email Address</th>
+                              <th className="p-2 border-b border-purple-200 w-12 text-center">Page</th>
+                              <th className="p-2 border-b border-purple-200 text-center">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span>Link Status</span>
+                                  <span className="font-normal text-purple-600 text-[9px]">(Clickable?)</span>
+                                </div>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {emailLinksAnalysis.details.map((item: EmailLinkDetail, i: number) => (
+                              <tr key={i} className="border-b border-purple-100 last:border-0 hover:bg-purple-50/30">
+                                <td className="p-2 max-w-[200px]">
+                                  <span className="truncate block text-purple-700" title={item.email}>{item.email}</span>
+                                </td>
+                                <td className="p-2 text-center text-muted">{item.page}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-emerald-600 font-bold">✓ Linked</span>
+                                      <span className="text-[9px] text-emerald-600/70">Clickable</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-red-500 font-bold">✗ Not linked</span>
+                                      <span className="text-[9px] text-red-500/70">Needs fix</span>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {emailLinksAnalysis?.total_emails === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No email addresses found in the PDF.</p>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeEmailLinks}
+                        disabled={analyzingEmailLinks || applyingEmailLinks}
+                        variant={emailLinksAnalysis ? 'outline' : 'primary'}
+                        leftIcon={analyzingEmailLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
+                      >
+                        {analyzingEmailLinks ? 'Analyzing...' : 'Analyze Emails'}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyEmailLinks}
+                        disabled={applyingEmailLinks || analyzingEmailLinks || !emailLinksAnalysis || emailLinksAnalysis.not_linked === 0}
+                        leftIcon={applyingEmailLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
+                      >
+                        {applyingEmailLinks ? 'Applying...' : 'Apply / Fix'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 9: Endnote Links */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 9 ? 0 : 9)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">9</div>
+                    <span className="font-medium text-sm">Endnote Links</span>
+                    {endnoteLinksAnalysis && (
+                      <span className="text-xs bg-blue-500/10 text-blue-600 px-2 py-0.5 rounded-full">
+                        {endnoteLinksAnalysis.total_notes} Notes · {endnoteLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 9 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 9 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Create bidirectional links between superscript note references and their corresponding endnotes.
+                    </p>
+
+                    {/* Status Legend */}
+                    <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg text-xs space-y-1">
+                      <p className="font-semibold text-blue-800">Link Status:</p>
+                      <div className="space-y-1 ml-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 font-bold">✓ Linked</span>
+                          <span className="text-muted">= Bidirectional links created (ref ↔ endnote)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-500 font-bold">✗ Not linked</span>
+                          <span className="text-muted">= Missing links, needs "Apply/Fix"</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    {endnoteLinksAnalysis && (
+                      <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1 text-sm text-blue-800">
+                        <p className="font-semibold">Endnote Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total notes found: <strong>{endnoteLinksAnalysis.total_notes}</strong></li>
+                          <li className="text-emerald-700">Already linked: <strong>{endnoteLinksAnalysis.linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{endnoteLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Endnote Table */}
+                    {endnoteLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-blue-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-blue-200 w-12 text-center">Note#</th>
+                              <th className="p-2 border-b border-blue-200 w-20 text-center">Reference Page</th>
+                              <th className="p-2 border-b border-blue-200 w-20 text-center">Definition Page</th>
+                              <th className="p-2 border-b border-blue-200">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span>Link Status</span>
+                                  <span className="font-normal text-blue-600 text-[9px]">(Bidirectional?)</span>
+                                </div>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {endnoteLinksAnalysis.details.map((item: EndnoteDetail, i: number) => (
+                              <tr key={i} className="border-b border-blue-100 last:border-0 hover:bg-blue-50/30">
+                                <td className="p-2 text-center font-bold text-blue-700">{item.note_number}</td>
+                                <td className="p-2 text-center text-muted">{item.reference_page || '-'}</td>
+                                <td className="p-2 text-center text-muted">{item.definition_page || '-'}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-emerald-600 font-bold">✓ Linked</span>
+                                      <span className="text-[9px] text-emerald-600/70">Active</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-red-500 font-bold">✗ Not linked</span>
+                                      <span className="text-[9px] text-red-500/70">{item.status || 'Needs fix'}</span>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {endnoteLinksAnalysis?.total_notes === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No endnotes found in the PDF.</p>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeEndnoteLinks}
+                        disabled={analyzingEndnoteLinks || applyingEndnoteLinks}
+                        variant={endnoteLinksAnalysis ? 'outline' : 'primary'}
+                        leftIcon={analyzingEndnoteLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
+                      >
+                        {analyzingEndnoteLinks ? 'Analyzing...' : 'Analyze Notes'}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyEndnoteLinks}
+                        disabled={applyingEndnoteLinks || analyzingEndnoteLinks || !endnoteLinksAnalysis || endnoteLinksAnalysis.not_linked === 0}
+                        leftIcon={applyingEndnoteLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
+                      >
+                        {applyingEndnoteLinks ? 'Applying...' : 'Apply / Fix'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 10: Cross-Reference Links */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 10 ? 0 : 10)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">10</div>
+                    <span className="font-medium text-sm">Cross-Reference Links</span>
+                    {crossrefLinksAnalysis && (
+                      <span className="text-xs bg-indigo-500/10 text-indigo-600 px-2 py-0.5 rounded-full">
+                        {crossrefLinksAnalysis.total_references} Refs · {crossrefLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 10 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 10 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Create links for cross-references to Figures, Tables, Chapters, and Pages throughout the document.
+                    </p>
+
+                    {/* Status Legend */}
+                    <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg text-xs space-y-1">
+                      <p className="font-semibold text-indigo-800">Link Status:</p>
+                      <div className="space-y-1 ml-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 font-bold">✓ Linked</span>
+                          <span className="text-muted">= Cross-reference link created (to target)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-500 font-bold">✗ Not linked</span>
+                          <span className="text-muted">= Missing links, needs "Apply/Fix"</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    {crossrefLinksAnalysis && (
+                      <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg space-y-1 text-sm text-indigo-800">
+                        <p className="font-semibold">Cross-Reference Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total references found: <strong>{crossrefLinksAnalysis.total_references}</strong></li>
+                          <li className="text-emerald-700">Already linked: <strong>{crossrefLinksAnalysis.linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{crossrefLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Cross-Reference Table */}
+                    {crossrefLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-indigo-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-indigo-50/90 text-indigo-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-indigo-200 text-center">Type</th>
+                              <th className="p-2 border-b border-indigo-200">Reference Text</th>
+                              <th className="p-2 border-b border-indigo-200 w-16 text-center">Ref Page</th>
+                              <th className="p-2 border-b border-indigo-200">Target</th>
+                              <th className="p-2 border-b border-indigo-200 w-16 text-center">Target Page</th>
+                              <th className="p-2 border-b border-indigo-200">Link Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {crossrefLinksAnalysis.details.map((item: CrossrefDetail, i: number) => (
+                              <tr key={i} className="border-b border-indigo-100 last:border-0 hover:bg-indigo-50/30">
+                                <td className="p-2 text-center">
+                                  <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-medium capitalize">
+                                    {item.type}
+                                  </span>
+                                </td>
+                                <td className="p-2 text-muted truncate">{item.reference_text}</td>
+                                <td className="p-2 text-center text-muted">{item.reference_page || '-'}</td>
+                                <td className="p-2 text-muted truncate">{item.target_identifier}</td>
+                                <td className="p-2 text-center text-muted">{item.target_page || '-'}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-emerald-600 font-bold">✓ Linked</span>
+                                      <span className="text-[9px] text-emerald-600/70">Active</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-red-500 font-bold">✗ Not linked</span>
+                                      <span className="text-[9px] text-red-500/70">Needs fix</span>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {crossrefLinksAnalysis?.total_references === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No cross-references found in the PDF.</p>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeCrossrefLinks}
+                        disabled={analyzingCrossrefLinks || applyingCrossrefLinks}
+                        variant={crossrefLinksAnalysis ? 'outline' : 'primary'}
+                        leftIcon={analyzingCrossrefLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
+                      >
+                        {analyzingCrossrefLinks ? 'Analyzing...' : 'Analyze References'}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyCrossrefLinks}
+                        disabled={applyingCrossrefLinks || analyzingCrossrefLinks || !crossrefLinksAnalysis || crossrefLinksAnalysis.not_linked === 0}
+                        leftIcon={applyingCrossrefLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
+                      >
+                        {applyingCrossrefLinks ? 'Applying...' : 'Apply / Fix'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* ── PROJECTS LISTING ───────────────────────────────────────────── */
+        <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6 overflow-y-auto">
+          {/* Metrics */}
+          <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-xl border border-border bg-card shadow-sm flex items-center gap-4">
+              <div className="h-10 w-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <CheckCircle2 size={20} />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted uppercase tracking-wider m-0">Total Projects</p>
+                <h3 className="text-2xl font-bold text-text m-0 mt-1">{totalCount}</h3>
+              </div>
+            </div>
+            <div className="p-4 rounded-xl border border-border bg-card shadow-sm flex items-center gap-4">
+              <div className="h-10 w-10 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                <CheckCircle2 size={20} />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted uppercase tracking-wider m-0">Passed Validations</p>
+                <h3 className="text-2xl font-bold text-text m-0 mt-1">{passedCount}</h3>
+              </div>
+            </div>
+            <div className="p-4 rounded-xl border border-border bg-card shadow-sm flex items-center gap-4">
+              <div className="h-10 w-10 rounded-lg bg-red-500/10 text-red-600 flex items-center justify-center shrink-0">
+                <XCircle size={20} />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted uppercase tracking-wider m-0">Failed Validations</p>
+                <h3 className="text-2xl font-bold text-text m-0 mt-1">{failedCount}</h3>
+              </div>
+            </div>
+          </section>
+
+          {/* Filter bar */}
+          <section className="p-4 rounded-xl border border-border bg-card shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div className="relative w-full md:w-80 shrink-0">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                placeholder="Search project, client code..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-3 py-1.5 w-full text-xs rounded-lg border border-border bg-background text-text focus:ring-1 focus:ring-primary focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
+              <div className="flex items-center gap-2">
+                <Filter size={12} className="text-muted" />
+                <span className="text-xs text-muted">Status:</span>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="text-xs rounded-lg border border-border bg-background text-text py-1 px-2.5 focus:outline-none"
+                >
+                  <option value="all">All</option>
+                  <option value="passed">Passed</option>
+                  <option value="failed">Failed</option>
+                  <option value="unvalidated">Not Validated</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted">Assignee:</span>
+                <select
+                  value={assigneeFilter}
+                  onChange={(e) => setAssigneeFilter(e.target.value)}
+                  className="text-xs rounded-lg border border-border bg-background text-text py-1 px-2.5 focus:outline-none"
+                >
+                  <option value="all">All</option>
+                  <option value="unassigned">Unassigned</option>
+                  {Array.from(new Set(projects.map((p) => p.assignee).filter(Boolean))).map((u) => (
+                    <option key={u} value={u || ''}>{u}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </section>
+
+          {/* Cards */}
+          {loading ? (
+            <div className="h-64 flex items-center justify-center text-xs text-muted">
+              <RefreshCw size={20} className="animate-spin mr-2" /> Loading projects...
+            </div>
+          ) : loadError ? (
+            <div className="h-64 flex flex-col items-center justify-center border border-dashed border-red-500/50 rounded-xl bg-red-50 dark:bg-red-950/20 p-6 text-center">
+              <AlertCircle size={36} className="text-red-600 dark:text-red-400 mb-2" />
+              <h4 className="text-sm font-semibold text-red-700 dark:text-red-300 m-0">{loadError}</h4>
+              <Button
+                onClick={() => { setLoadError(null); setLoading(true); fetchProjects(); }}
+                variant="outline"
+                className="text-xs mt-4"
+              >
+                Retry
+              </Button>
+            </div>
+          ) : filteredProjects.length === 0 ? (
+            <div className="h-64 flex flex-col items-center justify-center border border-dashed border-border rounded-xl bg-card p-6 text-center">
+              <FolderOpen size={36} className="text-muted/60 mb-2" />
+              <h4 className="text-sm font-semibold text-text m-0">No Projects Found</h4>
+              <p className="text-xs text-muted m-0 mt-1 max-w-sm">
+                Create a project and upload a ZIP package containing the PDF source files.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredProjects.map((proj) => (
+                <ProjectCard
+                  key={proj.id}
+                  project={proj}
+                  users={users}
+                  onDelete={(id) => setProjectToDelete(id)}
+                  onEdit={(p) => { setEditingProject(p); setEditAssignee(p.assignee || ''); }}
+                  onRefresh={fetchProjects}
+                  onSelect={handleSelectProject}
+                />
+              ))}
+            </div>
+          )}
+        </main>
+      )}
+
+      {/* ── CREATE PROJECT MODAL ──────────────────────────────────────────── */}
+      <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Create Web PDF Project">
+        <form onSubmit={handleCreateProject} className="space-y-4 pt-1">
+          {errorMsg && (
+            <div className="p-3 text-xs bg-red-500/10 border border-red-500/20 text-red-600 rounded-lg">
+              {errorMsg}
+            </div>
+          )}
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-text block">Client Company *</label>
+            <select
+              value={customerName}
+              onChange={e => {
+                const selectedVal = e.target.value;
+                setCustomerName(selectedVal);
+                const matched = clients.find(c => c.company === selectedVal);
+                if (matched && matched.division) {
+                  setClientCode(matched.division);
+                } else {
+                  setClientCode('');
+                }
+              }}
+              required
+              className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">— Select Client —</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.company}>{c.company}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-text block">Client Code / Division</label>
+            <input
+              type="text"
+              readOnly
+              value={clientCode}
+              placeholder="Auto-populated from client selection"
+              className="w-full text-xs p-2 rounded-lg border border-border bg-muted/40 text-text/80 cursor-not-allowed focus:outline-none"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-text block">Project Name *</label>
+            <input
+              type="text"
+              required
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="e.g. pelagic-guide-book-v2"
+              className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-text block">ZIP File Upload *</label>
+            <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-border border-dashed rounded-lg cursor-pointer bg-background hover:bg-card transition-colors">
+              <Upload className="w-7 h-7 mb-2 text-muted" />
+              <p className="text-xs text-text font-semibold">
+                {zipFile ? zipFile.name : 'Click to upload ZIP package'}
+              </p>
+              <p className="text-[10px] text-muted mt-0.5">Must be a .zip file containing PDF files</p>
+              <input
+                type="file"
+                accept=".zip"
+                onChange={(e) => setZipFile(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" type="button" onClick={() => setShowAddModal(false)} className="text-xs font-semibold">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={uploading} leftIcon={uploading ? <RefreshCw className="w-3 h-3 animate-spin" /> : undefined} className="text-xs font-semibold">
+              {uploading ? 'Uploading...' : 'Create & Upload'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── EDIT MODAL ────────────────────────────────────────────────────── */}
+      <Modal isOpen={!!editingProject} onClose={() => setEditingProject(null)} title="Edit Project Assignee">
+        <form onSubmit={handleSaveEdit} className="space-y-4 pt-1">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-text block">Assignee</label>
+            <select
+              value={editAssignee}
+              onChange={(e) => setEditAssignee(e.target.value)}
+              className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Unassigned</option>
+              {users.filter((u) => u.active_status).map((u) => (
+                <option key={u.id} value={u.user_name}>{u.user_name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" type="button" onClick={() => setEditingProject(null)} className="text-xs font-semibold">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={savingEdit} className="text-xs font-semibold">
+              {savingEdit ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── DELETE CONFIRM ────────────────────────────────────────────────── */}
+      <Modal isOpen={projectToDelete !== null} onClose={() => setProjectToDelete(null)} title="Delete Project">
+        <div className="space-y-4 pt-1">
+          <p className="text-xs text-text">
+            Are you sure? The database record will be soft-deleted. Project files on disk will remain intact.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setProjectToDelete(null)} className="text-xs font-semibold">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeleteConfirm}
+              variant="ghost"
+              className="text-xs font-semibold bg-red-500/10 text-red-600 hover:bg-red-500/20"
+            >
+              Confirm Delete
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+    </div>
+  );
+}

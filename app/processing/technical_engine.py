@@ -100,12 +100,14 @@ class TechnicalEngine:
                 hl_texts = []
                 seen = set()
                 for hf in highlight_findings:
+                    surface = hf.get("surface", "")
                     pat_str = hf.get("search_pattern")
-                    if not pat_str:
-                        surface = hf.get("surface", "")
+                    if not pat_str or (surface and (not surface[0].isalnum() or not surface[-1].isalnum())):
                         if not surface:
                             continue
-                        pat_str = r'\b' + re.escape(surface) + r'\b'
+                        prefix = r'\b' if (surface[0].isalnum() or surface[0] == '_') else ''
+                        suffix = r'\b' if (surface[-1].isalnum() or surface[-1] == '_') else ''
+                        pat_str = prefix + re.escape(surface) + suffix
                     key = (pat_str, hf.get("region", "body"), hf.get("source", "body"))
                     if key not in seen:
                         seen.add(key)

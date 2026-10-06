@@ -1,4 +1,4 @@
-﻿"""Top-level orchestration: run all rules across chapters, aggregate, return a dashboard-ready dict."""
+"""Top-level orchestration: run all rules across chapters, aggregate, return a dashboard-ready dict."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -21,6 +21,71 @@ from manuscript_core.rules.spelling import run_spelling_rules
 from manuscript_core.rules.te_points import run_te_rules, detect_citations, detect_caption_labels, detect_chart_caption_labels
 
 
+_GENERIC_SUB_RULES = {
+    "num_single_numeral", "num_single_spelled",
+    "num_double_numeral", "num_double_spelled",
+    "num_zero_numeral", "num_zero_spelled",
+    "range_to", "range_endash", "range_hyphen"
+}
+
+
+def resolve_finding_overlaps(findings: list[Finding]) -> list[Finding]:
+    """Resolves collisions and merges overlapping findings within the same paragraph segment.
+
+    If a specific compound/citation finding (e.g. '10-fold' or 'Figure 1-1') overlaps with
+    a generic sub-rule finding (e.g. 'num_single_numeral' for '10' or 'range_hyphen' for '1-1'),
+    the generic sub-rule finding is suppressed.
+    """
+    if not findings:
+        return []
+
+    grouped: dict[int, list[Finding]] = defaultdict(list)
+    for f in findings:
+        grouped[f.para_index].append(f)
+
+    resolved: list[Finding] = []
+
+    for _, group in grouped.items():
+        if len(group) == 1:
+            resolved.extend(group)
+            continue
+
+        # Sort group by match_start asc, span length desc
+        group.sort(key=lambda f: (f.match_start, -(f.match_end - f.match_start)))
+
+        # Identify compound/specific findings
+        compound_spans = [
+            (f.match_start, f.match_end, f.rule_id)
+            for f in group
+            if f.rule_id not in _GENERIC_SUB_RULES
+        ]
+
+        kept: list[Finding] = []
+        seen_spans: set[tuple[int, int, str]] = set()
+
+        for f in group:
+            span_key = (f.match_start, f.match_end, f.rule_id)
+            if span_key in seen_spans:
+                continue
+
+            # Check if this finding is a generic sub-rule overlapping a compound/specific finding
+            if f.rule_id in _GENERIC_SUB_RULES:
+                is_sub_match = False
+                for c_start, c_end, _ in compound_spans:
+                    if max(f.match_start, c_start) < min(f.match_end, c_end):
+                        is_sub_match = True
+                        break
+                if is_sub_match:
+                    continue  # Suppress generic sub-match!
+
+            seen_spans.add(span_key)
+            kept.append(f)
+
+        resolved.extend(kept)
+
+    return resolved
+
+
 def _run_all_rules(seg: Segment) -> list[Finding]:
     findings: list[Finding] = []
 
@@ -32,12 +97,12 @@ def _run_all_rules(seg: Segment) -> list[Finding]:
 
     # Skip all analysis (TE and ME rules) for front matter and references sections
     if seg.region in ("front", "references"):
-        return findings
+        return resolve_finding_overlaps(findings)
 
     # TE point rules run against non-excluded segments; other rules also skip
     # excluded segments entirely since the extractor masks them fully.
     if seg.excluded:
-        return findings
+        return resolve_finding_overlaps(findings)
     findings.extend(run_te_rules(seg))
     findings.extend(run_spelling_rules(seg))
     findings.extend(run_compound_rules(seg))
@@ -52,7 +117,7 @@ def _run_all_rules(seg: Segment) -> list[Finding]:
     findings.extend(run_country_style(seg))
     findings.extend(run_subject_terms(seg))
     findings.extend(run_sic_special(seg))
-    return findings
+    return resolve_finding_overlaps(findings)
 
 
 def analyze_manuscript(chapters: list[dict]) -> dict[str, Any]:

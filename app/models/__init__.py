@@ -124,6 +124,9 @@ from app.domains.workflow.models import (  # noqa: F401
     ChapterInfo,
 )
 from app.domains.post_prod.epub_validator.models import EvProject, EvHistory  # noqa: F401
+from app.domains.post_prod.word_conversion.models import PostProdProject, PostProdChapter  # noqa: F401
+from app.domains.post_prod.xml_conversion.models import PostProdXMLConversionProject, PostProdXMLConversionHistory  # noqa: F401
+from app.domains.books_on_demand.models import BodJob  # noqa: F401
 
 Chapter = ChapterInfo
 
@@ -151,6 +154,6 @@ class ProcessingJob(Base):
     user = relationship("User")
 
 
-
-
+from app.domains.processing.language_edit_models import LanguageEditJob, LanguageEditFinding
+from app.domains.journals.models import JournalClient, Journal, JournalArticle, JournalStageDetail, JournalStylesheet, JournalGrammarsheet, JournalFile, JournalDelivery, JournalCheckRun, JournalIssue, JournalWorkflow, JournalAsset
 

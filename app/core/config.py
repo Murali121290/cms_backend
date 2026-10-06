@@ -6,6 +6,22 @@ from typing import Optional
 
 from app.core.paths import UPLOADS_DIR
 
+LANGUAGE_MAP = {
+    'af': 'Afrikaans', 'ar': 'Arabic', 'bg': 'Bulgarian', 'bn': 'Bengali',
+    'ca': 'Catalan', 'cs': 'Czech', 'cy': 'Welsh', 'da': 'Danish', 'de': 'German',
+    'el': 'Greek', 'en': 'English', 'es': 'Spanish', 'et': 'Estonian', 'fa': 'Persian',
+    'fi': 'Finnish', 'fr': 'French', 'gu': 'Gujarati', 'he': 'Hebrew', 'hi': 'Hindi',
+    'hr': 'Croatian', 'hu': 'Hungarian', 'id': 'Indonesian', 'it': 'Italian',
+    'ja': 'Japanese', 'kn': 'Kannada', 'ko': 'Korean', 'lt': 'Lithuanian',
+    'lv': 'Latvian', 'mk': 'Macedonian', 'ml': 'Malayalam', 'mr': 'Marathi',
+    'ne': 'Nepali', 'nl': 'Dutch', 'no': 'Norwegian', 'pa': 'Punjabi',
+    'pl': 'Polish', 'pt': 'Portuguese', 'ro': 'Romanian', 'ru': 'Russian',
+    'sk': 'Slovak', 'sl': 'Slovenian', 'sq': 'Albanian', 'sv': 'Swedish',
+    'sw': 'Swahili', 'ta': 'Tamil', 'te': 'Telugu', 'th': 'Thai',
+    'tl': 'Tagalog', 'tr': 'Turkish', 'uk': 'Ukrainian', 'ur': 'Urdu',
+    'vi': 'Vietnamese', 'zh-cn': 'Chinese (Simplified)', 'zh-tw': 'Chinese (Traditional)'
+}
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Publishing CMS"
     API_V1_STR: str = "/api/v1"
@@ -56,8 +72,19 @@ class Settings(BaseSettings):
     PPH_MAX_WAIT_SECONDS: int = 4500   # 75 min — covers worst-case 1-hour jobs with headroom
     PPH_POLL_INTERVAL_SECONDS: int = 20  # Poll every 20s; jobs run 30-60 min so 2s is excessive
 
-    # PPH Reference Conversion settings (for reference_structuring process type)
-    REF_SOURCE_STYLE: str = "Auto"  # Auto, AMA, APA, CGRN
+    # Journal production (JATS) integration settings
+    # When set, Stage 4 sends the edited DOCX to the Windows XSLT server (docx_to_jats.xslt);
+    # otherwise, or if the server fails, the built-in XHTML -> JATS converter is used.
+    JATS_XSLT_URL: str = ""
+    JATS_XSLT_NAME: str = "docx_to_jats.xslt"
+    JATS_XSLT_TIMEOUT_SECONDS: int = 300
+    # InDesign Server endpoint for journal articles (JATS + journal template -> INDD/IDML/PDF).
+    JOURNAL_INDESIGN_ENDPOINT: str = "/convert-jats-to-indesign"
+
+    # UMLS / NLM Medical Terminology API integration settings
+    UMLS_API_KEY: str = ""
+    UMLS_BASE_URL: str = "https://uts-ws.nlm.nih.gov/rest"
+
     REF_TARGET_STYLE: str = "APA"   # AMA, APA, CGRN
 
     SMTP_FROM: str = "inkflow-noreply@example.com"
@@ -67,6 +94,15 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     SMTP_USE_TLS: bool = False
     SMTP_USE_SSL: bool = False
+
+    # Books on Demand (BOD) FTP Settings
+    BOD_FTP_HOST: str = ""
+    BOD_FTP_USERNAME: str = ""
+    BOD_FTP_PASSWORD: str = ""
+    BOD_FTP_BASE_PATH: str = "BOD"
+    BOD_FTP_DELIVERY_PATH: str = "/BOD/Delivery"
+    BOD_MANAGER_EMAIL: str = ""
+    BOD_CUSTOM_STAGES: str = "Add job,Production,QC,Archive"
 
     def __init__(self, **values):
         super().__init__(**values)

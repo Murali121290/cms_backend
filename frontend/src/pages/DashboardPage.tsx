@@ -3,6 +3,7 @@ import { DashboardStatsGrid } from "@/features/dashboard/components/DashboardSta
 import { useDashboardQuery } from "@/features/dashboard/useDashboardQuery";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { getSsrUrl, ssrPaths } from "@/utils/appPaths";
+import { Navigate } from "react-router-dom";
 
 import { BookOpen } from "lucide-react";
 
@@ -56,8 +57,32 @@ export function DashboardPage() {
   }
 
   const { projects, stats, viewer } = dashboardQuery.data;
-  const { timeOfDay, dayOfWeek, formattedDate } = getGreeting();
+  
+  const isAccessibilityUser =
+    viewer?.team === 'Accessibility Team' ||
+    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('accessibility')) ||
+    Boolean(viewer?.roles && (viewer.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')));
 
+  const isCustomerUser =
+    viewer?.team === 'Customer Team' ||
+    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('customer')) ||
+    Boolean(viewer?.roles && (viewer.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('customer')));
+
+  const hasBodCustomerAccess = Boolean(
+    (viewer as any)?.customer_access && 
+    Array.isArray((viewer as any).customer_access) && 
+    (viewer as any).customer_access.includes('BOD')
+  );
+
+  if (isAccessibilityUser) {
+    return <Navigate to="/post-production" replace />;
+  }
+  
+  if (isCustomerUser && hasBodCustomerAccess) {
+    return <Navigate to="/bod/report" replace />;
+  }
+
+  const { timeOfDay, dayOfWeek, formattedDate } = getGreeting();
   return (
     <main className="page dashboard-page">
       {/* Hero banner */}
@@ -77,7 +102,7 @@ export function DashboardPage() {
               </span>
             </div>
             <h1 className="text-3xl font-serif font-medium text-[#FBF9F4] tracking-tight leading-none mb-2">
-              Good {timeOfDay}, {(viewer.first_name || viewer.username).trim()}.
+              Good {timeOfDay}, {((viewer.first_name || viewer.last_name) ? `${viewer.first_name || ''} ${viewer.last_name || ''}`.trim() : viewer.username)}
             </h1>
             <p className="text-white/60 text-sm mt-1">
               You have <strong className="text-primary font-bold">{projects.length} active</strong> project{projects.length !== 1 ? "s" : ""} in progress.

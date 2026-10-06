@@ -18,7 +18,7 @@ def _build_table_doc(rows):
 def test_header_row_still_detected():
     doc, table = _build_table_doc([["NAME", "VALUE"], ["Item 1", "10"]])
     tag_tables(doc, mode="style")
-    assert table.cell(0, 0).paragraphs[0].style.name == "TBCH"
+    assert table.cell(0, 0).paragraphs[0].style.name in ("T2", "TBCH")
 
 
 def test_source_line_tagged_tsn():

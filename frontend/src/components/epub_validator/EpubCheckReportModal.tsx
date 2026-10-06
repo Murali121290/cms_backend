@@ -9,6 +9,7 @@ import {
   Clock,
   BookOpen,
   Filter,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import type { EpubCheckReport } from '@/api/epubValidator';
@@ -93,12 +94,22 @@ export function EpubCheckReportModal({ report, folderName, onClose }: Props) {
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted/60 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/api/v2/post-prod/epub-validator/epubcheck/${encodeURIComponent(folderName)}/download-log`}
+              download
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition shadow-xs"
+              aria-label="Download log text file"
+            >
+              <Download className="w-3.5 h-3.5" /> Download Log
+            </a>
+            <button
+              onClick={onClose}
+              className="p-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted/60 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content Body */}

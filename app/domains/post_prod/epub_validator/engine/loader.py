@@ -53,6 +53,31 @@ def load_customer(customer: str | None) -> list[dict]:
             return _read_rules_file(rf)
     return []
 
+def load_customer_config(customer: str | None) -> dict:
+    """Load the full customer JSON configuration."""
+    if not customer:
+        return {}
+    c_clean = customer.strip()
+    customers_dir = _RULES_ROOT / "customers"
+    if not customers_dir.is_dir():
+        return {}
+
+    target_dir: Path | None = None
+    for p in customers_dir.iterdir():
+        if p.is_dir() and p.name.lower() == c_clean.lower():
+            target_dir = p
+            break
+
+    if target_dir is None:
+        return {}
+
+    for fn in ("customer.json", "rules.json"):
+        rf = target_dir / fn
+        if rf.is_file():
+            with rf.open("r", encoding="utf-8") as f:
+                return json.load(f)
+    return {}
+
 
 
 def load_overrides(customer: str | None) -> dict:

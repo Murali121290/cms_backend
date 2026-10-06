@@ -9,7 +9,7 @@ my $input_dir   = $ARGV[0];
 my $output_file = $ARGV[1];
 
 # DTD and Root Setup
-my $dtd_decl = '<!DOCTYPE book PUBLIC "-//NLM//DTD BITS Book Interchange DTD v2.0 20130520//EN" "D:/s4c/wordtoxml/FirstXML/BITS-Book-1.0-DTD/BITS-book1.dtd">';
+my $dtd_decl = '<!DOCTYPE book PUBLIC "-//NLM//DTD BITS Book Interchange DTD v2.0 20130520//EN" "app/processing/legacy/wordtoxml/BITS-Book-1.0-DTD/BITS-book1.dtd">';
 
 my $master_xml = <<"XML";
 <?xml version="1.0" encoding="UTF-8"?>

@@ -80,7 +80,8 @@ class StructuringEngine:
                 shutil.copyfile(extracted_docx, output_path)
 
                 logger.info(f"AI structuring completed. Output written to: {output_path}")
-                return [output_path]
+                xhtml_path = self._generate_xhtml(output_path)
+                return [output_path, xhtml_path] if xhtml_path else [output_path]
             except Exception as e:
                 logger.error(f"AI structuring failed; falling back to local structuring. Error: {e}", exc_info=True)
                 # Fall back to local structuring below
@@ -105,4 +106,26 @@ class StructuringEngine:
             raise Exception(f"Structuring failed: {error_msg}")
 
         logger.info(f"Structuring successful. Processed {result.get('paragraphs_processed')} paragraphs.")
-        return [output_path]
+        xhtml_path = self._generate_xhtml(output_path)
+        return [output_path, xhtml_path] if xhtml_path else [output_path]
+
+    def _generate_xhtml(self, docx_path: str) -> str:
+        """Convert DOCX to XHTML using DocxToXhtmlRunsEngine."""
+        try:
+            from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
+            dir_name = os.path.dirname(docx_path)
+            base_name = os.path.splitext(os.path.basename(docx_path))[0]
+            xhtml_dir = os.path.join(dir_name, "xhtml")
+            os.makedirs(xhtml_dir, exist_ok=True)
+            xhtml_path = os.path.join(xhtml_dir, f"{base_name}.html")
+
+            engine = DocxToXhtmlRunsEngine()
+            content = engine.convert(docx_path)
+            with open(xhtml_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            logger.info(f"Auto-generated XHTML after structuring: {xhtml_path}")
+            return xhtml_path
+        except Exception as e:
+            logger.warning(f"Could not auto-generate XHTML for {docx_path}: {e}")
+            return None
+

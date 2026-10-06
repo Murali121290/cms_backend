@@ -19,12 +19,17 @@ import {
   PanelRightClose,
   ArrowUpDown,
   ChevronDown,
+  ExternalLink,
+  Download,
+  Upload,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
 import { getFileContent, getPdfPage, saveFileContent, ValidationProgress, renameEpubFile } from '@/api/epubValidator';
 import { SourceEditor } from './SourceEditor';
 import type { XHTMLFile, ValidationFileEntry, ValidationIssue } from '@/types/epubValidator';
+import { ignoreIssue, unignoreIssue, type IgnoreIssuePayload } from '@/api/epubValidator';
 
 interface Props {
   file: XHTMLFile;
@@ -40,11 +45,16 @@ interface Props {
   onRenameSuccess?: (newName: string) => void;
   isRefreshingAnalysis?: boolean;
   onRefreshAnalysis?: () => void;
+  onValidationDataChange?: () => void;
 }
 
 export type Tab = 'result' | 'preview' | 'pdf' | 'analysis';
 
-type DisplayIssue = ValidationIssue & { _ruleName: string };
+type DisplayIssue = ValidationIssue & {
+  _ruleName: string;
+  _ruleId: string;
+  _fileName: string;
+};
 
 // ─── Rule row in left sidebar ────────────────────────────────────────────────
 
@@ -61,12 +71,14 @@ function RuleRow({
   onClick: () => void;
   onSubRuleClick: (name: string) => void;
 }) {
-  const errors   = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
-  const warnings = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length;
-  const passed   = entry.result.issues.length === 0;
+  const activeIssues = entry.result.issues.filter(i => !i.is_ignored);
+  const errors = activeIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
+  const warnings = activeIssues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length;
+  const infos = activeIssues.filter(i => (i.category ?? '').toLowerCase() === 'info').length;
+  const passed = errors === 0 && warnings === 0;
 
   const subRuleNames = [...new Set(
-    entry.result.issues.map(i => i.rule_name).filter((n): n is string => !!n)
+    activeIssues.map(i => i.rule_name).filter((n): n is string => !!n)
   )];
 
   return (
@@ -96,8 +108,10 @@ function RuleRow({
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
           ) : errors > 0 ? (
             <XCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
-          ) : (
+          ) : warnings > 0 ? (
             <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+          ) : (
+            <Info className="w-3.5 h-3.5 text-sky-500 flex-shrink-0" />
           )}
         </div>
 
@@ -111,13 +125,18 @@ function RuleRow({
           {entry.rule_name}
         </p>
 
-        {/* Line 3: Issue counts if failed */}
+        {/* Line 3: Issue counts if failed or has info */}
         {!passed && (
           <p className="text-[10px] text-muted-foreground mt-1 leading-none font-sans opacity-75">
             {[
-              errors   > 0 && `${errors} error${errors !== 1 ? 's' : ''}`,
+              errors > 0 && `${errors} error${errors !== 1 ? 's' : ''}`,
               warnings > 0 && `${warnings} warning${warnings !== 1 ? 's' : ''}`,
             ].filter(Boolean).join(' · ')}
+          </p>
+        )}
+        {passed && infos > 0 && (
+          <p className="text-[10px] text-sky-600 dark:text-sky-400 mt-1 leading-none font-sans opacity-85">
+            {infos} info item{infos !== 1 ? 's' : ''}
           </p>
         )}
       </button>
@@ -125,8 +144,9 @@ function RuleRow({
       {subRuleNames.length > 0 && (
         <div className="ml-3 pl-2 border-l border-border/40 mt-0.5 mb-1 space-y-0.5">
           {subRuleNames.map(name => {
-            const subErrors   = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'error').length;
-            const subWarnings = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() !== 'error').length;
+            const subErrors = activeIssues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'error').length;
+            const subWarnings = activeIssues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'warning').length;
+            const subInfos = activeIssues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'info').length;
             const isSubSelected = isSelected && selectedSubRuleName === name;
             return (
               <button
@@ -144,14 +164,21 @@ function RuleRow({
                   )}>
                     {name}
                   </span>
-                  {subErrors > 0
-                    ? <XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
-                    : <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                  {subErrors > 0 ? (
+                    <XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
+                  ) : subWarnings > 0 ? (
+                    <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" />
+                  ) : subInfos > 0 ? (
+                    <Info className="w-3 h-3 text-sky-500 flex-shrink-0" />
+                  ) : (
+                    <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+                  )}
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-0.5 leading-none">
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-none font-sans opacity-75">
                   {[
-                    subErrors   > 0 && `${subErrors} error${subErrors !== 1 ? 's' : ''}`,
+                    subErrors > 0 && `${subErrors} error${subErrors !== 1 ? 's' : ''}`,
                     subWarnings > 0 && `${subWarnings} warning${subWarnings !== 1 ? 's' : ''}`,
+                    subInfos > 0 && `${subInfos} revalidate item${subInfos !== 1 ? 's' : ''}`,
                   ].filter(Boolean).join(' · ')}
                 </p>
               </button>
@@ -173,7 +200,7 @@ function DiffText({ expected, actual, type }: { expected: string; actual: string
   }
 
   const differences = diffChars(expected, actual);
-  
+
   return (
     <span className="font-mono leading-relaxed break-words">
       {differences.map((part, i) => {
@@ -195,26 +222,128 @@ function DiffText({ expected, actual, type }: { expected: string; actual: string
   );
 }
 
+const URL_PATTERN = /https?:\/\/[^\s<>"\']*|www\.[^\s<>"\']+\.[^\s<>"\']{2,}|\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|dev|store|tech|ai|online|site|xyz)\b(?:\/[^\s<>"\']*)?/i;
+
 // ─── Issue row in right panel ────────────────────────────────────────────────
 
-function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => void }) {
-  const isError = (issue.category ?? '').toLowerCase() === 'error';
+function IssueRow({
+  issue,
+  onClick,
+  onIgnore,
+  onUnignore,
+  folderName,
+  onRefresh,
+}: {
+  issue: DisplayIssue;
+  onClick?: () => void;
+  onIgnore?: (e: React.MouseEvent) => void;
+  onUnignore?: (e: React.MouseEvent) => void;
+  folderName?: string;
+  onRefresh?: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const cat = (issue.category ?? '').toLowerCase();
+  const isError = cat === 'error';
+  const isInfo = cat === 'info';
   const hasDiff = issue.expected_text || issue.actual_text;
+
+  const isCoverSizeError = issue.rule_name === 'Aspen: Cover height is 1100 pixels' || (issue.message && issue.message.includes('Cover height is'));
+
+  const handleDownloadCover = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!folderName || !issue.file_path) return;
+    const url = `/api/v2/post-prod/epub-validator/file-data/${encodeURIComponent(folderName)}/${encodeURIComponent(issue.file_path)}`;
+    window.open(url, '_blank');
+  };
+
+  const handleReplaceCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    const file = e.target.files?.[0];
+    if (!file || !folderName || !issue.file_path) return;
+
+    const reason = window.prompt("Please provide a reason for replacing this cover image (this will be logged in history):");
+    if (!reason) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('reason', reason);
+
+      const res = await fetch(`/api/v2/post-prod/epub-validator/replace-file/${encodeURIComponent(folderName)}/${encodeURIComponent(issue.file_path)}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to replace file');
+      }
+      alert('Cover image replaced successfully. Please refresh the report to see the updated status.');
+      onRefresh?.();
+    } catch (err: any) {
+      alert(`Failed to upload replacement image: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const targetUrl = useMemo(() => {
+    if (issue.href && (issue.href.startsWith('http://') || issue.href.startsWith('https://'))) {
+      return issue.href;
+    }
+    const msg = issue.message || '';
+    const match = msg.match(URL_PATTERN);
+    if (match) {
+      const raw = match[0].replace(/['",.]*$/, '');
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        return raw;
+      }
+      return `https://${raw}`;
+    }
+
+    if (issue.href && URL_PATTERN.test(issue.href)) {
+      const raw = issue.href.trim().replace(/['",.]*$/, '');
+      return raw.startsWith('http') ? raw : `https://${raw}`;
+    }
+
+    return null;
+  }, [issue.href, issue.message]);
+
+  const handleRowClick = (e: React.MouseEvent) => {
+    if ((e.shiftKey || e.metaKey || e.ctrlKey) && targetUrl) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      onClick?.();
+    }
+  };
 
   return (
     <div
-      onClick={onClick}
+      onClick={handleRowClick}
+      title={targetUrl ? 'Click to jump to line · Shift + Click (or Cmd + Click) to open URL in Chrome' : 'Click to jump to line'}
       className={cn(
         'rounded-lg border text-sm overflow-hidden shadow-xs transition-all cursor-pointer hover:shadow-md hover:border-primary/40',
         isError
           ? 'bg-red-50/80 border-red-100 dark:bg-red-950/20 dark:border-red-900/30'
-          : 'bg-amber-50/80 border-amber-100 dark:bg-amber-950/20 dark:border-amber-900/30',
+          : isInfo
+            ? 'bg-sky-50/80 border-sky-100 dark:bg-sky-950/20 dark:border-sky-900/30'
+            : 'bg-amber-50/80 border-amber-100 dark:bg-amber-950/20 dark:border-amber-900/30',
       )}
     >
       {/* Main row */}
       <div className="flex items-start gap-3 px-4 py-3">
         {isError ? (
           <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+        ) : isInfo ? (
+          <Info className="w-4 h-4 text-sky-500 flex-shrink-0 mt-0.5" />
         ) : (
           <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
         )}
@@ -228,38 +357,74 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
               )}
               <p className={cn(
                 'font-medium text-xs font-serif truncate',
-                isError ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400',
+                isError ? 'text-red-700 dark:text-red-400' : isInfo ? 'text-sky-700 dark:text-sky-400' : 'text-amber-700 dark:text-amber-400',
               )} title={issue.rule_name || issue._ruleName || issue.type}>
                 {issue.rule_name || issue._ruleName || issue.type}
               </p>
             </div>
-            {typeof issue.line_number === 'number' && (
-              <span
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors"
-                title="Click to jump to line in source code"
-              >
-                Line {issue.line_number} →
+            <div className="flex items-center gap-1.5 shrink-0">
+              {typeof issue.line_number === 'number' && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors"
+                  title="Click to jump to line in source code"
+                >
+                  Line {issue.line_number} →
+                </span>
+              )}
+              {issue.is_ignored ? (
+                <button
+                  onClick={onUnignore}
+                  className="flex items-center justify-center p-1 rounded text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                  title="Unignore issue"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  onClick={onIgnore}
+                  className="flex items-center justify-center p-1 rounded text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                  title="Ignore issue"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <span className={cn(
+                'px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border uppercase shrink-0',
+                isError
+                  ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
+                  : isInfo
+                    ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
+                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+              )}>
+                {isError ? 'ERROR' : isInfo ? 'REVALIDATE' : 'WARNING'}
               </span>
-            )}
+            </div>
           </div>
           {issue.message && (
             <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap break-all font-sans">{issue.message}</p>
           )}
-          {issue.href && (
+          {targetUrl && (
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <a
+                href={targetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-sky-500/10 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20 border border-sky-500/20 transition-colors break-all"
+                title="Click to open URL in new Chrome browser tab"
+              >
+                <span className="truncate max-w-[280px]">{targetUrl}</span>
+                <ExternalLink className="w-3 h-3 shrink-0" />
+              </a>
+            </div>
+          )}
+          {issue.href && !targetUrl && (
             <p className="text-xs font-mono text-muted-foreground mt-0.5 break-all opacity-70">{issue.href}</p>
           )}
-          <p className="text-[10px] text-muted-foreground mt-1 opacity-60 font-mono">{issue._ruleName}</p>
+          {issue._ruleName && issue._ruleName !== issue.rule_name && (
+            <p className="text-[10px] text-muted-foreground mt-1 opacity-60 font-mono">{issue._ruleName}</p>
+          )}
         </div>
-        {issue.category && (
-          <span className={cn(
-            'flex-shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded self-start',
-            isError
-              ? 'bg-red-100 text-red-600 dark:bg-red-900/40'
-              : 'bg-amber-100 text-amber-600 dark:bg-amber-900/40',
-          )}>
-            {issue.category}
-          </span>
-        )}
       </div>
 
       {/* Expected / Actual diff block */}
@@ -269,15 +434,19 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
           isError ? 'bg-red-100/50 border-red-200/60 dark:bg-red-950/40 dark:border-red-900/50' : 'bg-amber-100/50 border-amber-200/60 dark:bg-amber-950/40 dark:border-amber-900/50',
         )}>
           {issue.expected_text && (
-            <div className="px-3 py-1.5 flex items-start gap-2 border-b border-inherit">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 shrink-0 w-14 font-sans pt-0.5">Expected</span>
-              <DiffText expected={issue.expected_text} actual={issue.actual_text || ''} type="expected" />
+            <div className="px-3 py-2 flex flex-col gap-1 border-b border-inherit">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-sans">Expected</span>
+              <div className="break-all font-mono">
+                <DiffText expected={issue.expected_text} actual={issue.actual_text || ''} type="expected" />
+              </div>
             </div>
           )}
           {issue.actual_text && (
-            <div className="px-3 py-1.5 flex items-start gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 shrink-0 w-14 font-sans pt-0.5">Actual</span>
-              <DiffText expected={issue.expected_text || ''} actual={issue.actual_text} type="actual" />
+            <div className="px-3 py-2 flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 font-sans">Actual</span>
+              <div className="break-all font-mono">
+                <DiffText expected={issue.expected_text || ''} actual={issue.actual_text} type="actual" />
+              </div>
             </div>
           )}
         </div>
@@ -290,7 +459,7 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
 
 function resolveRelative(filePath: string, href: string): string {
   const base = filePath.replace(/\\/g, '/');
-  const dir  = base.includes('/') ? base.slice(0, base.lastIndexOf('/') + 1) : '';
+  const dir = base.includes('/') ? base.slice(0, base.lastIndexOf('/') + 1) : '';
   try {
     return new URL(href, `http://x/${dir}`).pathname.slice(1);
   } catch {
@@ -300,7 +469,7 @@ function resolveRelative(filePath: string, href: string): string {
 
 const getInjectedHtml = (html: string, baseUrl: string) => {
   if (!html) return '';
-  
+
   // Fix XHTML self-closing tags that break HTML parsing
   const fixedHtml = html.replace(/<(a|span|div|p|strong|em|h[1-6])\b([^>]*?)\/>/gi, '<$1$2></$1>');
 
@@ -363,7 +532,7 @@ const getInjectedHtml = (html: string, baseUrl: string) => {
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess, isRefreshingAnalysis, onRefreshAnalysis }: Props) {
+export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess, isRefreshingAnalysis, onRefreshAnalysis, onValidationDataChange }: Props) {
   const isImageFile = useMemo(() => {
     const name = (file.file_name || '').toLowerCase();
     return /\.(png|jpe?g|gif|svg|webp|bmp|ico|tif?f)$/i.test(name);
@@ -372,7 +541,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   const visibleTabs: Tab[] = isImageFile
     ? ['result']
     : (allowedTabs ?? ['result', 'preview']);
-  const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [showAnalysisSidebar, setShowAnalysisSidebar] = useState(false);
   const [showFilenamesInAnalysis, setShowFilenamesInAnalysis] = useState(false);
   const [showValidationFindings, setShowValidationFindings] = useState(true);
@@ -410,20 +579,78 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     }
   }
 
+  // ── Replace Image ─────────────────────────────────────────────────────────────
+  const [showReplaceModal, setShowReplaceModal] = useState(false);
+  const [replaceFile, setReplaceFile] = useState<File | null>(null);
+  const [replaceReason, setReplaceReason] = useState('');
+  const [isReplacing, setIsReplacing] = useState(false);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
+  const [replacementPreviewUrl, setReplacementPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (replaceFile) {
+      const url = URL.createObjectURL(replaceFile);
+      setReplacementPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setReplacementPreviewUrl(null);
+    }
+  }, [replaceFile]);
+
+  const handleDownloadImage = () => {
+    if (!folderName || !filePath) return;
+    const url = `/api/v2/post-prod/epub-validator/file-data/${encodeURIComponent(folderName)}/${encodeURIComponent(filePath)}`;
+    window.open(url, '_blank');
+  };
+
+  const [lastUploadedPreviewUrl, setLastUploadedPreviewUrl] = useState<string | null>(null);
+
+  const handleReplaceSubmit = async () => {
+    if (!replaceFile || !replaceReason || !folderName || !filePath) return;
+    setIsReplacing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', replaceFile);
+      formData.append('reason', replaceReason);
+
+      const res = await fetch(`/api/v2/post-prod/epub-validator/replace-file/${encodeURIComponent(folderName)}/${encodeURIComponent(filePath)}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to replace file');
+      }
+      
+      // Store the local URL so the image instantly updates in the UI
+      setLastUploadedPreviewUrl(URL.createObjectURL(replaceFile));
+      
+      setShowReplaceModal(false);
+      setReplaceFile(null);
+      setReplaceReason('');
+      setImageVersion(Date.now());
+    } catch (err: any) {
+      alert(`Failed to replace image: ${err.message}`);
+    } finally {
+      setIsReplacing(false);
+    }
+  };
+
   // ── Source fetch ─────────────────────────────────────────────────────────────
   const [sourceContent, setSourceContent] = useState<string | null>(null);
   const [sourceLoading, setSourceLoading] = useState(false);
-  const [sourceError, setSourceError]     = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
 
   // ── Source editing ────────────────────────────────────────────────────────────
-  const [editedContent, setEditedContent]   = useState<string | null>(null);
-  const [isSaving, setIsSaving]             = useState(false);
-  const [saveSuccess, setSaveSuccess]       = useState(false);
-  const [saveError, setSaveError]           = useState<string | null>(null);
+  const [editedContent, setEditedContent] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isDirty       = editedContent !== null && editedContent !== sourceContent;
+  const isDirty = editedContent !== null && editedContent !== sourceContent;
   const displayContent = editedContent ?? sourceContent ?? '';
 
   const handleIssueClick = (issue: DisplayIssue) => {
@@ -482,20 +709,20 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
         if (!textToFind) return;
 
         const lines = (displayContent || '').split('\n');
-        
+
         let index = lines.findIndex(line => {
-           const noTags = line.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-           if (!noTags) return false;
-           // Basic decoding for entities
-           const textArea = document.createElement('textarea');
-           textArea.innerHTML = noTags;
-           const decodedLine = textArea.value;
-           return decodedLine.includes(textToFind) || textToFind.includes(decodedLine);
+          const noTags = line.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+          if (!noTags) return false;
+          // Basic decoding for entities
+          const textArea = document.createElement('textarea');
+          textArea.innerHTML = noTags;
+          const decodedLine = textArea.value;
+          return decodedLine.includes(textToFind) || textToFind.includes(decodedLine);
         });
 
         // Fallback: search raw HTML string if not found
         if (index === -1) {
-           index = lines.findIndex(line => line.includes(textToFind));
+          index = lines.findIndex(line => line.includes(textToFind));
         }
 
         if (index !== -1 && sourceEditorRef.current) {
@@ -507,11 +734,13 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     return () => window.removeEventListener('message', handleMessage);
   }, [displayContent]);
 
+  const [imageVersion, setImageVersion] = useState(Date.now());
+
   const imageUrl = useMemo(() => {
     if (!isImageFile || !folderName || !filePath) return null;
     const encoded = encodeURIComponent(filePath.replace(/\\/g, '/'));
-    return `/api/v2/post-prod/epub-validator/file-data/${folderName}/${encoded}`;
-  }, [isImageFile, folderName, filePath]);
+    return `/api/v2/post-prod/epub-validator/file-data/${folderName}/${encoded}?v=${imageVersion}`;
+  }, [isImageFile, folderName, filePath, imageVersion]);
 
   useEffect(() => {
     if (activeTab !== 'result') return;
@@ -525,8 +754,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   }, [activeTab, folderName, filePath, sourceContent, sourceLoading]);
 
   // ── PDF page lookup ───────────────────────────────────────────────────────────
-  const [pdfPage, setPdfPage]             = useState<number | null>(null);
-  const [pdfEndPage, setPdfEndPage]       = useState<number | null>(null);
+  const [pdfPage, setPdfPage] = useState<number | null>(null);
+  const [pdfEndPage, setPdfEndPage] = useState<number | null>(null);
   const [pdfPageLoading, setPdfPageLoading] = useState(false);
 
   useEffect(() => {
@@ -540,9 +769,9 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   }, [activeTab, folderName, file.file_name, pdfPage, pdfPageLoading]);
 
   // ── Preview (rendered iframe with inlined CSS + fixed image URLs) ─────────────
-  const [previewUrl, setPreviewUrl]         = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError]     = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const previewBlobRef = useRef<string | null>(null);
 
   // Revoke blob URL on unmount
@@ -561,7 +790,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
         let html = await getFileContent(folderName, filePath);
 
         const norm = filePath.replace(/\\/g, '/');
-        const dir  = norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/') + 1) : '';
+        const dir = norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/') + 1) : '';
 
         // ── 1. Collect all CSS hrefs from <link> tags ─────────────────────
         const cssHrefs = new Set<string>();
@@ -613,36 +842,104 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   }, [activeTab, folderName, filePath, previewUrl, previewLoading]);
 
   const totalErrors = useMemo(
-    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length, 0),
+    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error' && !i.is_ignored).length, 0),
     [entries],
   );
   const totalWarnings = useMemo(
-    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length, 0),
+    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'warning' && !i.is_ignored).length, 0),
+    [entries],
+  );
+  const totalInfos = useMemo(
+    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'info' && !i.is_ignored).length, 0),
     [entries],
   );
 
-  const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning'>('all');
+  const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning' | 'info' | 'ignored'>('all');
   const [ruleNameFilter, setRuleNameFilter] = useState<string | null>(null);
 
-  const toggleIssueFilter = (f: 'error' | 'warning') =>
+  const [localIgnoredKeys, setLocalIgnoredKeys] = useState<Set<string>>(new Set());
+  const [localUnignoredKeys, setLocalUnignoredKeys] = useState<Set<string>>(new Set());
+
+  const handleIgnore = async (issue: DisplayIssue, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.extract || issue.message}|${issue.line_number ?? ''}`;
+    setLocalIgnoredKeys(prev => new Set(prev).add(key));
+    setLocalUnignoredKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+    try {
+      await ignoreIssue(folderName, {
+        rule_id: String(issue._ruleId || ''),
+        file_name: issue._fileName || '',
+        snippet: issue.snippet || issue.extract || issue.message || '',
+        line_number: issue.line_number ?? undefined,
+      });
+      onValidationDataChange?.();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUnignore = async (issue: DisplayIssue, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.extract || issue.message}|${issue.line_number ?? ''}`;
+    setLocalUnignoredKeys(prev => new Set(prev).add(key));
+    setLocalIgnoredKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+    try {
+      await unignoreIssue(folderName, {
+        rule_id: String(issue._ruleId || ''),
+        file_name: issue._fileName || '',
+        snippet: issue.snippet || issue.extract || issue.message || '',
+        line_number: issue.line_number ?? undefined,
+      });
+      onValidationDataChange?.();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const toggleIssueFilter = (f: 'error' | 'warning' | 'info' | 'ignored') =>
     setIssueFilter((prev) => (prev === f ? 'all' : f));
 
   const allIssues = useMemo<DisplayIssue[]>(() => {
+    let raw: DisplayIssue[] = [];
     if (selectedRuleId) {
-      const entry = entries.find(e => e.rule_id === selectedRuleId);
-      return (entry?.result.issues ?? []).map(i => ({ ...i, _ruleName: entry?.rule_name ?? '' }));
+      const matchingEntries = entries.filter(e => e.rule_id === selectedRuleId);
+      raw = matchingEntries.flatMap(entry =>
+        (entry.result.issues ?? []).map(i => ({
+          ...i,
+          _ruleName: entry.rule_name ?? '',
+          _ruleId: entry.rule_id ?? '',
+          _fileName: entry.file_details?.relative_path ?? entry.file_details?.file_name ?? ''
+        }))
+      );
+    } else {
+      raw = entries.flatMap(e =>
+        e.result.issues.map(i => ({
+          ...i,
+          _ruleName: e.rule_name,
+          _ruleId: e.rule_id,
+          _fileName: e.file_details?.relative_path ?? e.file_details?.file_name ?? ''
+        })),
+      );
     }
-    return entries.flatMap(e =>
-      e.result.issues.map(i => ({ ...i, _ruleName: e.rule_name })),
-    );
-  }, [entries, selectedRuleId]);
+
+    return raw.map(issue => {
+      const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.extract || issue.message}|${issue.line_number ?? ''}`;
+      if (localIgnoredKeys.has(key)) return { ...issue, is_ignored: true };
+      if (localUnignoredKeys.has(key)) return { ...issue, is_ignored: false };
+      return issue;
+    });
+  }, [entries, selectedRuleId, localIgnoredKeys, localUnignoredKeys]);
 
   const displayedIssues = useMemo<DisplayIssue[]>(() => {
     let issues = allIssues;
-    if (issueFilter === 'error')   issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'error');
-    if (issueFilter === 'warning') issues = issues.filter(i => (i.category ?? '').toLowerCase() !== 'error');
-    if (ruleNameFilter)            issues = issues.filter(i => i.rule_name === ruleNameFilter);
-    
+    if (issueFilter === 'ignored') issues = issues.filter(i => i.is_ignored);
+    else if (issueFilter === 'error') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'error' && !i.is_ignored);
+    else if (issueFilter === 'warning') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'warning' && !i.is_ignored);
+    else if (issueFilter === 'info') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'info' && !i.is_ignored);
+    else issues = issues.filter(i => !i.is_ignored);
+
+    if (ruleNameFilter) issues = issues.filter(i => i._ruleName === ruleNameFilter || i.rule_name === ruleNameFilter);
+
     if (sortOrder === 'line') {
       issues = [...issues].sort((a, b) => {
         const lineA = a.line_number ?? 0;
@@ -650,12 +947,14 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
         return lineA - lineB;
       });
     }
-    
+
     return issues;
   }, [allIssues, issueFilter, ruleNameFilter, sortOrder]);
 
-  const errorCount   = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length,   [allIssues]);
-  const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length, [allIssues]);
+  const errorCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error' && !i.is_ignored).length, [allIssues]);
+  const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'warning' && !i.is_ignored).length, [allIssues]);
+  const infoCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'info' && !i.is_ignored).length, [allIssues]);
+  const ignoredCount = useMemo(() => allIssues.filter(i => i.is_ignored).length, [allIssues]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -715,13 +1014,16 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
               <p className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap font-sans">
                 Validation session
                 {totalErrors > 0 && (
-                  <span className="text-red-500">· {totalErrors} error{totalErrors !== 1 ? 's' : ''}</span>
+                  <span className="text-red-500 font-medium">· {totalErrors} error{totalErrors !== 1 ? 's' : ''}</span>
                 )}
                 {totalWarnings > 0 && (
-                  <span className="text-amber-500">· {totalWarnings} warning{totalWarnings !== 1 ? 's' : ''}</span>
+                  <span className="text-amber-500 font-medium">· {totalWarnings} warning{totalWarnings !== 1 ? 's' : ''}</span>
+                )}
+                {totalInfos > 0 && (
+                  <span className="text-sky-500 font-medium">· {totalInfos} revalidate</span>
                 )}
                 {totalErrors === 0 && totalWarnings === 0 && entries.length > 0 && (
-                  <span className="text-emerald-500">· all passed</span>
+                  <span className="text-emerald-500 font-medium">· all passed</span>
                 )}
               </p>
             </div>
@@ -768,7 +1070,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                 disabled={isRevalidating}
               >
                 <RotateCw className={cn('w-3.5 h-3.5 shrink-0', isRevalidating && 'animate-spin')} />
-                <span>{isRevalidating ? 'Validating…' : 'Revalidate'}</span>
+                <span>{isRevalidating ? 'Validating…' : 'Validate'}</span>
               </button>
             )}
             <Button variant="ghost" size="sm" onClick={handleClose} className="ml-1 p-1 h-8 w-8 rounded-md">
@@ -848,91 +1150,91 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
 
           {/* Left sidebar — only on Validation Result tab */}
           {activeTab === 'result' && (
-          <div className="w-56 flex-shrink-0 border-r border-border flex flex-col">
-            <div className="px-3 pt-3 pb-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-2">
-                Validation Rules
-              </p>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
-              {/* All-issues shortcut */}
-              <button
-                onClick={() => { setSelectedRule(null); setRuleNameFilter(null); }}
-                className={cn(
-                  'w-full text-left px-3 py-2 rounded-lg transition-colors text-xs font-semibold font-serif',
-                  selectedRuleId === null
-                    ? 'bg-primary/10 text-primary'
-                    : 'hover:bg-muted text-muted-foreground',
-                )}
-              >
-                All issues
-                {(totalErrors + totalWarnings) > 0 && (
-                  <span className="ml-1 text-[10px] opacity-70 font-mono">({totalErrors + totalWarnings})</span>
-                )}
-              </button>
-
-              {entries.length === 0 ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground/60 italic font-sans">
-                  No validation data yet.
+            <div className="w-56 flex-shrink-0 border-r border-border flex flex-col">
+              <div className="px-3 pt-3 pb-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-2">
+                  Validation Rules
                 </p>
-              ) : (
-                (() => {
-                  // v2 responses tag each entry with origin. If none of the entries
-                  // carry the tag we're on legacy — render as a flat list.
-                  const hasOrigin = entries.some((e) => e.origin !== undefined);
-                  if (!hasOrigin) {
-                    return entries.map((entry) => (
-                      <RuleRow
-                        key={`${entry.rule_id}-${entry.file_details.file_name}`}
-                        entry={entry}
-                        isSelected={selectedRuleId === entry.rule_id}
-                        selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
-                        onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
-                        onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
-                      />
-                    ));
-                  }
-                  const generalEntries = entries.filter((e) => e.origin !== 'customer');
-                  const customerEntries = entries.filter((e) => e.origin === 'customer');
-                  const customerLabel = customerEntries[0]?.customer
-                    ? `${customerEntries[0].customer!.charAt(0).toUpperCase()}${customerEntries[0].customer!.slice(1)} Rules`
-                    : 'Customer Rules';
-                  const renderEntries = (list: ValidationFileEntry[]) =>
-                    list.map((entry) => (
-                      <RuleRow
-                        key={`${entry.rule_id}-${entry.file_details.file_name}`}
-                        entry={entry}
-                        isSelected={selectedRuleId === entry.rule_id}
-                        selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
-                        onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
-                        onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
-                      />
-                    ));
-                  return (
-                    <>
-                      {generalEntries.length > 0 && (
-                        <>
-                          <p className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
-                            General
-                          </p>
-                          {renderEntries(generalEntries)}
-                        </>
-                      )}
-                      {customerEntries.length > 0 && (
-                        <>
-                          <p className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-primary/80">
-                            {customerLabel}
-                          </p>
-                          {renderEntries(customerEntries)}
-                        </>
-                      )}
-                    </>
-                  );
-                })()
-              )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
+                {/* All-issues shortcut */}
+                <button
+                  onClick={() => { setSelectedRule(null); setRuleNameFilter(null); }}
+                  className={cn(
+                    'w-full text-left px-3 py-2 rounded-lg transition-colors text-xs font-semibold font-serif',
+                    selectedRuleId === null
+                      ? 'bg-primary/10 text-primary'
+                      : 'hover:bg-muted text-muted-foreground',
+                  )}
+                >
+                  All issues
+                  {(totalErrors + totalWarnings + totalInfos) > 0 && (
+                    <span className="ml-1 text-[10px] opacity-70 font-mono">({totalErrors + totalWarnings + totalInfos})</span>
+                  )}
+                </button>
+
+                {entries.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-muted-foreground/60 italic font-sans">
+                    No validation data yet.
+                  </p>
+                ) : (
+                  (() => {
+                    // v2 responses tag each entry with origin. If none of the entries
+                    // carry the tag we're on legacy — render as a flat list.
+                    const hasOrigin = entries.some((e) => e.origin !== undefined);
+                    if (!hasOrigin) {
+                      return entries.map((entry) => (
+                        <RuleRow
+                          key={`${entry.rule_id}-${entry.file_details.file_name}`}
+                          entry={entry}
+                          isSelected={selectedRuleId === entry.rule_id}
+                          selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                          onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                          onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
+                        />
+                      ));
+                    }
+                    const generalEntries = entries.filter((e) => e.origin !== 'customer');
+                    const customerEntries = entries.filter((e) => e.origin === 'customer');
+                    const customerLabel = customerEntries[0]?.customer
+                      ? `${customerEntries[0].customer!.charAt(0).toUpperCase()}${customerEntries[0].customer!.slice(1)} Rules`
+                      : 'Customer Rules';
+                    const renderEntries = (list: ValidationFileEntry[]) =>
+                      list.map((entry) => (
+                        <RuleRow
+                          key={`${entry.rule_id}-${entry.file_details.file_name}`}
+                          entry={entry}
+                          isSelected={selectedRuleId === entry.rule_id}
+                          selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                          onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                          onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
+                        />
+                      ));
+                    return (
+                      <>
+                        {generalEntries.length > 0 && (
+                          <>
+                            <p className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                              General
+                            </p>
+                            {renderEntries(generalEntries)}
+                          </>
+                        )}
+                        {customerEntries.length > 0 && (
+                          <>
+                            <p className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-primary/80">
+                              {customerLabel}
+                            </p>
+                            {renderEntries(customerEntries)}
+                          </>
+                        )}
+                      </>
+                    );
+                  })()
+                )}
+              </div>
             </div>
-          </div>
           )}
 
           {/* Right panel */}
@@ -952,7 +1254,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                 >
                   {tab === 'result' ? (<>Validation Result{isDirty && <span className="ml-1 text-amber-500">●</span>}</>)
                     : tab === 'preview' ? 'Preview'
-                    : 'PDF'}
+                      : 'PDF'}
                 </button>
               ))}
             </div>
@@ -969,106 +1271,133 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                     transition={{ duration: 0.12 }}
                     className="h-full flex overflow-hidden font-sans"
                   >
-                      {/* Left Column: Validation Findings List for ALL files */}
-                      {showValidationFindings && (
-                        <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
-                          <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
+                    {/* Left Column: Validation Findings List for ALL files */}
+                    {showValidationFindings && (
+                      <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
+                        <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex flex-col gap-2 shrink-0 font-sans">
+                          {/* Row 1: Validation Findings Title, Sort Toggle & Close Icon */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider truncate">
                                 Validation Findings ({displayedIssues.length})
                               </span>
-                              <button 
-                                onClick={() => setShowValidationFindings(false)}
-                                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
-                                title="Hide Findings"
+                              <button
+                                onClick={() => setSortOrder(prev => prev === 'rule' ? 'line' : 'rule')}
+                                className={cn(
+                                  'px-2 py-0.5 rounded text-[10px] font-bold border transition-all flex items-center gap-1 shrink-0',
+                                  sortOrder === 'line'
+                                    ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                                    : 'bg-background text-muted-foreground border-border hover:bg-muted'
+                                )}
+                                title="Toggle Sort Order"
                               >
-                                <PanelLeftClose className="w-4 h-4" />
+                                <ArrowUpDown className="w-3 h-3" />
+                                {sortOrder === 'rule' ? 'Sort: Rule' : 'Sort: Line'}
                               </button>
                             </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => setSortOrder(prev => prev === 'rule' ? 'line' : 'rule')}
-                            className={cn(
-                              'px-2 py-0.5 rounded text-[10px] font-bold border transition-all flex items-center gap-1',
-                              sortOrder === 'line'
-                                ? 'bg-primary text-primary-foreground border-primary'
-                                : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'
-                            )}
-                            title="Toggle Sort Order"
-                          >
-                            <ArrowUpDown className="w-3 h-3" />
-                            {sortOrder === 'rule' ? 'Sort: Rule' : 'Sort: Line'}
-                          </button>
-                          <button
-                            onClick={() => toggleIssueFilter('error')}
-                            className={cn(
-                              'px-2 py-0.5 rounded text-[10px] font-bold border transition-all',
-                              issueFilter === 'error'
-                                ? 'bg-red-500 text-white border-red-500'
-                                : 'bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20',
-                            )}
-                          >
-                            Errors ({errorCount})
-                          </button>
-                          <button
-                            onClick={() => toggleIssueFilter('warning')}
-                            className={cn(
-                              'px-2 py-0.5 rounded text-[10px] font-bold border transition-all',
-                              issueFilter === 'warning'
-                                ? 'bg-amber-500 text-white border-amber-500'
-                                : 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20',
-                            )}
-                          >
-                            Warnings ({warningCount})
-                          </button>
-                        </div>
-                      </div>
+                            <button
+                              onClick={() => setShowValidationFindings(false)}
+                              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted shrink-0"
+                              title="Hide Findings"
+                            >
+                              <PanelLeftClose className="w-4 h-4" />
+                            </button>
+                          </div>
 
-                      {/* Selected Rule Banner Info Card */}
-                      {(() => {
-                        const activeEntry = entries.find(e => e.rule_id === selectedRuleId);
-                        if (!activeEntry) return null;
-                        const isPass = activeEntry.result.issues.length === 0;
-                        return (
-                          <div className="px-3.5 py-2.5 bg-card border-b border-border shadow-xs">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                {activeEntry.rule_id && (
-                                  <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
-                                    {activeEntry.rule_id}
+                          {/* Row 2: Category Filter Buttons (Full Width 4-Column Grid) */}
+                          <div className="grid grid-cols-4 gap-1.5 w-full">
+                            <button
+                              onClick={() => toggleIssueFilter('error')}
+                              className={cn(
+                                'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                issueFilter === 'error'
+                                  ? 'bg-red-500 text-white border-red-500 shadow-xs'
+                                  : 'bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20',
+                              )}
+                            >
+                              Errors ({errorCount})
+                            </button>
+                            <button
+                              onClick={() => toggleIssueFilter('warning')}
+                              className={cn(
+                                'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                issueFilter === 'warning'
+                                  ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                                  : 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20',
+                              )}
+                            >
+                              Warnings ({warningCount})
+                            </button>
+                            <button
+                              onClick={() => toggleIssueFilter('info')}
+                              className={cn(
+                                'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                issueFilter === 'info'
+                                  ? 'bg-sky-500 text-white border-sky-500 shadow-xs'
+                                  : 'bg-sky-500/10 text-sky-600 border-sky-500/20 hover:bg-sky-500/20',
+                              )}
+                            >
+                              Revalidate ({infoCount})
+                            </button>
+                            <button
+                              onClick={() => toggleIssueFilter('ignored')}
+                              className={cn(
+                                'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                issueFilter === 'ignored'
+                                  ? 'bg-slate-500 text-white border-slate-500 shadow-xs'
+                                  : 'bg-slate-500/10 text-slate-600 border-slate-500/20 hover:bg-slate-500/20 dark:bg-slate-400/10 dark:text-slate-400 dark:border-slate-400/20',
+                              )}
+                            >
+                              Ignored ({ignoredCount})
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Selected Rule Banner Info Card */}
+                        {(() => {
+                          const activeEntry = entries.find(e => e.rule_id === selectedRuleId);
+                          if (!activeEntry) return null;
+                          const isPass = displayedIssues.length === 0;
+                          return (
+                            <div className="px-3.5 py-2.5 bg-card border-b border-border shadow-xs">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  {activeEntry.rule_id && (
+                                    <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
+                                      {activeEntry.rule_id}
+                                    </span>
+                                  )}
+                                  <span className="text-xs font-bold text-foreground font-serif truncate" title={activeEntry.rule_name}>
+                                    {activeEntry.rule_name}
+                                  </span>
+                                </div>
+                                {isPass ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+                                    Passed <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20 shrink-0">
+                                    {displayedIssues.length} issue{displayedIssues.length !== 1 ? 's' : ''}
                                   </span>
                                 )}
-                                <span className="text-xs font-bold text-foreground font-serif truncate" title={activeEntry.rule_name}>
-                                  {activeEntry.rule_name}
-                                </span>
                               </div>
-                              {isPass ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
-                                  Passed <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20 shrink-0">
-                                  {displayedIssues.length} issue{displayedIssues.length !== 1 ? 's' : ''}
-                                </span>
-                              )}
                             </div>
-                          </div>
-                        );
-                      })()}
+                          );
+                        })()}
 
-                      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                        {displayedIssues.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-                            <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
-                            <p className="text-xs font-semibold text-foreground font-serif">No issues found</p>
-                            <p className="text-[11px] text-muted-foreground mt-1">All validation checks passed for this file.</p>
-                          </div>
-                        ) : (
-                          displayedIssues.map((issue, i) => (
-                            <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} />
-                          ))
-                        )}
-                      </div>
+                        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                          {displayedIssues.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                              <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
+                              <p className="text-xs font-semibold text-foreground font-serif">No issues found</p>
+                              <p className="text-[11px] text-muted-foreground mt-1">All validation checks passed for this file.</p>
+                            </div>
+                          ) : (
+                            displayedIssues.map((issue, i) => (
+                              <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} onIgnore={(e) => handleIgnore(issue, e)} onUnignore={(e) => handleUnignore(issue, e)} folderName={folderName} onRefresh={onRevalidate} />
+                            ))
+                          )}
+                        </div>
                       </div>
                     )}
 
@@ -1088,14 +1417,45 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                           <span className="font-semibold text-foreground truncate">{filePath}</span>
                         </div>
                         <div className="flex items-center gap-3">
+                          {isImageFile && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setLastUploadedPreviewUrl(null);
+                                  setImageVersion(Date.now());
+                                }}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted"
+                                title="Refresh Image"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Refresh</span>
+                              </button>
+                              <button
+                                onClick={handleDownloadImage}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted"
+                                title="Download Image"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Download</span>
+                              </button>
+                              <button
+                                onClick={() => setShowReplaceModal(true)}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
+                                title="Replace Image"
+                              >
+                                <Upload className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Replace</span>
+                              </button>
+                            </>
+                          )}
                           {!isImageFile && isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
                           {!isImageFile && (
                             <button
                               onClick={() => setShowHtmlPreview(!showHtmlPreview)}
                               className={cn(
                                 "flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent",
-                                showHtmlPreview 
-                                  ? "bg-primary/10 text-primary border-primary/20" 
+                                showHtmlPreview
+                                  ? "bg-primary/10 text-primary border-primary/20"
                                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
                               )}
                               title="Toggle HTML Preview"
@@ -1109,8 +1469,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                               onClick={() => setShowAnalysisSidebar(!showAnalysisSidebar)}
                               className={cn(
                                 "flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent",
-                                showAnalysisSidebar 
-                                  ? "bg-primary/10 text-primary border-primary/20" 
+                                showAnalysisSidebar
+                                  ? "bg-primary/10 text-primary border-primary/20"
                                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
                               )}
                               title="Toggle Analysis Report"
@@ -1126,11 +1486,12 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                         <div className="flex-1 overflow-hidden relative">
                           {isImageFile ? (
                             <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 overflow-auto">
-                              {imageUrl ? (
+                              {imageUrl || replacementPreviewUrl ? (
                                 <div className="flex flex-col items-center justify-center gap-3.5 max-w-full">
                                   <div className="p-3 rounded-2xl bg-card border border-border shadow-sm max-w-full overflow-hidden flex items-center justify-center bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px]">
                                     <img
-                                      src={imageUrl}
+                                      key={`img-${imageVersion}`}
+                                      src={lastUploadedPreviewUrl || replacementPreviewUrl || imageUrl || ''}
                                       alt={file.file_name}
                                       className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-xs"
                                       onError={(e) => {
@@ -1200,7 +1561,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                 <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
                                   HTML Preview
                                 </span>
-                                <button 
+                                <button
                                   onClick={() => setShowHtmlPreview(false)}
                                   className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
                                   title="Close Preview"
@@ -1209,9 +1570,9 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                 </button>
                               </div>
                               <div className="flex-1 bg-white dark:bg-zinc-100 overflow-hidden relative">
-                                <iframe 
+                                <iframe
                                   ref={iframeRef}
-                                  srcDoc={getInjectedHtml(displayContent, baseUrl)} 
+                                  srcDoc={getInjectedHtml(displayContent, baseUrl)}
                                   className="w-full h-full border-none absolute inset-0"
                                   sandbox="allow-same-origin allow-scripts"
                                   title="HTML Preview"
@@ -1237,8 +1598,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                     Analysis
                                   </h3>
                                   <div className="flex items-center gap-1">
-                                    <button 
-                                      onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                    <button
+                                      onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)}
                                       className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
                                       title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
                                     >
@@ -1508,7 +1869,157 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* ── Image Replace Modal ─────────────────────────────────────────────── */}
+        <ImageReplaceModal
+          isOpen={showReplaceModal}
+          onClose={() => setShowReplaceModal(false)}
+          folderName={folderName}
+          filePath={filePath}
+          onSuccess={() => {
+            // Update the cache-busting key so the image instantly refreshes
+            setImageVersion(Date.now());
+          }}
+        />
       </motion.div>
+    </div>
+  );
+}
+
+// ── Image Replace Modal Component ─────────────────────────────────────────────
+
+function ImageReplaceModal({
+  isOpen,
+  onClose,
+  folderName,
+  filePath,
+  onSuccess,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  folderName: string;
+  filePath: string;
+  onSuccess: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [reason, setReason] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  if (!isOpen) return null;
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile && droppedFile.type.startsWith('image/')) {
+      setFile(droppedFile);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) setFile(selectedFile);
+  };
+
+  const handleSubmit = async () => {
+    if (!file || !reason) return;
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('reason', reason);
+
+      const res = await fetch(`/api/v2/post-prod/epub-validator/replace-file/${encodeURIComponent(folderName)}/${encodeURIComponent(filePath)}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to replace file');
+      }
+      onSuccess();
+      onClose();
+      setFile(null);
+      setReason('');
+    } catch (err: any) {
+      alert(`Failed to upload replacement image: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+      <div className="bg-background rounded-[14px] shadow-2xl w-full max-w-[500px] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="px-6 pt-6 pb-4">
+          <div className="flex items-start justify-between mb-1">
+            <h2 className="font-bold text-2xl text-foreground tracking-tight">Replace Image</h2>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors rounded-full focus:outline-none">
+              <div className="border-[1.5px] border-current rounded-full p-0.5">
+                <X className="w-4 h-4" strokeWidth={2.5} />
+              </div>
+            </button>
+          </div>
+          <p className="text-[13px] text-muted-foreground">Upload a new image to replace the current one</p>
+        </div>
+        
+        <div className="px-6">
+          <div className="h-[1px] w-full bg-border"></div>
+        </div>
+        
+        <div className="p-6 flex flex-col gap-6">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+              UPLOAD IMAGE FILE
+            </label>
+            <div
+              className={cn(
+                "border-[1.5px] border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all duration-200",
+                file 
+                  ? "border-primary bg-primary/5" 
+                  : "border-border hover:border-primary hover:bg-accent/50"
+              )}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+              <Upload className={cn("w-6 h-6 mb-3", file ? "text-primary" : "text-muted-foreground")} strokeWidth={1.5} />
+              {file ? (
+                <div className="text-center">
+                  <span className="text-[15px] font-bold text-foreground">{file.name}</span>
+                  <p className="text-[13px] text-muted-foreground mt-1">Click or drag to change file</p>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <p className="text-[15px] font-bold text-foreground">Click to choose Image File</p>
+                  <p className="text-[13px] text-muted-foreground mt-1">Supports .jpg, .png, .webp files</p>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+              REASON FOR REPLACEMENT <span className="text-destructive opacity-70">(REQUIRED)</span>
+            </label>
+            <textarea
+              className="w-full text-[14px] p-3 rounded-lg border border-input bg-background resize-none h-[88px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+              placeholder="e.g. Fixed cover height issue..."
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+        </div>
+        
+        <div className="px-6 py-5 flex justify-end gap-3 pt-2">
+          <Button variant="outline" className="px-5 shadow-sm rounded-lg text-foreground font-semibold h-10 hover:bg-accent" onClick={onClose} disabled={isUploading}>
+            Cancel
+          </Button>
+          <Button className="px-5 shadow-sm rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-10 border-none disabled:opacity-50" onClick={handleSubmit} disabled={!file || !reason.trim() || isUploading}>
+            {isUploading ? 'Replacing...' : 'Replace Image'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

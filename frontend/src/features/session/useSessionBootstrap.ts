@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getApiErrorMessage } from "@/api/client";
 import { getSession } from "@/api/session";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useUsersStore } from "@/stores/usersStore";
 
 export function useSessionBootstrap() {
   const setLoading = useSessionStore((state) => state.setLoading);
@@ -39,6 +40,7 @@ export function useSessionBootstrap() {
 
     if (query.data?.authenticated) {
       setAuthenticated(query.data);
+      useUsersStore.getState().fetchUsers();
       return;
     }
 

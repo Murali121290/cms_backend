@@ -20,6 +20,7 @@ def validate_epub(
     folder_name: str,
     target_file: str | None = None,
     customer: str | None = None,
+    category: str | None = None,
     progress_callback=None,
 ) -> dict:
     """Run general rules and (if a customer is detected/provided) the customer's
@@ -50,12 +51,20 @@ def validate_epub(
     def _count_active(rules: list[dict]) -> int:
         return len([r for r in rules if r.get("enabled", True) and registry.get(r["id"])])
 
+    customer_config = loader.load_customer_config(resolved_customer) if resolved_customer else {}
     customer_rules = loader.load_customer(resolved_customer) if resolved_customer else []
+    
+    if customer_config and "category_order" in customer_config:
+        report["category_order"] = customer_config["category_order"]
     
     if customer_rules:
         general_rules = []
     else:
         general_rules = loader.load_general()
+        
+    if category:
+        customer_rules = [r for r in customer_rules if r.get("category") == category]
+        general_rules = [r for r in general_rules if r.get("category") == category]
         
     grand_total = _count_active(general_rules) + _count_active(customer_rules)
     global_index = [0]  # mutable counter shared across both _run calls
@@ -96,6 +105,7 @@ def validate_epub(
         return {
             "rule_id": rule["id"],
             "rule_name": rule["name"],
+            "category": rule.get("category", "General Check"),
             "function": function.__name__,
             "target_path": target_path,
             "file_pattern": file_pattern,

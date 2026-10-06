@@ -39,6 +39,7 @@ from .services.ace_service import (
 from .services.epubcheck_service import (
     run_epubcheck_report,
     get_cached_epubcheck_report,
+    generate_epubcheck_txt_report,
 )
 from .services.summary_service import extract_epub_summary
 
@@ -146,7 +147,7 @@ async def create_project(
         epub_path=result["epub_extract_path"],
         total_files=result.get("total_files", 0),
         user_id=user.id if user else None,
-        eisbn=eisbn,
+        eisbn=result.get("eisbn_extracted") or eisbn,
         copyright_year=copyright_year,
     )
     return {"message": "Project created successfully", "project": project}
@@ -205,6 +206,21 @@ def delete_project(
             print(f"Failed to delete directory {folder_path}: {e}")
 
     return {"status": True, "message": "Project deleted"}
+
+
+@router.get("/categories")
+def get_available_categories(customer: str = Query(None, description="Customer code to fetch rules for")):
+    """Return a list of unique rule categories available for the given customer (plus general rules)."""
+    from .engine import loader
+    general_rules = loader.load_general()
+    customer_rules = loader.load_customer(customer) if customer else []
+    
+    categories = set()
+    for rule in general_rules + customer_rules:
+        if rule.get("enabled", True):
+            categories.add(rule.get("category", "General Check"))
+            
+    return {"status": True, "categories": sorted(list(categories))}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -267,6 +283,58 @@ async def save_file_content(
     return {"status": True, "message": "File saved"}
 
 
+@router.post("/replace-file/{folder_name}/{file_path:path}")
+async def replace_file_content(
+    folder_name: str,
+    file_path: str,
+    file: UploadFile = File(...),
+    reason: str = Form(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    from .models import EvProject, EvHistory
+    
+    project = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base = (Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / "epub").resolve()
+    target = (base / file_path).resolve()
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Original file not found")
+        
+    content = await file.read()
+    await asyncio.to_thread(target.write_bytes, content)
+    
+    # Record history
+    history = EvHistory(
+        project_id=project.id,
+        changed_by_id=user.id,
+        changed_by_username=user.username,
+        result_type="file_replacement",
+        reason=f"Replaced {file_path}: {reason}"
+    )
+    db.add(history)
+    db.commit()
+    
+    # Repack extracted files into .epub zip and save to output directory
+    try:
+        from .services.repack_service import repack_epub
+        await asyncio.to_thread(repack_epub, folder_name)
+    except Exception:
+        pass
+        
+    # Clear the summary cache so it regenerates on next read
+    cache_path = (Path(UPLOAD_DIR) / folder_name / "summary_cache.json").resolve()
+    if cache_path.exists():
+        try:
+            cache_path.unlink()
+        except Exception:
+            pass
+
+    return {"status": True, "message": "File replaced"}
 @router.post("/file-data/{folder_name}/{file_path:path}/rename")
 async def rename_file_content(
     folder_name: str,
@@ -453,6 +521,18 @@ def get_epubcheck_report_route(folder_name: str):
     return {"status": True, "report": report}
 
 
+@router.get("/epubcheck/{folder_name}/download-log")
+def download_epubcheck_log_route(folder_name: str, db: Session = Depends(get_db)):
+    txt_content, download_filename, _ = generate_epubcheck_txt_report(folder_name, db)
+    return Response(
+        content=txt_content,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_filename}"'
+        },
+    )
+
+
 @router.post("/epubcheck/{folder_name}")
 async def run_epubcheck_report_route(
     folder_name: str,
@@ -468,6 +548,7 @@ async def start_validation(
     filename: str,
     file: str = Query(None),
     customer: str = Query(None, description="Override customer / client_code"),
+    category: str = Query(None, description="Category of rules to validate"),
     db: Session = Depends(get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -495,6 +576,7 @@ async def start_validation(
         epub_folder=epub_folder,
         target_file=file,
         customer=resolved_customer,
+        category=category,
         user_id=user_id,
         username=username,
     )
@@ -558,7 +640,42 @@ def get_latest_validation(
     run = ev_projects_db.get_latest_validation_run(db, filename)
     if not run:
         return {"status": False, "message": "No validation run history found."}
+    
+    # Flag ignored issues in the stored result
+    run = _flag_ignored_issues(filename, run)
     return run
+
+def _flag_ignored_issues(folder_name: str, validation_result: dict) -> dict:
+    import json
+    import os
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+    ignored_file = os.path.join(UPLOAD_DIR, folder_name, "ignored_issues.json")
+    ignored_set = set()
+    if os.path.exists(ignored_file):
+        try:
+            with open(ignored_file, 'r', encoding='utf-8') as f:
+                ignored_list = json.load(f)
+                for item in ignored_list:
+                    key = f"{item.get('rule_id')}|{item.get('file_name')}|{item.get('snippet')}|{item.get('line_number', '')}"
+                    ignored_set.add(key)
+        except Exception:
+            pass
+
+    files = validation_result.get("files", [])
+    for file_entry in files:
+        rule_id = file_entry.get("rule_id")
+        file_details = file_entry.get("file_details", {})
+        file_name = file_details.get("relative_path") or file_details.get("file_name")
+        
+        issues = file_entry.get("result", {}).get("issues", [])
+        for issue in issues:
+            key = f"{rule_id}|{file_name}|{issue.get('snippet') or issue.get('extract') or issue.get('message')}|{issue.get('line_number', '')}"
+            if key in ignored_set:
+                issue["is_ignored"] = True
+            else:
+                issue["is_ignored"] = False
+            
+    return validation_result
 
 
 @router.get("/validate/{filename}")
@@ -601,8 +718,80 @@ async def validate_file(
             )
             ev_projects_db.update_project_status(db, filename, "completed", error=None)
 
+    # Flag ignored issues before returning
+    if isinstance(result, dict):
+        result = _flag_ignored_issues(filename, result)
+
     return {"status": True, "result": result}
 
+
+class IgnoreIssueRequest(BaseModel):
+    rule_id: str
+    file_name: str
+    snippet: str
+    line_number: Optional[int] = None
+
+@router.post("/projects/{folder_name}/ignore_issue")
+def ignore_issue(folder_name: str, payload: IgnoreIssueRequest):
+    import json
+    import os
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+    ignored_file = os.path.join(UPLOAD_DIR, folder_name, "ignored_issues.json")
+    
+    ignored_list = []
+    if os.path.exists(ignored_file):
+        try:
+            with open(ignored_file, 'r', encoding='utf-8') as f:
+                ignored_list = json.load(f)
+        except Exception:
+            pass
+            
+    for item in ignored_list:
+        if item.get("rule_id") == payload.rule_id and \
+           item.get("file_name") == payload.file_name and \
+           item.get("snippet") == payload.snippet and \
+           item.get("line_number") == payload.line_number:
+            return {"status": True, "message": "Already ignored"}
+            
+    ignored_list.append(payload.model_dump())
+    
+    os.makedirs(os.path.dirname(ignored_file), exist_ok=True)
+    with open(ignored_file, 'w', encoding='utf-8') as f:
+        json.dump(ignored_list, f, indent=2)
+        
+    return {"status": True, "message": "Issue ignored"}
+
+
+@router.post("/projects/{folder_name}/unignore_issue")
+def unignore_issue(folder_name: str, payload: IgnoreIssueRequest):
+    import json
+    import os
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+    ignored_file = os.path.join(UPLOAD_DIR, folder_name, "ignored_issues.json")
+    
+    if not os.path.exists(ignored_file):
+        return {"status": True, "message": "Nothing to unignore"}
+        
+    try:
+        with open(ignored_file, 'r', encoding='utf-8') as f:
+            ignored_list = json.load(f)
+    except Exception:
+        ignored_list = []
+        
+    print("UNIGNORE PAYLOAD:", payload.dict())
+    print("CURRENT IGNORED LIST:", ignored_list)
+        
+    new_list = [item for item in ignored_list if not (
+        item.get("rule_id") == payload.rule_id and 
+        item.get("file_name") == payload.file_name and 
+        item.get("snippet") == payload.snippet and
+        item.get("line_number") == payload.line_number
+    )]
+    
+    with open(ignored_file, 'w', encoding='utf-8') as f:
+        json.dump(new_list, f, indent=2)
+        
+    return {"status": True, "message": "Issue unignored"}
 
 @router.post("/export/{folder_name}")
 async def export_epub(
@@ -630,16 +819,18 @@ async def export_epub(
     if not epub_dir.is_dir():
         raise HTTPException(status_code=404, detail="EPUB source directory not found.")
 
-    # Get export filename based on customer configuration
+    # Base name for filenames (eISBN > project_name > folder_name)
     project = ev_projects_db.get_project_by_folder(db, folder_name)
-    if project and project.eisbn:
-        filename = f"{project.eisbn}_EPUB.epub"
-    elif project and project.project_name:
-        filename = f"{project.project_name}_EPUB.epub"
+    if project and project.eisbn and project.eisbn.strip():
+        base_name = project.eisbn.strip()
+    elif project and project.project_name and project.project_name.strip():
+        base_name = project.project_name.strip()
     else:
-        filename = f"{folder_name}_EPUB.epub"
+        base_name = folder_name
 
-    def _build_zip() -> bytes:
+    epub_filename = f"{base_name}_EPUB.epub"
+
+    def _build_epub_zip() -> bytes:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             mimetype_path = epub_dir / "mimetype"
@@ -658,11 +849,62 @@ async def export_epub(
                     )
         return buf.getvalue()
 
-    zip_bytes = await asyncio.to_thread(_build_zip)
+    epub_bytes = await asyncio.to_thread(_build_epub_zip)
+
+    # Check for ACE validation zip
+    ace_bytes: Optional[bytes] = None
+    ace_filename: Optional[str] = None
+    try:
+        ace_h_dir = ace_html_report_dir(folder_name)
+        if ace_h_dir.is_dir():
+            ace_zip_path = get_ace_report_zip_path(folder_name)
+            if ace_zip_path.is_file():
+                ace_bytes = ace_zip_path.read_bytes()
+                ace_filename = f"{base_name}-ace-report.zip"
+    except Exception:
+        pass
+
+    # Check for EPUBCheck .txt log file
+    txt_bytes: Optional[bytes] = None
+    txt_filename: Optional[str] = None
+    try:
+        cached_epubcheck = get_cached_epubcheck_report(folder_name)
+        if cached_epubcheck and cached_epubcheck.get("status") != "fatal":
+            txt_content, txt_fn, _ = generate_epubcheck_txt_report(folder_name, db)
+            txt_bytes = txt_content.encode("utf-8")
+            txt_filename = txt_fn
+    except Exception:
+        pass
+
+    # If neither ACE nor EPUBCheck reports exist, return ONLY the final .epub file
+    if not ace_bytes and not txt_bytes:
+        return Response(
+            content=epub_bytes,
+            media_type="application/epub+zip",
+            headers={"Content-Disposition": f'attachment; filename="{epub_filename}"'},
+        )
+
+    # If ACE or EPUBCheck reports exist, return a ZIP bundle containing EPUB + validation reports
+    bundle_filename = f"{base_name}_EPUB_package.zip"
+
+    def _build_bundle_zip() -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # 1. Final EPUB file
+            zf.writestr(epub_filename, epub_bytes)
+            # 2. ACE validation ZIP (if present)
+            if ace_bytes and ace_filename:
+                zf.writestr(ace_filename, ace_bytes)
+            # 3. EPUBCheck log .txt (if present)
+            if txt_bytes and txt_filename:
+                zf.writestr(txt_filename, txt_bytes)
+        return buf.getvalue()
+
+    bundle_zip_bytes = await asyncio.to_thread(_build_bundle_zip)
     return Response(
-        content=zip_bytes,
-        media_type="application/epub+zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        content=bundle_zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{bundle_filename}"'},
     )
 
 

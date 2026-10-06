@@ -39,6 +39,19 @@ export const uiPaths = {
   ) => fileId
     ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/reference-review`
     : `/projects/${projectId}/chapters/${chapterId}/reference-review`,
+  languageReview: (
+    projectId: number | string,
+    chapterId: number | string,
+    fileId?: number | string,
+  ) => fileId
+    ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/language-review`
+    : `/projects/${projectId}/chapters/${chapterId}/language-review`,
+
+  unifiedReview: (
+    projectId: number | string,
+    chapterId: number | string,
+    fileId: number | string,
+  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/unified-review`,
   fileEditor: (
     projectId: number | string,
     chapterId: number | string,

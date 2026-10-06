@@ -18,13 +18,43 @@ blocks:
     - pattern: "^[A-Z][A-Z\\s]{3,}$"
       description: "All-caps section heading"
 
-# Paragraph-level patterns with priority (lower number = higher priority)
 paragraphs:
+  # Pre-press Metadata Rules (Priority 1-5)
+  - priority: 1
+    pattern: "^(?:Book title|Section title|Section or Part title|Chapter title|Corresponding author|First author|ORCID Identifier|<metadata>|</metadata>|ABSTRACT|KEYWORDS|MESH TERMS):.*$"
+    tag: PMI
+    style: PMI
+    description: "Book and chapter pre-press metadata fields"
+
+  - priority: 2
+    pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+    tag: PMI
+    style: PMI
+    description: "Author email address in metadata"
+
+  - priority: 3
+    pattern: "^<CL>.*$"
+    tag: TSN
+    style: TSN
+    description: "Citation/source line with <CL> marker"
+
+  - priority: 4
+    pattern: "^Pull Quote:\\s*.*$"
+    tag: QUO
+    style: QUO
+    description: "Pull Quote"
+
+  - priority: 5
+    pattern: "^Pull Box:\\s*.*$"
+    tag: BX2-TXT-FLUSH
+    style: BX2-TXT-FLUSH
+    description: "Pull Box text"
+
   - priority: 10
-    pattern: "^(?:CHAPTER|Chapter)\\s+\\d+"
+    pattern: "^(?:CHAPTER|Chapter|chapter)\\s+(?:\\d+|[A-Za-z]+)"
     tag: CN
     style: CN
-    description: "Chapter numberes"
+    description: "Chapter numbers (digits or words, e.g. Chapter 1, Chapter One)"
 
   # Figures, tables, boxes (High priority to prevent misclassification as Headings)
   - priority: 11
@@ -126,7 +156,7 @@ paragraphs:
 
 # List-specific patterns (detected via Word list formatting)
 lists:
-  bullet_pattern: "^[•·\\-\\–▪■●○➢>*]\\s+"
+  bullet_pattern: "^[•·\\-\\–▪■●○➢*]\\s+"
   number_pattern: "^\\d+\\.\\s+"
   roman_pattern: "^(?i:[ivxlcdm]+)[\\.)]\\s+"
   lc_letter_pattern: "^[a-z][\\.)]\\s+"
@@ -282,12 +312,34 @@ structural_tags:
   exact:
     - TXT
     - TXT-FLUSH
+    - TXT-DC
+    - TXT-SPACE ABOVE
+    - TXT-AU
+    - INTRO
+    - APTX
+    - TX
+    - TXL
     - PMI
     - CW
     - CN
     - CT
     - CST
     - CAU
+    - CHAP
+    - COQ
+    - COQA
+    - PART
+    - PN
+    - PT
+    - PST
+    - PAU
+    - UNIT
+    - UN
+    - UT
+    - UST
+    - SN
+    - ST
+    - SST
     - ABS
     - H1
     - H2
@@ -295,31 +347,139 @@ structural_tags:
     - H4
     - H5
     - H6
+    - H1A
     - SP1
     - SP2
+    - SPH2
+    - PT-H2
     - OBJ1
+    - OBJ-TXT
+    - OBJ-TXT-FLUSH
+    - COBJ
+    - COBJ_T
+    - COBJ_TXL
     - KT
+    - KT1
+    - KP1
+    - COUTH1
+    - COUT-1
+    - COUT-2
+    - COUT-BL
     - EPI
     - EPI-ATT
     - EXT
+    - EXT-FIRST
+    - EXT-MID
+    - EXT-LAST
+    - EXT-ONLY
+    - QUO
+    - QUOA
     - EQ
+    - EQ-FIRST
+    - EQ-MID
+    - EQ-LAST
+    - EQ-ONLY
     - REFH1
     - REFH2
+    - REFH2A
+    - REF-H1
+    - REF-H2
+    - REF-N
+    - REF-U
+    - BIB
+    - BIBH1
+    - BIBH2
+    - SR
+    - SRH1
+    - SRH2
+    - ACK1
+    - ACKTXT
+    - APX
+    - APXN
+    - APXT
+    - APXST
+    - APXAU
+    - APX-CAU
+    - APX-TTL
     - T1
+    - TN
+    - TableCaption
     - T2
+    - T2-C
+    - T3
     - T4
+    - T5
+    - T6
+    - T11
+    - T12
+    - T21
+    - T22
+    - T23
+    - T
+    - T-DIR
+    - TBL
+    - TBL-MID0
+    - TUL
+    - TUL-MID
     - TFN
+    - TFN1
+    - TableFootnote
+    - TableNote
+    - Exhibit-TableFootnote
     - TSN
+    - TableSource
+    - TMATH
+    - UNT-TTL
+    - UNT-T1
+    - UNT
+    - UNT-T2
+    - UNT-T3
+    - UNT-BL
+    - UNT-UL
+    - UNT-FN
+    - FIG-LEG
+    - FIG-CRED
+    - FIG-SRC
+    - UNFIG
+    - UNFIG-LEG
+    - UNFIG-SRC
+    - FGC
+    - FGS
+    - CL
     - TBCH
     - TB
     - L1
     - L2
     - NBX1-TTL
     - NBX-TXT
+    - SBT
+    - SBTXT
+    - SBUL
+    - TTLPG-TTL
+    - TTLPG-SUBTTL
+    - TTLPG-AU
+    - TTLPG-AU-AFFIL
+    - CPY
+    - DED
+    - FM-TTL
+    - CONTRIB-AU
+    - CONTRIB-AU-AFFIL
+    - REV-AU
+    - REV-AU-AFFIL
+    - BM-TTL
+    - IDX-TXT
+    - IDX-ALPHA
+    - RHR
+    - RHV
+    - DF
   prefixes:
     - "PT-H"
     - "BL-"
     - "BL2-"
+    - "BL3-"
+    - "BL4-"
+    - "BL5-"
+    - "BL6-"
     - "NL-"
     - "NL2-"
     - "UL-"
@@ -329,6 +489,15 @@ structural_tags:
     - "OL-"
     - "OL2-"
     - "OBJ-"
+    - "KT-"
+    - "KP-"
+    - "COUT-"
+    - "EXER-"
+    - "RQ-"
+    - "QUES-"
+    - "ANS-"
+    - "EOC-"
+    - "EOC_"
     - "REF-"
     - "APX-"
     - "BX1-"
@@ -337,13 +506,32 @@ structural_tags:
     - "BX4-"
     - "NBX-"
     - "NBX1-"
+    - "SB"
+    - "SBBL-"
+    - "SBNL-"
+    - "SBUL-"
     - "TBL-"
+    - "TBL2-"
+    - "TBL3-"
+    - "TBL4-"
     - "TNL-"
     - "TRL-"
+    - "TFN-"
     - "UNT-"
     - "UNBX-"
     - "FIG-"
+    - "EQN-"
     - "EPI-"
+    - "MCUL-"
+    - "OUT"
+    - "OUT1-"
+    - "OUT2-"
+    - "OUT3-"
+    - "FOLIO-"
+    - "TOC-"
+    - "GLOS-"
+    - "IDX-"
+    - "Box-"
 
 normalization:
   source_style_map:
@@ -361,8 +549,15 @@ normalization:
     H2: H2
     H3: H3
     H4: H4
+    H5: H5
+    H6: H6
+    CN: CN
+    CT: CT
+    CST: CST
+    CAU: CAU
     INTRO: H1
     Intro: H1
+    OBJ: OBJ1
     OBJ-TTL: OBJ1
     OBJ-TITLE: OBJ1
     KT: KT

@@ -983,7 +983,7 @@ def _dedupe_comments(root, comments_root) -> int:
 
 _REF_PARA_STYLES: Tuple[str, ...] = (
     "REF-U", "REF-N", "REF-OPEN", "Reference", "Bibliography",
-    "BIB", "BIBH1", "BIBH2", "REFERENCE",
+    "BIB", "BIBH1", "BIBH2", "REFERENCE", "Reference-Alphabetical", "Reference-Numbered", "ReferenceAlphabetical", "ReferenceNumbered",
 )
 _HYPERLINK_BLUE_HEXES: Tuple[str, ...] = ("0563C1", "0000FF")
 
@@ -1457,9 +1457,9 @@ def _run_validator(docx_path: str) -> Dict[str, Any]:
     is_apa = False
     for para in doc.paragraphs:
         name = (para.style.name if para.style else "") or ""
-        if name.startswith("REF-N"):
+        if name.startswith("REF-N") or name.startswith("Reference-Numbered") or name == "ReferenceNumbered":
             is_ama = True
-        if name.startswith("REF-U") or name.startswith("ref-open") or name == "REF-U":
+        if name.startswith("REF-U") or name.startswith("ref-open") or name == "REF-U" or name.startswith("Reference-Alphabetical") or name == "ReferenceAlphabetical":
             is_apa = True
         for r in para.runs:
             if getattr(r, "text", None) and "<ref-open>" in r.text.lower():

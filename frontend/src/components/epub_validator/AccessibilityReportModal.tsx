@@ -39,14 +39,25 @@ function relativeTime(iso: string): string {
 }
 
 export function AccessibilityReportModal({ report, folderName, onClose }: Props) {
-  const totalViolations = report.violations.length;
-  const passed = report.status === 'pass' && totalViolations === 0;
+  const violations = report?.violations ?? [];
+  const totalViolations = violations.length;
+  const isFatal = report?.status === 'fatal';
+  const passed = !isFatal && report?.status === 'pass' && totalViolations === 0;
   const reportUrl = `/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/report/report.html`;
-  const coverage = report.coverage;
-  const wcag = report.wcag_breakdown ?? [];
-  const features = report.metadata.accessibility_features ?? [];
+  const coverage = report?.coverage;
+  const wcag = report?.wcag_breakdown ?? [];
+  const metadata = report?.metadata ?? {
+    title: null,
+    language: null,
+    identifier: null,
+    accessibility_features: [],
+    accessibility_summary: null,
+    conforms_to: [],
+  };
+  const features = metadata.accessibility_features ?? [];
   const outline = coverage?.outline_summary;
   const missing = coverage?.accessibility_metadata_missing ?? [];
+  const totals = report?.totals ?? { critical: 0, serious: 0, moderate: 0, minor: 0 };
   const hasViolationBreakdown = wcag.some((r) => r.total > 0);
 
   return (
@@ -63,6 +74,8 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
           className={
             passed
               ? 'border-b border-emerald-200 bg-gradient-to-r from-emerald-50/60 via-white to-white'
+              : isFatal
+              ? 'border-b border-red-200 bg-gradient-to-r from-red-50/60 via-white to-white'
               : 'border-b border-amber-200 bg-gradient-to-r from-amber-50/60 via-white to-white'
           }
         >
@@ -72,6 +85,8 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
               className={
                 passed
                   ? 'w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm shadow-emerald-500/40 shrink-0'
+                  : isFatal
+                  ? 'w-8 h-8 rounded-full bg-red-500 flex items-center justify-center shadow-sm shadow-red-500/40 shrink-0'
                   : 'w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center shadow-sm shadow-amber-500/40 shrink-0'
               }
             >
@@ -85,53 +100,61 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 min-w-0">
                 <h2 className="text-base font-semibold text-foreground truncate">
-                  {report.metadata.title || folderName}
+                  {metadata.title || folderName}
                 </h2>
                 <span
                   className={
                     passed
                       ? 'shrink-0 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 font-semibold'
+                      : isFatal
+                      ? 'shrink-0 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300 font-semibold'
                       : 'shrink-0 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-semibold'
                   }
                 >
-                  {passed ? 'Passed' : `${totalViolations} violation${totalViolations !== 1 ? 's' : ''}`} · {report.conformance_level}
+                  {passed ? 'Passed' : isFatal ? 'Failed to Run' : `${totalViolations} violation${totalViolations !== 1 ? 's' : ''}`} · {report?.conformance_level || 'N/A'}
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground mt-0.5">
-                <span className="inline-flex items-center gap-1" title={formatWhen(report.ran_at)}>
-                  <Clock className="w-3 h-3" /> {relativeTime(report.ran_at)} · {report.duration_seconds}s
-                </span>
-                {report.metadata.language && (
-                  <span>Lang: <span className="text-foreground font-medium">{report.metadata.language}</span></span>
+                {report?.ran_at && (
+                  <span className="inline-flex items-center gap-1" title={formatWhen(report.ran_at)}>
+                    <Clock className="w-3 h-3" /> {relativeTime(report.ran_at)} · {report.duration_seconds ?? 0}s
+                  </span>
                 )}
-                {report.metadata.identifier && (
+                {metadata.language && (
+                  <span>Lang: <span className="text-foreground font-medium">{metadata.language}</span></span>
+                )}
+                {metadata.identifier && (
                   <span
                     className="font-mono truncate max-w-[18rem]"
-                    title={report.metadata.identifier}
+                    title={metadata.identifier}
                   >
-                    {report.metadata.identifier}
+                    {metadata.identifier}
                   </span>
                 )}
               </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <a
-                href={`/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/download-zip`}
-                download={`${folderName}-ace-report.zip`}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition shadow-xs"
-                aria-label="Download ACE report zip"
-              >
-                <Download className="w-3.5 h-3.5" /> Download ZIP
-              </a>
-              <a
-                href={reportUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md border border-border hover:bg-muted transition"
-              >
-                Open full report <ExternalLink className="w-3 h-3" />
-              </a>
+              {!isFatal && (
+                <>
+                  <a
+                    href={`/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/download-zip`}
+                    download={`${folderName}-ace-report.zip`}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition shadow-xs"
+                    aria-label="Download ACE report zip"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Download ZIP
+                  </a>
+                  <a
+                    href={reportUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md border border-border hover:bg-muted transition"
+                  >
+                    Open full report <ExternalLink className="w-3 h-3" />
+                  </a>
+                </>
+              )}
               <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
                 <X className="w-4 h-4" />
               </Button>
@@ -140,95 +163,110 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
           </div>
 
           {/* Row 2: single-line metrics strip */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2 text-xs">
-            <Metric label="Documents" value={coverage?.files_checked ?? 0} />
-            <Metric
-              label="Images"
-              value={coverage?.images_inspected ?? 0}
-              hint={
-                coverage && coverage.images_missing_alt > 0
-                  ? { text: `${coverage.images_missing_alt} no alt`, tone: 'amber' }
-                  : undefined
-              }
-            />
-            <Metric label="Headings" value={outline?.headings ?? 0} />
-            <Metric label="TOC" value={outline?.toc_entries ?? 0} />
+          {!isFatal && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2 text-xs">
+              <Metric label="Documents" value={coverage?.files_checked ?? 0} />
+              <Metric
+                label="Images"
+                value={coverage?.images_inspected ?? 0}
+                hint={
+                  coverage && coverage.images_missing_alt > 0
+                    ? { text: `${coverage.images_missing_alt} no alt`, tone: 'amber' }
+                    : undefined
+                }
+              />
+              <Metric label="Headings" value={outline?.headings ?? 0} />
+              <Metric label="TOC" value={outline?.toc_entries ?? 0} />
 
-            <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground">·</span>
 
-            <ImpactPill label="Critical" count={report.totals.critical} tone="high" />
-            <ImpactPill label="Serious" count={report.totals.serious} tone="high" />
-            <ImpactPill label="Moderate" count={report.totals.moderate} tone="mid" />
-            <ImpactPill label="Minor" count={report.totals.minor} tone="mid" />
+              <ImpactPill label="Critical" count={totals.critical} tone="high" />
+              <ImpactPill label="Serious" count={totals.serious} tone="high" />
+              <ImpactPill label="Moderate" count={totals.moderate} tone="mid" />
+              <ImpactPill label="Minor" count={totals.minor} tone="mid" />
 
-            {(features.length > 0 || missing.length > 0) && (
-              <>
-                <span className="text-muted-foreground">·</span>
-                {features.length > 0 && (
-                  <details name="ace-popover" className="relative group">
-                    <summary className="cursor-pointer list-none inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition">
-                      {features.length} a11y features
-                      <span className="text-[10px] group-open:hidden">▸</span>
-                      <span className="text-[10px] hidden group-open:inline">▾</span>
-                    </summary>
-                    <div className="absolute z-20 mt-1 left-0 w-[22rem] max-w-[calc(100vw-3rem)] rounded-md border border-border bg-popover shadow-lg p-2">
-                      <div className="flex flex-wrap gap-1">
-                        {features.map((f) => (
-                          <span
-                            key={f}
-                            className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-medium"
-                          >
-                            {f}
-                          </span>
-                        ))}
+              {(features.length > 0 || missing.length > 0) && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  {features.length > 0 && (
+                    <details name="ace-popover" className="relative group">
+                      <summary className="cursor-pointer list-none inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition">
+                        {features.length} a11y features
+                        <span className="text-[10px] group-open:hidden">▸</span>
+                        <span className="text-[10px] hidden group-open:inline">▾</span>
+                      </summary>
+                      <div className="absolute z-20 mt-1 left-0 w-[22rem] max-w-[calc(100vw-3rem)] rounded-md border border-border bg-popover shadow-lg p-2">
+                        <div className="flex flex-wrap gap-1">
+                          {features.map((f) => (
+                            <span
+                              key={f}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-medium"
+                            >
+                              {f}
+                            </span>
+                                                      ))}
+                        </div>
                       </div>
-                    </div>
-                  </details>
-                )}
-                {missing.length > 0 && (
-                  <details name="ace-popover" className="relative group">
-                    <summary
-                      className="cursor-pointer list-none inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition"
-                      title={missing.join(', ')}
-                    >
-                      {missing.length} optional metadata
-                      <span className="text-[10px] group-open:hidden">▸</span>
-                      <span className="text-[10px] hidden group-open:inline">▾</span>
-                    </summary>
-                    <div className="absolute z-20 mt-1 right-0 w-[22rem] max-w-[calc(100vw-3rem)] rounded-md border border-border bg-popover shadow-lg p-2">
-                      <ul className="text-[11px] text-amber-800 space-y-0.5 font-mono">
-                        {missing.map((f) => (
-                          <li key={f}>· {f}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </details>
-                )}
-              </>
-            )}
+                    </details>
+                  )}
+                  {missing.length > 0 && (
+                    <details name="ace-popover" className="relative group">
+                      <summary
+                        className="cursor-pointer list-none inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition"
+                        title={missing.join(', ')}
+                      >
+                        {missing.length} optional metadata
+                        <span className="text-[10px] group-open:hidden">▸</span>
+                        <span className="text-[10px] hidden group-open:inline">▾</span>
+                      </summary>
+                      <div className="absolute z-20 mt-1 right-0 w-[22rem] max-w-[calc(100vw-3rem)] rounded-md border border-border bg-popover shadow-lg p-2">
+                        <ul className="text-[11px] text-amber-800 space-y-0.5 font-mono">
+                          {missing.map((f) => (
+                            <li key={f}>· {f}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </details>
+                  )}
+                </>
+              )}
 
-            {hasViolationBreakdown && (
-              <>
-                <span className="text-muted-foreground">·</span>
-                {wcag.filter((r) => r.total > 0).map((r) => (
-                  <span
-                    key={r.ruleset}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"
-                  >
-                    {r.ruleset}: <strong>{r.total}</strong>
-                  </span>
-                ))}
-              </>
-            )}
-          </div>
+              {hasViolationBreakdown && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  {wcag.filter((r) => r.total > 0).map((r) => (
+                    <span
+                      key={r.ruleset}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"
+                    >
+                      {r.ruleset}: <strong>{r.total}</strong>
+                    </span>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Report — dominant surface, ~82% of modal */}
-        <iframe
-          src={reportUrl}
-          title="DAISY ACE Report"
-          className="flex-1 w-full border-0 bg-white"
-        />
+        {/* Report surface */}
+        {isFatal ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4 bg-muted/20">
+            <ShieldAlert className="w-12 h-12 text-red-500" />
+            <h3 className="text-lg font-bold text-foreground">Accessibility Check Encountered an Error</h3>
+            <p className="text-xs text-red-800 bg-red-50 p-4 rounded-lg border border-red-200 max-w-2xl font-mono text-left overflow-auto max-h-48 whitespace-pre-wrap">
+              {(report as any)?.message || 'ACE did not produce a report.'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Click &quot;Re-run accessibility&quot; to attempt the check again with updated settings.
+            </p>
+          </div>
+        ) : (
+          <iframe
+            src={reportUrl}
+            title="DAISY ACE Report"
+            className="flex-1 w-full border-0 bg-white"
+          />
+        )}
       </motion.div>
     </div>
   );

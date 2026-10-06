@@ -26,10 +26,16 @@ import { Placeholder } from '@/pages/Placeholder'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { ChapterFilePage } from '@/pages/ChapterFilePage'
 import { ChapterDetailPage } from '@/pages/ChapterDetailPage'
+
 import { TechnicalReviewPage } from '@/pages/TechnicalReviewPage'
 import { TechnicalEditorPage } from '@/pages/TechnicalEditorPage'
 import { StructuringReviewPage } from '@/pages/StructuringReviewPage'
+import { LanguageReviewPage } from '@/pages/LanguageReviewPage'
 import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReviewPage'
+
+
+
+import { UnifiedReviewEditorPage } from '@/pages/UnifiedReviewEditorPage'
 import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
 import { StylesheetsPage } from '@/pages/StylesheetsPage'
@@ -45,6 +51,19 @@ import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
 import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
 import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
 import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
+import { PostProdXmlConversion } from '@/pages/PostProdXmlConversion'
+import { PostProdXmlConversionEditor } from '@/pages/PostProdXmlConversionEditor'
+import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
+import { JournalClientsPage } from '@/pages/journals/JournalClientsPage'
+import { JournalClientPage } from '@/pages/journals/JournalClientPage'
+import { CreateJournalPage } from '@/pages/journals/CreateJournalPage'
+import { JournalArticlesPage } from '@/pages/journals/JournalArticlesPage'
+import { JournalArticleFilesPage } from '@/pages/journals/JournalArticleFilesPage'
+import { JournalSettingsPage } from '@/pages/journals/JournalSettingsPage'
+import { BodInternalPage } from '@/pages/books_on_demand/BodInternalPage'
+import { BodInternalJobPage } from '@/pages/books_on_demand/BodInternalJobPage'
+import { BodCustomerReportPage } from '@/pages/books_on_demand/BodCustomerReportPage'
+import { PostProdWebPdfProcessor } from '@/pages/PostProdWebPdfProcessor'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { useRBAC } from '@/hooks/useRBAC'
 
@@ -52,7 +71,7 @@ function PostProdGuard({ children }: { children: React.ReactNode }) {
   const { canAccess, viewer } = useRBAC()
   const isAccessUser =
     viewer?.team === 'Accessibility Team' ||
-    Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
+    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('accessibility')) ||
     Boolean((viewer as any)?.roles && (viewer as any).roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
 
   const hasAccess = canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessUser
@@ -111,6 +130,16 @@ const router = createBrowserRouter([
       { path: 'workspace', element: <WorkspacePage /> },
 
       { path: 'clients', element: <Clients /> },
+      { path: 'journal-production', element: <JournalClientsPage /> },
+      { path: 'journal-production/clients/:clientId', element: <JournalClientPage /> },
+      { path: 'journal-production/clients/:clientId/journals/new', element: <CreateJournalPage /> },
+      { path: 'journal-production/journals/:journalId', element: <JournalArticlesPage /> },
+      { path: 'journal-production/journals/:journalId/settings', element: <JournalSettingsPage /> },
+      { path: 'journal-production/articles/:articleId', element: <JournalArticleFilesPage /> },
+      // Book review pages on a journal article's shadow file (?journalArticle=<id>, see useJournalReviewMode)
+      { path: 'journal-production/review/structuring/:projectId/:fileId', element: <StructuringReviewPage /> },
+      { path: 'journal-production/review/technical/:projectId/:fileId', element: <TechnicalReviewPage /> },
+      { path: 'journal-production/review/language/:projectId/:fileId', element: <LanguageReviewPage /> },
       { path: 'clients/:clientId/projects', element: <ClientProjects /> },
       { path: 'clients/:clientId/projects/new', element: <CreateProjectPage /> },
 
@@ -146,18 +175,23 @@ const router = createBrowserRouter([
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/language-review', element: <LanguageReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },
 
       // ── File-level pages (clients prefix) ───────────────────────────────────
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/language-review', element: <LanguageReviewPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
+
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },
 
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
@@ -168,6 +202,15 @@ const router = createBrowserRouter([
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
       { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
+      { path: 'post-production/xml-conversion', element: <PostProdGuard><PostProdXmlConversion /></PostProdGuard> },
+      { path: 'post-production/xml-conversion/:projectId', element: <PostProdGuard><PostProdXmlConversionEditor /></PostProdGuard> },
+      { path: 'journal-article-editor', element: <JournalArticleEditorPage /> },
+      { path: 'journal-article-editor/:articleId', element: <JournalArticleEditorPage /> },
+      { path: 'bod/internal', element: <BodInternalPage /> },
+      { path: 'bod/internal/:jobId', element: <BodInternalJobPage /> },
+      { path: 'bod/report', element: <BodCustomerReportPage /> },
+      { path: 'post-production/web-pdf-processor', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
+      { path: 'post-production/web-pdf-processor/:projectId', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },

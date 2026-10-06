@@ -5,34 +5,39 @@
       "name": "NAV TOC Link Check",
       "target_path": "",
       "enabled": true,
-      "file_name_pattern": "nav.xhtml"
+      "file_name_pattern": "nav.xhtml",
+      "category": "Navigation Check"
     },
     {
       "id": "NAV002",
       "name": "NCX and Navigation link Check",
       "target_path": "",
       "enabled": true,
-      "file_name_pattern": "toc.ncx"
+      "file_name_pattern": "toc.ncx",
+      "category": "Navigation Check"
     },
     {
       "id": "NAV003",
       "name": "PDF-EPUB TOC Match",
       "scope": "book",
-      "enabled": false
+      "enabled": false,
+      "category": "Navigation Check"
     },
     {
       "id": "NAV004",
       "name": "Cover Entry in TOC",
       "target_path": "",
       "enabled": true,
-      "file_name_pattern": "nav.xhtml"
+      "file_name_pattern": "nav.xhtml",
+      "category": "Navigation Check"
     },
     {
       "id": "NAV005",
       "name": "Page List Link Check",
       "target_path": "",
       "enabled": true,
-      "file_name_pattern": "nav.xhtml"
+      "file_name_pattern": "nav.xhtml",
+      "category": "Navigation Check"
     }
   ]
 }

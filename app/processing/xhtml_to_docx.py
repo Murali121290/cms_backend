@@ -24,6 +24,30 @@ from app.utils.utils.structuring_lib.annotator import normalize_structural_tag_c
 
 logger = logging.getLogger("app.processing.xhtml_to_docx")
 
+def _ensure_paragraph_style(doc, style_name: str) -> None:
+    """Ensure a paragraph style exists in doc.styles so Word recognizes it in styles.xml."""
+    if not style_name or style_name in ("Normal", "MsoNormal"):
+        return
+    try:
+        _ = doc.styles[style_name]
+        return
+    except KeyError:
+        pass
+
+    for s in doc.styles:
+        if s.name == style_name or s.style_id == style_name:
+            return
+
+    try:
+        from docx.enum.style import WD_STYLE_TYPE
+        new_style = doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        try:
+            new_style.base_style = doc.styles['Normal']
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"Could not create paragraph style '{style_name}': {e}")
+
 
 class XhtmlToDocxEngine:
     """Apply HTML-editor style changes back to the processed DOCX file."""
@@ -218,6 +242,7 @@ class XhtmlToDocxEngine:
 
             # Apply the style
             try:
+                _ensure_paragraph_style(doc, new_style)
                 if not para.style or para.style.name != new_style:
                     para.style = new_style
                     changes_applied += 1

@@ -1,4 +1,5 @@
 import type { ProjectDetail } from "@/types/api";
+import { useUsersStore } from "@/stores/usersStore";
 
 interface ProjectMetadataPanelProps {
   project: ProjectDetail;
@@ -32,7 +33,7 @@ export function ProjectMetadataPanel({ project }: ProjectMetadataPanelProps) {
         <MetaCard label="Files" value={project.file_count} />
         <MetaCard label="Workflow" value={project.workflow_name} />
 
-        <MetaCard label="Project Manager" value={project.project_manager} />
+        <MetaCard label="Project Manager" value={project.project_manager ? useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager) : project.project_manager} />
         <MetaCard label="Priority" value={project.priority} />
         <MetaCard label="Category" value={project.category} />
         <MetaCard label="Composition" value={project.composition} />

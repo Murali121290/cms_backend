@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Search
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -30,6 +30,15 @@ import { getApiErrorMessage } from '@/api/client'
 import { uploadChapterFiles } from '@/api/files'
 import { useRBAC } from '@/hooks/useRBAC'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
+
+interface FinalDeliveryFile {
+  id: number
+  chapter_id: number
+  chapter_number: string
+  chapter_title: string | null
+  filename: string
+  extension: string
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -259,37 +268,345 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
     )
   }
 
+  const [isOpen, setIsOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    if (isOpen) document.addEventListener('mousedown', onClickOutside)
+    if (!isOpen) setSearchQuery('')
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [isOpen])
+
   const active = users.filter(u => u.active_status)
   const assignable = stageRolesMap
     ? active.filter(u => isRoleAllowedForStage(u.role || '', stageName, stageRolesMap) || u.user_name === value)
     : active
 
+  const filteredAssignable = assignable.filter(u => {
+    if (!searchQuery) return true;
+    const fn = (u.first_name || '').trim()
+    const ln = (u.last_name || '').trim()
+    const fullName = `${fn} ${ln}`.trim().toLowerCase()
+    const sq = searchQuery.toLowerCase()
+    return fullName.includes(sq) || u.user_name.toLowerCase().includes(sq)
+  })
+
   return (
-    <div className={`relative flex items-center ${widthCls} ${className ?? ''}`} onClick={onClick}>
-      <select
-        value={value ?? ''}
-        onChange={e => onChange(e.target.value)}
+    <div className={`relative flex items-center ${widthCls} ${className ?? ''}`} onClick={onClick} ref={popoverRef}>
+      <button
+        type="button"
         disabled={disabled || updating}
-        className="text-[11px] bg-background border border-border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!disabled && !updating) setIsOpen(prev => !prev)
+        }}
+        className={`flex items-center justify-between w-full text-[11px] bg-background border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-border'} disabled:opacity-60 cursor-pointer`}
         title={currentDisplay}
       >
-        <option value="">— Unassigned —</option>
-        {(assignable || []).map(u => {
-          const fn = (u.first_name || '').trim()
-          const ln = (u.last_name || '').trim()
-          const fullName = `${fn} ${ln}`.trim()
-          const label = fullName ? `${fullName} (${u.user_name})` : u.user_name
-          return (
-            <option key={u.id} value={u.user_name}>{label}</option>
-          )
-        })}
-      </select>
-      {updating ? (
-        <span className="absolute right-1.5 flex items-center justify-center pointer-events-none">
-          <Spinner size="sm" className="w-3 h-3 border-primary/30 border-t-primary" />
+        <span className="truncate">{currentDisplay}</span>
+        {updating ? (
+          <span className="absolute right-1.5 flex items-center justify-center pointer-events-none">
+            <Spinner size="sm" className="w-3 h-3 border-primary/30 border-t-primary" />
+          </span>
+        ) : (
+          <span className="pointer-events-none absolute right-1.5 text-muted text-[9px] transition-transform duration-200" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-[calc(100%+6px)] left-0 w-52 bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.15)] rounded-xl py-1.5 z-[100] max-h-72 flex flex-col backdrop-blur-3xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="px-1.5 pb-1 mb-1 border-b border-border/50 shrink-0 space-y-1">
+            <div className="relative px-1 pt-1 pb-1">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search assignees..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                className="w-full bg-muted/50 border-none text-[11px] rounded-md pl-6 pr-2 py-1.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
+            </div>
+            <button
+              type="button"
+              className="w-full text-left px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground rounded-md transition-all flex items-center gap-2 group"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsOpen(false)
+                if (value !== '') onChange('')
+              }}
+            >
+              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${value === '' ? 'text-primary' : 'text-transparent'}`}>
+                {value === '' && <CheckCircle2 size={12} strokeWidth={3} />}
+              </div>
+              <span className="group-hover:translate-x-0.5 transition-transform duration-200">— Unassigned —</span>
+            </button>
+          </div>
+          <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
+            {filteredAssignable.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground px-2.5 py-3 text-center">No results found</div>
+            ) : (
+              filteredAssignable.map(u => {
+                const fn = (u.first_name || '').trim()
+                const ln = (u.last_name || '').trim()
+                const fullName = `${fn} ${ln}`.trim()
+                const label = fullName || u.user_name
+                const isSelected = value === u.user_name
+                
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
+                      isSelected 
+                        ? 'bg-primary/10 text-primary font-medium' 
+                        : 'text-foreground hover:bg-muted/40'
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setIsOpen(false)
+                      if (value !== u.user_name) onChange(u.user_name)
+                    }}
+                  >
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
+                      isSelected ? 'text-primary' : 'text-transparent'
+                    }`}>
+                      {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
+                      {!isSelected && <User size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
+                    </div>
+                    <span className={`truncate transition-transform duration-200 ${!isSelected && 'group-hover:translate-x-0.5'}`}>{label}</span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FilterAssigneeDropdown({
+  value,
+  onChange,
+  assigneeOptions,
+  users
+}: {
+  value: string
+  onChange: (val: string) => void
+  assigneeOptions: string[]
+  users: AppUser[]
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    if (isOpen) document.addEventListener('mousedown', onClickOutside)
+    if (!isOpen) setSearchQuery('')
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [isOpen])
+
+  const filteredOptions = assigneeOptions.filter(u => {
+    if (!searchQuery) return true;
+    const name = getUserDisplayName(u, users).toLowerCase()
+    const sq = searchQuery.toLowerCase()
+    return name.includes(sq) || u.toLowerCase().includes(sq)
+  })
+
+  const currentDisplay = value ? getUserDisplayName(value, users) : 'All Assignees'
+
+  return (
+    <div className="relative flex items-center" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsOpen(prev => !prev)
+        }}
+        className={`flex items-center justify-between w-[160px] text-xs bg-card border rounded-lg pl-3 pr-8 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-border'} cursor-pointer shadow-sm hover:shadow-md`}
+        title={currentDisplay}
+      >
+        <span className="flex items-center flex-1 min-w-0 overflow-hidden">
+          <span className="truncate leading-tight block w-full text-left">{currentDisplay}</span>
         </span>
-      ) : (
-        <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
+        <span className="pointer-events-none absolute right-2.5 text-muted transition-transform duration-200 flex-shrink-0" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-[calc(100%+8px)] left-0 w-56 bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.15)] rounded-xl py-1.5 z-[100] max-h-72 flex flex-col backdrop-blur-3xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="px-1.5 pb-1 mb-1 border-b border-border/50 shrink-0 space-y-1">
+            <div className="relative px-1 pt-1 pb-1">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search assignees..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                className="w-full bg-muted/50 border-none text-[11px] rounded-md pl-6 pr-2 py-1.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
+            </div>
+            <button
+              type="button"
+              className="w-full text-left px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground rounded-md transition-all flex items-center gap-2 group"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsOpen(false)
+                if (value !== '') onChange('')
+              }}
+            >
+              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${value === '' ? 'text-primary' : 'text-transparent'}`}>
+                {value === '' && <CheckCircle2 size={12} strokeWidth={3} />}
+              </div>
+              <span className="group-hover:translate-x-0.5 transition-transform duration-200">All Assignees</span>
+            </button>
+          </div>
+          
+          <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
+            {filteredOptions.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground px-2.5 py-3 text-center">No results found</div>
+            ) : (
+              filteredOptions.map(u => {
+                const label = getUserDisplayName(u, users)
+                const isSelected = value === u
+                
+                return (
+                  <button
+                    key={u}
+                    type="button"
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
+                      isSelected 
+                        ? 'bg-primary/10 text-primary font-medium' 
+                        : 'text-foreground hover:bg-muted/40'
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setIsOpen(false)
+                      if (value !== u) onChange(u)
+                    }}
+                  >
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
+                      isSelected ? 'text-primary' : 'text-transparent'
+                    }`}>
+                      {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
+                      {!isSelected && <User size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
+                    </div>
+                    <span className={`truncate transition-transform duration-200 ${!isSelected && 'group-hover:translate-x-0.5'}`}>{label}</span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StageSelectDropdown({
+  value,
+  onChange,
+  stages,
+  placeholder = 'Select stage...'
+}: {
+  value: string
+  onChange: (val: string) => void
+  stages: string[]
+  placeholder?: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    if (isOpen) document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [isOpen])
+
+  const currentDisplay = value || placeholder
+
+  return (
+    <div className="relative flex items-center" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsOpen(prev => !prev)
+        }}
+        className={`flex items-center justify-between min-w-[140px] text-xs bg-card border rounded-lg pl-3 pr-8 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-border'} cursor-pointer shadow-sm hover:shadow-md`}
+        title={currentDisplay}
+      >
+        <span className="flex items-center flex-1 min-w-0 overflow-hidden">
+          <span className="truncate leading-tight block w-full text-left">{currentDisplay}</span>
+        </span>
+        <span className="pointer-events-none absolute right-2.5 text-muted transition-transform duration-200 flex-shrink-0" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-[calc(100%+8px)] left-0 min-w-[180px] bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.15)] rounded-xl py-1.5 z-[100] max-h-64 flex flex-col backdrop-blur-3xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="px-1.5 pb-1 mb-1 border-b border-border/50 shrink-0">
+            <button
+              type="button"
+              className="w-full text-left px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground rounded-md transition-all flex items-center gap-2 group"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsOpen(false)
+                if (value !== '') onChange('')
+              }}
+            >
+              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${value === '' ? 'text-primary' : 'text-transparent'}`}>
+                {value === '' && <CheckCircle2 size={12} strokeWidth={3} />}
+              </div>
+              <span className="group-hover:translate-x-0.5 transition-transform duration-200">{placeholder}</span>
+            </button>
+          </div>
+          
+          <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
+            {stages.map(s => {
+              const isSelected = value === s
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
+                    isSelected 
+                      ? 'bg-primary/10 text-primary font-medium' 
+                      : 'text-foreground hover:bg-muted/40'
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsOpen(false)
+                    if (value !== s) onChange(s)
+                  }}
+                >
+                  <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
+                    isSelected ? 'text-primary' : 'text-transparent'
+                  }`}>
+                    {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
+                    {!isSelected && <Layers size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
+                  </div>
+                  <span className={`truncate transition-transform duration-200 ${!isSelected && 'group-hover:translate-x-0.5'}`}>{s}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -319,7 +636,7 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
   }
 
   return (
-    <div className={`bg-card rounded-xl border border-border shadow-sm flex flex-col overflow-hidden transition-shadow hover:shadow-md ${cardBorderCls(chapter)}`}>
+    <div className={`bg-card rounded-xl border border-border shadow-sm flex flex-col transition-shadow hover:shadow-md ${cardBorderCls(chapter)}`}>
 
       {/* Header */}
       <div className="px-4 pt-3.5 pb-2.5">
@@ -502,6 +819,9 @@ export function ProjectWorkflow() {
   const [stageRolesMap, setStageRolesMap] = useState<Map<string, string[]>>(new Map())
   const [combineConfirmOpen, setCombineConfirmOpen] = useState(false)
   const [combining, setCombining] = useState(false)
+  const [finalDeliveryFiles, setFinalDeliveryFiles] = useState<FinalDeliveryFile[]>([])
+  const [loadingFinalDeliveryFiles, setLoadingFinalDeliveryFiles] = useState(false)
+  const [combineSelectedChapterIds, setCombineSelectedChapterIds] = useState<Set<number>>(new Set())
   const [users, setUsers] = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
   // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
@@ -706,6 +1026,19 @@ export function ProjectWorkflow() {
     return manuscriptChapters
   }, [manuscriptChapters, filterStage])
 
+  const combineChapterGroups = useMemo(() => {
+    const groups = new Map<number, { chapter_id: number; chapter_number: string; chapter_title: string | null; files: FinalDeliveryFile[] }>()
+    for (const f of finalDeliveryFiles) {
+      const existing = groups.get(f.chapter_id)
+      if (existing) {
+        existing.files.push(f)
+      } else {
+        groups.set(f.chapter_id, { chapter_id: f.chapter_id, chapter_number: f.chapter_number, chapter_title: f.chapter_title, files: [f] })
+      }
+    }
+    return Array.from(groups.values()).sort((a, b) => sortChapters({ chapters: a.chapter_number }, { chapters: b.chapter_number }))
+  }, [finalDeliveryFiles])
+
   // Select active track chapters
   const activeChapters = useMemo(() => {
     if (activeTab === 'design') return designChapters
@@ -862,7 +1195,7 @@ export function ProjectWorkflow() {
       handleChapterUpdate(chapter.id, updated)
       if (!opts?.silent) {
         if (assignee) {
-          toast.success(`Assigned to ${assignee}`)
+          toast.success(`Assigned to ${getUserDisplayName(assignee, users)}`)
         } else {
           toast.success('Chapter unassigned successfully')
         }
@@ -885,7 +1218,7 @@ export function ProjectWorkflow() {
     const succeeded = results.filter(Boolean).length
     const failed = results.length - succeeded
     if (failed === 0) {
-      toast.success(`Assigned ${succeeded} chapter${succeeded !== 1 ? 's' : ''} in ${bulkStage} to ${bulkAssignee || 'Unassigned'}`)
+      toast.success(`Assigned ${succeeded} chapter${succeeded !== 1 ? 's' : ''} in ${bulkStage} to ${bulkAssignee ? getUserDisplayName(bulkAssignee, users) : 'Unassigned'}`)
     } else {
       toast.error(`Assigned ${succeeded}/${results.length} chapters — ${failed} failed`)
     }
@@ -1123,11 +1456,32 @@ export function ProjectWorkflow() {
     navigate(`${clientId ? `/clients/${clientId}/projects/${projectId}` : `/projects/${projectId}`}/chapters/${cmsId}`)
   }
 
+  async function handleOpenCombineModal() {
+    setCombineConfirmOpen(true)
+    setLoadingFinalDeliveryFiles(true)
+    try {
+      const response = await fetch(`/api/v2/projects/${id}/final-delivery-files`)
+      if (!response.ok) throw new Error('Failed to load Final delivery files.')
+      const data = await response.json()
+      const files: FinalDeliveryFile[] = data.files ?? []
+      setFinalDeliveryFiles(files)
+      setCombineSelectedChapterIds(new Set(files.map(f => f.chapter_id)))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load Final delivery files.')
+      setFinalDeliveryFiles([])
+      setCombineSelectedChapterIds(new Set())
+    } finally {
+      setLoadingFinalDeliveryFiles(false)
+    }
+  }
+
   async function handleCombineBook() {
     setCombining(true)
     try {
       const response = await fetch(`/api/v2/projects/${id}/combine-book`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapter_ids: Array.from(combineSelectedChapterIds) }),
       })
       if (!response.ok) {
         const errorText = await response.text()
@@ -1225,7 +1579,7 @@ export function ProjectWorkflow() {
               )}
               {project.project_manager && (
                 <span className="inline-flex items-center gap-1">
-                  <User size={11} /> PM: {project.project_manager}
+                  <User size={11} /> PM: {getUserDisplayName(project.project_manager, users)}
                 </span>
               )}
             </div>
@@ -1340,14 +1694,12 @@ export function ProjectWorkflow() {
           </span>
 
           {/* Assignee filter */}
-          <select
+          <FilterAssigneeDropdown 
             value={filterAssignee}
-            onChange={e => setFilterAssignee(e.target.value)}
-            className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
-          >
-            <option value="">All Assignees</option>
-            {assigneeOptions.map(a => <option key={a} value={a}>{getUserDisplayName(a, users)} ({a})</option>)}
-          </select>
+            onChange={setFilterAssignee}
+            assigneeOptions={assigneeOptions}
+            users={users}
+          />
 
           {hasFilters && (
             <button
@@ -1365,14 +1717,12 @@ export function ProjectWorkflow() {
             <Layers size={11} /> Group Assign
           </span>
 
-          <select
+          <StageSelectDropdown
             value={bulkStage}
-            onChange={e => { setBulkStage(e.target.value); setBulkAssignee(''); setSelectedBulkChapterIds(new Set()) }}
-            className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
-          >
-            <option value="">Select stage…</option>
-            {orderedStages.map(s => <option key={s.stage_name} value={s.stage_name}>{s.stage_name}</option>)}
-          </select>
+            onChange={val => { setBulkStage(val); setBulkAssignee(''); setSelectedBulkChapterIds(new Set()) }}
+            stages={orderedStages.map(s => s.stage_name)}
+            placeholder="Select stage…"
+          />
 
           <button
             onClick={() => {
@@ -1392,24 +1742,21 @@ export function ProjectWorkflow() {
             <Send size={11} /> Group Proceed
           </span>
 
-          <select
+          <StageSelectDropdown
             value={groupProceedStage}
-            onChange={e => {
-              const stg = e.target.value
-              setGroupProceedStage(stg)
+            onChange={val => {
+              setGroupProceedStage(val)
               const uName = viewer?.username?.trim().toLowerCase()
               const assigned = activeChapters.filter(
-                c => c.stage_name === stg &&
+                c => c.stage_name === val &&
                      c.current_assignee_name &&
                      c.current_assignee_name.trim().toLowerCase() === uName
               )
               setSelectedGroupProceedChapterIds(new Set(assigned.map(c => c.id)))
             }}
-            className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
-          >
-            <option value="">Select stage…</option>
-            {orderedStages.map(s => <option key={s.stage_name} value={s.stage_name}>{s.stage_name}</option>)}
-          </select>
+            stages={orderedStages.map(s => s.stage_name)}
+            placeholder="Select stage…"
+          />
 
           <button
             onClick={() => {
@@ -1486,9 +1833,7 @@ export function ProjectWorkflow() {
                 </>
               )}
               <button
-                onClick={() => {
-                  setCombineConfirmOpen(true)
-                }}
+                onClick={handleOpenCombineModal}
                 className="text-xs font-medium px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors"
               >
                 Combine Book
@@ -1796,7 +2141,7 @@ export function ProjectWorkflow() {
                   <span className="font-semibold text-primary text-xs uppercase w-8 flex-shrink-0">{c.chapters}</span>
                   <span className="truncate text-text flex-1 min-w-0">{c.chapter_title || c.chapters}</span>
                   <span className={`text-xs flex-shrink-0 ${c.current_assignee_name ? 'text-muted' : 'text-muted/60 italic'}`}>
-                    {c.current_assignee_name || 'Unassigned'}
+                    {c.current_assignee_name ? getUserDisplayName(c.current_assignee_name, users) : 'Unassigned'}
                   </span>
                 </label>
               ))}
@@ -2227,7 +2572,7 @@ export function ProjectWorkflow() {
         isOpen={combineConfirmOpen}
         onClose={() => { if (!combining) setCombineConfirmOpen(false) }}
         title="Combine Project Book"
-        description="This will gather all XML and ePUB files from the Final delivery folders of all chapters and merge them into a single book XML and ePUB. The combined files will be uploaded to a new 'Final files' chapter folder."
+        description="Select which chapters' Final delivery files to merge. Their XML and ePUB files will be combined into a single book XML and ePUB, uploaded to a new 'Final files' chapter folder."
         footer={
           <div className="flex gap-3 justify-end items-center">
             <button
@@ -2239,7 +2584,7 @@ export function ProjectWorkflow() {
             </button>
             <button
               onClick={handleCombineBook}
-              disabled={combining}
+              disabled={combining || loadingFinalDeliveryFiles || combineSelectedChapterIds.size === 0}
               className="text-xs font-semibold px-4 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
               {combining && <Spinner size="sm" />}
@@ -2248,13 +2593,95 @@ export function ProjectWorkflow() {
           </div>
         }
       >
-        <div className="py-4 text-xs text-muted flex flex-col gap-2">
-          <p>The merge scripts will be executed on the Windows Conversion Server:</p>
-          <ul className="list-disc pl-5 space-y-1">
-            <li>XML Merge: <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700">book_xml.pl</code></li>
-            <li>ePUB Merge: <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700">book_epub.pl</code></li>
-          </ul>
-          <p className="mt-2 text-amber-600 font-medium">⚠️ Note: Make sure chapters have XML and ePUB files uploaded in their Final delivery folder before running the combine process.</p>
+        <div className="py-4 text-xs text-muted flex flex-col gap-3">
+          {loadingFinalDeliveryFiles ? (
+            <div className="flex items-center justify-center py-8">
+              <Spinner size="sm" />
+            </div>
+          ) : combineChapterGroups.length === 0 ? (
+            <p className="text-center text-muted py-6">
+              No Final delivery XML/ePUB files found in any chapter.
+            </p>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-muted">
+                  Chapters ({combineSelectedChapterIds.size}/{combineChapterGroups.length} selected)
+                </label>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setCombineSelectedChapterIds(new Set())}
+                    className="text-[11px] text-primary hover:underline font-medium transition-colors"
+                  >
+                    Deselect all
+                  </button>
+                  <span className="text-border">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setCombineSelectedChapterIds(new Set(combineChapterGroups.map(c => c.chapter_id)))}
+                    className="text-[11px] text-primary hover:underline font-medium transition-colors"
+                  >
+                    Select all
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-64 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+                {combineChapterGroups.map(ch => {
+                  const isSelected = combineSelectedChapterIds.has(ch.chapter_id)
+                  return (
+                    <label
+                      key={ch.chapter_id}
+                      className={`flex items-start gap-3 px-3 py-2 hover:bg-surface transition-colors cursor-pointer select-none ${isSelected ? 'bg-amber-50/20' : ''
+                        }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {
+                          setCombineSelectedChapterIds(prev => {
+                            const next = new Set(prev)
+                            if (next.has(ch.chapter_id)) {
+                              next.delete(ch.chapter_id)
+                            } else {
+                              next.add(ch.chapter_id)
+                            }
+                            return next
+                          })
+                        }}
+                        className="mt-0.5 rounded border-border text-primary focus:ring-primary/40 cursor-pointer"
+                      />
+                      <div className="flex flex-col gap-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-primary text-xs uppercase flex-shrink-0">
+                            Ch {ch.chapter_number.padStart(2, '0')}
+                          </span>
+                          <span className="truncate text-text font-medium">
+                            {ch.chapter_title || `Chapter ${ch.chapter_number}`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {ch.files.map(f => (
+                            <code
+                              key={f.id}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${f.extension === '.xml'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800'
+                                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
+                                }`}
+                            >
+                              {f.filename}
+                            </code>
+                          ))}
+                        </div>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
         </div>
       </Modal>
 

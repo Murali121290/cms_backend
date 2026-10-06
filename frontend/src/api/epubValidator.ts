@@ -2,6 +2,23 @@ import axios from 'axios';
 import api, { getApiErrorMessage } from './client';
 import type { AceReport, Book, FilesResponse, UploadResponse, ValidationApiResponse } from '../types/epubValidator';
 
+export interface IgnoreIssuePayload {
+  rule_id: string;
+  file_name: string;
+  snippet: string;
+  line_number?: number;
+}
+
+export async function ignoreIssue(folderName: string, payload: IgnoreIssuePayload) {
+  const { data } = await api.post(`/post-prod/epub-validator/projects/${folderName}/ignore_issue`, payload);
+  return data;
+}
+
+export async function unignoreIssue(folderName: string, payload: IgnoreIssuePayload) {
+  const { data } = await api.post(`/post-prod/epub-validator/projects/${folderName}/unignore_issue`, payload);
+  return data;
+}
+
 export async function uploadFile(
   file: File,
   onProgress?: (pct: number) => void,
@@ -58,6 +75,16 @@ export interface EpubSummary {
   error?: string;
 }
 
+export async function getCategories(customer?: string): Promise<string[]> {
+  try {
+    const params = customer ? { customer } : {};
+    const { data } = await api.get<{ status: boolean; categories: string[] }>(`/post-prod/epub-validator/categories`, { params });
+    return data.categories || [];
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to fetch categories'));
+  }
+}
+
 export async function getEpubSummary(folderName: string, refresh?: boolean): Promise<EpubSummary> {
   try {
     const params = refresh ? { refresh: true } : {};
@@ -84,12 +111,17 @@ export interface ValidationProgress {
 export async function startValidation(
   folderName: string,
   fileName?: string,
+  category?: string,
 ): Promise<{ task_id: string; status: string }> {
   try {
+    const params: Record<string, string> = {};
+    if (fileName) params.file = fileName;
+    if (category) params.category = category;
+
     const { data } = await api.post<{ task_id: string; status: string }>(
       `/post-prod/epub-validator/validate/${folderName}/start`,
       null,
-      { params: fileName ? { file: fileName } : undefined }
+      { params: Object.keys(params).length > 0 ? params : undefined }
     );
     return data;
   } catch (err) {

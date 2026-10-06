@@ -30,6 +30,15 @@ class ViewProofEngine:
         if not chapter:
             raise ValueError(f"Chapter with ID {file_record.chapter_id} not found.")
 
+        # Resolve file_path to verified physical path if needed
+        if not os.path.isabs(file_path) or not os.path.exists(file_path):
+            from app.domains.processing.service import resolve_physical_file_path
+            from app.services.file_service import UPLOAD_DIR
+            target_upload_dir = upload_dir or UPLOAD_DIR
+            file_path = resolve_physical_file_path(file_path, str(target_upload_dir))
+            if not os.path.exists(file_path) and file_record and file_record.path:
+                file_path = resolve_physical_file_path(file_record.path, str(target_upload_dir))
+
         # 2. Find the project InDesign template (.indt) file recursively
         logger.info("Locating project InDesign template (.indt) file...")
         indt_path = None
@@ -66,15 +75,43 @@ class ViewProofEngine:
 
         logger.info(f"Using template file: {indt_path}")
 
-        # 3. Package the XHTML, template, and adjacent artfile/Links into a temporary ZIP
+        # 3. Ensure we package ONLY the active .xhtml file as manuscript input for View Proof
+        xhtml_file_path = file_path
+        if not xhtml_file_path.lower().endswith(".xhtml"):
+            chapter_dir = os.path.join(upload_dir, project.code, chapter.chapters)
+            file_stem = os.path.splitext(os.path.basename(file_path))[0]
+            candidate_xhtml = None
+            
+            for sub in ["Proof", "Manuscript", "XML", ""]:
+                cand = os.path.join(chapter_dir, sub, f"{file_stem}.xhtml") if sub else os.path.join(chapter_dir, f"{file_stem}.xhtml")
+                if os.path.exists(cand):
+                    candidate_xhtml = cand
+                    break
+            
+            if not candidate_xhtml:
+                for root, _, files in os.walk(chapter_dir):
+                    for f in files:
+                        if f.lower().endswith(".xhtml"):
+                            candidate_xhtml = os.path.join(root, f)
+                            if file_stem.lower() in f.lower():
+                                break
+                    if candidate_xhtml:
+                        break
+                        
+            if candidate_xhtml:
+                xhtml_file_path = candidate_xhtml
+            else:
+                raise ValueError(f"No active XHTML manuscript (.xhtml) found for chapter {chapter.chapters}. View Proof requires an .xhtml file.")
+
         temp_zip_fd, temp_zip_path = tempfile.mkstemp(suffix=".zip")
         os.close(temp_zip_fd)
 
         try:
-            logger.info(f"Packaging view-proof assets into ZIP: {temp_zip_path}")
+            logger.info(f"Packaging view-proof assets into ZIP: {temp_zip_path} (XHTML: {xhtml_file_path})")
             with zipfile.ZipFile(temp_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                # Add edited XHTML file
-                zf.write(file_path, os.path.basename(file_path))
+                # Add edited XHTML file strictly as .xhtml
+                file_stem = os.path.splitext(os.path.basename(file_path))[0]
+                zf.write(xhtml_file_path, f"{file_stem}.xhtml")
 
                 # Add template (.indt/.indd) under relative project path (e.g. Design/template/indesign/Degeneffe.indt)
                 project_dir = os.path.join(upload_dir, project.code)
@@ -201,12 +238,28 @@ class ViewProofEngine:
             saved_files = []
             extracted_paths = set()
             
+            # Primary chapter XML filename stems to protect from being overwritten
+            file_stem = os.path.splitext(file_record.filename)[0].lower()
+            chap_num_xml = f"{chapter.chapters}.xml".lower() if hasattr(chapter, 'chapters') and chapter.chapters else ""
+            
             with zipfile.ZipFile(io.BytesIO(response.content)) as z_out:
                 for zname in z_out.namelist():
                     if zname.endswith("/") or zname.endswith("\\"):
                         continue
                     basename = os.path.basename(zname)
+                    basename_lower = basename.lower()
                     ext = os.path.splitext(basename)[1].lower()
+
+                    # Ignore intermediate InDesign logs/XML and primary source chapter XML
+                    if (
+                        basename_lower.endswith("_indd.xml.log") or
+                        basename_lower.endswith(".xml.log") or
+                        basename_lower.endswith("_indd.xml") or
+                        basename_lower == f"{file_stem}.xml" or
+                        (chap_num_xml and basename_lower == chap_num_xml)
+                    ):
+                        logger.info(f"Skipping ignored view-proof file: {basename}")
+                        continue
 
                     # Ignore template (.indt) and source editor (.xhtml) files during View Proof stage
                     if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx", ".pdf", ".css", ".indd"):

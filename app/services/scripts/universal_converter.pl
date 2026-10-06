@@ -151,17 +151,42 @@ foreach my $full_path (@file_queue) {
         }
 
         my $xmlout = $out_dom->toString(1);
+
+        # Clean unwanted XHTML namespaces & editor conversion data attributes
+        $xmlout =~ s{\s*xmlns="http://www\.w3\.org/1999/xhtml"}{}g;
+        $xmlout =~ s{\s*xmlns=""}{}g;
+        $xmlout =~ s{\s*data-xml-tag="[^"]*"}{}g;
+        $xmlout =~ s{\s*data-original-tag="[^"]*"}{}g;
+
         $xmlout =~ s{</head>(\s*)<body>}{</head>}gs;
         $xmlout =~ s{</body>(\s*)</book>}{</book>}gs;
         $xmlout =~ s{<head>((?:(?!</head>).)*?)</head>}{}gs;
         $xmlout =~ s{<\?xml[^>]*\?>}{}gi;
+        $xmlout =~ s{<!DOCTYPE[^>]*>}{}gi;
         $xmlout =~ s{<\!--\s*\?xml[^>]*\?>\s*-->}{}gi;
         $xmlout =~ s{<\!--\s*<\?xml[^>]*\?>\s*-->}{}gi;
         $xmlout =~ s{<\!--\s*\?xml.*?\?>\s*-->}{}gi;
 
-        unless ($xmlout =~ /<book-part[\s>]/i) {
+        if ($xmlout =~ /<book-part[\s>]/i) {
+            # Extract metadata elements that might be inside body and relocate to book-part-meta
+            my $meta_html = "";
+            while ($xmlout =~ s{(<(?:title-group|contrib-group|abstract|kwd-group)[\s>][\s\S]*?<\/(?:title-group|contrib-group|abstract|kwd-group)>)}{}i) {
+                $meta_html .= $1 . "\n";
+            }
+            if ($meta_html) {
+                if ($xmlout =~ /<book-part-meta[^>]*>/i) {
+                    $xmlout =~ s{(<book-part-meta[^>]*>)}{$1\n$meta_html}i;
+                } else {
+                    $xmlout =~ s{(<book-part[^>]*>)}{$1\n<book-part-meta>\n${meta_html}</book-part-meta>}i;
+                }
+            }
+            # Ensure root <book> node has standard NLM BITS DTD attributes
+            $xmlout =~ s{<book\b[^>]*>}{<book xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:mml="http://www.w3.org/1998/Math/MathML" xmlns:xlink="http://www.w3.org/1999/xlink" dtd-version="1.0" xml:lang="en">}i;
+        } else {
             my $ch_id = "ch10";
-            if ($xmlout =~ /<label>(\d+)<\/label>/) {
+            if ($xmlout =~ /id="(ch\d+)"/i) {
+                $ch_id = $1;
+            } elsif ($xmlout =~ /<label>(\d+)<\/label>/i) {
                 $ch_id = "ch" . $1;
             }
 
@@ -178,9 +203,7 @@ foreach my $full_path (@file_queue) {
             $xmlout =~ s{</?book[^>]*>}{}gi;
             $xmlout =~ s{</?book-body[^>]*>}{}gi;
 
-            $xmlout = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    . "<!DOCTYPE book PUBLIC \"-//NLM//DTD BITS Book Interchange DTD v2.0 20130520//EN\" \"D:/s4c/wordtoxml/FirstXML/BITS-Book-1.0-DTD/BITS-book1.dtd\">\n"
-                    . "<book xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" xmlns:xi=\"http://www.w3.org/2001/XInclude\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:aid=\"http://ns.adobe.com/AdobeInDesign/4.0/\" dtd-version=\"1.0\" xml:lang=\"en\">\n"
+            $xmlout = "<book xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" xmlns:xi=\"http://www.w3.org/2001/XInclude\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" dtd-version=\"1.0\" xml:lang=\"en\">\n"
                     . "<book-body>\n"
                     . "<book-part id=\"$ch_id\" book-part-type=\"chapter\">\n"
                     . "<book-part-meta>\n" . $meta_html . "</book-part-meta>\n"
@@ -189,6 +212,12 @@ foreach my $full_path (@file_queue) {
                     . "</book-body>\n"
                     . "</book>\n";
         }
+
+        # Prepend XML Declaration & updated DTD path header
+        $xmlout = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                . "<!DOCTYPE book PUBLIC \"-//NLM//DTD BITS Book Interchange DTD v2.0 20130520//EN\" \"app/processing/legacy/wordtoxml/BITS-Book-1.0-DTD/BITS-book1.dtd\">\n"
+                . $xmlout;
+
         $xmlout =~ s{<strong>}{<bold>}g;
         $xmlout =~ s{</strong>}{</bold>}g;
         $xmlout =~ s{<em>}{<italic>}g;
@@ -198,18 +227,21 @@ foreach my $full_path (@file_queue) {
         $xmlout =~ s{<delete[^>]*>((?:(?!</delete>).)*?)</delete>}{}g;
         $xmlout =~ s{<\!-- QUERY: <query>(\s*)}{<query>}gi;
         $xmlout =~ s{</query> -->}{</query>}gi;
-        $xmlout =~ s{<\!--\s*<highlight>\s*-->}{<highlight>}gi;
-        $xmlout =~ s{<\!--\s*</highlight>\s*-->}{</highlight>}gi;
-        $xmlout =~ s{<\!--\s*<query[^>]*>\s*-->}{<query>}gi;
-        $xmlout =~ s{<\!--\s*</query>\s*-->}{</query>}gi;
+        $xmlout =~ s{<\!--\s*<highlight>\s*-->}{<!-- <highlight> -->}gi;
+        $xmlout =~ s{<\!--\s*</highlight>\s*-->}{<!-- </highlight> -->}gi;
+        $xmlout =~ s{<\!--\s*<query[^>]*>\s*-->}{<!-- <query> -->}gi;
+        $xmlout =~ s{<\!--\s*</query>\s*-->}{<!-- </query> -->}gi;
         $xmlout =~ s{\s+aid:(?:pstyle|cstyle)="[^"]*"}{}gi;
         $xmlout =~ s{<\!--\s*aid:(?:pstyle|cstyle)="[^"]*"\s*-->}{}gi;
         $xmlout =~ s{<insert[^>]*>((?:(?!</insert>).)*?)</insert>}{$1}g;
+        $xmlout =~ s{<([^>]+)><\!\-\- aid:pstyle="([^"]+)" \-\->}{<$1 aid:pstyle="$2">}g;
+        $xmlout =~ s{<([^>]+)><\!\-\- aid:cstyle="([^"]+)" \-\->}{<$1 aid:cstyle="$2">}g;
         $xmlout =~ s{</col>}{}g;
         $xmlout =~ s{<col ([^>]*)>}{<col $1/>}g;
         $xmlout =~ s{<col ([^>]*)//>}{<col $1/>}g;
         $xmlout =~ s{<colgroup>((?:(?!</colgroup>).)*?)</colgroup>(\s*)<table ([^>]*)>}{$2<table $3>\n<colgroup>$1</colgroup>}gs;
         $xmlout =~ s{<p\/>}{}g;
+        $xmlout =~ s{(<(?:ext-link|uri|graphic|inline-graphic|media)\b[^>]*?)\bhref="}{$1xlink:href="}gi;
         $xmlout =~ s{(\n+)}{\n}g;
         save_file($target_out_path, $xmlout);
     }
@@ -356,8 +388,18 @@ sub convert_xhtml_to_xml {
     if ($node->hasAttributes()) {
         foreach my $attr ($node->attributes()) {
             my $name = $attr->nodeName;
-            next if $name eq 'class' || $name eq 'data-xml-tag' || $name =~ /^data-aid-/;
+            $name =~ s/^xlink://i if $target_tag =~ /^(?:ext-link|uri|graphic|inline-graphic|media)$/i;
+            next if $name eq 'class' || $name eq 'data-xml-tag' || $name eq 'data-original-tag' || $name =~ /^data-aid-/ || $name eq 'xmlns' || $name =~ /^xmlns:/;
             $elem->setAttribute($name, $attr->nodeValue);
+        }
+    }
+
+    if ($target_tag eq 'ext-link' && !$elem->hasAttribute('ext-link-type')) {
+        my $href = $elem->getAttribute('href') || '';
+        if ($href =~ /10\.\d{4,9}\// || $href =~ /doi\.org/i) {
+            $elem->setAttribute('ext-link-type', 'doi');
+        } else {
+            $elem->setAttribute('ext-link-type', 'uri');
         }
     }
 

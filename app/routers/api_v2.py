@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Fo
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from jose import JWTError, jwt
+from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -220,7 +221,8 @@ def _get_filtered_projects_query(db: Session, user: models.User):
     from app.domains.clients.models import Client
     from app.domains.auth.rbac_config import has_permission
 
-    query = db.query(Project)
+    # Soft-deleted projects (and the hidden JRNL-* projects that hold journal review files) stay out of lists.
+    query = db.query(Project).filter(Project.is_deleted != True)  # noqa: E712
 
     # Filter projects based on user.customer_access for non-Admin users
     if not _has_admin_role(user) and getattr(user, "customer_access", None):
@@ -4560,9 +4562,72 @@ def api_v2_start_batch_jobs(
     }
 
 
+class CombineBookRequest(BaseModel):
+    chapter_ids: List[int] | None = None
+
+
+@router.get("/projects/{project_id}/final-delivery-files", response_model=schemas_v2.FinalDeliveryFilesResponse)
+def api_v2_list_final_delivery_files(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    from app.services.file_service import UPLOAD_DIR
+
+    chapters = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.project_code).all()
+
+    items = []
+    for chapter in chapters:
+        if chapter.chapters.lower() == "final files":
+            continue
+
+        for f in chapter.files:
+            if f.category == "Misc" and f.path:
+                ext = os.path.splitext(f.filename)[1].lower()
+                if ext in (".xml", ".epub") and not f.filename.endswith(".log"):
+                    abs_path = os.path.join(UPLOAD_DIR, f.path) if not os.path.isabs(f.path) else f.path
+                    size_bytes = None
+                    if os.path.exists(abs_path):
+                        try:
+                            size_bytes = os.path.getsize(abs_path)
+                        except Exception:
+                            pass
+                    items.append(schemas_v2.FinalDeliveryFileItem(
+                        id=f.id,
+                        chapter_id=chapter.id,
+                        chapter_number=chapter.chapters,
+                        chapter_title=chapter.chapter_title,
+                        filename=f.filename,
+                        extension=ext,
+                        size_bytes=size_bytes,
+                        uploaded_at=f.uploaded_at,
+                    ))
+
+    items.sort(key=lambda item: (item.chapter_number, item.filename))
+
+    return schemas_v2.FinalDeliveryFilesResponse(files=items)
+
+
 @router.post("/projects/{project_id}/combine-book")
 def api_v2_combine_project_book(
     project_id: int,
+    payload: CombineBookRequest | None = None,
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -4584,8 +4649,11 @@ def api_v2_combine_project_book(
         )
 
     # Gather chapter-wise XML and ePUB files from the "Misc" category
-    chapters = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.project_code).all()
-    
+    chapters_query = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.project_code)
+    if payload and payload.chapter_ids:
+        chapters_query = chapters_query.filter(models.ChapterInfo.id.in_(payload.chapter_ids))
+    chapters = chapters_query.all()
+
     files_to_package = []
     for chapter in chapters:
         # Avoid including files from "Final files" chapter itself to prevent infinite loop of merging merges
@@ -5340,96 +5408,14 @@ def api_v2_technical_scan(
         ).first()
 
         if selected_stylesheet:
-            # Build set of (element, subtype, pattern) tuples from stylesheet
-            stylesheet_ia_rows = set()
             import json
+            from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
             try:
                 selected_rows = json.loads(selected_stylesheet.selected_ia_rows)
-                for row in selected_rows:
-                    stylesheet_ia_rows.add((row.get("element"), row.get("subtype"), row.get("pattern")))
             except (json.JSONDecodeError, TypeError):
-                pass
-
-            # Build category-level set for fallback matching
-            try:
-                selected_rows_list = json.loads(selected_stylesheet.selected_ia_rows)
-            except (json.JSONDecodeError, TypeError):
-                selected_rows_list = []
-            stylesheet_subtypes = {
-                row.get("subtype", "").lower()
-                for row in selected_rows_list
-                if row.get("subtype")
-            }
-
-            # Use rule_id_to_ia already embedded in cached scan result (no import needed)
-            rule_id_to_ia = raw_scan.get("ia_report", {}).get("rule_id_to_ia", {})
-
-            # Fall back to module import only if not in cached result
-            if not rule_id_to_ia:
-                try:
-                    from app.processing.manuscript_core.ia_mapping import RULE_ID_TO_IA as rule_id_to_ia
-                except ImportError:
-                    try:
-                        from manuscript_core.ia_mapping import RULE_ID_TO_IA as rule_id_to_ia
-                    except ImportError:
-                        rule_id_to_ia = {}
-
-            # Annotate in_stylesheet for each finding
-            for finding in findings:
-                rule_id = finding.get("rule_id")
-                matched = False
-                if rule_id and rule_id in rule_id_to_ia:
-                    ia_row = rule_id_to_ia[rule_id]
-                    if isinstance(ia_row, (tuple, list)) and len(ia_row) >= 3:
-                        matched = (ia_row[0], ia_row[1], ia_row[2]) in stylesheet_ia_rows
-                if not matched:
-                    # Fallback: category-level match (finding.category == ia_row.subtype)
-                    cat = finding.get("category", "").lower()
-                    matched = bool(cat and cat in stylesheet_subtypes)
-                finding["in_stylesheet"] = matched
-
-            # Apply dynamic replacement overrides for range and thousand-separator rules
-            import re as regex_module
-            preferred_patterns: dict = {}
-            for row in selected_rows_list:
-                el = row.get("element", "")
-                pat = row.get("pattern", "")
-                if el and pat:
-                    preferred_patterns.setdefault(el, set()).add(pat)
-
-            range_rule_ids = {"range_to", "range_endash", "range_hyphen"}
-            thous_rule_ids = {"thous_sep_missing", "thous_sep_comma", "thous_sep_space", "thous_sep_nbsp"}
-
-            for finding in findings:
-                rule_id = finding.get("rule_id", "")
-                surface = finding.get("surface", "")
-
-                if rule_id in range_rule_ids:
-                    prefs = preferred_patterns.get("Ranges", set())
-                    if prefs:
-                        pref = next(iter(prefs))
-                        nums = regex_module.findall(r'\d+', surface)
-                        if len(nums) >= 2:
-                            if "to" in pref.lower():
-                                finding["replacement"] = f"{nums[0]} to {nums[1]}"
-                            elif "en dash" in pref.lower():
-                                finding["replacement"] = f"{nums[0]}–{nums[1]}"
-                            elif "hyphen" in pref.lower():
-                                finding["replacement"] = f"{nums[0]}-{nums[1]}"
-
-                elif rule_id in thous_rule_ids:
-                    prefs = preferred_patterns.get("Thousand separator (use/non-use)", set())
-                    if prefs:
-                        pref = next(iter(prefs))
-                        clean = regex_module.sub(r'[,\s ]', '', surface)
-                        try:
-                            n = int(clean)
-                            if "comma" in pref.lower() and "no comma" not in pref.lower():
-                                finding["replacement"] = f"{n:,}"
-                            elif "no comma" in pref.lower():
-                                finding["replacement"] = clean
-                        except ValueError:
-                            pass
+                selected_rows = []
+            # rule_id_to_ia is embedded in the cached scan result; the helper imports it otherwise.
+            annotate_with_stylesheet(findings, selected_rows, raw_scan.get("ia_report", {}).get("rule_id_to_ia"))
 
     # Ensure inconsistencies is a dict (convert list to dict if needed)
     inconsistencies_data = raw_scan.get("inconsistencies", {})
@@ -5539,6 +5525,52 @@ def api_v2_technical_export_html(
         content=html_content,
         media_type="text/html",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/files/{file_id}/technical-review/export")
+def api_v2_technical_export(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        export_payload = structuring_review_service.get_export_payload(
+            db,
+            file_id=file_id,
+            logger=logger,
+        )
+    except HTTPException as exc:
+        code = "TECHNICAL_EXPORT_FAILED"
+        detail_message = str(exc.detail)
+        if exc.status_code == 404:
+            code = "PROCESSED_FILE_MISSING" if "Processed file not found" in detail_message else "FILE_NOT_FOUND"
+        return _error_response(
+            status_code=exc.status_code,
+            code=code,
+            message=detail_message,
+        )
+
+    cleanup = None
+    if export_payload.get("is_temp"):
+        from starlette.background import BackgroundTask
+        import os as _os
+        tmp_path = export_payload["path"]
+        cleanup = BackgroundTask(lambda: _os.path.exists(tmp_path) and _os.unlink(tmp_path))
+
+    return FileResponse(
+        path=export_payload["path"],
+        filename=export_payload["filename"],
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        background=cleanup,
     )
 
 
@@ -5810,7 +5842,12 @@ def api_v2_get_file_xhtml(
             message="File not found",
         )
 
-    file_path = os.path.abspath(file_record.path)
+    # Read the current processed DOCX (falls back to the original upload when
+    # none exists yet) — the same convention save_xhtml_and_convert already
+    # uses for this file's plain save, so the editor and Technical Review's
+    # scan/apply agree on which document is "current".
+    resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    file_path = os.path.abspath(resolved["processed_path"])
     if not os.path.exists(file_path):
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -5828,12 +5865,14 @@ def api_v2_get_file_xhtml(
     if os.path.exists(xhtml_path) and os.path.getmtime(xhtml_path) >= file_mtime:
         logger.info(f"Serving cached XHTML for file {file_id}")
     else:
-        # Always force a fresh conversion to ensure the editor shows the latest text/formatting
-        from app.processing.docx_to_xhtml import DocxToXhtmlEngine
+        # Use DocxToXhtmlRunsEngine to preserve track changes, highlights, math, and run bookmarks
+        from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
         try:
             os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
-            engine = DocxToXhtmlEngine()
-            engine.convert(file_path, xhtml_path)
+            engine = DocxToXhtmlRunsEngine()
+            content = engine.convert(file_path, file_id=file_id)
+            with open(xhtml_path, "w", encoding="utf-8") as f:
+                f.write(content)
         except Exception as e:
             return _error_response(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

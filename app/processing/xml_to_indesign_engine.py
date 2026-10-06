@@ -40,7 +40,10 @@ class XMLToInDesignEngine:
         if not template_file:
             raise FileNotFoundError(f"Template file with ID {template_file_id} not found.")
             
-        template_path = os.path.abspath(template_file.path)
+        from app.domains.processing.service import resolve_physical_file_path
+        from app.services.file_service import UPLOAD_DIR
+        target_upload_dir = upload_dir or UPLOAD_DIR
+        template_path = resolve_physical_file_path(template_file.path, str(target_upload_dir))
         if not os.path.exists(template_path):
             raise FileNotFoundError(f"Physical template file missing: {template_path}")
             

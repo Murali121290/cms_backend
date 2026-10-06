@@ -1,0 +1,55 @@
+{
+  "name": "US English House Style",
+  "description": "Standard American English spelling and style rules",
+  "variant_to_canonical": {
+    "colour": "color",
+    "colours": "colors",
+    "organise": "organize",
+    "organised": "organized",
+    "organisation": "organization",
+    "analyse": "analyze",
+    "analysed": "analyzed",
+    "centre": "center",
+    "centred": "centered",
+    "behaviour": "behavior",
+    "favour": "favor",
+    "labelled": "labeled",
+    "modelling": "modeling",
+    "email": "e-mail"
+  },
+  "rules": [
+    {
+      "id": "GP001", "category": "grammar", "type": "regex", "pattern": " {2,}", "replacement": " ", "message": "Collapse multiple spaces to one.", "severity": "error", "enabled": true
+    },
+    {
+      "id": "GP002", "category": "grammar", "type": "regex", "pattern": "\\s+([,;:.!?])", "replacement": "\\1", "message": "Remove space before punctuation.", "severity": "error", "enabled": true
+    },
+    {
+      "id": "GP003", "category": "grammar", "type": "regex", "pattern": "([,;:])(?=[^\\s\\d])", "replacement": "\\1 ", "message": "Add a space after punctuation.", "severity": "error", "enabled": true
+    },
+    {
+      "id": "GP006", "category": "grammar", "type": "regex", "pattern": "\\ba\\s+(?=[aeiouAEIOU]|EMR\\b|RT\\b|MRI\\b|OAR\\b|CT\\b|ACC\\b|SRT\\b)", "replacement": "an ", "message": "Use 'an' before a vowel sound.", "severity": "warning", "enabled": true
+    },
+    {
+      "id": "GP009", "category": "grammar", "type": "regex", "pattern": "\\b(non|pre|post|anti|multi|sub)-([a-z]+)\\b", "replacement": "\\1\\2", "message": "Remove hyphen in prefix word.", "severity": "suggestion", "flags": ["IGNORECASE"], "enabled": true
+    },
+    {
+      "id": "GP010", "category": "grammar", "type": "regex", "pattern": "\\b(?!(?:early|family|only|likely|daily|weekly|monthly|yearly|ugly|friendly|lively|lonely|holy|silly)\\b)([a-z]+ly)-([a-z]+)\\b", "replacement": "\\1 \\2", "message": "Remove hyphen in '-ly' adverb modifier.", "severity": "warning", "flags": ["IGNORECASE"], "enabled": true
+    },
+    {
+      "id": "SP000", "category": "spelling", "type": "dictionary", "message": "Standardise to US house style.", "enabled": true
+    },
+    {
+      "id": "SL001", "category": "sentence", "type": "function", "function": "max_sentence_length", "params": { "limit": 40 }, "enabled": true
+    },
+    {
+      "id": "SL002", "category": "sentence", "type": "function", "function": "terminal_punctuation", "enabled": true
+    },
+    {
+      "id": "SL003", "category": "sentence", "type": "function", "function": "start_capital", "enabled": true
+    },
+    {
+      "id": "SL004", "category": "sentence", "type": "function", "function": "wordiness", "enabled": true
+    }
+  ]
+}

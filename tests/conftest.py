@@ -41,6 +41,14 @@ def _build_docx(path: Path, paragraphs: Iterable[str] | None = None) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def _journal_storage(monkeypatch, tmp_path):
+    """Journal files go to a per-test folder instead of the runtime uploads folder."""
+    monkeypatch.setenv("JOURNAL_STORAGE_ROOT", str(tmp_path / "journal_storage"))
+    # Tests run Pre-Editing steps explicitly; test_journal_pre_editing_steps turns auto-structuring back on.
+    monkeypatch.setenv("JOURNAL_AUTO_STRUCTURE", "0")
+
+
 @pytest.fixture()
 def app_env(monkeypatch, tmp_path):
     from app import database

@@ -149,8 +149,20 @@ def translate_tag(
 
     if value is None:
         numbered_box = _NUMBERED_BOX_RE.match(name)
-        if numbered_box and numbered_box.group(1) != "1":
-            value = tag_map.get(f"BX1{numbered_box.group(2)}")
+        if numbered_box:
+            num, suffix = numbered_box.groups()
+            if num != "1":
+                value = tag_map.get(f"BX1{suffix}")
+            if value is None and suffix.startswith("-"):
+                subtag = suffix[1:]
+                translated_sub = translate_tag(subtag, tag_map, prefixes, case=case)
+                if translated_sub != subtag:
+                    box_prefix = "Box-01-"
+                    for k, v in tag_map.items():
+                        if k.startswith("BX1-") and isinstance(v, str) and "-" in v:
+                            box_prefix = v.rsplit("-", 1)[0] + "-"
+                            break
+                    value = f"{box_prefix}{translated_sub}"
 
     if value is None and prefixes:
         matched_prefix = None

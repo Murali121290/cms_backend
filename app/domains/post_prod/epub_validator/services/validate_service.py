@@ -4,6 +4,8 @@ import re
 import fnmatch
 import posixpath
 import sys
+import socket
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import requests
@@ -362,8 +364,18 @@ _URL_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0 Safari/537.36"
-    )
+        "Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 
@@ -372,7 +384,7 @@ def _make_session() -> requests.Session:
     retry = Retry(
         total=3, connect=3, read=3, backoff_factor=2,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET"],
+        allowed_methods=["GET", "HEAD"],
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
@@ -380,22 +392,63 @@ def _make_session() -> requests.Session:
     return session
 
 
+def is_domain_live(url: str) -> bool:
+    """Check if the target domain hostname resolves in DNS and responds on TCP port 443/80."""
+    try:
+        clean_url = url.strip()
+        if not clean_url.startswith(("http://", "https://")):
+            clean_url = "http://" + clean_url
+        parsed = urllib.parse.urlparse(clean_url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        hostname = hostname.lower()
+        try:
+            socket.gethostbyname(hostname)
+        except Exception:
+            return False
+        try:
+            sock = socket.create_connection((hostname, 443), timeout=3)
+            sock.close()
+            return True
+        except Exception:
+            pass
+        try:
+            sock = socket.create_connection((hostname, 80), timeout=3)
+            sock.close()
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
+
+
 def _check_single_url(href: str, session: requests.Session) -> dict | None:
     """Return an issue dict if the URL has a problem, else None."""
+    resp = None
     try:
-        resp = session.head(href, timeout=30, allow_redirects=True,
-                            verify=False, headers=_URL_HEADERS)
+        resp = session.get(href, timeout=5, allow_redirects=True,
+                           verify=False, headers=_URL_HEADERS, stream=True)
         code = resp.status_code
         if code in (403, 405):
-            resp = session.get(href, timeout=30, allow_redirects=True,
-                               verify=False, headers=_URL_HEADERS, stream=True)
+            resp.close()
+            resp = session.head(href, timeout=5, allow_redirects=True,
+                                verify=False, headers=_URL_HEADERS)
             code = resp.status_code
         if code < 400:
             return None
         if code == 404:
-            sev, msg = "error", "URL not found"
-        elif code == 403:
-            sev, msg = "warning", "Access forbidden or bot blocked"
+            return {"type": "external_url_issue", "href": href,
+                    "status_code": 404, "category": "error",
+                    "message": "URL not found"}
+        if code == 403:
+            if is_domain_live(href):
+                return {"type": "external_url_verified", "href": href,
+                        "status_code": 403, "category": "info",
+                        "message": "URL verified active on host via DNS/TCP (Anti-bot firewall WAF 403 on automated check)"}
+            return {"type": "external_url_issue", "href": href,
+                    "status_code": 403, "category": "warning",
+                    "message": "Access forbidden. Status code - 403"}
         elif code == 405:
             sev, msg = "warning", "Method not allowed"
         elif code >= 500:
@@ -405,15 +458,22 @@ def _check_single_url(href: str, session: requests.Session) -> dict | None:
         return {"type": "external_url_issue", "href": href,
                 "status_code": code, "category": sev,
                 "message": f"{msg}. Status code - {code}"}
-    except requests.exceptions.Timeout:
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        if is_domain_live(href):
+            return {"type": "external_url_verified", "href": href,
+                    "category": "info",
+                    "message": "URL verified active on host via DNS/TCP (Server drops or blocks automated HTTP checks)"}
         return {"type": "external_url_issue", "href": href,
-                "category": "warning", "message": "Request timeout"}
-    except requests.exceptions.ConnectionError:
-        return {"type": "external_url_issue", "href": href,
-                "category": "error", "message": "Connection error"}
+                "category": "error", "message": "Host unreachable or dead domain"}
     except Exception as e:
         return {"type": "external_url_issue", "href": href,
                 "category": "error", "message": str(e)}
+    finally:
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
 
 def validate_external_urls(file_details):

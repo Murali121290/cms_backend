@@ -8,6 +8,8 @@
 import glob
 import os
 import re
+import socket
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -15,6 +17,7 @@ from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import json
+from typing import Any
 
 from ..engine.registry import rule
 from ..services.upload_service import UPLOAD_DIR
@@ -30,8 +33,18 @@ _URL_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0 Safari/537.36"
-    )
+        "Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 # Cache: url -> issue dict (or None if URL is healthy).
@@ -49,7 +62,7 @@ def _make_session() -> requests.Session:
         read=1,
         backoff_factor=1,  # reduced from 2 — wait: 1s between retries
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET"],
+        allowed_methods=["GET", "HEAD"],
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
@@ -113,22 +126,81 @@ def _check_mailto(href: str) -> dict | None:
     return None
 
 
+def is_domain_live(url: str) -> bool:
+    """Check if the target domain hostname resolves in DNS and responds on TCP port 443/80."""
+    try:
+        clean_url = url.strip()
+        if not clean_url.startswith(("http://", "https://")):
+            clean_url = "http://" + clean_url
+        parsed = urllib.parse.urlparse(clean_url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        hostname = hostname.lower()
+        try:
+            socket.gethostbyname(hostname)
+        except Exception:
+            return False
+        try:
+            sock = socket.create_connection((hostname, 443), timeout=3)
+            sock.close()
+            return True
+        except Exception:
+            pass
+        try:
+            sock = socket.create_connection((hostname, 80), timeout=3)
+            sock.close()
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
+
+
 def _check_single_url(href: str, session: requests.Session) -> dict | None:
     """Return an issue dict if the URL has a problem, else None."""
+    resp = None
     try:
-        resp = session.head(href, timeout=10, allow_redirects=True,  # reduced from 30s
-                           verify=False, headers=_URL_HEADERS)
+        # Perform streaming GET directly to bypass bot blocks on HEAD requests
+        resp = session.get(href, timeout=5, allow_redirects=True,
+                           verify=False, headers=_URL_HEADERS, stream=True)
         code = resp.status_code
         if code in (403, 405):
-            resp = session.get(href, timeout=10, allow_redirects=True,  # reduced from 30s
-                              verify=False, headers=_URL_HEADERS, stream=True)
+            resp.close()
+            # Try once with HEAD if GET gave forbidden or method not allowed
+            resp = session.head(href, timeout=5, allow_redirects=True,
+                                verify=False, headers=_URL_HEADERS)
             code = resp.status_code
         if code < 400:
             return None
         if code == 404:
-            sev, msg = "Error", "URL not found"
-        elif code == 403:
-            sev, msg = "Warning", "Access forbidden or bot blocked"
+            return {
+                "rule_name": "External URL Issue",
+                "type": "external_url_issue",
+                "href": href,
+                "status_code": 404,
+                "category": "Error",
+                "message": "URL not found",
+            }
+        if code == 403:
+            # If site is live and reachable via DNS/TCP, log as Info for audit record
+            if is_domain_live(href):
+                return {
+                    "rule_name": "External Link Verified",
+                    "type": "external_url_verified",
+                    "href": href,
+                    "status_code": 403,
+                    "category": "Info",
+                    "message": "URL verified active on host via DNS/TCP (Anti-bot firewall WAF 403 on automated check)",
+                }
+            return {
+                "rule_name": "External URL Issue",
+                "type": "external_url_issue",
+                "href": href,
+                "status_code": 403,
+                "category": "Warning",
+                "message": "Access forbidden. Status code - 403",
+            }
         elif code == 405:
             sev, msg = "Warning", "Method not allowed"
         elif code >= 500:
@@ -143,21 +215,22 @@ def _check_single_url(href: str, session: requests.Session) -> dict | None:
             "category": sev,
             "message": f"{msg}. Status code - {code}",
         }
-    except requests.exceptions.Timeout:
-        return {
-            "rule_name": "URL Timeout",
-            "type": "external_url_issue",
-            "href": href,
-            "category": "Warning",
-            "message": "Request timeout",
-        }
-    except requests.exceptions.ConnectionError:
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        # If connection/timeout failed on HTTP client but domain host is live on DNS/TCP socket -> log Info item
+        if is_domain_live(href):
+            return {
+                "rule_name": "External Link Verified",
+                "type": "external_url_verified",
+                "href": href,
+                "category": "Info",
+                "message": "URL verified active on host via DNS/TCP (Server drops or blocks automated HTTP checks)",
+            }
         return {
             "rule_name": "Connection Error",
             "type": "external_url_issue",
             "href": href,
             "category": "Error",
-            "message": "Connection error",
+            "message": "Host unreachable or dead domain",
         }
     except Exception as e:
         return {
@@ -167,6 +240,12 @@ def _check_single_url(href: str, session: requests.Session) -> dict | None:
             "category": "Error",
             "message": str(e),
         }
+    finally:
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
 
 def _epub_page_ids(epub: str) -> set[str]:
@@ -210,7 +289,36 @@ def _page_id_for_number(page_num: str, existing: set[str]) -> str | None:
     return None
 
 
+def _word_to_int(s: str) -> int | None:
+    """Convert a word number (e.g. 'one', 'two') to an integer."""
+    words = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+        "thirty": 30, "forty": 40, "fifty": 50
+    }
+    return words.get(s.lower())
+
+
+def _roman_to_int(s: str) -> int | None:
+    """Convert a Roman numeral string to an integer. Returns None if not a valid Roman numeral."""
+    s = s.upper()
+    vals = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+    if not s or not all(c in vals for c in s):
+        return None
+    total = 0
+    prev = 0
+    for ch in reversed(s):
+        curr = vals[ch]
+        if curr < prev:
+            total -= curr
+        else:
+            total += curr
+        prev = curr
+    return total if total > 0 else None
+
+
 _CHAPTER_NUMS_CACHE: dict[str, set[str]] = {}
+_PART_NUMS_CACHE: dict[str, set[str]] = {}
 
 def _epub_chapter_numbers(epub: str) -> set[str]:
     if epub in _CHAPTER_NUMS_CACHE:
@@ -219,32 +327,86 @@ def _epub_chapter_numbers(epub: str) -> set[str]:
     nums: set[str] = set()
     for xhtml in glob.glob(os.path.join(epub, "**", "*.xhtml"), recursive=True):
         basename = os.path.basename(xhtml).lower()
-        # Match base chapter numbers in filenames like ch110.xhtml, chapter-11.xhtml
-        m = re.search(r'(?:ch|chapter|c|part|sec(?:tion)?)[_-]?(\d+)', basename)
+        # Match base chapter numbers in filenames like ch110.xhtml, chapter-11.xhtml, or c_IV
+        m = re.search(r'(?:ch|chapter|c)[_-]?(\d+|[ivxlcdm]+)', basename)
         if m:
-            nums.add(m.group(1).lstrip("0") or "0")
-
+            raw = m.group(1).lstrip("0") or "0"
+            nums.add(raw)
+            # Also store Arabic equivalent if the captured value is a Roman numeral
+            arabic = _roman_to_int(raw)
+            if arabic is not None:
+                nums.add(str(arabic))
 
     _CHAPTER_NUMS_CACHE[epub] = nums
     return nums
 
 
-_SUMMARY_CACHE: dict[str, dict[str, set[str]]] = {}
+def _epub_part_numbers(epub: str) -> set[str]:
+    if epub in _PART_NUMS_CACHE:
+        return _PART_NUMS_CACHE[epub]
 
-def _get_summary_labels(folder_name: str) -> dict[str, set[str]]:
+    nums: set[str] = set()
+    for xhtml in glob.glob(os.path.join(epub, "**", "*.xhtml"), recursive=True):
+        basename = os.path.basename(xhtml).lower()
+        # Match base part numbers in filenames like part_02.xhtml or partI.xhtml
+        m = re.search(r'part[_-]?(\d+|[ivxlcdm]+)', basename)
+        if m:
+            raw = m.group(1).lstrip("0") or "0"
+            nums.add(raw)
+            # Also store Arabic equivalent if the captured value is a Roman numeral
+            arabic = _roman_to_int(raw)
+            if arabic is not None:
+                nums.add(str(arabic))
+
+    _PART_NUMS_CACHE[epub] = nums
+    return nums
+
+
+_SUMMARY_CACHE: dict[str, dict[str, Any]] = {}
+
+def _get_summary_labels(folder_name: str) -> dict[str, Any]:
     if not folder_name:
-        return {"figures": set(), "tables": set()}
+        return {
+            "figures": set(),
+            "tables": set(),
+            "total_chapters": None,
+            "total_parts": None,
+            "total_sections": None,
+            "total_figures": None,
+            "total_tables": None,
+        }
         
     if folder_name in _SUMMARY_CACHE:
         return _SUMMARY_CACHE[folder_name]
 
     cache_path = os.path.join(UPLOAD_DIR, folder_name, "summary_cache.json")
-    labels = {"figures": set(), "tables": set()}
+    if not os.path.exists(cache_path):
+        try:
+            from ..services.summary_service import extract_epub_summary
+            extract_epub_summary(folder_name)
+        except Exception:
+            pass
+
+    labels: dict[str, Any] = {
+        "figures": set(),
+        "tables": set(),
+        "total_chapters": None,
+        "total_parts": None,
+        "total_sections": None,
+        "total_figures": None,
+        "total_tables": None,
+    }
     
     if os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                
+            labels["total_chapters"] = data.get("total_chapters", 0)
+            labels["total_parts"] = data.get("total_parts", 0)
+            labels["total_sections"] = data.get("total_sections", 0)
+            labels["total_figures"] = data.get("total_figures", 0)
+            labels["total_tables"] = data.get("total_tables", 0)
                 
             for label in data.get("figure_labels", []):
                 m = re.search(r'fig(?:ure)?\.?\s*(\d+(?:[\.\-–]\d+)*)', label, re.IGNORECASE)
@@ -328,14 +490,24 @@ def validate_page_citation_links(file_details, rule_config=None):
                     continue
 
             # If it is a chapter citation, only validate if the base chapter exists in this book
-            if m.group(2) is not None and epub:
-                chapter_num_full = m.group(2).lstrip("0") or "0"
-                base_match = re.match(r'^(\d+)', chapter_num_full)
-                base_chapter = base_match.group(1) if base_match else chapter_num_full
-                
-                available_chapters = _epub_chapter_numbers(epub)
-                if available_chapters and base_chapter not in available_chapters:
+            if m.group(2) is not None:
+                if summary_labels.get("total_chapters") == 0:
                     continue
+                if epub:
+                    chapter_num_full = m.group(2).lstrip("0") or "0"
+                    base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', chapter_num_full)
+                    base_chapter = base_match.group(1) if base_match else chapter_num_full
+                    
+                    available_chapters = _epub_chapter_numbers(epub)
+                    if available_chapters:
+                        # Normalize citation: try comparing as-is (lowercase), and also as Arabic equivalent
+                        chapter_lower = base_chapter.lower()
+                        arabic_equiv = _roman_to_int(base_chapter)
+                        arabic_str = str(arabic_equiv) if arabic_equiv else None
+                        word_equiv = _word_to_int(base_chapter)
+                        word_str = str(word_equiv) if word_equiv else None
+                        if chapter_lower not in available_chapters and (arabic_str is None or arabic_str not in available_chapters) and (word_str is None or word_str not in available_chapters):
+                            continue
 
             # If it is a page citation, only validate if the page exists in this book
             if m.group(1) is not None and epub:
@@ -343,23 +515,72 @@ def validate_page_citation_links(file_details, rule_config=None):
                 if page_ids and _page_id_for_number(page_num, page_ids) is None:
                     continue
                     
-            # If it is a Figure citation, verify it exists
-            special_message = None
-            if is_figure and summary_labels["figures"]:
-                fig_num = m.group(3)
-                if fig_num and fig_num not in summary_labels["figures"]:
-                    special_message = f"Citation '{m.group(0)}' looks like a citation but is not found in this book."
+            # If it is a Figure citation, only validate if figures exist and match in this book
+            if is_figure:
+                if summary_labels.get("total_figures") == 0:
+                    continue
+                if summary_labels["figures"]:
+                    fig_num = m.group(3)
+                    if fig_num:
+                        word_equiv = _word_to_int(fig_num)
+                        word_str = str(word_equiv) if word_equiv else None
+                        if fig_num not in summary_labels["figures"] and (word_str is None or word_str not in summary_labels["figures"]):
+                            continue
             
-            # If it is a Table citation, verify it exists
-            if is_table and summary_labels["tables"]:
-                table_num = m.group(4)
-                if table_num and table_num not in summary_labels["tables"]:
-                    special_message = f"Citation '{m.group(0)}' looks like a citation but is not found in this book."
+            # If it is a Table citation, only validate if tables exist and match in this book
+            if is_table:
+                if summary_labels.get("total_tables") == 0:
+                    continue
+                if summary_labels["tables"]:
+                    table_num = m.group(4)
+                    if table_num:
+                        word_equiv = _word_to_int(table_num)
+                        word_str = str(word_equiv) if word_equiv else None
+                        if table_num not in summary_labels["tables"] and (word_str is None or word_str not in summary_labels["tables"]):
+                            continue
 
-            msg = special_message or f"Citation '{m.group(0)}' is not wrapped in a link."
-            rule_name = "Citation Not In Book" if special_message else "Citation Not Linked"
-            issue_type = "citation_not_in_book" if special_message else "page_citation_not_linked"
-            category = "Warning" if special_message else "Error"
+            # If it is a Section citation (Group 9), skip if total_sections is 0 or if statutory/external legal reference
+            is_section = m.group(9) is not None if len(m.groups()) >= 9 else False
+            if is_section:
+                # If analysis summary indicates 0 sections in the book, do not flag section citation errors
+                if summary_labels.get("total_sections") == 0:
+                    continue
+
+                # Skip statutory / external legal references (e.g. Section 307 of SOX / Code / Act / U.S.C.)
+                remainder = str(text_node)[m.end():m.end() + 50]
+                if re.match(r'^\s+(?:of\s+(?:sox|erisa|title\s+\d+|the\s+(?:code|act|statute|rules?|constitution|dodd|false\s+claims))|codified|§|\(?\d+\s+u\.s\.c|\(?\d+\s+c\.f\.r)', remainder, re.IGNORECASE):
+                    continue
+
+            # If it is a Part citation (Group 10), only validate if the base part exists in this book
+            is_part = m.group(10) is not None if len(m.groups()) >= 10 else False
+            if is_part:
+                if summary_labels.get("total_parts") == 0:
+                    continue
+                if epub:
+                    part_num_full = m.group(10).lstrip("0") or "0"
+                    base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', part_num_full)
+                    base_part = base_match.group(1) if base_match else part_num_full
+                    
+                    available_parts = _epub_part_numbers(epub)
+                    if available_parts:
+                        part_lower = base_part.lower()
+                        arabic_equiv = _roman_to_int(base_part)
+                        arabic_str = str(arabic_equiv) if arabic_equiv else None
+                        word_equiv = _word_to_int(base_part)
+                        word_str = str(word_equiv) if word_equiv else None
+                        if part_lower not in available_parts and (arabic_str is None or arabic_str not in available_parts) and (word_str is None or word_str not in available_parts):
+                            continue
+            # If it is a Box citation (Group 8), skip P.O. Boxes (which are not cross-references)
+            is_box = m.group(8) is not None if len(m.groups()) >= 8 else False
+            if is_box:
+                preceding = str(text_node)[:m.start()].strip()
+                if re.search(r'\b(?:P\.?\s*O\.?|Post\s+Office)\s*$', preceding, re.IGNORECASE):
+                    continue
+
+            msg = f"Citation '{m.group(0)}' is not wrapped in a link."
+            rule_name = "Citation Not Linked"
+            issue_type = "page_citation_not_linked"
+            category = "Error"
 
             issues.append({
                 "rule_name": rule_name,
@@ -692,6 +913,46 @@ def validate_url_text_match(file_details, rule_config=None):
                     "extract": href,
                 })
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("URL006")
+def validate_bare_url_text(file_details, rule_config=None):
+    """Find http:// / https:// / www. URLs that appear as plain text but are NOT inside an <a> tag."""
+    file_path = file_details["full_path"]
+    issues = []
+    url_pattern = re.compile(
+        r'https?://[^\s<>"\']*|'
+        r'www\.[^\s<>"\']+\.[^\s<>"\']{2,}|'
+        r'\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|dev|store|tech|ai|online|site|xyz)\b(?:/[^\s<>"\']*)?',
+        re.IGNORECASE
+    )
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    for text_node in soup.find_all(string=True):
+        # Skip if this text is inside an <a>, <script>, <style>, <title> or heading tags (h1-h7)
+        if text_node.find_parent(["a", "script", "style", "title", "h1", "h2", "h3", "h4", "h5", "h6", "h7"]):
+            continue
+        parent = text_node.parent
+        if parent is None:
+            continue
+        line_num = getattr(parent, "sourceline", None)
+
+        for m in url_pattern.finditer(str(text_node)):
+            url = m.group(0).rstrip(".,;:!?)")
+            if not url:
+                continue
+            issues.append({
+                "type": "bare_url_not_linked",
+                "message": f"URL '{url}' appears as plain text but is not wrapped in an <a> tag.",
+                "category": "Warning",
+                "line_number": line_num,
+                "extract": url,
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
 
 
 @rule("URL004")

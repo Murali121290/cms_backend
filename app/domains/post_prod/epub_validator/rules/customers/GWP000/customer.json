@@ -7,7 +7,8 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": true
+      "enabled": true,
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-001",
@@ -19,7 +20,8 @@
       "enabled": true,
       "rule_config": {
         "expected_publisher": "The Goodheart-Willcox Company, Inc"
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-002",
@@ -30,8 +32,9 @@
       ],
       "enabled": true,
       "rule_config": {
-        "expected_rights_pattern": "copyright\\s*©\\s*\\d{4}\\s+by\\s+the\\s+goodheart-willcox\\s+company,\\s+inc\\.?"
-      }
+        "expected_rights_pattern": "copyright\\s*\u00a9\\s*\\d{4}\\s+by\\s+the\\s+goodheart-willcox\\s+company,\\s+inc\\.?"
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-003",
@@ -53,7 +56,8 @@
           "dc:description",
           "dc:rights"
         ]
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-005",
@@ -65,7 +69,8 @@
       "enabled": true,
       "rule_config": {
         "required_prefix": "urn:isbn:"
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-006",
@@ -80,7 +85,8 @@
           "textual",
           "visual"
         ]
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-007",
@@ -95,7 +101,8 @@
           "textual,visual",
           "textual"
         ]
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-008",
@@ -122,7 +129,8 @@
           "MathML",
           "describedMath"
         ]
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-009",
@@ -135,7 +143,8 @@
       "rule_config": {
         "expected_summary": "A very complex book with a lot of images, tables, list items and complex formatting, which are defined with accessible structural markup. There are multiple linked references to various figures in this EPUB however there are no back links provided. There is a page list and embedded page-breaks within this EPUB to aid in the ability to go to a specific page. Additionally, blank pages have been removed from the EPUB while their page break labels have been left in, for reasons of structural flow.",
         "is_required": false
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-010",
@@ -149,7 +158,8 @@
         "expected_values": [
           "none"
         ]
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-011",
@@ -161,7 +171,8 @@
       "enabled": true,
       "rule_config": {
         "expected_text": "EPUB Accessibility 1.1 - WCAG 2.2 Level AA"
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-012",
@@ -173,7 +184,8 @@
       "enabled": true,
       "rule_config": {
         "expected_text": "Benetech"
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-013",
@@ -185,7 +197,8 @@
       "enabled": true,
       "rule_config": {
         "expected_text": "https://bornaccessible.org/certification/gca-credential/"
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-SPINE-001",
@@ -198,7 +211,8 @@
       "rule_config": {
         "file_suffix": "Alt.xhtml",
         "expected_linear": "no"
-      }
+      },
+      "category": "Metadata Check"
     },
     {
       "id": "COM-NAV-001",
@@ -210,7 +224,8 @@
       "enabled": true,
       "rule_config": {
         "expected_type": "toc"
-      }
+      },
+      "category": "Navigation Check"
     },
     {
       "id": "COM-NAV-002",
@@ -222,7 +237,8 @@
       "enabled": true,
       "rule_config": {
         "expected_type": "page-list"
-      }
+      },
+      "category": "Navigation Check"
     },
     {
       "id": "COM-NAV-003",
@@ -234,19 +250,22 @@
       "enabled": true,
       "rule_config": {
         "expected_type": "landmarks"
-      }
+      },
+      "category": "Navigation Check"
     },
     {
       "id": "STRUCT001",
       "name": "EPUB Folder Structure Check",
       "scope": "book",
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     },
     {
       "id": "STRUCT002",
       "name": "Container File Check",
       "scope": "book",
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     },
     {
       "id": "STRUCT003",
@@ -262,7 +281,8 @@
         "nav_file": "nav.xhtml",
         "toc_file": "toc.ncx"
       },
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     },
     {
       "id": "STRUCT005",
@@ -272,35 +292,40 @@
         "xhtml_folder": "Text",
         "start_number": 1
       },
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     },
     {
       "id": "CSS002",
       "name": "CSS File Validation",
       "target_path": "OEBPS/Styles",
       "enabled": true,
-      "file_name_pattern": "*.css"
+      "file_name_pattern": "*.css",
+      "category": "CSS Check"
     },
     {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "URL001",
       "name": "Internal Link Check",
       "target_path": "OEBPS/Text",
       "enabled": false,
-      "file_name_pattern": "*.xhtml"
+      "file_name_pattern": "*.xhtml",
+      "category": "Link Check"
     },
     {
       "id": "URL002",
       "name": "External Link Check",
       "target_path": "OEBPS/Text",
       "enabled": false,
-      "file_name_pattern": "*.xhtml"
+      "file_name_pattern": "*.xhtml",
+      "category": "Link Check"
     },
     {
       "id": "COM-LINK-001",
@@ -309,43 +334,49 @@
       "enabled": true,
       "file_name_pattern": "*.xhtml",
       "rule_config": {
-        "citation_regex": "\\b(?:see\\s+)?(?:p(?:ages?|p)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-–][ \\t]*\\d{1,4})?|ch(?:apter|ap)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))(?:[ \\t]*[\\-–][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|fig(?:ure)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:tbl\\.?|table)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|unit\\.?[ \\t]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|lesson\\.?[ \\t]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:exh\\.?|exhibit)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:pl\\.?|plate)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|map(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|box(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:sec\\.?|section)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:pt\\.?|part)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:app\\.?|appendix)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:illus\\.?|illustration)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])))\\b"
-      }
+        "citation_regex": "\\b(?:see\\s+)?(?:p(?:ages?|p)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-\u2013][ \\t]*\\d{1,4})?|ch(?:apter|ap)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))(?:[ \\t]*[\\-\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|fig(?:ure)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:tbl\\.?|table)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|unit\\.?[ \\t]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|lesson\\.?[ \\t]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:exh\\.?|exhibit)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:pl\\.?|plate)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|map(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|box(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:sec\\.?|section)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:pt\\.?|part)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:app\\.?|appendix)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:illus\\.?|illustration)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])))\\b"
+      },
+      "category": "Link Check"
     },
     {
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "OEBPS",
       "enabled": true,
-      "file_name_pattern": "nav.xhtml"
+      "file_name_pattern": "nav.xhtml",
+      "category": "Navigation Check"
     },
     {
       "id": "INDEX001",
       "name": "Index Link Check",
       "target_path": "OEBPS",
       "enabled": true,
-      "file_name_pattern": "*index*.xhtml"
+      "file_name_pattern": "*index*.xhtml",
+      "category": "Index Check"
     },
     {
       "id": "INDEX002",
       "name": "Index Unordered List Format Check",
       "target_path": "OEBPS",
       "enabled": true,
-      "file_name_pattern": "*index*.xhtml"
+      "file_name_pattern": "*index*.xhtml",
+      "category": "Index Check"
     },
     {
       "id": "NAV002",
       "name": "NCX and Navigation link Check",
       "target_path": "OEBPS",
       "enabled": true,
-      "file_name_pattern": "toc.ncx"
+      "file_name_pattern": "toc.ncx",
+      "category": "Navigation Check"
     },
     {
       "id": "NAV005",
       "name": "Page List Link Check",
       "target_path": "OEBPS",
       "enabled": true,
-      "file_name_pattern": "nav.xhtml"
+      "file_name_pattern": "nav.xhtml",
+      "category": "Navigation Check"
     },
     {
       "id": "XHTML002",
@@ -438,7 +469,8 @@
             "tag": "section"
           }
         ]
-      }
+      },
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML003",
@@ -448,34 +480,39 @@
       "enabled": true,
       "rule_config": {
         "expected_lang": "en"
-      }
+      },
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML004",
       "name": "<title> element is unique per page",
       "scope": "book",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML005",
       "name": "No <br/> allowed inside headings",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML006",
       "name": "Single <h1> per page and no adjacent headings",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "GWP-IMG-001",
       "name": "Image Filename Format Check",
       "target_path": "OEBPS/Images",
       "file_name_pattern": "*.*",
-      "enabled": true
+      "enabled": true,
+      "category": "Image Check"
     },
     {
       "id": "IMG-001",
@@ -485,7 +522,8 @@
       "enabled": true,
       "rule_config": {
         "expected_dpi": 150
-      }
+      },
+      "category": "Image Check"
     },
     {
       "id": "IMG-002",
@@ -501,7 +539,8 @@
           "header",
           "aside"
         ]
-      }
+      },
+      "category": "Image Check"
     },
     {
       "id": "GWP-XHTML-001",
@@ -514,21 +553,24 @@
         "expected_role": "doc-introduction",
         "expected_heading_level": "h2",
         "expected_parent_tag": "section"
-      }
+      },
+      "category": "XHTML Check"
     },
     {
       "id": "GWP-XHTML-002",
       "name": "Figure Structure Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "GWP-XHTML-003",
       "name": "Table Structure Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "GWP-XHTML-004",
@@ -538,42 +580,48 @@
       "enabled": true,
       "rule_config": {
         "max_columns": 4
-      }
+      },
+      "category": "XHTML Check"
     },
     {
       "id": "GWP-XHTML-005",
       "name": "Pagebreak Formatting Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "GWP-XHTML-006",
       "name": "Presentational Table Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "GWP-CSS-001",
       "name": "Inline CSS Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "CSS Check"
     },
     {
       "id": "GWP-CSS-002",
       "name": "Meta Viewport Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "CSS Check"
     },
     {
       "id": "GWP-CSS-003",
       "name": "Font and Line Height Relative Unit Check",
       "target_path": "OEBPS/Styles",
       "file_name_pattern": "*.css",
-      "enabled": true
+      "enabled": true,
+      "category": "CSS Check"
     },
     {
       "id": "GWP-CSS-004",
@@ -588,7 +636,8 @@
           "%": 62.5
         }
       },
-      "enabled": true
+      "enabled": true,
+      "category": "CSS Check"
     },
     {
       "id": "GWP-IMG-002",
@@ -598,7 +647,8 @@
         "*.xhtml",
         "*.html"
       ],
-      "enabled": true
+      "enabled": true,
+      "category": "Image Check"
     },
     {
       "id": "GWP-IMG-003",
@@ -608,83 +658,95 @@
         "opf_path": "OEBPS/content.opf",
         "image_folder": "Images"
       },
-      "enabled": true
+      "enabled": true,
+      "category": "Image Check"
     },
     {
       "id": "GWP-LINK-001",
       "name": "1:1 Internal Backlinks Check",
       "scope": "book",
-      "enabled": false
+      "enabled": false,
+      "category": "Link Check"
     },
     {
       "id": "COM-NCX-001",
       "name": "toc.ncx navPoint Check",
       "target_path": "OEBPS",
       "file_name_pattern": "toc.ncx",
-      "enabled": true
+      "enabled": true,
+      "category": "TOC Check"
     },
     {
       "id": "COM-NCX-002",
       "name": "toc.ncx pageTarget Check",
       "target_path": "OEBPS",
       "file_name_pattern": "toc.ncx",
-      "enabled": true
+      "enabled": true,
+      "category": "TOC Check"
     },
     {
       "id": "COM-NCX-003",
       "name": "toc.ncx PDF Page Count Check",
       "target_path": "OEBPS",
       "file_name_pattern": "toc.ncx",
-      "enabled": false
+      "enabled": false,
+      "category": "TOC Check"
     },
     {
       "id": "COM-NCX-004",
       "name": "toc.ncx ISBN Match Check",
       "target_path": "OEBPS",
       "file_name_pattern": "toc.ncx",
-      "enabled": false
+      "enabled": false,
+      "category": "TOC Check"
     },
     {
       "id": "STRUCT006",
       "name": "Confirm no cover.xhtml",
       "scope": "book",
       "target_path": "",
-      "enabled": true
+      "enabled": true,
+      "category": "Structure Check"
     },
     {
       "id": "GLOS001",
       "name": "Glossary Format Check (dl, dt, dd)",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*glossary*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "Glossary check"
     },
     {
       "id": "GLOS002",
       "name": "Glossary Term Backlinks Title Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*glossary*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "Glossary check"
     },
     {
       "id": "GWP-KT-001",
       "name": "Key Term Tagging Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "Glossary check"
     },
     {
       "id": "GWP-ED-001",
       "name": "Extended Description Unique Links Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*extended*.xhtml",
-      "enabled": false
+      "enabled": false,
+      "category": "Link Check"
     },
     {
       "id": "GWP-QUOTE-001",
       "name": "Quotation Markup Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "Quote Check"
     }
   ]
 }

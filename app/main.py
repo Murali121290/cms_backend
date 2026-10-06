@@ -1,6 +1,8 @@
 from app.core.paths import ensure_runtime_dirs
 ensure_runtime_dirs()
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +32,10 @@ app.add_middleware(
 app.include_router(routers_web.router, tags=["Web UI"])
 
 # API Routers
+from app.routers import language_edit
+app.include_router(language_edit.router)
 app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])
+
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["Users"])
 app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["Projects"])
 app.include_router(files.router, prefix=f"{settings.API_V1_STR}/files", tags=["Files"])
@@ -77,6 +82,21 @@ app.include_router(epub_validator, prefix="/api/v2", tags=["EPUB Validator"])
 # PPT Builder Router
 from app.domains.post_prod.ppt_builder import router as ppt_builder
 app.include_router(ppt_builder, prefix="/api/v2", tags=["PPT Builder"])
+
+# XML Conversion Router
+from app.domains.post_prod.xml_conversion.router import router as xml_conversion_router
+app.include_router(xml_conversion_router, prefix="/api/v2/post-prod", tags=["XML Conversion"])
+
+# Journal Production Router
+from app.domains.journals.router import router as journals_router
+app.include_router(journals_router, prefix="/api/v2", tags=["Journal Production"])
+
+# Books on Demand Router
+from app.domains.books_on_demand.router import router as bod_router
+app.include_router(bod_router, prefix="/api/v2/bod", tags=["Books on Demand"])
+# Web PDF Processor Router
+from app.domains.post_prod.web_pdf_processor.router import router as web_pdf_processor
+app.include_router(web_pdf_processor, prefix="/api/v2", tags=["Web PDF Processor"])
 
 @app.get("/")
 def read_root():
@@ -129,7 +149,11 @@ def init_data():
         except Exception:
             db.rollback()
 
-        Base.metadata.create_all(bind=engine)
+        try:
+            Base.metadata.create_all(bind=engine)
+        except Exception as e:
+            # Another worker may have created the tables first; log anything else instead of hiding it.
+            logging.getLogger(__name__).warning("create_all failed during startup: %s", e)
             
         # Define all required roles in RolesMaster
         roles = [

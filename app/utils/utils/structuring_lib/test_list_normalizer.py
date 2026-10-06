@@ -42,10 +42,10 @@ def test_run_bridged_by_empty_paragraph_stays_one_run():
     assert _tags(result) == ["BL-FIRST", "EMPTY", "BL-MID", "BL-LAST"]
 
 
-def test_reference_family_gets_position_suffixes():
-    annotations = [_ann("REF-N"), _ann("REF-N"), _ann("REF-N")]
+def test_reference_family_stays_flat():
+    annotations = [_ann("REF-N"), _ann("REF-N"), _ann("REF-N"), _ann("H1"), _ann("REF-U"), _ann("REF-U")]
     result = normalize_list_positions(annotations)
-    assert _tags(result) == ["REF-N-FIRST", "REF-N-MID", "REF-N-LAST"]
+    assert _tags(result) == ["REF-N", "REF-N", "REF-N", "H1", "REF-U", "REF-U"]
 
 
 def test_different_families_do_not_merge():
