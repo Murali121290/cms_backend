@@ -1089,16 +1089,19 @@ async def download_file(
     user=Depends(get_current_user_from_cookie),
     db: Session = Depends(database.get_db)
 ):
-    if not user: return RedirectResponse(url="/login")
+    import mimetypes
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     file_record = file_service.get_file_for_download(db, file_id=file_id)
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
         
+    mime, _ = mimetypes.guess_type(file_record.filename)
     return FileResponse(
         path=file_record.path, 
         filename=file_record.filename, 
-        media_type='application/octet-stream'
+        media_type=mime or 'application/octet-stream'
     )
 
 @router.post("/projects/files/{file_id}/delete")

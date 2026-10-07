@@ -2732,10 +2732,12 @@ def api_v2_download_file(
             message="File not found.",
         )
 
+    import mimetypes
+    mime, _ = mimetypes.guess_type(file_record.filename)
     return _serve_docx_finalized(
         path=file_record.path,
         filename=file_record.filename,
-        media_type="application/octet-stream",
+        media_type=mime or "application/octet-stream",
     )
 
 

@@ -38,6 +38,8 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useJournalReviewMode } from "@/features/journals/useJournalReviewMode";
 import { uiPaths } from "@/utils/appPaths";
 import { ReferenceReviewSidePanel } from "@/features/referenceReview/components/ReferenceReviewSidePanel";
+import { DesignPdfViewer } from "@/features/structuringReview/components/DesignPdfViewer";
+import { getChapterFiles, getProjectChapters } from "@/api/projects";
 
 type StructuringTab = "overview" | "editor" | "onlyoffice" | "collabora";
 
@@ -197,6 +199,80 @@ export function StructuringReviewPage() {
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<"styles" | "changes">("styles");
   const [showReferencePanel, setShowReferencePanel] = useState(false);
+  const [isDesignSplitActive, setIsDesignSplitActive] = useState(false);
+  const [designPdfUrl, setDesignPdfUrl] = useState<string | null>(null);
+  const [designPdfFilename, setDesignPdfFilename] = useState<string>("Design PDF");
+
+  useEffect(() => {
+    if (!normalizedProjectId || !normalizedChapterId) return;
+
+    let isMounted = true;
+
+    const isPdfFile = (f: { filename?: string; category?: string }) => {
+      return (
+        f.filename?.toLowerCase().endsWith(".pdf") ||
+        f.category?.toLowerCase() === "pdf" ||
+        f.category?.toLowerCase() === "design"
+      );
+    };
+
+    const fetchDesignPdf = async () => {
+      try {
+        // 1. Try current chapter files
+        const currentRes = await getChapterFiles(normalizedProjectId, normalizedChapterId);
+        let pdfFile = currentRes.files?.find(isPdfFile);
+
+        // 2. If not found in current chapter, try the project's Design chapter or all project chapters
+        if (!pdfFile) {
+          const chaptersRes = await getProjectChapters(normalizedProjectId);
+          const chapters = chaptersRes.chapters || [];
+
+          // Find Design chapter first (e.g. number="design" or title contains "design")
+          const designChap = chapters.find(
+            (c: any) =>
+              c.number?.toLowerCase() === "design" ||
+              c.title?.toLowerCase().includes("design")
+          );
+
+          if (designChap) {
+            const designRes = await getChapterFiles(normalizedProjectId, designChap.id);
+            pdfFile = designRes.files?.find(isPdfFile);
+          }
+
+          // Fallback: search all other chapters in the project if still not found
+          if (!pdfFile) {
+            for (const chap of chapters) {
+              if (chap.id === normalizedChapterId || chap.id === designChap?.id) continue;
+              const chapRes = await getChapterFiles(normalizedProjectId, chap.id);
+              pdfFile = chapRes.files?.find(isPdfFile);
+              if (pdfFile) break;
+            }
+          }
+        }
+
+        if (isMounted) {
+          if (pdfFile) {
+            const chFolder = `chapter-${pdfFile.chapter_id}`;
+            const url = `/api/uploads/${normalizedProjectId}/chapter/${chFolder}/${pdfFile.category || "Pdf"}/${encodeURIComponent(pdfFile.filename)}/download?chapter_id=${pdfFile.chapter_id}`;
+            setDesignPdfUrl(url);
+            setDesignPdfFilename(pdfFile.filename);
+          } else {
+            setDesignPdfUrl(null);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load design PDF:", err);
+        if (isMounted) setDesignPdfUrl(null);
+      }
+    };
+
+    fetchDesignPdf();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [normalizedProjectId, normalizedChapterId]);
+
   const location = useLocation();
   const xsltContent = (location.state as { xsltContent?: string } | null)?.xsltContent;
 
@@ -610,7 +686,19 @@ export function StructuringReviewPage() {
              full viewport. */}
         {(activeTab === "editor" || isFullscreen) && activeTab !== "onlyoffice" && (
           <div className={`flex-1 flex min-h-0 page-enter gap-3 ${isFullscreen ? "" : "mt-3"}`}>
-            <div className="flex-1 min-w-0 flex flex-col min-h-0">
+            {/* If Design 50/50 Split View is active, render DesignPdfViewer on the left (50% width) */}
+            {isDesignSplitActive && (
+              <div className="w-1/2 min-w-0 flex flex-col min-h-0">
+                <DesignPdfViewer
+                  pdfUrl={designPdfUrl}
+                  filename={designPdfFilename}
+                  onClose={() => setIsDesignSplitActive(false)}
+                  className="h-full"
+                />
+              </div>
+            )}
+
+            <div className={`${isDesignSplitActive ? "w-1/2" : "flex-1"} min-w-0 flex flex-col min-h-0`}>
             {xhtmlQuery.isPending && !xsltContent ? (
               <div style={{ padding: "24px", textAlign: "center" }}>Loading document…</div>
             ) : (
@@ -645,6 +733,8 @@ export function StructuringReviewPage() {
                   charStyles={review.char_styles}
                   onAddStyle={handleAddStyle}
                   editorRef={editorRef}
+                  isDesignViewActive={isDesignSplitActive}
+                  onToggleDesignView={() => setIsDesignSplitActive((prev) => !prev)}
                   onOpenVersion={(versionId) => {
                     if (normalizedProjectId && (normalizedChapterId || journal)) {
                       navigate(reviewPath(versionId, "editor"));
