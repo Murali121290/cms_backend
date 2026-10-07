@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { journalReviewPath, type BookReviewKind } from '@/features/journals/useJournalReviewMode'
-import { ArrowLeft, Check, Crosshair, Play, Search } from 'lucide-react'
+import { ArrowLeft, Check, Crosshair, Play, Search, FileText, Loader2 } from 'lucide-react'
 import { journalsApi, type ArticleWorkspace, type JournalIssue, type JournalCheckModule, type PreEditingStepKey } from '@/api/journals'
 import { WysiwygEditor, type WysiwygEditorHandle } from '@/features/editor'
+import { TinyMceEditor } from '@/features/editor/TinyMceEditor'
 import type { Occurrence } from '@/features/editor/OccurrenceHighlight'
 import { StylesPanel } from '@/features/structuringReview/components/EditorStylesPanel'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -18,9 +19,35 @@ import { STAGE, advanceError, shortStage } from './journals/journalUi'
 import { ArticleFilesPanel } from './journals/ArticleFilesPanel'
 import { JatsXmlEditor } from '@/features/journals/JatsXmlEditor'
 import { PreEditingSteps } from '@/features/journals/PreEditingSteps'
-import 'pdfjs-viewer-element'
-
+import { SourceEditor } from '@/components/epub_validator/SourceEditor'
 import { useAuthStore } from '@/store/useAuthStore'
+
+function PdfJsViewer({ src, height }: { src: string; height?: string }) {
+  const ref = useRef<(HTMLElement & { initPromise?: Promise<unknown> }) | null>(null)
+
+  useEffect(() => {
+    if (!src) return
+    const el = ref.current
+    if (!el) return
+    let cancelled = false
+    Promise.resolve(el.initPromise).then(() => {
+      if (!cancelled) {
+        el.setAttribute('src', src)
+      }
+    })
+    return () => { cancelled = true }
+  }, [src])
+
+  return (
+    <div className="w-full bg-slate-800 shrink-0" style={{ height: height || '100%' }}>
+      {/* @ts-ignore */}
+      <pdfjs-viewer-element
+        ref={ref}
+        style={{ width: '100%', height: '100%', display: 'block', border: '0' }}
+      />
+    </div>
+  )
+}
 
 const CHECKS: { key: JournalCheckModule; name: string; stage: number }[] = [
   { key: 'structuring', name: 'Structuring', stage: STAGE.PRE_EDITING },
@@ -61,6 +88,29 @@ export function JournalArticleEditorPage() {
   const [blocked, setBlocked] = useState<{ message: string; issues: JournalIssue[] } | null>(null)
   const [trackChanges, setTrackChanges] = useState(true)
   const [customStyles, setCustomStyles] = useState<string[]>([])
+  const [leftViewMode, setLeftViewMode] = useState<'pdf' | 'xml'>('pdf')
+  const [isConvertingXml, setIsConvertingXml] = useState(false)
+  const [updatedXmlContent, setUpdatedXmlContent] = useState<string | null>(null)
+
+  const handleShowUpdatedXml = async () => {
+    setLeftViewMode('xml')
+    let content = ws?.xhtml?.content ?? ''
+    if (editorRef.current?.editor) {
+      content = editorRef.current.editor.getHTML()
+    }
+    setIsConvertingXml(true)
+    try {
+      const data = await journalsApi.convertXhtmlToXml(id, content)
+      if (data.xml_content) {
+        setUpdatedXmlContent(data.xml_content)
+        toast.success('XHTML converted & JATS XML updated successfully!')
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to convert XHTML to XML'))
+    } finally {
+      setIsConvertingXml(false)
+    }
+  }
 
   // Findings checklist filters
   const [moduleFilter, setModuleFilter] = useState<'all' | JournalCheckModule>('all')
@@ -458,6 +508,50 @@ export function JournalArticleEditorPage() {
     }
   }
 
+  const handleFinishQc = async () => {
+    setStageBusy(true)
+    try {
+      await journalsApi.finishQc(id)
+      toast.success('Stage 5 Final QC finished! Proof PDF & Proof XHTML saved to proof folder; Final XML & EPUB saved to delivery folder.')
+      await load()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to finish Stage 5 QC'))
+    } finally {
+      setStageBusy(false)
+    }
+  }
+
+  const handleSaveProofXhtml = async (content: string) => {
+    setSaving(true)
+    try {
+      await journalsApi.saveProofXhtml(id, content)
+      toast.success('Saved proof XHTML edits into proof folder.')
+      await load()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to save proof XHTML'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCompleteProof = async () => {
+    setStageBusy(true)
+    try {
+      await journalsApi.completeProof(id)
+      toast.success('Stage 6 View Proof completed! Final files generated into indesign/, proof/, and delivery/ folders.')
+      await load()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to complete proof'))
+    } finally {
+      setStageBusy(false)
+    }
+  }
+
+  const handleDownloadDeliveryZip = async () => {
+    window.open(journalsApi.archiveUrl(id), '_blank')
+    toast.success('Downloading delivery package ZIP...')
+  }
+
   // Keep the selected card in view when a highlight is clicked in the editor.
   useEffect(() => {
     if (selectedId !== null) document.getElementById(`finding-${selectedId}`)?.scrollIntoView({ block: 'nearest' })
@@ -578,6 +672,21 @@ export function JournalArticleEditorPage() {
             <Button variant="ghost" size="sm" onClick={() => stageAction('indesign-status')}>Check InDesign status</Button>
           </>
         )}
+        {stageNo === STAGE.INDESIGN_QC && !done && (
+          <Button variant="primary" size="sm" onClick={handleFinishQc} isLoading={stageBusy}>
+            Finish QC
+          </Button>
+        )}
+        {stageNo === STAGE.PROOF && !done && (
+          <Button variant="primary" size="sm" onClick={handleCompleteProof} isLoading={stageBusy}>
+            Complete Proof
+          </Button>
+        )}
+        {stageNo === STAGE.DELIVERY && (
+          <Button variant="primary" size="sm" onClick={handleDownloadDeliveryZip}>
+            Download Delivery ZIP
+          </Button>
+        )}
         {stageNo >= STAGE.INDESIGN_QC && (
           <a href={journalsApi.proofUrl(id)} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">
             Download proof PDF
@@ -646,188 +755,336 @@ export function JournalArticleEditorPage() {
 
       <div className="flex-1 flex min-h-0">
         {/* Findings checklist */}
-        <aside className="w-[340px] shrink-0 bg-card border-r border-border flex flex-col min-h-0 overflow-y-auto">
-          {stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && selectedStep && (
-            <PreEditingSteps state={ws.pre_editing} selected={selectedStep} busy={stepBusy}
-              onSelect={key => { setSelectedStep(key); setModuleFilter(ws.pre_editing.steps.find(s => s.key === key)?.module ?? 'all') }}
-              onRun={runStep} onFinish={finishStep} onReopen={reopenStep} />
-          )}
-          <div className="p-3 space-y-2 border-b border-border">
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-bold uppercase tracking-wider text-text">Findings checklist</p>
-              <span className="rounded-full bg-surface px-2 text-xs tabular-nums">{issues.length}</span>
-              {visible.length > 0 && (
-                <button type="button" onClick={ignoreAll}
-                  className="ml-auto text-[11px] font-semibold text-primary hover:underline">
-                  Ignore all ({visible.length})
-                </button>
-              )}
-            </div>
-            <label className="relative block">
-              <span className="sr-only">Search findings</span>
-              <Search className="size-3.5 text-muted absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search findings or rules…"
-                className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-2 text-xs outline-none focus:ring-2 focus:ring-primary/30" />
-            </label>
-            <div className="flex flex-wrap gap-1">
-              <button type="button" onClick={() => setModuleFilter('all')}
-                className={cn('px-2 py-0.5 rounded text-[11px] font-semibold', moduleFilter === 'all' ? 'bg-text text-card' : 'bg-surface text-muted')}>
-                ALL ({issues.length})
-              </button>
-              {modulesWithIssues.map(c => (
-                <button key={c.key} type="button" onClick={() => setModuleFilter(c.key)}
-                  className={cn('px-2 py-0.5 rounded text-[11px] font-semibold uppercase', moduleFilter === c.key ? 'bg-text text-card' : 'bg-surface text-muted')}>
-                  {c.name.split(' ')[0]} ({counts.byModule[c.key]})
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-4 rounded-md bg-surface p-0.5 text-[11px]">
-              {(['all', 'error', 'warning', 'info'] as const).map(s => (
-                <button key={s} type="button" onClick={() => setSeverityFilter(s)}
-                  className={cn('py-1 rounded capitalize', severityFilter === s ? 'bg-card shadow-sm font-semibold text-text' : 'text-muted')}>
-                  {s === 'info' ? 'Hints' : s === 'all' ? 'All' : `${s}s`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
-            {visible.length === 0 ? (
-              <p className="text-xs text-muted text-center py-8">
-                {issues.length ? 'No findings match these filters.' : ws.xhtml ? 'No open findings. Complete the stage when you are ready.' : 'Run pre-editing to check the manuscript.'}
-              </p>
-            ) : visible.map(i => {
-              const l = locOf(i)
-              const selected = selectedId === i.id
-              const canApply = i.suggestion?.type === 'replace' && occIndexByIssue.has(i.id)
-              return (
-                <article key={i.id} id={`finding-${i.id}`}
-                  className={cn('rounded-lg border bg-card p-3 space-y-1.5 border-l-4 text-xs cursor-pointer',
-                    i.severity === 'error' ? 'border-l-red-500' : i.severity === 'warning' ? 'border-l-amber-500' : 'border-l-blue-500',
-                    selected ? 'ring-2 ring-primary/40 border-primary' : 'border-border')}
-                  onClick={() => goTo(i)}>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold uppercase text-[10px] tracking-wide text-text">{CHECK_NAME[i.module] ?? i.module}</span>
-                    <span className="font-mono text-muted">{i.rule_id}</span>
-                    <span className="ml-auto text-muted">{l.para_idx !== undefined ? `Para ${l.para_idx}` : (i.location as { xml_line?: number } | undefined)?.xml_line ? `Line ${(i.location as { xml_line?: number }).xml_line}` : ''}</span>
-                  </div>
-                  <p className="font-semibold text-text text-[13px] leading-snug">{i.title}</p>
-                  {i.context_snippet && (
-                    <p className="text-muted break-words">
-                      {l.surface && i.context_snippet.includes(l.surface) ? (
-                        <>
-                          {i.context_snippet.split(l.surface)[0]}
-                          <mark className="bg-amber-200/70 text-text rounded px-0.5">{l.surface}</mark>
-                          {i.context_snippet.split(l.surface).slice(1).join(l.surface)}
-                        </>
-                      ) : i.context_snippet}
-                    </p>
-                  )}
-                  {i.suggestion?.to && i.suggestion.type !== 'signoff' && (
-                    <p className="text-muted">
-                      {i.suggestion.type === 'retag' ? 'Retag as ' : 'Suggested: '}
-                      <strong className="text-green-700">{i.suggestion.to}</strong>
-                    </p>
-                  )}
-                  <div className="flex flex-wrap gap-1.5 pt-1" onClick={e => e.stopPropagation()}>
-                    {canApply && <Button size="sm" onClick={() => applyFix(i)}>Apply fix</Button>}
-                    {i.suggestion?.type === 'retag' ? (
-                      <Button size="sm" variant="secondary" onClick={() => { goTo(i); setSideTab('styles') }}>Retag in Styles</Button>
-                    ) : null}
-                    <Button size="sm" variant="secondary" onClick={() => resolve(i, 'accept')}>
-                      {i.suggestion?.type === 'signoff' ? 'Sign off' : 'Mark fixed'}
-                    </Button>
-                    {l.para_idx !== undefined && (
-                      <Button size="sm" variant="ghost" leftIcon={<Crosshair />} onClick={() => goTo(i)}>Go to</Button>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={() => resolve(i, 'ignore')}>Ignore</Button>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
-        </aside>
-
-        {/* Editor */}
-        <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-          {ws.jats && (
-            <div className="flex items-center gap-1 bg-slate-900 px-3 pt-1.5 shrink-0" role="tablist" aria-label="Article view">
-              {([
-                ['xhtml', 'WYSIWYG XHTML'],
-                ['xml', 'JATS XML Source'],
-                ['layout', 'Layout Preview (HTML)'],
-                ...(ws.proof_pdf || stageNo >= 4 ? [['pdf', 'Proof PDF (InDesign)']] : [])
-              ] as const).map(([key, label]) => (
-                <button key={key} type="button" role="tab" aria-selected={view === key}
-                  onClick={() => setView(key as any)}
-                  className={cn('px-4 py-1.5 text-xs font-semibold rounded-t-md border-b-2 transition-colors',
-                    view === key ? 'bg-white text-slate-900 border-blue-500' : 'text-slate-300 border-transparent hover:text-white')}>
-                  {label}
-                  {key === 'xml' ? ` · v${ws.jats!.version}` : key === 'pdf' && ws.proof_pdf ? ` · v${ws.proof_pdf.version}` : ''}
-                </button>
-              ))}
-              {(ws.open_issues.xml?.error ?? 0) > 0 && (
-                <span className="ml-2 rounded-full bg-red-500/20 text-red-300 px-2 text-[11px]">{ws.open_issues.xml!.error} DTD error{ws.open_issues.xml!.error > 1 ? 's' : ''}</span>
-              )}
-            </div>
-          )}
-          {view === 'pdf' ? (
-            ws.proof_pdf || stageNo >= 4 ? (
-              <div className="w-full bg-slate-800 shrink-0" style={{ height: editorHeight }}>
-                {/* @ts-ignore */}
-                <pdfjs-viewer-element
-                  src={journalsApi.proofPdfUrl(id)}
-                  key={journalsApi.proofPdfUrl(id)}
-                  style={{ width: '100%', height: '100%', display: 'block', border: '0' }}
-                />
+        {stageNo < STAGE.PROOF && (
+          <aside className="w-[340px] shrink-0 bg-card border-r border-border flex flex-col min-h-0 overflow-y-auto">
+            {stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && selectedStep && (
+              <PreEditingSteps state={ws.pre_editing} selected={selectedStep} busy={stepBusy}
+                onSelect={key => { setSelectedStep(key); setModuleFilter(ws.pre_editing.steps.find(s => s.key === key)?.module ?? 'all') }}
+                onRun={runStep} onFinish={finishStep} onReopen={reopenStep} />
+            )}
+            <div className="p-3 space-y-2 border-b border-border">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-text">Findings checklist</p>
+                <span className="rounded-full bg-surface px-2 text-xs tabular-nums">{issues.length}</span>
+                {visible.length > 0 && (
+                  <button type="button" onClick={ignoreAll}
+                    className="ml-auto text-[11px] font-semibold text-primary hover:underline">
+                    Ignore all ({visible.length})
+                  </button>
+                )}
               </div>
-            ) : (
-              <EmptyState
-                title="No Proof PDF generated yet"
-                description="Run Generate InDesign to create the proof PDF and view it here."
-              />
-            )
-          ) : view === 'layout' && ws.jats ? (
-            <iframe
-              title="Layout Preview HTML"
-              src={journalsApi.layoutHtmlUrl(id)}
-              className="w-full border-0 bg-white"
-              style={{ height: editorHeight }}
-            />
-          ) : view === 'xml' && ws.jats ? (
-            <JatsXmlEditor articleId={id} version={jatsVersion} height={editorHeight} onSaved={load} />
-          ) : ws.xhtml ? (
-            <WysiwygEditor
-              ref={editorRef}
-              key={`${id}-${ws.xhtml.file.version}`}
-              fileId={String(ws.xhtml.file.id)}
-              initialContent={ws.xhtml.content}
-              onSave={saveEdits}
-              isSaving={saving}
-              saveLabel="Save edits to DOCX"
-              documentTitle={ws.xhtml.file.filename}
-              height={editorHeight}
-              styles={styles}
-              onAddStyle={s => setCustomStyles(prev => prev.includes(s) ? prev : [...prev, s])}
-              trackChangesEnabled={trackChanges}
-              onTrackChangesToggle={setTrackChanges}
-              currentUser={currentUser}
-              occurrences={occurrences}
-              selectedOccurrenceIndex={selectedOcc}
-              onOccurrenceClick={idx => setSelectedId(issueByOcc[idx] ?? null)}
-              sidePanel={sidePanel}
-            />
-          ) : running || stepBusy === 'structuring' || structuring?.status === 'running' ? (
-            <EmptyState
-              title="Structuring the manuscript…"
-              description="Started automatically. Paragraph styles, front matter and headings are being applied to the working copy; the manuscript and its findings appear here when it finishes."
-            />
+              <label className="relative block">
+                <span className="sr-only">Search findings</span>
+                <Search className="size-3.5 text-muted absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search findings or rules…"
+                  className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-2 text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+              </label>
+              <div className="flex flex-wrap gap-1">
+                <button type="button" onClick={() => setModuleFilter('all')}
+                  className={cn('px-2 py-0.5 rounded text-[11px] font-semibold', moduleFilter === 'all' ? 'bg-text text-card' : 'bg-surface text-muted')}>
+                  ALL ({issues.length})
+                </button>
+                {modulesWithIssues.map(c => (
+                  <button key={c.key} type="button" onClick={() => setModuleFilter(c.key)}
+                    className={cn('px-2 py-0.5 rounded text-[11px] font-semibold uppercase', moduleFilter === c.key ? 'bg-text text-card' : 'bg-surface text-muted')}>
+                    {c.name.split(' ')[0]} ({counts.byModule[c.key]})
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-4 rounded-md bg-surface p-0.5 text-[11px]">
+                {(['all', 'error', 'warning', 'info'] as const).map(s => (
+                  <button key={s} type="button" onClick={() => setSeverityFilter(s)}
+                    className={cn('py-1 rounded capitalize', severityFilter === s ? 'bg-card shadow-sm font-semibold text-text' : 'text-muted')}>
+                    {s === 'info' ? 'Hints' : s === 'all' ? 'All' : `${s}s`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+              {visible.length === 0 ? (
+                <p className="text-xs text-muted text-center py-8">
+                  {issues.length ? 'No findings match these filters.' : ws.xhtml ? 'No open findings. Complete the stage when you are ready.' : 'Run pre-editing to check the manuscript.'}
+                </p>
+              ) : visible.map(i => {
+                const l = locOf(i)
+                const selected = selectedId === i.id
+                const canApply = i.suggestion?.type === 'replace' && occIndexByIssue.has(i.id)
+                return (
+                  <article key={i.id} id={`finding-${i.id}`}
+                    className={cn('rounded-lg border bg-card p-3 space-y-1.5 border-l-4 text-xs cursor-pointer',
+                      i.severity === 'error' ? 'border-l-red-500' : i.severity === 'warning' ? 'border-l-amber-500' : 'border-l-blue-500',
+                      selected ? 'ring-2 ring-primary/40 border-primary' : 'border-border')}
+                    onClick={() => goTo(i)}>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold uppercase text-[10px] tracking-wide text-text">{CHECK_NAME[i.module] ?? i.module}</span>
+                      <span className="font-mono text-muted">{i.rule_id}</span>
+                      <span className="ml-auto text-muted">{l.para_idx !== undefined ? `Para ${l.para_idx}` : (i.location as { xml_line?: number } | undefined)?.xml_line ? `Line ${(i.location as { xml_line?: number }).xml_line}` : ''}</span>
+                    </div>
+                    <p className="font-semibold text-text text-[13px] leading-snug">{i.title}</p>
+                    {i.context_snippet && (
+                      <p className="text-muted break-words">
+                        {l.surface && i.context_snippet.includes(l.surface) ? (
+                          <>
+                            {i.context_snippet.split(l.surface)[0]}
+                            <mark className="bg-amber-200/70 text-text rounded px-0.5">{l.surface}</mark>
+                            {i.context_snippet.split(l.surface).slice(1).join(l.surface)}
+                          </>
+                        ) : i.context_snippet}
+                      </p>
+                    )}
+                    {i.suggestion?.to && i.suggestion.type !== 'signoff' && (
+                      <p className="text-muted">
+                        {i.suggestion.type === 'retag' ? 'Retag as ' : 'Suggested: '}
+                        <strong className="text-green-700">{i.suggestion.to}</strong>
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-1.5 pt-1" onClick={e => e.stopPropagation()}>
+                      {canApply && <Button size="sm" onClick={() => applyFix(i)}>Apply fix</Button>}
+                      {i.suggestion?.type === 'retag' ? (
+                        <Button size="sm" variant="secondary" onClick={() => { goTo(i); setSideTab('styles') }}>Retag in Styles</Button>
+                      ) : null}
+                      <Button size="sm" variant="secondary" onClick={() => resolve(i, 'accept')}>
+                        {i.suggestion?.type === 'signoff' ? 'Sign off' : 'Mark fixed'}
+                      </Button>
+                      {l.para_idx !== undefined && (
+                        <Button size="sm" variant="ghost" leftIcon={<Crosshair />} onClick={() => goTo(i)}>Go to</Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => resolve(i, 'ignore')}>Ignore</Button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </aside>
+        )}
+
+        {/* Editor / Main View Area */}
+        <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+          {stageNo === STAGE.PROOF ? (
+            /* Stage 6: Split-Screen Dual Editor View */
+            <div className="flex-1 flex flex-col min-h-0 bg-slate-900">
+              <div className="flex items-center justify-between px-4 py-2 bg-slate-800 text-white text-xs border-b border-slate-700">
+                <div className="flex items-center gap-2 font-semibold">
+                  <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span>Stage 6: View Proof & Proofing Corrections</span>
+                  <span className="text-slate-400 text-[11px] font-normal">
+                    (Left: {leftViewMode === 'pdf' ? 'Proof PDF' : 'Updated Manuscript XML'} | Right: TinyMCE XHTML Editor)
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant={leftViewMode === 'xml' ? 'primary' : 'secondary'}
+                    onClick={handleShowUpdatedXml}
+                    isLoading={isConvertingXml}
+                    className="flex items-center gap-1.5"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-purple-300" />
+                    <span>Show Updated XML</span>
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={handleFinishQc} isLoading={stageBusy}>
+                    Re-run InDesign PDF
+                  </Button>
+                  <Button size="sm" variant="primary" onClick={handleCompleteProof} isLoading={stageBusy}>
+                    Complete Proof & Advance to Stage 7
+                  </Button>
+                </div>
+              </div>
+              <div className="flex-1 grid grid-cols-2 min-h-0 gap-1 bg-slate-950 p-1">
+                {/* Left 50%: Proof PDF Viewer or Updated XML Code View */}
+                <div className="flex flex-col rounded-lg bg-slate-900 border border-slate-800 overflow-hidden min-h-0">
+                  <div className="px-3 py-1.5 bg-slate-800 text-slate-200 text-xs font-semibold flex justify-between items-center border-b border-slate-700 select-none">
+                    <div className="flex items-center gap-2">
+                      <span>{leftViewMode === 'pdf' ? '📄 InDesign Proof PDF' : '⚡ Updated Manuscript JATS XML'}</span>
+                      {leftViewMode === 'xml' && (
+                        <span className="bg-purple-950 text-purple-300 text-[10px] px-2 py-0.5 rounded border border-purple-800/60 font-mono">
+                          xhtml2xml (Perl)
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {leftViewMode === 'xml' ? (
+                        <button
+                          onClick={() => setLeftViewMode('pdf')}
+                          className="text-[11px] text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 font-medium"
+                        >
+                          ‹ Back to PDF Proof
+                        </button>
+                      ) : (
+                        <a href={journalsApi.proofPdfUrl(id)} target="_blank" rel="noreferrer" className="text-[11px] text-blue-400 hover:underline">
+                          Open PDF in new tab ↗
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0 relative">
+                    {leftViewMode === 'pdf' ? (
+                      <PdfJsViewer src={journalsApi.proofPdfUrl(id)} />
+                    ) : isConvertingXml ? (
+                      <div className="flex-1 h-full flex flex-col items-center justify-center bg-slate-950 text-slate-300 space-y-3">
+                        <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+                        <p className="text-xs font-medium">Converting TinyMCE XHTML to JATS XML via Perl script...</p>
+                      </div>
+                    ) : (
+                      <SourceEditor
+                        value={updatedXmlContent ?? ws?.xml?.content ?? '<!-- Converted XML will appear here -->'}
+                        onChange={() => {}}
+                        readOnly={true}
+                        className="flex-1 min-h-0 h-full"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Right 50%: TinyMCE XHTML Proof Editor */}
+                <div className="flex flex-col rounded-lg bg-white border border-slate-300 overflow-hidden min-h-0">
+                  <div className="px-3 py-1.5 bg-slate-100 text-slate-800 text-xs font-semibold flex justify-between items-center border-b border-slate-200">
+                    <span>✍️ Proof XHTML Editor (TinyMCE)</span>
+                    <span className="text-slate-500 text-[11px]">Save edits to proof/ folder</span>
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    <TinyMceEditor
+                      initialContent={ws?.xhtml?.content ?? ''}
+                      onSave={handleSaveProofXhtml}
+                      isSaving={saving}
+                      saveLabel="Save Proof XHTML"
+                      documentTitle={ws?.article.article_title}
+                      height="100%"
+                      leftViewMode={leftViewMode}
+                      onShowUpdatedXml={handleShowUpdatedXml}
+                      onShowPdfProof={() => setLeftViewMode('pdf')}
+                      isConvertingXml={isConvertingXml}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : stageNo === STAGE.DELIVERY ? (
+            /* Stage 7: Final Delivery Package Dashboard */
+            <div className="flex-1 p-8 bg-slate-900 text-white overflow-y-auto flex flex-col items-center justify-center">
+              <div className="max-w-2xl w-full bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl space-y-6">
+                <div className="flex items-center gap-4 border-b border-slate-700 pb-4">
+                  <div className="size-12 rounded-xl bg-green-500/20 text-green-400 flex items-center justify-center text-2xl font-bold">
+                    📦
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Stage 7: Final Delivery Package</h2>
+                    <p className="text-xs text-slate-400">All publication outputs have been generated, validated, and placed in the delivery folder.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Delivery Package Contents:</h3>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-between">
+                      <span className="font-semibold text-slate-200">📄 Final JATS 1.3 XML</span>
+                      <span className="text-green-400 font-bold">✓ Ready</span>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-between">
+                      <span className="font-semibold text-slate-200">📑 Publication Proof PDF</span>
+                      <span className="text-green-400 font-bold">✓ Ready</span>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-between">
+                      <span className="font-semibold text-slate-200">📱 Publication EPUB</span>
+                      <span className="text-green-400 font-bold">✓ Ready</span>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-between">
+                      <span className="font-semibold text-slate-200">🎨 InDesign INDD / IDML</span>
+                      <span className="text-green-400 font-bold">✓ Ready</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-700 space-y-3">
+                  <Button
+                    size="lg"
+                    className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 text-sm rounded-xl shadow-lg transition-all"
+                    onClick={handleDownloadDeliveryZip}>
+                    📥 Download Complete Delivery ZIP Package
+                  </Button>
+                  <p className="text-[11px] text-slate-400 text-center">
+                    Contains article.xml, article_proof.pdf, article_final.epub, indesign/ layout files, and artfile/ high-resolution figures.
+                  </p>
+                </div>
+              </div>
+            </div>
           ) : (
-            <EmptyState
-              title="No XHTML yet"
-              description={structuring?.status === 'failed' ? `Structuring failed: ${structuring.error ?? 'unknown error'}` : 'Structure the manuscript to convert it to XHTML and see its findings.'}
-              action={<Button leftIcon={<Play />} onClick={runPreEditing} isLoading={running}>{structuring?.status === 'failed' ? 'Retry structuring' : 'Run structuring'}</Button>}
-            />
+            /* Stages 1-5 View Rendering */
+            <>
+              {ws.jats && (
+                <div className="flex items-center gap-1 bg-slate-900 px-3 pt-1.5 shrink-0" role="tablist" aria-label="Article view">
+                  {([
+                    ['xhtml', 'WYSIWYG XHTML'],
+                    ['xml', 'JATS XML Source'],
+                    ['layout', 'Layout Preview (HTML)'],
+                    ...(ws.proof_pdf || stageNo >= 4 ? [['pdf', 'Proof PDF (InDesign)']] : [])
+                  ] as const).map(([key, label]) => (
+                    <button key={key} type="button" role="tab" aria-selected={view === key}
+                      onClick={() => setView(key as any)}
+                      className={cn('px-4 py-1.5 text-xs font-semibold rounded-t-md border-b-2 transition-colors',
+                        view === key ? 'bg-white text-slate-900 border-blue-500' : 'text-slate-300 border-transparent hover:text-white')}>
+                      {label}
+                      {key === 'xml' ? ` · v${ws.jats!.version}` : key === 'pdf' && ws.proof_pdf ? ` · v${ws.proof_pdf.version}` : ''}
+                    </button>
+                  ))}
+                  {(ws.open_issues.xml?.error ?? 0) > 0 && (
+                    <span className="ml-2 rounded-full bg-red-500/20 text-red-300 px-2 text-[11px]">{ws.open_issues.xml!.error} DTD error{ws.open_issues.xml!.error > 1 ? 's' : ''}</span>
+                  )}
+                </div>
+              )}
+              {view === 'pdf' ? (
+                ws.proof_pdf || stageNo >= 4 ? (
+                  <PdfJsViewer src={journalsApi.proofPdfUrl(id)} height={editorHeight} />
+                ) : (
+                  <EmptyState
+                    title="No Proof PDF generated yet"
+                    description="Run Generate InDesign to create the proof PDF and view it here."
+                  />
+                )
+              ) : view === 'layout' && ws.jats ? (
+                <iframe
+                  title="Layout Preview HTML"
+                  src={journalsApi.layoutHtmlUrl(id)}
+                  className="w-full border-0 bg-white"
+                  style={{ height: editorHeight }}
+                />
+              ) : view === 'xml' && ws.jats ? (
+                <JatsXmlEditor articleId={id} version={jatsVersion} height={editorHeight} onSaved={load} />
+              ) : ws.xhtml ? (
+                <WysiwygEditor
+                  ref={editorRef}
+                  key={`${id}-${ws.xhtml.file.version}`}
+                  fileId={String(ws.xhtml.file.id)}
+                  initialContent={ws.xhtml.content}
+                  onSave={saveEdits}
+                  isSaving={saving}
+                  saveLabel="Save edits to DOCX"
+                  documentTitle={ws.xhtml.file.filename}
+                  height={editorHeight}
+                  styles={styles}
+                  onAddStyle={s => setCustomStyles(prev => prev.includes(s) ? prev : [...prev, s])}
+                  trackChangesEnabled={trackChanges}
+                  onTrackChangesToggle={setTrackChanges}
+                  currentUser={currentUser}
+                  occurrences={occurrences}
+                  selectedOccurrenceIndex={selectedOcc}
+                  onOccurrenceClick={idx => setSelectedId(issueByOcc[idx] ?? null)}
+                  sidePanel={sidePanel}
+                />
+              ) : running || stepBusy === 'structuring' || structuring?.status === 'running' ? (
+                <EmptyState
+                  title="Structuring the manuscript…"
+                  description="Started automatically. Paragraph styles, front matter and headings are being applied to the working copy; the manuscript and its findings appear here when it finishes."
+                />
+              ) : (
+                <EmptyState
+                  title="No XHTML yet"
+                  description={structuring?.status === 'failed' ? `Structuring failed: ${structuring.error ?? 'unknown error'}` : 'Structure the manuscript to convert it to XHTML and see its findings.'}
+                  action={<Button leftIcon={<Play />} onClick={runPreEditing} isLoading={running}>{structuring?.status === 'failed' ? 'Retry structuring' : 'Run structuring'}</Button>}
+                />
+              )}
+            </>
           )}
         </main>
       </div>

@@ -12,6 +12,7 @@ import re
 import zipfile
 from collections import defaultdict
 from datetime import datetime
+import app.models
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -31,7 +32,8 @@ CATEGORY_FOLDER = {
     "Manuscript": "manuscript", "XHTML": "manuscript", "Reference_Report": "backup",
     "Art": "art", "JATS_XML": "xml", "XML": "xml",
     "INDD": "indesign", "IDML": "indesign", "Preflight": "indesign",
-    "Proof_PDF": "proof", "Proof": "proof", "Delivery_ZIP": "delivery",
+    "Proof_PDF": "proof", "Proof": "proof", "Proof_XHTML": "proof", "Proof_CSS": "proof", "Proof_XML": "proof", "Proof_EPUB": "proof", "Proof_DOCX": "proof",
+    "Delivery_ZIP": "delivery", "Delivery_EPUB": "delivery", "Delivery_DOCX": "delivery", "Delivery_XML": "delivery", "Delivery_PDF": "delivery", "Delivery_XHTML": "delivery", "EPUB": "delivery", "DOCX": "delivery",
     "Working_Copy": "backup",
 }
 
@@ -253,16 +255,30 @@ def restore(db: Session, article: JournalArticle, f: JournalFile, user_id: Optio
 
 
 # --- zips -------------------------------------------------------------------------------------------
+def clean_zip_arcname(arcname: str) -> str:
+    """Strips version tags (_v1, _v2, etc.) from filename inside zip path."""
+    dir_part, base_part = os.path.split(arcname)
+    cleaned_base = re.sub(r"_v\d+(?=\.[^.]+$)", "", base_part, flags=re.IGNORECASE)
+    cleaned_base = re.sub(r"_v\d+$", "", cleaned_base, flags=re.IGNORECASE)
+    if dir_part:
+        return f"{dir_part}/{cleaned_base}"
+    return cleaned_base
+
+
+# --- zips -------------------------------------------------------------------------------------------
 def build_zip(entries: Iterable[Tuple[str, str]]) -> bytes:
     """entries: (path on disk, name inside the zip)."""
     buf = io.BytesIO()
     seen = set()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for path, arc in entries:
-            if not path or not os.path.exists(path) or arc in seen:
+            if not path or not os.path.exists(path):
                 continue
-            seen.add(arc)
-            z.write(path, arc)
+            clean_arc = clean_zip_arcname(arc)
+            if clean_arc in seen:
+                continue
+            seen.add(clean_arc)
+            z.write(path, clean_arc)
     return buf.getvalue()
 
 
@@ -302,22 +318,58 @@ def delivery_readiness(db: Session, article: JournalArticle) -> List[dict]:
 
 def build_delivery(db: Session, article: JournalArticle, include_indesign: bool = True, include_art: bool = True,
                    user_id: Optional[int] = None, channel: str = "MANUAL_DOWNLOAD") -> Tuple[JournalFile, List[dict]]:
-    """Zip the current XML, proof, InDesign and art as the next Delivery_ZIP version and record the delivery."""
+    """Zip the current XML, proof, EPUB, DOCX, InDesign and art as the next Delivery_ZIP version and record the delivery."""
     from app.domains.journals.files import art_files, latest_file, save_version
     from app.domains.journals.models import JournalDelivery
 
-    if not article.jats_xml_path or not os.path.exists(article.jats_xml_path):
-        raise ValueError("Convert the article to JATS XML before building the delivery package")
-    entries = [(article.jats_xml_path, os.path.basename(article.jats_xml_path))]
-    if article.proof_pdf_path:
-        entries.append((article.proof_pdf_path, os.path.basename(article.proof_pdf_path)))
+    entries = []
+
+    # 1. JATS XML
+    xml_row = latest_file(db, article.id, "Delivery_XML") or latest_file(db, article.id, "JATS_XML")
+    xml_path = article.jats_xml_path if (article.jats_xml_path and os.path.exists(article.jats_xml_path)) else (xml_row.path if xml_row else None)
+    if xml_path and os.path.exists(xml_path):
+        entries.append((xml_path, os.path.basename(xml_path)))
+
+    # 2. Proof / Delivery PDF
+    pdf_row = latest_file(db, article.id, "Delivery_PDF") or latest_file(db, article.id, "Proof_PDF")
+    pdf_path = article.proof_pdf_path if (article.proof_pdf_path and os.path.exists(article.proof_pdf_path)) else (pdf_row.path if pdf_row else None)
+    if pdf_path and os.path.exists(pdf_path):
+        entries.append((pdf_path, os.path.basename(pdf_path)))
+
+    # 3. EPUB
+    epub_row = latest_file(db, article.id, "Delivery_EPUB") or latest_file(db, article.id, "EPUB")
+    if epub_row and epub_row.path and os.path.exists(epub_row.path):
+        entries.append((epub_row.path, os.path.basename(epub_row.path)))
+
+    # 4. Final DOCX
+    docx_row = latest_file(db, article.id, "Delivery_DOCX") or latest_file(db, article.id, "DOCX")
+    if docx_row and docx_row.path and os.path.exists(docx_row.path):
+        entries.append((docx_row.path, os.path.basename(docx_row.path)))
+
+    # 5. Proof XHTML & CSS
+    xhtml_row = latest_file(db, article.id, "Delivery_XHTML") or latest_file(db, article.id, "Proof_XHTML")
+    if xhtml_row and xhtml_row.path and os.path.exists(xhtml_row.path):
+        entries.append((xhtml_row.path, os.path.basename(xhtml_row.path)))
+    css_row = latest_file(db, article.id, "Proof_CSS")
+    if css_row and css_row.path and os.path.exists(css_row.path):
+        entries.append((css_row.path, os.path.basename(css_row.path)))
+
+    # 6. InDesign (.indd / .idml)
     if include_indesign:
-        for cat in ("INDD", "IDML"):
+        for cat in ("Delivery_INDD", "INDD", "Delivery_IDML", "IDML"):
             r = latest_file(db, article.id, cat)
-            if r:
+            if r and r.path and os.path.exists(r.path):
                 entries.append((r.path, f"indesign/{r.filename}"))
+
+    # 7. Art files
     if include_art:
-        entries += [(r.path, f"art/{r.filename}") for r in art_files(db, article.id)]
+        for r in art_files(db, article.id):
+            if r and r.path and os.path.exists(r.path):
+                entries.append((r.path, f"art/{r.filename}"))
+
+    if not entries:
+        raise ValueError("No files located for delivery package")
+
     readiness = delivery_readiness(db, article)
     doi = re.sub(r"[^\w.-]+", "_", article.article_doi or f"article_{article.id}")
     journal_code = article.journal.journal_code if article.journal else "journal"
@@ -325,8 +377,8 @@ def build_delivery(db: Session, article: JournalArticle, include_indesign: bool 
     row = save_version(db, article, "Delivery_ZIP", name, build_zip(entries), "delivery")
     row.uploaded_by_id = user_id
     article.final_delivery_path = row.path
-    db.add(JournalDelivery(article_id=article.id, package_name=row.filename, jats_xml_file=article.jats_xml_path,
-                           pdf_file=article.proof_pdf_path, indd_file=article.indesign_path if include_indesign else None,
+    db.add(JournalDelivery(article_id=article.id, package_name=row.filename, jats_xml_file=xml_path,
+                           pdf_file=pdf_path, indd_file=article.indesign_path if include_indesign else None,
                            delivery_channel=channel, delivery_status="Packaged", delivered_by_id=user_id))
     db.commit()
     return row, readiness

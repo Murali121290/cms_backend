@@ -511,6 +511,10 @@ export const journalsApi = {
     const res = await apiClient.post('/journals/articles/assign-stage', data)
     return res.data
   },
+  convertXhtmlToXml: async (articleId: number, content?: string): Promise<{ status: boolean; message: string; xml_content: string; file?: any }> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/convert-xml`, { content })
+    return res.data
+  },
   uploadZipPackage: async (journalId: number, zipFile: File): Promise<any> => {
     const formData = new FormData()
     formData.append('journal_id', String(journalId))
@@ -638,6 +642,22 @@ export const journalsApi = {
   },
   getInDesignStatus: async (articleId: number): Promise<InDesignStatus> => {
     const res = await apiClient.get(`/journals/articles/${articleId}/indesign`)
+    return res.data
+  },
+  finishQc: async (articleId: number): Promise<any> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/qc/finish`)
+    return res.data
+  },
+  saveProofXhtml: async (articleId: number, content: string): Promise<any> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/proof/save`, { content })
+    return res.data
+  },
+  completeProof: async (articleId: number, content?: string): Promise<any> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/proof/complete`, { content })
+    return res.data
+  },
+  getDeliveryStatus: async (articleId: number): Promise<any> => {
+    const res = await apiClient.get(`/journals/articles/${articleId}/delivery/status`)
     return res.data
   },
   replaceArticleFile: async (articleId: number, file: File): Promise<any> => {
