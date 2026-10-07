@@ -9,6 +9,8 @@ import { toast } from '@/store/useToastStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useRBAC } from '@/hooks/useRBAC'
 import { Modal } from '@/components/ui/Modal'
+import { Select } from '@/components/ui/Select'
+import { Input } from '@/components/ui/Input'
 
 // ── Assignee Dropdown ────────────────────────────────────────────────────────
 
@@ -130,7 +132,7 @@ function AssigneeDropdown({
 }
 
 export function PostProdXmlConversion() {
-  useDocumentTitle('XML Conversion — S4Carlisle CMS')
+  useDocumentTitle('PDF2XML Conversion — S4Carlisle CMS')
   const navigate = useNavigate()
   const viewer = useSessionStore((s) => s.viewer)
   const { isTeamLead } = useRBAC()
@@ -169,7 +171,10 @@ export function PostProdXmlConversion() {
       const res = await fetch('/api/v2/clients/active')
       if (res.ok) {
         const data = await res.json()
-        setClients(data)
+        const sortedClients = data.sort((a: any, b: any) => 
+          (a.company || '').localeCompare(b.company || '')
+        )
+        setClients(sortedClients)
       }
     } catch (err) {
       console.error('Failed to fetch clients', err)
@@ -338,7 +343,7 @@ export function PostProdXmlConversion() {
               <FolderOpen size={20} className="text-primary" />
             </div>
             <div>
-              <h1 className="text-xl font-bold font-serif text-text m-0">XML Conversion</h1>
+              <h1 className="text-xl font-bold font-serif text-text m-0">PDF2XML Conversion</h1>
               <p className="text-sm text-muted">
                 {totalProjects} project{totalProjects !== 1 ? 's' : ''}
               </p>
@@ -609,54 +614,43 @@ export function PostProdXmlConversion() {
               </div>
             )}
 
-            <form onSubmit={handleAddProject} className="space-y-3.5">
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Name</label>
-                <select
-                  value={customerName}
-                  onChange={e => {
-                    const selectedVal = e.target.value;
-                    setCustomerName(selectedVal);
-                    const matched = clients.find(c => c.company === selectedVal);
-                    if (matched && matched.division) {
-                      setClientCode(matched.division);
-                    } else {
-                      setClientCode('');
-                    }
-                  }}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-                  required
-                >
-                  <option value="">Select Client</option>
-                  {clients.map(c => (
-                    <option key={c.id} value={c.company}>{c.company}</option>
-                  ))}
-                </select>
-              </div>
+            <form onSubmit={handleAddProject} className="space-y-4">
+              <Select
+                id="clientName"
+                label="Client Name"
+                value={customerName}
+                onChange={e => {
+                  const selectedVal = e.target.value;
+                  setCustomerName(selectedVal);
+                  const matched = clients.find(c => c.company === selectedVal);
+                  if (matched && matched.division) {
+                    setClientCode(matched.division);
+                  } else {
+                    setClientCode('');
+                  }
+                }}
+                options={clients.map(c => ({ label: c.company, value: c.company }))}
+                placeholder="Select Client"
+                required
+              />
 
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Code</label>
-                <input
-                  type="text"
-                  value={clientCode}
-                  onChange={e => setClientCode(e.target.value)}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
-                  placeholder="e.g. BIO101"
-                  required
-                />
-              </div>
+              <Input
+                id="clientCode"
+                label="Client Code"
+                value={clientCode}
+                onChange={e => setClientCode(e.target.value)}
+                placeholder="e.g. BIO101"
+                required
+              />
 
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Project Name</label>
-                <input
-                  type="text"
-                  value={projectName}
-                  onChange={e => setProjectName(e.target.value)}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
-                  placeholder="e.g. Biology Vol 2"
-                  required
-                />
-              </div>
+              <Input
+                id="projectName"
+                label="Project Name"
+                value={projectName}
+                onChange={e => setProjectName(e.target.value)}
+                placeholder="e.g. Biology Vol 2"
+                required
+              />
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload Source PDF</label>

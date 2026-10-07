@@ -46,8 +46,10 @@ export interface Project extends ProjectSummary {
   customer_contact?: string | null
   category?: string | null
   composition?: string | null
+  copyediting_level?: string | null
   workflow_name: string | null
   project_manager?: string | null
+  client_project_manager?: string | null
   sales_person?: string | null
   priority?: string | null
   project_title?: string | null
@@ -74,9 +76,11 @@ export interface ProjectCreate {
   customer_contact?: string | null
   category?: string | null
   composition?: string | null
+  copyediting_level?: string | null
   workflow_name?: string | null
   status?: string | null
   project_manager?: string | null
+  client_project_manager?: string | null
   sales_person?: string | null
   priority?: string | null
   project_title?: string | null
@@ -103,9 +107,11 @@ export interface POExtractionResponse {
 
 export interface ProjectUpdate {
   project_manager?: string | null
+  client_project_manager?: string | null
   priority?: string | null
   status?: string | null
   composition?: string | null
+  copyediting_level?: string | null
   workflow_name?: string | null
   edition?: string | null
   color?: string | null

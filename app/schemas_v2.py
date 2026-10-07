@@ -118,7 +118,9 @@ class ProjectSummary(BaseModel):
     customer_contact: str | None = None
     category: str | None = None
     composition: str | None = None
+    copyediting_level: str | None = None
     project_manager: str | None = None
+    client_project_manager: str | None = None
     sales_person: str | None = None
     priority: str | None = None
     edition: str | None = None
@@ -1046,8 +1048,10 @@ class ProjectUpdateRequest(BaseModel):
     workflow_name: str | None = None
     client_id: int | None = None
     project_manager: str | None = None
+    client_project_manager: str | None = None
     priority: str | None = None
     composition: str | None = None
+    copyediting_level: str | None = None
     category: str | None = None
     edition: str | None = None
     color: str | None = None

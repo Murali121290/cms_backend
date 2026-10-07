@@ -10,6 +10,7 @@ WK_LWW = "wk_lww"
 KENDALL_HUNT = "kendall_hunt"
 ARTECH_HOUSE = "artech_house"
 SPRINGER = "springer"
+BEP = "bep"
 UNKNOWN = "unknown"
 
 TEMPLATE_LABELS = {
@@ -17,6 +18,7 @@ TEMPLATE_LABELS = {
     KENDALL_HUNT: "Kendall Hunt prepress RFQ",
     ARTECH_HOUSE: "Artech House transmittal",
     SPRINGER: "Springer Publishing Assignment Memo",
+    BEP: "Business Expert Press transmittal",
     UNKNOWN: "Unrecognized template",
 }
 
@@ -30,6 +32,8 @@ def detect_pdf_template(pdf_text: str) -> str:
 
 
 def detect_xlsx_template(filename: str, sheet_names: list[str]) -> str:
+    if "bep" in filename.casefold():
+        return BEP
     if "transmittal" in filename.casefold():
         return ARTECH_HOUSE
     return UNKNOWN
