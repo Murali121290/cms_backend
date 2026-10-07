@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { Select } from '@/components/ui/Select';
+import { Input } from '@/components/ui/Input';
 import { toast } from '@/store/useToastStore';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useSessionStore } from '@/stores/sessionStore';
@@ -415,7 +417,10 @@ export function PostProdEpubValidator() {
   const fetchClients = useCallback(async () => {
     try {
       const res = await fetch('/api/v2/clients/active');
-      if (res.ok) setClients(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setClients(data.sort((a: any, b: any) => (a.company || '').localeCompare(b.company || '')));
+      }
     } catch {
       /* silent */
     }
@@ -777,56 +782,37 @@ export function PostProdEpubValidator() {
               </button>
             </div>
 
-            <form onSubmit={handleAddProject} className="space-y-3.5">
+            <form onSubmit={handleAddProject} className="space-y-4">
               {/* Client */}
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
-                  Client Name
-                </label>
-                <select
-                  value={selectedClientId}
-                  onChange={handleClientChange}
-                  required
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-                >
-                  <option value="">Select Client</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={String(c.id)}>
-                      {c.company}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <Select
+                id="clientId"
+                label="Client Name"
+                value={selectedClientId}
+                onChange={(e) => handleClientChange(e)}
+                options={clients.map((c) => ({ label: c.company, value: String(c.id) }))}
+                placeholder="Select Client"
+                required
+              />
 
               {/* Client code */}
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
-                  Client Code
-                </label>
-                <input
-                  type="text"
-                  value={clientCode}
-                  onChange={(e) => setClientCode(e.target.value)}
-                  placeholder="e.g. ASPEN0503"
-                  required
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
-                />
-              </div>
+              <Input
+                id="clientCode"
+                label="Client Code"
+                value={clientCode}
+                onChange={(e) => setClientCode(e.target.value)}
+                placeholder="e.g. ASPEN0503"
+                required
+              />
 
               {/* Project name */}
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
-                  Project Name / Code
-                </label>
-                <input
-                  type="text"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="e.g. Biology Vol 2"
-                  required
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
-                />
-              </div>
+              <Input
+                id="projectName"
+                label="Project Name / Code"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Biology Vol 2"
+                required
+              />
 
               {/* Optional eISBN & Copyright Year */}
               <div className="grid grid-cols-2 gap-3">

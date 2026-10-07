@@ -598,7 +598,10 @@ export function CreateProjectPage() {
   }, [form.workflow_name, workflowMap])
 
   const clientOptions = useMemo(() =>
-    clients.filter(c => c.active_status).map(c => ({ value: String(c.id), label: clientLabel(c) }))
+    clients
+      .filter(c => c.active_status)
+      .sort((a, b) => clientLabel(a).localeCompare(clientLabel(b)))
+      .map(c => ({ value: String(c.id), label: clientLabel(c) }))
   , [clients])
 
   const handleCancel = () => {

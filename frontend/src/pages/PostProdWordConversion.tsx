@@ -5,6 +5,8 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { usersApi } from '@/api/users'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { Select } from '@/components/ui/Select'
+import { Input } from '@/components/ui/Input'
 import { toast } from '@/store/useToastStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useRBAC } from '@/hooks/useRBAC'
@@ -198,7 +200,10 @@ export function PostProdWordConversion() {
       const res = await fetch('/api/v2/clients/active')
       if (res.ok) {
         const data = await res.json()
-        setClients(data)
+        const sortedClients = data.sort((a: any, b: any) => 
+          (a.company || '').localeCompare(b.company || '')
+        )
+        setClients(sortedClients)
       }
     } catch (err) {
       console.error('Failed to fetch clients', err)
@@ -590,54 +595,43 @@ export function PostProdWordConversion() {
               </div>
             )}
 
-            <form onSubmit={handleAddProject} className="space-y-3.5">
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Name</label>
-                <select
-                  value={customerName}
-                  onChange={e => {
-                    const selectedVal = e.target.value;
-                    setCustomerName(selectedVal);
-                    const matched = clients.find(c => c.company === selectedVal);
-                    if (matched && matched.division) {
-                      setClientCode(matched.division);
-                    } else {
-                      setClientCode('');
-                    }
-                  }}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-                  required
-                >
-                  <option value="">Select Client</option>
-                  {clients.map(c => (
-                    <option key={c.id} value={c.company}>{c.company}</option>
-                  ))}
-                </select>
-              </div>
+            <form onSubmit={handleAddProject} className="space-y-4">
+              <Select
+                id="clientName"
+                label="Client Name"
+                value={customerName}
+                onChange={e => {
+                  const selectedVal = e.target.value;
+                  setCustomerName(selectedVal);
+                  const matched = clients.find(c => c.company === selectedVal);
+                  if (matched && matched.division) {
+                    setClientCode(matched.division);
+                  } else {
+                    setClientCode('');
+                  }
+                }}
+                options={clients.map(c => ({ label: c.company, value: c.company }))}
+                placeholder="Select Client"
+                required
+              />
 
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Code</label>
-                <input
-                  type="text"
-                  value={clientCode}
-                  onChange={e => setClientCode(e.target.value)}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
-                  placeholder="e.g. BIO101"
-                  required
-                />
-              </div>
+              <Input
+                id="clientCode"
+                label="Client Code"
+                value={clientCode}
+                onChange={e => setClientCode(e.target.value)}
+                placeholder="e.g. BIO101"
+                required
+              />
 
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Project Name / Code</label>
-                <input
-                  type="text"
-                  value={projectName}
-                  onChange={e => setProjectName(e.target.value)}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
-                  placeholder="e.g. Biology Vol 2"
-                  required
-                />
-              </div>
+              <Input
+                id="projectName"
+                label="Project Name / Code"
+                value={projectName}
+                onChange={e => setProjectName(e.target.value)}
+                placeholder="e.g. Biology Vol 2"
+                required
+              />
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload Chapters ZIP Package</label>

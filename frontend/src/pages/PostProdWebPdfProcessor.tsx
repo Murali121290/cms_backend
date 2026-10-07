@@ -23,6 +23,8 @@ import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/store/useToastStore';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useSessionStore } from '@/stores/sessionStore';
+import { Select } from '@/components/ui/Select';
+import { Input } from '@/components/ui/Input';
 import { useRBAC } from '@/hooks/useRBAC';
 import {
   listProjects,
@@ -487,7 +489,9 @@ export function PostProdWebPdfProcessor() {
 
         if (mounted) {
           setProjects(projectsData || []);
-          if (clientsRes) setClients(clientsRes);
+          if (clientsRes) {
+            setClients(clientsRes.sort((a: any, b: any) => (a.company || '').localeCompare(b.company || '')));
+          }
           setUsers(usersList || []);
         }
       } catch (err) {
@@ -2434,52 +2438,43 @@ export function PostProdWebPdfProcessor() {
               {errorMsg}
             </div>
           )}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-text block">Client Company *</label>
-            <select
-              value={customerName}
-              onChange={e => {
-                const selectedVal = e.target.value;
-                setCustomerName(selectedVal);
-                const matched = clients.find(c => c.company === selectedVal);
-                if (matched && matched.division) {
-                  setClientCode(matched.division);
-                } else {
-                  setClientCode('');
-                }
-              }}
-              required
-              className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">— Select Client —</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.company}>{c.company}</option>
-              ))}
-            </select>
-          </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-text block">Client Code / Division</label>
-            <input
-              type="text"
-              readOnly
-              value={clientCode}
-              placeholder="Auto-populated from client selection"
-              className="w-full text-xs p-2 rounded-lg border border-border bg-muted/40 text-text/80 cursor-not-allowed focus:outline-none"
-            />
-          </div>
+          <Select
+            id="clientCompany"
+            label="Client Company"
+            value={customerName}
+            onChange={e => {
+              const selectedVal = e.target.value;
+              setCustomerName(selectedVal);
+              const matched = clients.find(c => c.company === selectedVal);
+              if (matched && matched.division) {
+                setClientCode(matched.division);
+              } else {
+                setClientCode('');
+              }
+            }}
+            options={clients.map((c) => ({ label: c.company || '', value: c.company || '' }))}
+            placeholder="— Select Client —"
+            required
+          />
 
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-text block">Project Name *</label>
-            <input
-              type="text"
-              required
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              placeholder="e.g. pelagic-guide-book-v2"
-              className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </div>
+          <Input
+            id="clientCode"
+            label="Client Code / Division"
+            value={clientCode}
+            readOnly
+            placeholder="Auto-populated from client selection"
+            className="bg-muted/40 text-text/80 cursor-not-allowed"
+          />
+
+          <Input
+            id="projectName"
+            label="Project Name"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            placeholder="e.g. pelagic-guide-book-v2"
+            required
+          />
 
           <div className="space-y-1">
             <label className="text-xs font-semibold text-text block">ZIP File Upload *</label>
