@@ -68,6 +68,8 @@ export const uiPaths = {
     : `/projects/${projectId}/chapters/${chapterId}/wysiwyg`,
   projectStylesheets: (projectId: number | string) =>
     `/projects/${projectId}/stylesheets`,
+  projectRules: (projectId: number | string) =>
+    `/projects/${projectId}/rules`,
 } as const;
 
 export const ssrPaths = {

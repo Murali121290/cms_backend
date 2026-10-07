@@ -1617,6 +1617,14 @@ export function ProjectWorkflow() {
               <span className="w-2 h-2 rounded-full bg-emerald-500 absolute -top-0.5 -right-0.5 ring-1 ring-white" />
             )}
           </button>
+          <button
+            onClick={() => navigate(uiPaths.projectRules(id))}
+            title="Language-editing rules for this project"
+            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+          >
+            <BookMarked size={12} />
+            Rules
+          </button>
         </div>
       </div>
 
