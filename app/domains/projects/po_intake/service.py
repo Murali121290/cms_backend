@@ -11,7 +11,7 @@ import openpyxl
 import pdfplumber
 
 from app.domains.projects.po_intake import detect
-from app.domains.projects.po_intake.parsers import artech_house, kendall_hunt, springer, wk_lww
+from app.domains.projects.po_intake.parsers import artech_house, bep, kendall_hunt, springer, wk_lww
 
 _UNRECOGNIZED_WARNING = "Unrecognized PO template — please fill in the form manually."
 
@@ -55,11 +55,12 @@ def extract_po(file_path: str, filename: str) -> dict:
             return _empty_result(detect.UNKNOWN, [f"Could not read spreadsheet: {exc}"])
 
         template = detect.detect_xlsx_template(filename, sheet_names)
-        if template != detect.ARTECH_HOUSE:
+        if template not in (detect.ARTECH_HOUSE, detect.BEP):
             return _empty_result(detect.UNKNOWN)
 
         try:
-            parsed = artech_house.parse(file_path)
+            parser = artech_house if template == detect.ARTECH_HOUSE else bep
+            parsed = parser.parse(file_path)
         except Exception as exc:
             return _empty_result(template, [f"Recognized as {detect.TEMPLATE_LABELS[template]} but failed to parse it: {exc}"])
 

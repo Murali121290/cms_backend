@@ -64,6 +64,17 @@ def parse(pdf_path: str) -> dict:
         "copyright_year": copyright_year,
     }
 
+    ce_level_raw = n.clean(raw.get("Copyediting Level"))
+    copyediting_level = "Level 1"
+    if ce_level_raw:
+        ce_lower = ce_level_raw.lower()
+        if "moderate" in ce_lower:
+            copyediting_level = "Level 2"
+        elif "heavy" in ce_lower:
+            copyediting_level = "Level 3"
+
+    fields["copyediting_level"] = copyediting_level
+
     files_to_vendor_date, _ = n.parse_date_loose(raw.get("Files To Vendor"))
     course_start_date, _ = n.parse_date_loose(raw.get("CourseStartDate"))
     publication_date, _ = n.parse_date_loose(raw.get("PubDate"))
@@ -89,7 +100,7 @@ def parse(pdf_path: str) -> dict:
         },
         "editorial_services": {
             "copyediting_style": n.clean(raw.get("Copyediting Style")),
-            "copyediting_level": n.clean(raw.get("Copyediting Level")),
+            "copyediting_level": ce_level_raw,
             "notes": n.clean(raw.get("Text17")),
         },
         "composition": {

@@ -280,6 +280,7 @@ def _serialize_project_summary(project: Project):
         customer_contact=getattr(project, "customer_contact", None),
         category=getattr(project, "category", None),
         composition=getattr(project, "composition", None),
+        copyediting_level=getattr(project, "copyediting_level", None),
         project_manager=getattr(project, "project_manager", None),
         sales_person=getattr(project, "sales_person", None),
         priority=getattr(project, "priority", None),
@@ -1562,7 +1563,9 @@ def api_v2_project_bootstrap(
     customer_contact: str | None = Form(None),
     category: str | None = Form(None),
     composition: str | None = Form(None),
+    copyediting_level: str | None = Form(None),
     project_manager: str | None = Form(None),
+    client_project_manager: str | None = Form(None),
     sales_person: str | None = Form(None),
     priority: str | None = Form(None),
     edition: str | None = Form(None),
@@ -1662,8 +1665,9 @@ def api_v2_project_bootstrap(
         if c:
             project.client_name = c.company
 
-    for _f in ("division_code", "customer_contact", "category", "composition",
-               "project_manager", "sales_person", "priority", "edition", "color",
+    logging.error(f"DEBUG: client_project_manager from form: {locals().get('client_project_manager')}")
+    for _f in ("division_code", "customer_contact", "category", "composition", "copyediting_level",
+               "project_manager", "client_project_manager", "sales_person", "priority", "edition", "color",
                "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
                "actual_pages", "isbn_no", "billing_location"):
         _v = locals().get(_f)
@@ -1918,7 +1922,7 @@ def api_v2_update_project(
         if not has_permission(viewer, "edit_assignee"):
             raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
 
-    for _f in ("project_manager", "priority", "composition", "category", "edition",
+    for _f in ("project_manager", "client_project_manager", "priority", "composition", "copyediting_level", "category", "edition",
                "color", "trim_size", "copyright_year", "actual_pages", "manuscript_pages",
                "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location"):
         _v = getattr(payload, _f, None)

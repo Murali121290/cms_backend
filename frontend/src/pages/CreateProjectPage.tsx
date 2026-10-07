@@ -380,7 +380,7 @@ export function CreateProjectPage() {
     priority: 'Normal',
     actual_pages: 0,
     client_id: parsedClientId ?? undefined,
-    xml_standard: 'NLM',
+    xml_standard: 'BITS',
   }
 
   const [form,    setForm]    = useState<Partial<ProjectCreate>>(INIT)
@@ -472,6 +472,16 @@ export function CreateProjectPage() {
   // set (poFilledValues) so removing the PO later never reverts a manual edit made after import.
   function handlePoExtracted(file: File, result: POExtractionResponse | null) {
     setPoFile(file)
+    
+    if (result) {
+      // author_names actually populates the form's Author field, so visually move it
+      // from extras to fields so the UI displays it under "Auto-filled Fields"
+      if (result.extras['author_names'] !== undefined && result.extras['author_names'] !== null) {
+        result.fields['author_names'] = result.extras['author_names']
+        delete result.extras['author_names']
+      }
+    }
+    
     setPoResult(result)
     if (!result) return
 
@@ -624,7 +634,7 @@ export function CreateProjectPage() {
       const formData = new FormData()
       formData.append('code',          form.project_code ?? '')
       formData.append('title',         form.project_title ?? '')
-      formData.append('xml_standard',  form.xml_standard ?? 'NLM')
+      formData.append('xml_standard',  form.xml_standard ?? 'BITS')
       if (form.client_id)          formData.append('client_id',        String(form.client_id))
       if (form.client_name)        formData.append('client_name',      form.client_name)
       
@@ -646,7 +656,9 @@ export function CreateProjectPage() {
       if (form.customer_contact)   formData.append('customer_contact', form.customer_contact)
       if (form.category)           formData.append('category',         form.category)
       if (form.composition)        formData.append('composition',      form.composition)
+      if (form.copyediting_level)  formData.append('copyediting_level',form.copyediting_level)
       if (form.project_manager)    formData.append('project_manager',  form.project_manager)
+      if (form.client_project_manager) formData.append('client_project_manager', form.client_project_manager)
       if (form.sales_person)       formData.append('sales_person',     form.sales_person)
       if (form.priority)           formData.append('priority',         form.priority)
       if (form.status)             formData.append('status',           form.status)
@@ -751,32 +763,42 @@ export function CreateProjectPage() {
               Object.keys(poResult.fields).some(k => formatExtraValue(poResult.fields[k]) !== null) ||
               Object.keys(poResult.extras).some(k => formatExtraValue(poResult.extras[k]) !== null)
             ) && (
-              <details className="col-span-2 rounded-xl border border-border overflow-hidden" open>
+              <details className="col-span-2 rounded-xl border border-border overflow-hidden">
                 <summary className="list-none cursor-pointer px-4 py-3 bg-surface flex items-center justify-between text-sm font-semibold text-text">
                   <span>Extracted PO Details</span>
                   <ChevronDown size={14} className="text-muted" />
                 </summary>
                 <div className="px-4 py-3 flex flex-col gap-2">
-                  {Object.entries(poResult.fields).map(([key, value]) => {
-                    const formatted = formatExtraValue(value)
-                    if (formatted === null) return null
-                    return (
-                      <div key={key} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
-                        <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
-                        <span className="text-text font-semibold">{formatted}</span>
-                      </div>
-                    )
-                  })}
-                  {Object.entries(poResult.extras).map(([key, value]) => {
-                    const formatted = formatExtraValue(value)
-                    if (formatted === null) return null
-                    return (
-                      <div key={`extra-${key}`} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
-                        <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
-                        <span className="text-text font-semibold">{formatted}</span>
-                      </div>
-                    )
-                  })}
+                  {Object.keys(poResult.fields).some(k => formatExtraValue(poResult.fields[k]) !== null) && (
+                    <>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-primary/80 mt-1 mb-1">Auto-filled Fields</div>
+                      {Object.entries(poResult.fields).map(([key, value]) => {
+                        const formatted = formatExtraValue(value)
+                        if (formatted === null) return null
+                        return (
+                          <div key={key} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
+                            <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
+                            <span className="text-text font-semibold">{formatted}</span>
+                          </div>
+                        )
+                      })}
+                    </>
+                  )}
+                  {Object.keys(poResult.extras).some(k => formatExtraValue(poResult.extras[k]) !== null) && (
+                    <>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-muted mt-3 mb-1 pt-3 border-t border-border/50">Extra Details</div>
+                      {Object.entries(poResult.extras).map(([key, value]) => {
+                        const formatted = formatExtraValue(value)
+                        if (formatted === null) return null
+                        return (
+                          <div key={`extra-${key}`} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
+                            <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
+                            <span className="text-text font-semibold">{formatted}</span>
+                          </div>
+                        )
+                      })}
+                    </>
+                  )}
                 </div>
               </details>
             )}
@@ -846,6 +868,17 @@ export function CreateProjectPage() {
               ]}
               placeholder="Select composition level"
             />
+            <Select
+              label="Copyediting Level"
+              value={form.copyediting_level ?? ''}
+              onChange={e => set('copyediting_level', e.target.value || null)}
+              options={[
+                { value: 'Level 1', label: 'Level 1' },
+                { value: 'Level 2', label: 'Level 2' },
+                { value: 'Level 3', label: 'Level 3' },
+              ]}
+              placeholder="Select copyediting level"
+            />
 
             <Select
               label="Priority"
@@ -886,16 +919,20 @@ export function CreateProjectPage() {
               />
             </div>
 
-            {/* Author — no column on Project; saved into file_details, not the core project fields */}
-            <div className="col-span-2">
-              <Input
-                label="Author"
-                value={authorName}
-                onChange={e => setAuthorName(e.target.value)}
-                placeholder="e.g. Sharon Jensen, DNP, MD, RN"
-                hint="Not a core project field — saved alongside the other extracted PO details"
-              />
-            </div>
+            {/* Project Manager (Client) and Author row */}
+            <Input
+              label="Project Manager (Client)"
+              value={form.client_project_manager ?? ''}
+              onChange={e => set('client_project_manager', e.target.value)}
+              placeholder="Client's project manager"
+            />
+            <Input
+              label="Author"
+              value={authorName}
+              onChange={e => setAuthorName(e.target.value)}
+              placeholder="e.g. Sharon Jensen, DNP, MD, RN"
+              hint="Not a core project field — saved alongside the other extracted PO details"
+            />
 
             {/* ── Publication Details ─────────────────── */}
             <Section title="Publication Details" icon={Layers} />
@@ -903,20 +940,12 @@ export function CreateProjectPage() {
             <Input label="Edition"    value={form.edition    ?? ''} onChange={e => set('edition',    e.target.value)} placeholder="e.g. 3rd Edition" />
             <Input label="Color"      value={form.color      ?? ''} onChange={e => set('color',      e.target.value)} placeholder="e.g. 4-color, B&W" />
             <Input label="Trim Size"  value={form.trim_size  ?? ''} onChange={e => set('trim_size',  e.target.value)} placeholder="e.g. 8.5 x 11" />
-            <Select
+            <Input
               id="xml_standard"
               label="XML Standard"
-              required
-              value={form.xml_standard ?? 'NLM'}
-              onChange={e => set('xml_standard', e.target.value)}
-              options={[
-                { value: 'NLM',     label: 'NLM / JATS' },
-                { value: 'BITS',    label: 'BITS (Book)' },
-                { value: 'DocBook', label: 'DocBook' },
-                { value: 'TEI',     label: 'TEI' },
-              ]}
-              placeholder="Select XML standard"
-              error={errors.xml_standard}
+              value="BITS (Book)"
+              readOnly
+              disabled
             />
             <Input
               id="copyright_year"
@@ -957,11 +986,17 @@ export function CreateProjectPage() {
               onChange={e => set('isbn_no', e.target.value)}
               error={errors.isbn_no}
             />
-            <Input
+            <Select
               label="Billing Location"
               value={form.billing_location ?? ''}
               onChange={e => set('billing_location', e.target.value)}
-              placeholder="e.g. New York, US"
+              options={[
+                { value: 'S4Carlisle Publishing Services-Chennai', label: 'S4Carlisle Publishing Services-Chennai' },
+                { value: 'S4Carlisle Publishing Services-Singapore', label: 'S4Carlisle Publishing Services-Singapore' },
+                { value: 'S4Carlisle Transmedia Services Inc', label: 'S4Carlisle Transmedia Services Inc' },
+                { value: 'S4Carlisle Publishing Services Pte Ltd-Singapore 2', label: 'S4Carlisle Publishing Services Pte Ltd-Singapore 2' },
+              ]}
+              placeholder="Select billing location"
             />
             <Input
               label="Due Date"

@@ -37,6 +37,7 @@ export function ProjectMetadataPanel({ project }: ProjectMetadataPanelProps) {
         <MetaCard label="Priority" value={project.priority} />
         <MetaCard label="Category" value={project.category} />
         <MetaCard label="Composition" value={project.composition} />
+        <MetaCard label="Copyediting Level" value={project.copyediting_level} />
         <MetaCard label="Due Date" value={project.due_date} />
         <MetaCard label="Edition" value={project.edition} />
         <MetaCard label="Color" value={project.color} />
