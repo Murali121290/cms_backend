@@ -49,29 +49,29 @@ def categorize_file(filepath: str) -> Tuple[str, int]:
     # Default to main text block
     return 'TEXT', 2
 
-def merge_pdfs(input_files: List[str], output_path: str) -> dict:
+def merge_pdfs(input_files: List[dict], output_path: str) -> dict:
     """
     Merge PDFs and return result with total_pages count.
+    input_files expects a list of dicts: [{'absolute_path': str, 'category': str}]
     Returns: {'success': bool, 'total_pages': int, 'error': str (if failed)}
     """
-    print("Analyzing input files for optimal merge order...")
+    print("Preparing to merge files in the exact order provided by the UI...")
 
-    categorized_files = []
+    ordered_files = []
+    categories = []
+    
     for f in input_files:
-        if not os.path.exists(f):
-            print(f"Error: File not found: {f}")
-            return {'success': False, 'total_pages': 0, 'error': f'File not found: {f}'}
+        filepath = f.get('absolute_path')
+        cat = f.get('category', 'TEXT')
+        
+        if not os.path.exists(filepath):
+            print(f"Error: File not found: {filepath}")
+            return {'success': False, 'total_pages': 0, 'error': f'File not found: {filepath}'}
+            
+        ordered_files.append(filepath)
+        categories.append(cat)
 
-        cat, order = categorize_file(f)
-        categorized_files.append((order, f, cat))
-
-    # Sort files based on standard book ordering (by category order, then alphabetically by file path)
-    categorized_files.sort(key=lambda x: (x[0], x[1]))
-
-    ordered_files = [f for order, f, cat in categorized_files]
-    categories = [cat for order, f, cat in categorized_files]
-
-    print("\nProposed Merge Order:")
+    print("\nMerge Order (As specified by user):")
     for cat, f in zip(categories, ordered_files):
         print(f" [{cat}] -> {os.path.basename(f)}")
 

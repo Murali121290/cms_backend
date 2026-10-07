@@ -153,6 +153,26 @@ def get_project_files(
     extract_dir = os.path.join(project["folder_name"], "extract")
     if not os.path.isdir(extract_dir):
         return []
+        
+    from .models import WebPdfHistory
+    latest_merge = (
+        db.query(WebPdfHistory)
+        .filter(
+            WebPdfHistory.project_id == project_id,
+            WebPdfHistory.result_type == "merge",
+            WebPdfHistory.merge_status == "success"
+        )
+        .order_by(WebPdfHistory.created_at.desc())
+        .first()
+    )
+    
+    merged_files_map = {}
+    if latest_merge and latest_merge.merged_files:
+        for index, item in enumerate(latest_merge.merged_files):
+            merged_files_map[item.get('filename')] = {
+                'category': item.get('category'),
+                'order': index
+            }
     
     files_list = []
     for root, _, files in os.walk(extract_dir):
@@ -160,7 +180,14 @@ def get_project_files(
             if f.lower().endswith((".pdf", ".jpg", ".jpeg", ".png")) and not f.startswith("._"):
                 full_path = os.path.join(root, f)
                 rel_path = os.path.relpath(full_path, extract_dir)
-                category, order = categorize_file(full_path)
+                
+                if f in merged_files_map:
+                    category = merged_files_map[f]['category']
+                    order = merged_files_map[f]['order']
+                else:
+                    category, order_guess = categorize_file(full_path)
+                    order = 9999 + order_guess if merged_files_map else order_guess
+                
                 files_list.append({
                     "filename": f,
                     "relative_path": rel_path,
@@ -222,12 +249,12 @@ def merge_project_files(
     if not project_obj:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Extract absolute paths for merge operation
-    file_paths = [f.absolute_path for f in body.files]
+    # Extract absolute paths and categories for merge operation
+    input_files_data = [{"absolute_path": f.absolute_path, "category": f.category} for f in body.files]
     merged_output_path = os.path.join(project_obj.folder_name, "output.pdf")
 
     # Perform merge
-    result = merge_pdfs(file_paths, merged_output_path)
+    result = merge_pdfs(input_files_data, merged_output_path)
 
     # Record merge history
     merged_files_data = [
@@ -295,7 +322,7 @@ def trim_project_pdf(
         
     project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
     if project_obj:
-        project_obj.status = "Processing"
+        project_obj.status = "Trimmed"
         db.commit()
 
     return {"message": "PDF trimmed successfully", "output_path": output_pdf}
@@ -384,6 +411,11 @@ def check_fonts_status(
 
     try:
         font_status = font_service.check_fonts_embedded(output_pdf)
+        # Update project status
+        project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+        if project_obj:
+            project_obj.status = "Fonts Checked"
+            db.commit()
         return font_status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -409,6 +441,11 @@ def check_security_status(
 
     try:
         security_status = security_service.check_pdf_security(output_pdf)
+        # Update project status
+        project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+        if project_obj:
+            project_obj.status = "Security Checked"
+            db.commit()
         return security_status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -517,6 +554,11 @@ def generate_links(
             
     try:
         result = toc_service.create_links_in_pdf(output_pdf, request.link_type, request.analyze_only)
+        if not request.analyze_only:
+            project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+            if project_obj:
+                project_obj.status = "TOC Linked"
+                db.commit()
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -590,6 +632,13 @@ def generate_url_links(
 
     try:
         result = url_service.find_urls_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        # Mark as complete if: applying changes, OR analysis found nothing to fix
+        should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
+        if should_mark_complete:
+            project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+            if project_obj:
+                project_obj.status = "URL Linked"
+                db.commit()
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -626,6 +675,13 @@ def generate_email_links(
 
     try:
         result = email_service.find_emails_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        # Mark as complete if: applying changes, OR analysis found nothing to fix
+        should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
+        if should_mark_complete:
+            project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+            if project_obj:
+                project_obj.status = "Email Linked"
+                db.commit()
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -666,6 +722,13 @@ def generate_endnote_links(
 
     try:
         result = endnote_service.find_endnotes_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        # Mark as complete if: applying changes, OR analysis found nothing to fix
+        should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
+        if should_mark_complete:
+            project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+            if project_obj:
+                project_obj.status = "Endnote Linked"
+                db.commit()
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -698,6 +761,13 @@ def generate_crossref_links(
 
     try:
         result = crossref_service.find_crossrefs_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        # Mark as complete if: applying changes, OR analysis found nothing to fix
+        should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
+        if should_mark_complete:
+            project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+            if project_obj:
+                project_obj.status = "Crossref Linked"
+                db.commit()
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
