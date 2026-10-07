@@ -50,6 +50,42 @@
     },
     {
       "id": "SL004", "category": "sentence", "type": "function", "function": "wordiness", "enabled": true
+    },
+    {
+      "id": "GP011", "category": "grammar", "type": "regex",
+      "pattern": "\\b(\\w+), (\\w+) (and|or) (\\w+)\\b",
+      "replacement": "\\1, \\2, \\3 \\4",
+      "message": "Serial (Oxford) comma: add a comma before 'and' / 'or' (US / Chicago style).",
+      "severity": "suggestion", "enabled": true
+    },
+    {
+      "id": "GP012", "category": "grammar", "type": "regex",
+      "pattern": "'([^'\\n]{1,120}?)'",
+      "replacement": "\"\\1\"",
+      "message": "House style: use double quotes for primary quotations (US style).",
+      "severity": "suggestion", "enabled": false
+    },
+    {
+      "id": "GP013", "category": "grammar", "type": "regex",
+      "pattern": "([\"'])([.,])",
+      "replacement": "\\2\\1",
+      "message": "Move the period/comma inside the closing quote (US style).",
+      "severity": "suggestion", "enabled": false
+    },
+    {
+      "id": "MC_UK_US", "category": "spelling", "type": "builtin",
+      "message": "Flag UK spellings and propose the US equivalent (built-in dictionary).",
+      "severity": "warning", "enabled": true
+    },
+    {
+      "id": "MC_BIAS", "category": "inclusive", "type": "builtin",
+      "message": "Flag biased or non-inclusive terms and propose a preferred alternative.",
+      "severity": "warning", "enabled": true
+    },
+    {
+      "id": "MC_COMPOUNDS", "category": "compounds", "type": "builtin",
+      "message": "Flag hyphenated compound variants and propose the canonical form.",
+      "severity": "suggestion", "enabled": true
     }
   ]
 }

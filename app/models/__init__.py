@@ -154,6 +154,6 @@ class ProcessingJob(Base):
     user = relationship("User")
 
 
-from app.domains.processing.language_edit_models import LanguageEditJob, LanguageEditFinding
+from app.domains.processing.language_edit_models import LanguageEditJob, LanguageEditFinding, ProjectLanguageRules, ProjectLanguageRulesHistory
 from app.domains.journals.models import JournalClient, Journal, JournalArticle, JournalStageDetail, JournalStylesheet, JournalGrammarsheet, JournalFile, JournalDelivery, JournalCheckRun, JournalIssue, JournalWorkflow, JournalAsset
 
