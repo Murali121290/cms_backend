@@ -130,7 +130,7 @@ function AssigneeDropdown({
 }
 
 export function PostProdXmlConversion() {
-  useDocumentTitle('XML Conversion — S4Carlisle CMS')
+  useDocumentTitle('PDF2XML Conversion — S4Carlisle CMS')
   const navigate = useNavigate()
   const viewer = useSessionStore((s) => s.viewer)
   const { isTeamLead } = useRBAC()
@@ -338,7 +338,7 @@ export function PostProdXmlConversion() {
               <FolderOpen size={20} className="text-primary" />
             </div>
             <div>
-              <h1 className="text-xl font-bold font-serif text-text m-0">XML Conversion</h1>
+              <h1 className="text-xl font-bold font-serif text-text m-0">PDF2XML Conversion</h1>
               <p className="text-sm text-muted">
                 {totalProjects} project{totalProjects !== 1 ? 's' : ''}
               </p>
