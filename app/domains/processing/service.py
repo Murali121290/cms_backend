@@ -1013,15 +1013,30 @@ def background_processing_task(
                         file_record.uploaded_at = now_ist_naive()
                         logger.info(f"In-place overwrite: {file_record.filename} (v{file_record.version})")
 
-                        # Ensure pre-generated XHTML timestamp is updated after DOCX is overwritten
+                        # Invalidate stale XHTML cache and re-convert updated DOCX to fresh XHTML
                         try:
                             dir_name_sub = os.path.dirname(file_path)
                             base_name_sub = os.path.splitext(os.path.basename(file_path))[0]
                             xhtml_candidate = os.path.join(dir_name_sub, "xhtml", f"{base_name_sub}.html")
                             if os.path.exists(xhtml_candidate):
-                                os.utime(xhtml_candidate, None)
+                                try:
+                                    os.remove(xhtml_candidate)
+                                    logger.info(f"Removed stale XHTML cache for updated DOCX: {xhtml_candidate}")
+                                except Exception as rm_err:
+                                    logger.warning(f"Failed to remove stale XHTML: {rm_err}")
+
+                            try:
+                                from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
+                                os.makedirs(os.path.dirname(xhtml_candidate), exist_ok=True)
+                                engine = DocxToXhtmlRunsEngine()
+                                fresh_xhtml = engine.convert(file_path, file_id=file_record.id)
+                                with open(xhtml_candidate, "w", encoding="utf-8") as f:
+                                    f.write(fresh_xhtml)
+                                logger.info(f"Auto-converted updated DOCX v{file_record.version} to fresh XHTML: {xhtml_candidate}")
+                            except Exception as conv_err:
+                                logger.warning(f"Auto XHTML conversion after processing failed: {conv_err}")
                         except Exception as ut_err:
-                            logger.warning(f"Could not update timestamp on XHTML candidate: {ut_err}")
+                            logger.warning(f"Could not process XHTML candidate for updated DOCX: {ut_err}")
                     else:
                         mime = "application/octet-stream"
                         if processed_filename.endswith(".html"):

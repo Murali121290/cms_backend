@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
-import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert, GripVertical } from "lucide-react";
+import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert, GripVertical, Pencil, Edit2, ArrowRight } from "lucide-react";
 import type { Node as PmNode, Mark as PmMark } from "@tiptap/pm/model";
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { NewStyleDialog } from "./NewStyleDialog";
@@ -182,33 +182,36 @@ export function StylesPanel({
     if (!editor) return;
 
     const checkedNodes = getCheckedNodesList();
+    const headingMap: Record<string, number> = {
+      H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6,
+      Head1: 1, Head2: 2, Head3: 3, Head4: 4, Head5: 5, Head6: 6,
+    };
+    const level = headingMap[styleName] ?? (styleName.toLowerCase().startsWith("h") ? 1 : undefined);
+
     if (checkedNodes.length > 0) {
-      let chain = editor.chain().focus();
-      const headingMap: Record<string, number> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
-      const level = headingMap[styleName];
+      const tr = editor.state.tr;
+      const schema = editor.state.schema;
 
       const sortedNodes = [...checkedNodes].sort((a, b) => b.pos - a.pos);
       sortedNodes.forEach((node) => {
         if (node.type === "sdtInline") return;
-        
-        chain = chain.setTextSelection({ from: node.pos, to: node.pos });
-        if (level) {
-          chain = chain.setHeading({ level: level as 1 | 2 | 3 | 4 | 5 | 6 })
-            .updateAttributes("heading", { styleLabel: styleName });
-        } else {
-          const $pos = editor.state.doc.resolve(node.pos);
-          const isHeading = $pos.parent && $pos.parent.type.name === "heading";
-          if (isHeading) {
-            chain = chain.setParagraph();
-          }
-          chain = chain.updateAttributes("paragraph", { styleLabel: styleName });
+        const pmNode = tr.doc.nodeAt(node.pos);
+        if (!pmNode) return;
+
+        if (pmNode.type.name === "paragraph" || pmNode.type.name === "heading") {
+          const targetNodeType = level ? schema.nodes.heading : schema.nodes.paragraph;
+          const newAttrs = {
+            ...pmNode.attrs,
+            styleLabel: styleName,
+            ...(level ? { level } : {}),
+          };
+          tr.setNodeMarkup(node.pos, targetNodeType, newAttrs);
         }
       });
-      chain.run();
+
+      editor.view.dispatch(tr);
       setCheckedIds(new Set());
     } else {
-      const headingMap: Record<string, number> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
-      const level = headingMap[styleName];
       let chain = editor.chain().focus();
       if (level) {
         chain = chain.setHeading({ level: level as 1 | 2 | 3 | 4 | 5 | 6 })
@@ -220,6 +223,7 @@ export function StylesPanel({
       chain.run();
     }
     onAddStyle?.(styleName);
+    scanDocument();
   };
 
   const filteredStyles = allStyles.filter((s) =>
@@ -348,6 +352,137 @@ export function StylesPanel({
     }
     setExpandedIds(newExpanded);
   };
+
+  // ── Group edit & Move functionality ───────────────────────────────────────
+  const [editingGroupLabel, setEditingGroupLabel] = useState<string | null>(null);
+  const [editingInputValue, setEditingInputValue] = useState("");
+  const [moveTargetStyle, setMoveTargetStyle] = useState<string>("H1");
+  const [activeEditorNodeId, setActiveEditorNodeId] = useState<string | null>(null);
+
+  const moveCheckedNodesToStyle = (targetStyleName: string) => {
+    const editor = editorRef.current?.editor;
+    if (!editor || checkedIds.size === 0) return;
+
+    const checkedNodes = getCheckedNodesList();
+    if (checkedNodes.length === 0) return;
+
+    const tr = editor.state.tr;
+    const schema = editor.state.schema;
+    const headingMap: Record<string, number> = {
+      H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6,
+      Head1: 1, Head2: 2, Head3: 3, Head4: 4, Head5: 5, Head6: 6,
+    };
+    const level = headingMap[targetStyleName] ?? (targetStyleName.toLowerCase().startsWith("h") ? 1 : undefined);
+
+    const sortedNodes = [...checkedNodes].sort((a, b) => b.pos - a.pos);
+
+    sortedNodes.forEach((node) => {
+      if (node.type === "sdtInline") return;
+      const pmNode = tr.doc.nodeAt(node.pos);
+      if (!pmNode) return;
+
+      if (pmNode.type.name === "paragraph" || pmNode.type.name === "heading") {
+        const targetNodeType = level ? schema.nodes.heading : schema.nodes.paragraph;
+        const newAttrs = {
+          ...pmNode.attrs,
+          styleLabel: targetStyleName,
+          ...(level ? { level } : {}),
+        };
+        tr.setNodeMarkup(node.pos, targetNodeType, newAttrs);
+      }
+    });
+
+    editor.view.dispatch(tr);
+    setCheckedIds(new Set());
+    onAddStyle?.(targetStyleName);
+    scanDocument();
+  };
+
+  const handleStartEditGroup = (label: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingGroupLabel(label);
+    setEditingInputValue(label);
+  };
+
+  const handleSaveEditGroup = (oldLabel: string) => {
+    const newLabel = editingInputValue.trim();
+    if (!newLabel || newLabel === oldLabel) {
+      setEditingGroupLabel(null);
+      return;
+    }
+
+    const editor = editorRef.current?.editor;
+    if (editor) {
+      const tr = editor.state.tr;
+      const schema = editor.state.schema;
+      const headingMap: Record<string, number> = {
+        H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6,
+        Head1: 1, Head2: 2, Head3: 3, Head4: 4, Head5: 5, Head6: 6,
+      };
+      const newLevel = headingMap[newLabel] ?? (newLabel.toLowerCase().startsWith("h") ? 1 : undefined);
+
+      editor.state.doc.descendants((node: PmNode, pos: number) => {
+        if (node.type.name === "paragraph" || node.type.name === "heading") {
+          const currentStyle = node.attrs.styleLabel || (node.type.name === "heading" ? `H${node.attrs.level}` : "Normal");
+          if (currentStyle === oldLabel) {
+            const targetNodeType = newLevel ? schema.nodes.heading : node.type;
+            const newAttrs = {
+              ...node.attrs,
+              styleLabel: newLabel,
+              ...(newLevel ? { level: newLevel } : {}),
+            };
+            tr.setNodeMarkup(pos, targetNodeType, newAttrs);
+          }
+        }
+      });
+
+      editor.view.dispatch(tr);
+      scanDocument();
+    }
+
+    onAddStyle?.(newLabel);
+    setEditingGroupLabel(null);
+  };
+
+  const handleCancelEditGroup = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setEditingGroupLabel(null);
+  };
+
+  // Vice-versa: Sync selection from Editor -> Group tab sidebar
+  useEffect(() => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+
+    const handleSelectionUpdate = () => {
+      const from = editor.state.selection.from;
+      const matchingNode = flatNodes.find(n => from >= n.pos && from <= n.pos + n.nodeSize);
+      if (matchingNode) {
+        setActiveEditorNodeId(matchingNode.id);
+        const groupLabel = groupLabelFor(matchingNode);
+        const groupKey = `group:${groupLabel}`;
+        setExpandedIds((prev) => {
+          if (!prev.has(groupKey)) {
+            const next = new Set(prev);
+            next.add(groupKey);
+            return next;
+          }
+          return prev;
+        });
+
+        // Scroll sidebar row element into view
+        const rowEl = document.getElementById(`group-el-${matchingNode.id}`);
+        if (rowEl) {
+          rowEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      }
+    };
+
+    editor.on("selectionUpdate", handleSelectionUpdate);
+    return () => {
+      editor.off("selectionUpdate", handleSelectionUpdate);
+    };
+  }, [editorRef, flatNodes]);
 
   const scanDocument = useCallback(() => {
     if (scanTimer.current) clearTimeout(scanTimer.current);
@@ -790,13 +925,13 @@ export function StylesPanel({
     const groupKey = `group:${label}`;
     const isExpanded = expandedIds.has(groupKey);
     const isDraggingGroup = draggedGroup === label;
+    const isEditingThisGroup = editingGroupLabel === label;
     const showTopMarker = groupDragOver?.label === label && groupDragOver.pos === "before";
     const showBottomMarker = groupDragOver?.label === label && groupDragOver.pos === "after";
     return (
       <div key={groupKey} className="flex flex-col">
-        <button
-          type="button"
-          draggable
+        <div
+          draggable={!isEditingThisGroup}
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = "move";
             try { e.dataTransfer.setData("text/plain", label); } catch { /* ignore */ }
@@ -832,8 +967,10 @@ export function StylesPanel({
               reorderGroup(src, label, over.pos);
             }
           }}
-          onClick={() => toggleExpanded(groupKey)}
-          className={`relative flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-slate-50 text-xs select-none cursor-grab active:cursor-grabbing border-none bg-transparent text-left
+          onClick={() => {
+            if (!isEditingThisGroup) toggleExpanded(groupKey);
+          }}
+          className={`relative flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-slate-50 text-xs select-none cursor-pointer border-none bg-transparent text-left group/header
             ${isDraggingGroup ? "opacity-40" : ""}`}
         >
           {showTopMarker && (
@@ -842,21 +979,68 @@ export function StylesPanel({
           {showBottomMarker && (
             <div className="absolute left-0 right-0 -bottom-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
           )}
-          <GripVertical className="w-3 h-3 text-slate-300 shrink-0" aria-hidden />
+          <GripVertical className="w-3 h-3 text-slate-300 shrink-0 cursor-grab active:cursor-grabbing" aria-hidden />
           {isExpanded
             ? <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
             : <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
-          <span className="font-bold text-blue-700 font-mono text-[11px] shrink-0">{label}</span>
-          <span className="text-slate-400 text-[10px]">({items.length})</span>
-        </button>
+
+          {isEditingThisGroup ? (
+            <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+              <input
+                type="text"
+                value={editingInputValue}
+                onChange={(e) => setEditingInputValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveEditGroup(label);
+                  if (e.key === "Escape") handleCancelEditGroup();
+                }}
+                className="px-1.5 py-0.5 text-xs font-mono font-bold text-blue-900 border border-blue-400 rounded bg-white w-28 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => handleSaveEditGroup(label)}
+                className="p-1 text-emerald-600 hover:bg-emerald-50 rounded border-none bg-transparent cursor-pointer"
+                title="Save & Exit"
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelEditGroup}
+                className="p-1 text-slate-400 hover:bg-slate-100 rounded border-none bg-transparent cursor-pointer"
+                title="Cancel / Exit"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <span className="font-bold text-blue-700 font-mono text-[11px] shrink-0">{label}</span>
+              <span className="text-slate-400 text-[10px]">({items.length})</span>
+              <button
+                type="button"
+                onClick={(e) => handleStartEditGroup(label, e)}
+                className="ml-auto opacity-0 group-hover/header:opacity-100 p-0.5 text-slate-400 hover:text-blue-600 rounded transition-opacity"
+                title={`Rename "${label}" style across document`}
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+            </>
+          )}
+        </div>
         {isExpanded && (
           <div className="flex flex-col pl-5">
             {items.map(el => {
               const isChecked = checkedIds.has(el.id);
+              const isActiveNode = activeEditorNodeId === el.id;
               return (
                 <div
                   key={el.id}
-                  className="relative flex items-center gap-1.5 py-0.5 px-1.5 hover:bg-slate-50 rounded text-xs select-none"
+                  id={`group-el-${el.id}`}
+                  className={`relative flex items-center gap-1.5 py-0.5 px-1.5 rounded text-xs select-none transition-colors ${
+                    isActiveNode ? "bg-amber-100/90 font-medium text-amber-950 ring-1 ring-amber-300" : "hover:bg-slate-50"
+                  }`}
                 >
                   <input
                     type="checkbox"
@@ -1203,14 +1387,42 @@ export function StylesPanel({
         {/* ── Group Tab ──────────────────────────────────────────────────────── */}
         {activeTab === "group" && (
           <>
-            <div className="px-3 pt-3 pb-1 border-b border-border bg-slate-50 flex items-center justify-between">
+            <div className="px-3 pt-2.5 pb-1.5 border-b border-border bg-slate-50 flex items-center justify-between gap-2 flex-wrap">
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
                 Document Elements ({flatNodes.length})
               </p>
               {checkedIds.size > 0 && (
-                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded text-[9px] font-semibold">
-                  {checkedIds.size} checked
-                </span>
+                <div className="flex items-center gap-1.5 ml-auto bg-amber-50 border border-amber-300 rounded px-2 py-1 shadow-sm">
+                  <span className="text-[10px] font-bold text-amber-900">
+                    {checkedIds.size} checked
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-medium">→</span>
+                  <select
+                    value={moveTargetStyle}
+                    onChange={(e) => setMoveTargetStyle(e.target.value)}
+                    className="text-[10px] font-mono font-bold py-0.5 px-1 bg-white border border-amber-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  >
+                    {Array.from(new Set(["H1", "H2", "H3", "H4", "CT", "TXT", "Head1", "Head2", ...allStyles])).map(st => (
+                      <option key={st} value={st}>{st}</option>
+                    ))}
+                  </select>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="text-[10px] py-0.5 px-2 h-6 bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+                    onClick={() => moveCheckedNodesToStyle(moveTargetStyle)}
+                  >
+                    Move
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setCheckedIds(new Set())}
+                    className="p-0.5 text-slate-400 hover:text-slate-700 text-[10px] border-none bg-transparent cursor-pointer"
+                    title="Clear selection"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
             </div>
 

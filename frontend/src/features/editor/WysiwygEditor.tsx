@@ -2835,6 +2835,46 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           content: "Normal" !important;
         }
 
+        /* ── Table Style Badges: Move-Over (Hover) Only ───────────────────── */
+        /* Hide style badges inside table cells by default so text is 100% clean */
+        .ProseMirror table p::after,
+        .ProseMirror table h1::after,
+        .ProseMirror table h2::after,
+        .ProseMirror table h3::after,
+        .ProseMirror table h4::after,
+        .ProseMirror table h5::after,
+        .ProseMirror table h6::after {
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+          transition: opacity 0.15s ease, visibility 0.15s ease !important;
+        }
+
+        /* Reveal floating style badge on mouse over (hover) at top-right of cell */
+        .ProseMirror table p:hover::after,
+        .ProseMirror table td:hover p::after,
+        .ProseMirror table tr:hover p::after,
+        .ProseMirror table h1:hover::after,
+        .ProseMirror table h2:hover::after,
+        .ProseMirror table h3:hover::after,
+        .ProseMirror table h4:hover::after,
+        .ProseMirror table h5:hover::after,
+        .ProseMirror table h6:hover::after {
+          opacity: 1 !important;
+          visibility: visible !important;
+          pointer-events: auto !important;
+          position: absolute !important;
+          left: auto !important;
+          right: 4px !important;
+          top: -6px !important;
+          z-index: 50 !important;
+          background-color: #1e40af !important;
+          border: 1px solid #3b82f6 !important;
+          color: #ffffff !important;
+          font-weight: 700 !important;
+          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2) !important;
+        }
+
         /* Bullet & Numbered List Styling */
         .ProseMirror ul {
           list-style-type: disc !important;
