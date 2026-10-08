@@ -40,6 +40,7 @@ import { uiPaths } from "@/utils/appPaths";
 import { ReferenceReviewSidePanel } from "@/features/referenceReview/components/ReferenceReviewSidePanel";
 import { DesignPdfViewer } from "@/features/structuringReview/components/DesignPdfViewer";
 import { getChapterFiles, getProjectChapters } from "@/api/projects";
+import { getPersistedCustomStyles, savePersistedCustomStyle } from "@/utils/customStylesStorage";
 
 type StructuringTab = "overview" | "editor" | "onlyoffice" | "collabora";
 
@@ -278,7 +279,7 @@ export function StructuringReviewPage() {
 
   const viewer = useSessionStore((s) => s.viewer);
   const currentUser = viewer?.username;
-  const [customStyles, setCustomStyles] = useState<string[]>([]);
+  const [customStyles, setCustomStyles] = useState<string[]>(getPersistedCustomStyles);
   const onlyofficeRef = useRef<OnlyOfficeEditorHandle>(null);
   const [ooConnector, setOoConnector] = useState<any>(null);
   const collaboraIframeRef = useRef<HTMLIFrameElement>(null);
@@ -431,9 +432,9 @@ export function StructuringReviewPage() {
   const allStyles = Array.from(new Set([...baseStyles, ...customStyles])).sort();
 
   const handleAddStyle = (newStyleName: string) => {
-    if (!customStyles.includes(newStyleName)) {
-      setCustomStyles((prev) => [...prev, newStyleName]);
-    }
+    if (!newStyleName || !newStyleName.trim()) return;
+    const updated = savePersistedCustomStyle(newStyleName);
+    setCustomStyles(updated);
   };
 
   // ── Computed info ─────────────────────────────────────────────────────────

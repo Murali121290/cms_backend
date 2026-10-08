@@ -151,12 +151,20 @@ export function StylesPanel({
 
   // ── Paragraph tab ─────────────────────────────────────────────────────────
   const [currentStyle, setCurrentStyle] = useState("Normal");
+  const [flatNodes, setFlatNodes] = useState<ScannedElement[]>([]);
   const [allStyles, setAllStyles] = useState<string[]>(styles);
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [canUnwrapSdt, setCanUnwrapSdt] = useState(false);
 
-  useEffect(() => { setAllStyles(styles); }, [styles]);
+  // Merge prop styles with all styles extracted directly from active document nodes
+  useEffect(() => {
+    const docStyles = flatNodes
+      .map((n) => n.styleLabel)
+      .filter((s): s is string => Boolean(s) && typeof s === "string");
+
+    setAllStyles(Array.from(new Set([...styles, ...docStyles])).sort());
+  }, [styles, flatNodes]);
 
   useEffect(() => {
     const editor = editorRef.current?.editor;
@@ -278,7 +286,6 @@ export function StylesPanel({
 
   // ── Group tab (Scanning & Bulk Actions) ───────────────────────────────────
   const [scannedTree, setScannedTree] = useState<ScannedElement[]>([]);
-  const [flatNodes, setFlatNodes] = useState<ScannedElement[]>([]);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
