@@ -8,7 +8,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Manuscript Analysis": {
@@ -20,7 +20,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Editorial Assessment": {
@@ -32,7 +32,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
     "Pre-editing": {
@@ -44,7 +44,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
     "Pre-editing QA": {
@@ -56,7 +56,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Language Editing": {
@@ -68,7 +68,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
     "Language Editing QA": {
@@ -80,7 +80,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "AQ Resolution": {
@@ -92,7 +92,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Technical Editing": {
@@ -104,7 +104,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Template Processing": {
@@ -116,7 +116,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Art Processing": {
@@ -128,7 +128,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Non-XML Processing": {
@@ -140,7 +140,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Typesetting": {
@@ -152,7 +152,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Proofreading": {
@@ -164,7 +164,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Indexing": {
@@ -176,7 +176,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Corrections & 2P": {
@@ -188,7 +188,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "QC & Pre-flight": {
@@ -200,7 +200,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Delivery": {
@@ -212,7 +212,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Reprint": {
@@ -224,7 +224,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "XML Conversion": {
@@ -236,7 +236,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Digital Processing": {
@@ -248,7 +248,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Accessibility": {
@@ -260,7 +260,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Accessibility QC": {
@@ -272,7 +272,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Publisher Review": {
@@ -284,7 +284,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
   "Author Review": {
@@ -296,7 +296,7 @@
       "selvabharathp@s4carlisle.com"
     ],
     "cc": [],
-    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "subject": "{client_name} -{project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   }
 }

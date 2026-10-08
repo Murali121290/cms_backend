@@ -8631,6 +8631,7 @@ def _resolve_placeholders(text: str, chapter, project, client, current_stage: st
         "{current_stage}": current_stage,
         "{next_stage}": next_stage,
         "{project_code}": chapter.project or "",
+        "{client_name}": getattr(client, "company", None) or getattr(client, "name_company", None) or "",
         "{author_email}": getattr(project, "customer_contact", None) or getattr(client, "email", None) or "author@example.com",
         "{client_email}": getattr(client, "email", None) or "client@example.com",
         "{languageediting_team_email}": "languageediting_team@example.com",
