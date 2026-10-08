@@ -65,23 +65,30 @@ interface ClientCompany {
 // ── Validation Badge ──────────────────────────────────────────────────────────
 
 function ValidationBadge({ status }: { status: string | null }) {
-  if (!status || status === 'YTS') {
+  if (!status || status === 'Yet to start') {
     return (
       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-muted/20 text-muted">
-        YTS
+        Yet to start
       </span>
     );
   }
-  if (status === 'pass' || status === 'validated') {
+  if (status === 'Completed') {
     return (
       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-        Passed
+        Completed
+      </span>
+    );
+  }
+  if (status === 'In-Progress') {
+    return (
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/20">
+        In-Progress
       </span>
     );
   }
   return (
-    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
-      Failed
+    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-muted/20 text-muted">
+      {status}
     </span>
   );
 }
@@ -329,16 +336,37 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
 
         {/* Progress bar visual indicator */}
         <div className="mt-3">
-          <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
-            <span>PDF Files</span>
-            <span>{project.total_files} Files</span>
-          </div>
-          <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary transition-all duration-500 rounded-full"
-              style={{ width: project.status === 'Merged' ? '100%' : '0%' }}
-            />
-          </div>
+          {(() => {
+            const statusSteps: { [key: string]: number } = {
+              'Merged': 1,
+              'Trimmed': 2,
+              'Fonts Checked': 3,
+              'Security Checked': 4,
+              'Bookmarked': 5,
+              'TOC Linked': 6,
+              'URL Linked': 7,
+              'Email Linked': 8,
+              'Endnote Linked': 9,
+              'Crossref Linked': 10,
+            };
+            const currentStep = statusSteps[project.status] || 0;
+            const progressPercent = (currentStep / 10) * 100;
+
+            return (
+              <>
+                <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
+                  <span>Progress</span>
+                  <span>{currentStep}/10 Steps · {Math.round(progressPercent)}%</span>
+                </div>
+                <div className="h-2 w-full bg-border rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-500 rounded-full"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </>
+            );
+          })()}
         </div>
       </div>
 
@@ -532,6 +560,8 @@ export function PostProdWebPdfProcessor() {
 
         setProjectFiles([]);
         setLoadingFiles(true);
+
+        // Load project files
         listProjectFiles(p.id)
           .then(files => {
             setProjectFiles(files.map(f => ({ ...f, selected: true })));
@@ -540,6 +570,7 @@ export function PostProdWebPdfProcessor() {
             toast.error(err.message || 'Failed to load project files');
           })
           .finally(() => setLoadingFiles(false));
+
       }
     } else {
       setSelectedProject(null);
@@ -557,6 +588,50 @@ export function PostProdWebPdfProcessor() {
       setLoading(false);
     }
   }, []);
+
+  // ── Lazy load analysis when step is opened ──────────────────────────────
+  useEffect(() => {
+    if (!selectedProject) return;
+
+    const loadStepAnalysis = async () => {
+      const stepMap: { [key: number]: { step: string; setter: any } } = {
+        3: { step: 'fonts_check', setter: setFontsStatus },
+        4: { step: 'security_check', setter: setSecurityStatus },
+        5: { step: 'bookmarks', setter: setBookmarksStatus },
+        6: { step: 'toc_links', setter: setLinksAnalysisStatus },
+        7: { step: 'url_links', setter: setUrlLinksAnalysis },
+        8: { step: 'email_links', setter: setEmailLinksAnalysis },
+        9: { step: 'endnote_links', setter: setEndnoteLinksAnalysis },
+        10: { step: 'crossref_links', setter: setCrossrefLinksAnalysis },
+      };
+
+      const config = stepMap[activeStep];
+      if (!config) return;
+
+      console.log(`Loading ${config.step} analysis for project ${selectedProject.id}`);
+
+      try {
+        const response = await fetch(
+          `/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/step-analysis/${config.step}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`Loaded ${config.step}:`, data);
+          if (data) {
+            // Add success flag for UI to display analysis
+            const analysisData = { ...data, success: true };
+            config.setter(analysisData);
+          }
+        } else {
+          console.warn(`Failed to load ${config.step}: ${response.status}`);
+        }
+      } catch (err) {
+        console.error(`Error loading ${config.step}:`, err);
+      }
+    };
+
+    loadStepAnalysis();
+  }, [activeStep, selectedProject?.id]);
 
   // ── Derived metrics ─────────────────────────────────────────────────────
 

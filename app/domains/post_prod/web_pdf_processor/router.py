@@ -32,6 +32,16 @@ def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
     return user
 
 
+def update_validation_status(project_obj: WebPdfProject):
+    """Update validation_status based on workflow progress."""
+    if not project_obj.status:
+        project_obj.validation_status = "Yet to start"
+    elif project_obj.status == "Crossref Linked":
+        project_obj.validation_status = "Completed"
+    else:
+        project_obj.validation_status = "In-Progress"
+
+
 router = APIRouter(
     prefix="/post-prod/web-pdf-processor",
     tags=["Web PDF Processor"],
@@ -272,10 +282,10 @@ def merge_project_files(
             merged_output_path=merged_output_path,
             total_pages=result['total_pages'],
             merge_status="success",
-            error_message=None,
+            details=None,
         )
         project_obj.status = "Merged"
-        project_obj.validation_status = "pass"
+        update_validation_status(project_obj)
         db.commit()
         return {"message": "PDF files merged successfully", "output_path": merged_output_path}
     else:
@@ -288,7 +298,7 @@ def merge_project_files(
             merged_output_path=merged_output_path,
             total_pages=0,
             merge_status="failed",
-            error_message=result.get('error'),
+            details={"error": result.get('error')},
         )
         raise HTTPException(status_code=500, detail=f"Failed to merge PDF files: {result.get('error', 'Unknown error')}")
 
@@ -323,7 +333,14 @@ def trim_project_pdf(
     project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
     if project_obj:
         project_obj.status = "Trimmed"
+        update_validation_status(project_obj)
         db.commit()
+        web_pdf_projects_db.record_step_completion(
+            db, project_id=project_id, step_name="trim",
+            user_id=user.id if user else None,
+            username=user.username if user else None,
+            details={"mode": body.mode, "message": result_msg}
+        )
 
     return {"message": "PDF trimmed successfully", "output_path": output_pdf}
 
@@ -366,7 +383,7 @@ def _serialize_history(h: Any) -> dict:
         "merged_output_path": h.merged_output_path,
         "total_pages": h.total_pages,
         "merge_status": h.merge_status,
-        "error_message": h.error_message,
+        "details": h.details,
     }
 
 
@@ -389,6 +406,33 @@ def get_merge_history(
         .all()
     )
     return [_serialize_history(h) for h in history_rows]
+
+
+@router.get("/projects/{project_id}/step-analysis/{step_name}")
+def get_latest_step_analysis(
+    project_id: int,
+    step_name: str,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Get the latest analysis for a specific step."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from .models import WebPdfHistory
+    latest = (
+        db.query(WebPdfHistory)
+        .filter(WebPdfHistory.project_id == project_id, WebPdfHistory.result_type == step_name)
+        .order_by(WebPdfHistory.created_at.desc())
+        .first()
+    )
+
+    if not latest:
+        return None
+
+    return latest.details
+
 
 @router.get("/projects/{project_id}/fonts-status")
 def check_fonts_status(
@@ -415,7 +459,14 @@ def check_fonts_status(
         project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
         if project_obj:
             project_obj.status = "Fonts Checked"
+            update_validation_status(project_obj)
             db.commit()
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="fonts_check",
+                user_id=user.id if user else None,
+                username=user.username if user else None,
+                details=font_status
+            )
         return font_status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -445,7 +496,14 @@ def check_security_status(
         project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
         if project_obj:
             project_obj.status = "Security Checked"
+            update_validation_status(project_obj)
             db.commit()
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="security_check",
+                user_id=user.id if user else None,
+                username=user.username if user else None,
+                details=security_status
+            )
         return security_status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -476,13 +534,20 @@ def generate_bookmarks(
         result = toc_service.generate_bookmarks_for_pdf(output_pdf, output_pdf, include_subheadings=include_subheadings)
         if not result.get("success"):
             raise HTTPException(status_code=500, detail=result.get("error", "Unknown error generating bookmarks"))
-            
+
         # Update project status
         project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
         if project_obj:
             project_obj.status = "Bookmarked"
+            update_validation_status(project_obj)
             db.commit()
-            
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="bookmarks",
+                user_id=user.id if user else None,
+                username=user.username if user else None,
+                details=result
+            )
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -558,7 +623,14 @@ def generate_links(
             project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
             if project_obj:
                 project_obj.status = "TOC Linked"
+                update_validation_status(project_obj)
                 db.commit()
+                web_pdf_projects_db.record_step_completion(
+                    db, project_id=project_id, step_name="toc_links",
+                    user_id=user.id if user else None,
+                    username=user.username if user else None,
+                    details=result
+                )
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -632,13 +704,24 @@ def generate_url_links(
 
     try:
         result = url_service.find_urls_in_pdf(bookmarked_pdf_path, request.analyze_only)
+
+        # Always record the analysis
+        web_pdf_projects_db.record_step_completion(
+            db, project_id=project_id, step_name="url_links",
+            user_id=user.id if user else None,
+            username=user.username if user else None,
+            details=result
+        )
+
         # Mark as complete if: applying changes, OR analysis found nothing to fix
         should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
         if should_mark_complete:
             project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
             if project_obj:
                 project_obj.status = "URL Linked"
+                update_validation_status(project_obj)
                 db.commit()
+
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -675,13 +758,24 @@ def generate_email_links(
 
     try:
         result = email_service.find_emails_in_pdf(bookmarked_pdf_path, request.analyze_only)
+
+        # Always record the analysis
+        web_pdf_projects_db.record_step_completion(
+            db, project_id=project_id, step_name="email_links",
+            user_id=user.id if user else None,
+            username=user.username if user else None,
+            details=result
+        )
+
         # Mark as complete if: applying changes, OR analysis found nothing to fix
         should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
         if should_mark_complete:
             project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
             if project_obj:
                 project_obj.status = "Email Linked"
+                update_validation_status(project_obj)
                 db.commit()
+
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -722,13 +816,24 @@ def generate_endnote_links(
 
     try:
         result = endnote_service.find_endnotes_in_pdf(bookmarked_pdf_path, request.analyze_only)
+
+        # Always record the analysis
+        web_pdf_projects_db.record_step_completion(
+            db, project_id=project_id, step_name="endnote_links",
+            user_id=user.id if user else None,
+            username=user.username if user else None,
+            details=result
+        )
+
         # Mark as complete if: applying changes, OR analysis found nothing to fix
         should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
         if should_mark_complete:
             project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
             if project_obj:
                 project_obj.status = "Endnote Linked"
+                update_validation_status(project_obj)
                 db.commit()
+
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -761,13 +866,24 @@ def generate_crossref_links(
 
     try:
         result = crossref_service.find_crossrefs_in_pdf(bookmarked_pdf_path, request.analyze_only)
+
+        # Always record the analysis
+        web_pdf_projects_db.record_step_completion(
+            db, project_id=project_id, step_name="crossref_links",
+            user_id=user.id if user else None,
+            username=user.username if user else None,
+            details=result
+        )
+
         # Mark as complete if: applying changes, OR analysis found nothing to fix
         should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
         if should_mark_complete:
             project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
             if project_obj:
                 project_obj.status = "Crossref Linked"
+                update_validation_status(project_obj)
                 db.commit()
+
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
