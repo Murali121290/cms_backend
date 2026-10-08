@@ -1190,9 +1190,19 @@ export function PostProdWebPdfProcessor() {
               <FileText size={16} className="text-primary" />
               {selectedProject ? `${selectedProject.status === 'Bookmarked' ? 'Bookmarked' : selectedProject.status === 'Trimmed' ? 'Trimmed' : selectedProject.status === 'Fonts Checked' ? 'Fonts Checked' : selectedProject.status === 'Security Checked' ? 'Security Checked' : 'Merged'} PDF Preview` : 'PDF Preview'}
               {['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) && (
-                <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                  ✓ {selectedProject.status}
-                </span>
+                <>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                    ✓ {selectedProject.status}
+                  </span>
+                  <a
+                    href={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-xs text-primary hover:text-primary/80 font-semibold"
+                  >
+                    ↗ Open
+                  </a>
+                </>
               )}
             </h2>
 
