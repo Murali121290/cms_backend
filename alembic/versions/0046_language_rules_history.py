@@ -1,6 +1,6 @@
 """Add project_language_rules_history for Rules Picker audit trail
 
-Revision ID: 0044_language_rules_history
+Revision ID: 0046_language_rules_history
 Revises: 0043_journal_assign_delay
 Create Date: 2026-10-06 06:30:00.000000
 
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0044_language_rules_history'
+revision: str = '0046_language_rules_history'
 down_revision: Union[str, Sequence[str], None] = '0043_journal_assign_delay'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
