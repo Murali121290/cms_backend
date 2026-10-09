@@ -4071,9 +4071,9 @@ def api_v2_upload_zip(
                             except Exception as e:
                                 pass
                                 
-                        if total_word_count > 0:
+                        if total_word_count >= 0 and docx_paths:
                             ci_record.word_count = (ci_record.word_count or 0) + total_word_count
-                        if total_pages > 0:
+                        if total_pages >= 0 and docx_paths:
                             ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
                             
                 db.commit()
@@ -7980,9 +7980,9 @@ def api_v2_create_chapter_with_manuscript(
         except Exception:
             pass
 
-        if word_count:
+        if word_count is not None:
             new_chapter.word_count = word_count
-        if page_count:
+        if page_count is not None:
             new_chapter.manuscript_pages = page_count
             project.manuscript_pages = sum(
                 ci.manuscript_pages or 0
@@ -8231,6 +8231,38 @@ def api_v2_create_chapters_with_manuscript_zip(
                         actor_user_id=viewer.id,
                         upload_dir=file_service.UPLOAD_DIR,
                     )
+
+                word_count = None
+                page_count = None
+                if full_path.lower().endswith(".docx") and os.path.exists(full_path):
+                    try:
+                        import docx
+                        doc = docx.Document(full_path)
+                        word_count = sum(len(p.text.split()) for p in doc.paragraphs)
+                    except Exception:
+                        pass
+                    try:
+                        from lxml import etree as ET
+                        NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+                        with zipfile.ZipFile(full_path) as z:
+                            if "docProps/app.xml" in z.namelist():
+                                with z.open("docProps/app.xml") as f:
+                                    tree = ET.parse(f)
+                                    pages_el = tree.find(f"{{{NS}}}Pages")
+                                    if pages_el is not None and pages_el.text:
+                                        page_count = int(pages_el.text)
+                    except Exception:
+                        pass
+                        
+                if word_count is not None:
+                    new_chapter.word_count = word_count
+                if page_count is not None:
+                    new_chapter.manuscript_pages = page_count
+                    project.manuscript_pages = sum(
+                        ci.manuscript_pages or 0
+                        for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+                    )
+                db.commit()
 
                 existing_numbers.add(number_padded)
                 db.refresh(new_chapter)
@@ -9490,9 +9522,9 @@ def api_v2_finalize_mapping(
                                             total_pages += int(pages_el.text)
                         except Exception as e:
                             pass
-                    if total_word_count > 0:
+                    if total_word_count >= 0 and docx_paths:
                         ci_record.word_count = (ci_record.word_count or 0) + total_word_count
-                    if total_pages > 0:
+                    if total_pages >= 0 and docx_paths:
                         ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
             db.commit()
     except Exception as e:
