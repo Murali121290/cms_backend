@@ -9445,6 +9445,9 @@ def api_v2_finalize_mapping(
             file_type=mapping.file_type.lower(),
             category=file_cat,
             path=dest_path,
+            version=1,
+            uploaded_at=now_ist_naive(),
+            uploaded_by_id=viewer.id,
         )
         db.add(db_file)
         created_count += 1
