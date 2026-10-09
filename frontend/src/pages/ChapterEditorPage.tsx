@@ -18,6 +18,7 @@ import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
 import { OnlyOfficeEditor, TinyMceEditor, type TinyMceEditorHandle } from '@/features/editor'
 import { useParagraphStyles } from '@/features/editor/useParagraphStyles'
+import { getPersistedCustomStyles, savePersistedCustomStyle } from '@/utils/customStylesStorage'
 
 interface LintError {
   line: number;
@@ -290,13 +291,13 @@ export function ChapterEditorPage() {
 
   // Styles for XHTML WYSIWYG Editor
   const stylesQuery = useParagraphStyles()
-  const [customStyles, setCustomStyles] = useState<string[]>([])
+  const [customStyles, setCustomStyles] = useState<string[]>(getPersistedCustomStyles)
   const publisherStyles = stylesQuery.data || []
-  const allStyles = [...publisherStyles, ...customStyles].sort()
+  const allStyles = Array.from(new Set([...publisherStyles, ...customStyles])).sort()
   const handleAddStyle = (style: string) => {
-    if (!customStyles.includes(style)) {
-      setCustomStyles((prev) => [...prev, style].sort())
-    }
+    if (!style || !style.trim()) return
+    const updated = savePersistedCustomStyle(style)
+    setCustomStyles(updated)
   }
   
   // XML metrics (Well-formedness check + tags count + words count)

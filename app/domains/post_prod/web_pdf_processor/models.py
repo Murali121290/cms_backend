@@ -62,7 +62,7 @@ class WebPdfHistory(Base):
     merged_output_path = Column(Text, nullable=True)
     total_pages = Column(Integer, nullable=True)
     merge_status = Column(String(20), nullable=True)
-    error_message = Column(Text, nullable=True)
+    details = Column(JSON, nullable=True)
 
     project = relationship("WebPdfProject", foreign_keys=[project_id])
     changed_by = relationship("User", foreign_keys=[changed_by_id])

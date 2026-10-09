@@ -62,6 +62,23 @@ def parse(file_path: str) -> dict:
                     val = n.clean(cells[1])
                     if val:
                         extras["imprint"] = val
+                        
+            elif "prod editor" in first_cell or "production editor" in first_cell:
+                if len(cells) > 1:
+                    val = n.clean(cells[1])
+                    if val:
+                        extras["client_project_manager"] = val
+            
+            elif "summary of requirements" in first_cell:
+                if len(cells) > 2 and "x" in cells[1].casefold():
+                    req_text = cells[2].casefold()
+                    if "language edit" in req_text:
+                        if "offshore" in req_text or "us copyeditor" in req_text:
+                            fields["copyediting_level"] = "Level 2"
+                        elif "onshore" in req_text:
+                            fields["copyediting_level"] = "Level 3"
+                        else:
+                            fields["copyediting_level"] = "Level 1"
 
     # 2. Parse Table 1: Technical & Interior Color Specs
     if len(tables) > 1:

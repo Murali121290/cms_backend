@@ -40,8 +40,8 @@ def get_available_style_profiles() -> dict[str, dict[str, Any]]:
     return profiles
 
 
-def get_project_language_rules_dir(project_code: str) -> str:
-    path = os.path.join(str(UPLOADS_DIR), project_code, "CE support", "Style sheet template")
+def get_project_language_rules_dir(project_code: str, client_name: str = "unknown") -> str:
+    path = os.path.join(str(UPLOADS_DIR), client_name, project_code, "CE support", "Style sheet template")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -251,6 +251,8 @@ def _ensure_ce_support_chapter(db: Session, project):
                 ce_chapter.id, project.project_code)
     return ce_chapter
 
+
+# ─── Read (disk-first with profile fallback) ──────────────────────────────────
 
 # ─── Read (disk-first with profile fallback) ──────────────────────────────────
 

@@ -280,6 +280,7 @@ def _serialize_project_summary(project: Project):
         customer_contact=getattr(project, "customer_contact", None),
         category=getattr(project, "category", None),
         composition=getattr(project, "composition", None),
+        copyediting_level=getattr(project, "copyediting_level", None),
         project_manager=getattr(project, "project_manager", None),
         sales_person=getattr(project, "sales_person", None),
         priority=getattr(project, "priority", None),
@@ -332,7 +333,9 @@ def _serialize_lock(file_record: models.File, db: Session | None = None):
     from datetime import timezone as _tz
     checked_out_by_username = None
     if file_record.checked_out_by is not None:
-        checked_out_by_username = file_record.checked_out_by.username
+        user_obj = file_record.checked_out_by
+        full_name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+        checked_out_by_username = full_name if full_name else user_obj.username
 
     webdav_locked = False
     webdav_locked_by = None
@@ -355,7 +358,8 @@ def _serialize_lock(file_record: models.File, db: Session | None = None):
             webdav_locked = True
             webdav_locked_at = active_lock.created_at
             if lock_owner is not None:
-                webdav_locked_by = lock_owner.username
+                full_name = f"{lock_owner.first_name or ''} {lock_owner.last_name or ''}".strip()
+                webdav_locked_by = full_name if full_name else lock_owner.username
 
     return schemas_v2.LockState(
         is_checked_out=file_record.is_checked_out,
@@ -410,7 +414,9 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
 
     uploaded_by = None
     if file_record.uploaded_by:
-        uploaded_by = file_record.uploaded_by.username
+        user_obj = file_record.uploaded_by
+        full_name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+        uploaded_by = full_name if full_name else user_obj.username
 
     # Image / PDF metadata for the chapter file list's Dimensions / DPI /
     # Color Profile columns. Cheap for images (PIL only reads the header);
@@ -1562,7 +1568,9 @@ def api_v2_project_bootstrap(
     customer_contact: str | None = Form(None),
     category: str | None = Form(None),
     composition: str | None = Form(None),
+    copyediting_level: str | None = Form(None),
     project_manager: str | None = Form(None),
+    client_project_manager: str | None = Form(None),
     sales_person: str | None = Form(None),
     priority: str | None = Form(None),
     edition: str | None = Form(None),
@@ -1624,6 +1632,7 @@ def api_v2_project_bootstrap(
             chapter_count=chapter_count,
             files=files,
             upload_dir=file_service.UPLOAD_DIR,
+            uploaded_by_id=viewer.id,
         )
     except project_service.ProjectBootstrapValidationError as exc:
         logging.error(f"Project bootstrap validation error: {str(exc)}")
@@ -1662,8 +1671,9 @@ def api_v2_project_bootstrap(
         if c:
             project.client_name = c.company
 
-    for _f in ("division_code", "customer_contact", "category", "composition",
-               "project_manager", "sales_person", "priority", "edition", "color",
+    logging.error(f"DEBUG: client_project_manager from form: {locals().get('client_project_manager')}")
+    for _f in ("division_code", "customer_contact", "category", "composition", "copyediting_level",
+               "project_manager", "client_project_manager", "sales_person", "priority", "edition", "color",
                "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
                "actual_pages", "isbn_no", "billing_location"):
         _v = locals().get(_f)
@@ -1702,7 +1712,8 @@ def api_v2_project_bootstrap(
 
     if po_file is not None and po_file.filename:
         try:
-            ce_support_dir = os.path.join(file_service.UPLOAD_DIR, code, "CE support")
+            client_folder = client_name or "unknown"
+            ce_support_dir = os.path.join(file_service.UPLOAD_DIR, client_folder, code, "CE support")
             os.makedirs(ce_support_dir, exist_ok=True)
 
             po_dest_path = os.path.join(ce_support_dir, po_file.filename)
@@ -1918,7 +1929,7 @@ def api_v2_update_project(
         if not has_permission(viewer, "edit_assignee"):
             raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
 
-    for _f in ("project_manager", "priority", "composition", "category", "edition",
+    for _f in ("project_manager", "client_project_manager", "priority", "composition", "copyediting_level", "category", "edition",
                "color", "trim_size", "copyright_year", "actual_pages", "manuscript_pages",
                "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location"):
         _v = getattr(payload, _f, None)
@@ -2125,7 +2136,7 @@ def api_v2_project_intake(
                 continue
             target_ch = new_chapters[idx % len(new_chapters)]
             
-            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, target_ch.chapters, category)
+            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, target_ch.chapters, category)
             os.makedirs(dest_dir, exist_ok=True)
             
             dest_path = os.path.join(dest_dir, upload.filename)
@@ -2728,10 +2739,12 @@ def api_v2_download_file(
             message="File not found.",
         )
 
+    import mimetypes
+    mime, _ = mimetypes.guess_type(file_record.filename)
     return _serve_docx_finalized(
         path=file_record.path,
         filename=file_record.filename,
-        media_type="application/octet-stream",
+        media_type=mime or "application/octet-stream",
     )
 
 
@@ -3770,7 +3783,7 @@ def api_v2_upload_zip(
         with open(zip_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        zip_archive_dir = os.path.join(file_service.UPLOAD_DIR, project.code)
+        zip_archive_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code)
         os.makedirs(zip_archive_dir, exist_ok=True)
         project_service.create_predefined_project_folders(zip_archive_dir)
         zip_archive_path = os.path.join(zip_archive_dir, f"{project.code}_manuscript.zip")
@@ -3910,9 +3923,9 @@ def api_v2_upload_zip(
 
 
                 if chapter:
-                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, chapter.chapters, category)
+                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, category)
                 else:
-                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, "project_files", category)
+                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, "project_files", category)
 
                 os.makedirs(dest_dir, exist_ok=True)
                 dest_path = os.path.join(dest_dir, fname)
@@ -4058,9 +4071,9 @@ def api_v2_upload_zip(
                             except Exception as e:
                                 pass
                                 
-                        if total_word_count > 0:
+                        if total_word_count >= 0 and docx_paths:
                             ci_record.word_count = (ci_record.word_count or 0) + total_word_count
-                        if total_pages > 0:
+                        if total_pages >= 0 and docx_paths:
                             ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
                             
                 db.commit()
@@ -4746,8 +4759,7 @@ def api_v2_combine_project_book(
         with zipfile.ZipFile(response_zip_path, "r") as z_res:
             z_res.extractall(extract_dir)
 
-        # Dest directory for the "Final files" chapter
-        dest_dir = os.path.join(UPLOAD_DIR, project.project_code, final_chap.chapters, "Misc")
+        dest_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.project_code, final_chap.chapters, "Misc")
         os.makedirs(dest_dir, exist_ok=True)
         
         from app.domains.files import version_service
@@ -5217,6 +5229,8 @@ def api_v2_list_processing_jobs(
         func.coalesce(ProcessingJob.project_code, Project.project_code).label("project_code"),
         func.coalesce(ProcessingJob.chapter_number, ChapterInfo.chapters).label("chapter_number"),
         User.username.label("username"),
+        User.first_name.label("first_name"),
+        User.last_name.label("last_name"),
         User.role.label("user_role")
     ).outerjoin(File, ProcessingJob.file_id == File.id)\
      .outerjoin(Project, File.project_id == Project.id)\
@@ -5245,6 +5259,8 @@ def api_v2_list_processing_jobs(
             elif isinstance(row.options, dict):
                 options_dict = row.options
 
+        user_display_name = f"{row.first_name or ''} {row.last_name or ''}".strip() or row.username
+
         result.append(schemas_v2.ProcessingJobListItem(
             id=row.id,
             file_id=row.file_id,
@@ -5261,7 +5277,7 @@ def api_v2_list_processing_jobs(
             chapter_number=row.chapter_number,
             priority=row.priority,
             options=options_dict,
-            username=row.username,
+            username=user_display_name,
             user_role=row.user_role
         ))
     return result
@@ -6014,7 +6030,7 @@ def api_v2_get_file_asset(
         if not project or not chapter:
             raise HTTPException(status_code=404, detail="Project or Chapter not found")
 
-        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
         
         candidate_folders = [
             os.path.join(chapter_dir, "artfile"),
@@ -6056,7 +6072,7 @@ def api_v2_get_file_asset(
             if clean_asset_name.lower().endswith(".eps"):
                 search_names.extend([base_name_no_ext + ext for ext in [".png", ".jpg", ".jpeg", ".webp", ".svg"]])
             
-            project_dir = os.path.join(UPLOAD_DIR, project.code) if project else None
+            project_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code) if project else None
             if project_dir and os.path.exists(project_dir):
                 for root, _, files in os.walk(project_dir):
                     lower_files = {f.lower(): f for f in files}
@@ -7964,9 +7980,9 @@ def api_v2_create_chapter_with_manuscript(
         except Exception:
             pass
 
-        if word_count:
+        if word_count is not None:
             new_chapter.word_count = word_count
-        if page_count:
+        if page_count is not None:
             new_chapter.manuscript_pages = page_count
             project.manuscript_pages = sum(
                 ci.manuscript_pages or 0
@@ -8058,7 +8074,7 @@ def api_v2_create_chapter_with_art(
         db.commit()
         db.refresh(new_chapter)
 
-    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, art_chapter_name, "Art")
+    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, art_chapter_name, "Art")
     os.makedirs(dest_dir, exist_ok=True)
 
     if file.filename.lower().endswith(".zip"):
@@ -8216,6 +8232,38 @@ def api_v2_create_chapters_with_manuscript_zip(
                         upload_dir=file_service.UPLOAD_DIR,
                     )
 
+                word_count = None
+                page_count = None
+                if full_path.lower().endswith(".docx") and os.path.exists(full_path):
+                    try:
+                        import docx
+                        doc = docx.Document(full_path)
+                        word_count = sum(len(p.text.split()) for p in doc.paragraphs)
+                    except Exception:
+                        pass
+                    try:
+                        from lxml import etree as ET
+                        NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+                        with zipfile.ZipFile(full_path) as z:
+                            if "docProps/app.xml" in z.namelist():
+                                with z.open("docProps/app.xml") as f:
+                                    tree = ET.parse(f)
+                                    pages_el = tree.find(f"{{{NS}}}Pages")
+                                    if pages_el is not None and pages_el.text:
+                                        page_count = int(pages_el.text)
+                    except Exception:
+                        pass
+                        
+                if word_count is not None:
+                    new_chapter.word_count = word_count
+                if page_count is not None:
+                    new_chapter.manuscript_pages = page_count
+                    project.manuscript_pages = sum(
+                        ci.manuscript_pages or 0
+                        for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+                    )
+                db.commit()
+
                 existing_numbers.add(number_padded)
                 db.refresh(new_chapter)
                 created.append(new_chapter)
@@ -8340,7 +8388,7 @@ def api_v2_create_chapters_with_art_zip(
                 new_chapter.workflow = existing_art_workflow
                 db.commit()
 
-            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, art_chapter_name, "Art")
+            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, art_chapter_name, "Art")
             os.makedirs(dest_dir, exist_ok=True)
 
             for fname, full_path in files_list:
@@ -8627,6 +8675,7 @@ def _resolve_placeholders(text: str, chapter, project, client, current_stage: st
         "{current_stage}": current_stage,
         "{next_stage}": next_stage,
         "{project_code}": chapter.project or "",
+        "{client_name}": getattr(client, "company", None) or getattr(client, "name_company", None) or "",
         "{author_email}": getattr(project, "customer_contact", None) or getattr(client, "email", None) or "author@example.com",
         "{client_email}": getattr(client, "email", None) or "client@example.com",
         "{languageediting_team_email}": "languageediting_team@example.com",
@@ -9381,8 +9430,9 @@ def api_v2_finalize_mapping(
         if mapping.file_type == "Art": file_cat = "Art"
         elif mapping.file_type == "XML": file_cat = "XML"
         elif mapping.file_type == "InDesign": file_cat = "Design"
-        
-        dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, file_cat)
+
+        client_folder = project.client_name or "unknown"
+        dest_dir = os.path.join(file_service.UPLOAD_DIR, client_folder, project.code, ch_num, file_cat)
         os.makedirs(dest_dir, exist_ok=True)
         fname = os.path.basename(mapping.original_filename)
         dest_path = os.path.join(dest_dir, fname)
@@ -9395,6 +9445,9 @@ def api_v2_finalize_mapping(
             file_type=mapping.file_type.lower(),
             category=file_cat,
             path=dest_path,
+            version=1,
+            uploaded_at=now_ist_naive(),
+            uploaded_by_id=viewer.id,
         )
         db.add(db_file)
         created_count += 1
@@ -9440,7 +9493,8 @@ def api_v2_finalize_mapping(
                 ch_num = mapping.chapter_number
                 if ch_num not in chapter_docx_map:
                     chapter_docx_map[ch_num] = []
-                dest_path = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, "Manuscript", os.path.basename(mapping.original_filename))
+                client_folder = project.client_name or "unknown"
+                dest_path = os.path.join(file_service.UPLOAD_DIR, client_folder, project.code, ch_num, "Manuscript", os.path.basename(mapping.original_filename))
                 chapter_docx_map[ch_num].append(dest_path)
         
         if chapter_docx_map:
@@ -9471,9 +9525,9 @@ def api_v2_finalize_mapping(
                                             total_pages += int(pages_el.text)
                         except Exception as e:
                             pass
-                    if total_word_count > 0:
+                    if total_word_count >= 0 and docx_paths:
                         ci_record.word_count = (ci_record.word_count or 0) + total_word_count
-                    if total_pages > 0:
+                    if total_pages >= 0 and docx_paths:
                         ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
             db.commit()
     except Exception as e:
@@ -9585,10 +9639,10 @@ def api_v2_chapter_bulk_download(
             # 3. Direct filesystem candidates
             if not found_path:
                 candidates = [
-                    os.path.join(file_service.UPLOAD_DIR, project.code, chapter_folder_str, sub, fname),
-                    os.path.join(file_service.UPLOAD_DIR, project.code, chapter_folder_str, fname),
-                    os.path.join(file_service.UPLOAD_DIR, project.code, sub, fname),
-                    os.path.join(file_service.UPLOAD_DIR, project.code, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, chapter_folder_str, sub, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, chapter_folder_str, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, sub, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, fname),
                 ]
                 for cand in candidates:
                     if os.path.exists(cand) and os.path.isfile(cand):

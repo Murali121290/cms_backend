@@ -109,6 +109,7 @@ def update_project_rules(
     body: SaveRulesRequest,
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_from_cookie),
+    user=Depends(get_current_user_from_cookie)
 ):
     """Save/update project language rules, syncing JSON to project's CE support folder.
 

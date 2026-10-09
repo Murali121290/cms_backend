@@ -23,6 +23,8 @@ import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/store/useToastStore';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useSessionStore } from '@/stores/sessionStore';
+import { Select } from '@/components/ui/Select';
+import { Input } from '@/components/ui/Input';
 import { useRBAC } from '@/hooks/useRBAC';
 import {
   listProjects,
@@ -63,23 +65,30 @@ interface ClientCompany {
 // ── Validation Badge ──────────────────────────────────────────────────────────
 
 function ValidationBadge({ status }: { status: string | null }) {
-  if (!status || status === 'YTS') {
+  if (!status || status === 'Yet to start') {
     return (
       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-muted/20 text-muted">
-        YTS
+        Yet to start
       </span>
     );
   }
-  if (status === 'pass' || status === 'validated') {
+  if (status === 'Completed') {
     return (
       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-        Passed
+        Completed
+      </span>
+    );
+  }
+  if (status === 'In-Progress') {
+    return (
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/20">
+        In-Progress
       </span>
     );
   }
   return (
-    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
-      Failed
+    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-muted/20 text-muted">
+      {status}
     </span>
   );
 }
@@ -327,16 +336,37 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
 
         {/* Progress bar visual indicator */}
         <div className="mt-3">
-          <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
-            <span>PDF Files</span>
-            <span>{project.total_files} Files</span>
-          </div>
-          <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary transition-all duration-500 rounded-full"
-              style={{ width: project.status === 'Merged' ? '100%' : '0%' }}
-            />
-          </div>
+          {(() => {
+            const statusSteps: { [key: string]: number } = {
+              'Merged': 1,
+              'Trimmed': 2,
+              'Fonts Checked': 3,
+              'Security Checked': 4,
+              'Bookmarked': 5,
+              'TOC Linked': 6,
+              'URL Linked': 7,
+              'Email Linked': 8,
+              'Endnote Linked': 9,
+              'Crossref Linked': 10,
+            };
+            const currentStep = statusSteps[project.status] || 0;
+            const progressPercent = (currentStep / 10) * 100;
+
+            return (
+              <>
+                <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
+                  <span>Progress</span>
+                  <span>{currentStep}/10 Steps · {Math.round(progressPercent)}%</span>
+                </div>
+                <div className="h-2 w-full bg-border rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-500 rounded-full"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </>
+            );
+          })()}
         </div>
       </div>
 
@@ -487,7 +517,9 @@ export function PostProdWebPdfProcessor() {
 
         if (mounted) {
           setProjects(projectsData || []);
-          if (clientsRes) setClients(clientsRes);
+          if (clientsRes) {
+            setClients(clientsRes.sort((a: any, b: any) => (a.company || '').localeCompare(b.company || '')));
+          }
           setUsers(usersList || []);
         }
       } catch (err) {
@@ -517,8 +549,19 @@ export function PostProdWebPdfProcessor() {
       if (p && (!selectedProject || selectedProject.id !== p.id)) {
         // Load project files when URL changes
         setSelectedProject(p);
+
+        // Auto-select next pending step based on current status
+        if (p.status === 'Bookmarked') setActiveStep(6);
+        else if (p.status === 'Security Checked') setActiveStep(5);
+        else if (p.status === 'Fonts Checked') setActiveStep(4);
+        else if (p.status === 'Trimmed') setActiveStep(3);
+        else if (p.status === 'Merged') setActiveStep(2);
+        else setActiveStep(1);
+
         setProjectFiles([]);
         setLoadingFiles(true);
+
+        // Load project files
         listProjectFiles(p.id)
           .then(files => {
             setProjectFiles(files.map(f => ({ ...f, selected: true })));
@@ -527,6 +570,7 @@ export function PostProdWebPdfProcessor() {
             toast.error(err.message || 'Failed to load project files');
           })
           .finally(() => setLoadingFiles(false));
+
       }
     } else {
       setSelectedProject(null);
@@ -544,6 +588,50 @@ export function PostProdWebPdfProcessor() {
       setLoading(false);
     }
   }, []);
+
+  // ── Lazy load analysis when step is opened ──────────────────────────────
+  useEffect(() => {
+    if (!selectedProject) return;
+
+    const loadStepAnalysis = async () => {
+      const stepMap: { [key: number]: { step: string; setter: any } } = {
+        3: { step: 'fonts_check', setter: setFontsStatus },
+        4: { step: 'security_check', setter: setSecurityStatus },
+        5: { step: 'bookmarks', setter: setBookmarksStatus },
+        6: { step: 'toc_links', setter: setLinksAnalysisStatus },
+        7: { step: 'url_links', setter: setUrlLinksAnalysis },
+        8: { step: 'email_links', setter: setEmailLinksAnalysis },
+        9: { step: 'endnote_links', setter: setEndnoteLinksAnalysis },
+        10: { step: 'crossref_links', setter: setCrossrefLinksAnalysis },
+      };
+
+      const config = stepMap[activeStep];
+      if (!config) return;
+
+      console.log(`Loading ${config.step} analysis for project ${selectedProject.id}`);
+
+      try {
+        const response = await fetch(
+          `/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/step-analysis/${config.step}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`Loaded ${config.step}:`, data);
+          if (data) {
+            // Add success flag for UI to display analysis
+            const analysisData = { ...data, success: true };
+            config.setter(analysisData);
+          }
+        } else {
+          console.warn(`Failed to load ${config.step}: ${response.status}`);
+        }
+      } catch (err) {
+        console.error(`Error loading ${config.step}:`, err);
+      }
+    };
+
+    loadStepAnalysis();
+  }, [activeStep, selectedProject?.id]);
 
   // ── Derived metrics ─────────────────────────────────────────────────────
 
@@ -637,6 +725,15 @@ export function PostProdWebPdfProcessor() {
   const changeCategory = (index: number, cat: ProjectFile['category']) => {
     const list = [...projectFiles];
     list[index].category = cat;
+
+    if (cat === 'FC') {
+      const item = list.splice(index, 1)[0];
+      list.unshift(item);
+    } else if (cat === 'BC') {
+      const item = list.splice(index, 1)[0];
+      list.push(item);
+    }
+
     setProjectFiles(list);
   };
 
@@ -660,6 +757,7 @@ export function PostProdWebPdfProcessor() {
       setPdfRefreshKey(Date.now());
       setSelectedProject(prev => prev ? { ...prev, status: "Merged" } : prev);
       fetchProjects();
+      setActiveStep(2);
     } catch (err: any) {
       toast.error(err.message || 'Failed to merge PDF files.');
     } finally {
@@ -681,6 +779,7 @@ export function PostProdWebPdfProcessor() {
       setPdfRefreshKey(Date.now()); setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
       setPdfRefreshKey(Date.now()); setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
       fetchProjects();
+      setActiveStep(3);
 
       // Force iframe refresh by updating the project slightly or we can just rely on the key/src reload
     } catch (err: any) {
@@ -704,6 +803,9 @@ export function PostProdWebPdfProcessor() {
       const data = await res.json();
       setSecurityStatus(data);
       toast.success('Security check completed');
+      setSelectedProject(prev => prev ? { ...prev, status: 'Security Checked' } : prev);
+      fetchProjects();
+      setActiveStep(5);
     } catch (err: any) {
       toast.error(err.message || 'Failed to check security');
     } finally {
@@ -822,6 +924,7 @@ export function PostProdWebPdfProcessor() {
       const result = await generateLinks(selectedProject.id, linkType === 'none' ? 'one_way' : linkType, false);
       setLinksStatus(result);
       setPdfRefreshKey((prev) => prev + 1);
+      setSelectedProject(prev => prev ? { ...prev, status: 'TOC Linked' } : prev);
       toast.success(`Successfully generated ${result.total_links} internal links`);
       // Re-run analysis automatically
       handleAnalyzeLinks();
@@ -858,6 +961,9 @@ export function PostProdWebPdfProcessor() {
     try {
       const result = await generateUrlLinks(selectedProject.id, true);
       setUrlLinksAnalysis(result);
+      if (result.not_linked === 0) {
+        setSelectedProject(prev => prev ? { ...prev, status: 'URL Linked' } : prev);
+      }
     } catch (err: any) {
       toast.error(err.message || 'Failed to analyze URL links');
     } finally {
@@ -872,6 +978,7 @@ export function PostProdWebPdfProcessor() {
       const result = await generateUrlLinks(selectedProject.id, false);
       setUrlLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
+      setSelectedProject(prev => prev ? { ...prev, status: 'URL Linked' } : prev);
       toast.success(`Hyperlinked ${result.not_linked} URL(s) successfully`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply URL links');
@@ -887,6 +994,9 @@ export function PostProdWebPdfProcessor() {
     try {
       const result = await generateEmailLinks(selectedProject.id, true);
       setEmailLinksAnalysis(result);
+      if (result.not_linked === 0) {
+        setSelectedProject(prev => prev ? { ...prev, status: 'Email Linked' } : prev);
+      }
       toast.success('Email scan complete');
     } catch (err: any) {
       toast.error(err.message || 'Failed to analyze emails');
@@ -902,6 +1012,7 @@ export function PostProdWebPdfProcessor() {
       const result = await generateEmailLinks(selectedProject.id, false);
       setEmailLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
+      setSelectedProject(prev => prev ? { ...prev, status: 'Email Linked' } : prev);
       toast.success(`Hyperlinked ${result.not_linked} email(s) successfully`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply email links');
@@ -917,6 +1028,9 @@ export function PostProdWebPdfProcessor() {
     try {
       const result = await generateEndnoteLinks(selectedProject.id, true);
       setEndnoteLinksAnalysis(result);
+      if (result.not_linked === 0) {
+        setSelectedProject(prev => prev ? { ...prev, status: 'Endnote Linked' } : prev);
+      }
       toast.success('Endnote scan complete');
     } catch (err: any) {
       toast.error(err.message || 'Failed to analyze endnotes');
@@ -932,6 +1046,7 @@ export function PostProdWebPdfProcessor() {
       const result = await generateEndnoteLinks(selectedProject.id, false);
       setEndnoteLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
+      setSelectedProject(prev => prev ? { ...prev, status: 'Endnote Linked' } : prev);
       toast.success(`Created ${result.not_linked} endnote link(s) successfully`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply endnote links');
@@ -947,6 +1062,9 @@ export function PostProdWebPdfProcessor() {
     try {
       const result = await generateCrossrefLinks(selectedProject.id, true);
       setCrossrefLinksAnalysis(result);
+      if (result.not_linked === 0) {
+        setSelectedProject(prev => prev ? { ...prev, status: 'Crossref Linked' } : prev);
+      }
       toast.success('Cross-reference scan complete');
     } catch (err: any) {
       toast.error(err.message || 'Failed to analyze cross-references');
@@ -962,6 +1080,7 @@ export function PostProdWebPdfProcessor() {
       const result = await generateCrossrefLinks(selectedProject.id, false);
       setCrossrefLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
+      setSelectedProject(prev => prev ? { ...prev, status: 'Crossref Linked' } : prev);
       toast.success(`Applied cross-reference links - ${result.linked} linked, ${result.not_linked} remaining`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply cross-reference links');
@@ -983,6 +1102,9 @@ export function PostProdWebPdfProcessor() {
       const data = await res.json();
       setFontsStatus(data);
       toast.success('Font check completed');
+      setSelectedProject(prev => prev ? { ...prev, status: 'Fonts Checked' } : prev);
+      fetchProjects();
+      setActiveStep(4);
     } catch (err: any) {
       toast.error(err.message || 'Failed to check fonts');
     } finally {
@@ -1060,22 +1182,32 @@ export function PostProdWebPdfProcessor() {
 
       {/* ── WORKSPACE (split-screen) ───────────────────────────────────────── */}
       {selectedProject ? (
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-x divide-border overflow-hidden">
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[420px_1fr] divide-y lg:divide-y-0 lg:divide-x divide-border overflow-hidden">
 
-          {/* LEFT — PDF Preview */}
-          <div className="flex flex-col p-6 overflow-hidden bg-background">
+          {/* RIGHT — PDF Preview */}
+          <div className="flex flex-col p-6 overflow-hidden bg-background order-1 lg:order-2">
             <h2 className="text-sm font-bold text-text mb-3 flex items-center gap-2 shrink-0">
               <FileText size={16} className="text-primary" />
-              {selectedProject ? `${selectedProject.status === 'Bookmarked' ? 'Bookmarked' : selectedProject.status === 'Trimmed' ? 'Trimmed' : 'Merged'} PDF Preview` : 'PDF Preview'}
-              {(selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked') && (
-                <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                  ✓ {selectedProject.status}
-                </span>
+              {selectedProject ? `${selectedProject.status === 'Bookmarked' ? 'Bookmarked' : selectedProject.status === 'Trimmed' ? 'Trimmed' : selectedProject.status === 'Fonts Checked' ? 'Fonts Checked' : selectedProject.status === 'Security Checked' ? 'Security Checked' : 'Merged'} PDF Preview` : 'PDF Preview'}
+              {['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) && (
+                <>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                    ✓ {selectedProject.status}
+                  </span>
+                  <a
+                    href={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-xs text-primary hover:text-primary/80 font-semibold"
+                  >
+                    ↗ Open
+                  </a>
+                </>
               )}
             </h2>
 
             <div className="flex-1 rounded-xl overflow-hidden bg-card border border-border relative">
-              {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked' ? (
+              {['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
                 <iframe
                   key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}`} // force reload if status or key changes
                   src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf?t=${pdfRefreshKey}${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
@@ -1094,22 +1226,22 @@ export function PostProdWebPdfProcessor() {
             </div>
           </div>
 
-          {/* RIGHT — Stepper Panel */}
-          <div className="flex flex-col overflow-hidden bg-card border-l border-border/80">
+          {/* LEFT — Stepper Panel */}
+          <div className="flex flex-col overflow-hidden bg-card order-2 lg:order-1">
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
 
               {/* Step 1: Merge PDFs */}
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 1 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
-                  onClick={() => setActiveStep(1)}
+                  onClick={() => setActiveStep(activeStep === 1 ? 0 : 1)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed'
-                      ? 'bg-emerald-500/20 text-emerald-600'
-                      : activeStep === 1 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                        ? 'bg-emerald-500/20 text-emerald-600'
+                        : activeStep === 1 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
-                      {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '1'}
+                      {['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '1'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Merge PDF</h2>
                   </div>
@@ -1117,7 +1249,7 @@ export function PostProdWebPdfProcessor() {
                 </button>
 
                 {activeStep === 1 && (
-                  <div className="p-4 border-t border-border flex flex-col gap-4 h-[500px]">
+                  <div className="p-4 border-t border-border flex flex-col gap-4 max-h-[600px]">
                     <div className="flex items-start justify-between shrink-0 gap-3">
                       <p className="text-[11px] text-muted m-0">
                         Auto-detected below. Check/uncheck, reorder, or re-categorize files, then merge.
@@ -1225,19 +1357,19 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 2 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
-                      setActiveStep(2);
+                    if (['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) {
+                      setActiveStep(activeStep === 2 ? 0 : 2);
                     }
                   }}
-                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  disabled={!['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Trimmed'
-                      ? 'bg-emerald-500/20 text-emerald-600'
-                      : activeStep === 2 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${['Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                        ? 'bg-emerald-500/20 text-emerald-600'
+                        : activeStep === 2 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
-                      {selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '2'}
+                      {['Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '2'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Trim PDF</h2>
                   </div>
@@ -1350,22 +1482,24 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 3 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
-                      setActiveStep(3);
+                    if (['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) {
+                      setActiveStep(activeStep === 3 ? 0 : 3);
                     }
                   }}
-                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  disabled={!['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${fontsStatus && fontsStatus.all_embedded
-                      ? 'bg-emerald-500/20 text-emerald-600'
-                      : fontsStatus && !fontsStatus.all_embedded
-                        ? 'bg-amber-500/20 text-amber-600'
-                        : activeStep === 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${(fontsStatus && fontsStatus.all_embedded) || ['Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                        ? 'bg-emerald-500/20 text-emerald-600'
+                        : fontsStatus && !fontsStatus.all_embedded
+                          ? 'bg-amber-500/20 text-amber-600'
+                          : activeStep === 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
                       {fontsStatus ? (
                         fontsStatus.all_embedded ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : ['Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
+                        <CheckCircle2 size={14} />
                       ) : '3'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Check Fonts</h2>
@@ -1421,22 +1555,24 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 4 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
-                      setActiveStep(4);
+                    if (['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) {
+                      setActiveStep(activeStep === 4 ? 0 : 4);
                     }
                   }}
-                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  disabled={!['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${securityStatus && securityStatus.is_free_of_protection
-                      ? 'bg-emerald-500/20 text-emerald-600'
-                      : securityStatus && !securityStatus.is_free_of_protection
-                        ? 'bg-amber-500/20 text-amber-600'
-                        : activeStep === 4 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${(securityStatus && securityStatus.is_free_of_protection) || ['Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                        ? 'bg-emerald-500/20 text-emerald-600'
+                        : securityStatus && !securityStatus.is_free_of_protection
+                          ? 'bg-amber-500/20 text-amber-600'
+                          : activeStep === 4 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
                       {securityStatus ? (
                         securityStatus.is_free_of_protection ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : ['Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
+                        <CheckCircle2 size={14} />
                       ) : '4'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Check Security</h2>
@@ -1488,20 +1624,22 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 5 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked') {
-                      setActiveStep(5);
+                    if (['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) {
+                      setActiveStep(activeStep === 5 ? 0 : 5);
                     }
                   }}
-                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed' && selectedProject.status !== 'Bookmarked'}
+                  disabled={!['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${bookmarksStatus && bookmarksStatus.success
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${bookmarksStatus && bookmarksStatus.success || ['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
                       ? 'bg-emerald-500/20 text-emerald-600'
                       : activeStep === 5 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
                       {bookmarksStatus ? (
                         bookmarksStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : ['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
+                        <CheckCircle2 size={14} />
                       ) : '5'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Generate Bookmarks</h2>
@@ -1680,17 +1818,19 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 6 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (selectedProject.status === 'Bookmarked') setActiveStep(6);
+                    if (['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) setActiveStep(activeStep === 6 ? 0 : 6);
                   }}
-                  disabled={selectedProject.status !== 'Bookmarked'}
+                  disabled={!['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${linksStatus && linksStatus.success
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${linksStatus && linksStatus.success || ['TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
                       ? 'bg-emerald-500/20 text-emerald-600'
                       : activeStep === 6 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
                       {linksStatus ? (
+                        <CheckCircle2 size={14} className="text-emerald-500" />
+                      ) : ['TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
                         <CheckCircle2 size={14} className="text-emerald-500" />
                       ) : (
                         "6"
@@ -1826,7 +1966,9 @@ export function PostProdWebPdfProcessor() {
                   onClick={() => setActiveStep(activeStep === 7 ? 0 : 7)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">7</div>
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {['URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '7'}
+                    </div>
                     <span className="font-medium text-sm">URL Hyperlinking</span>
                     {urlLinksAnalysis && (
                       <span className="text-xs bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full">
@@ -1937,7 +2079,9 @@ export function PostProdWebPdfProcessor() {
                   onClick={() => setActiveStep(activeStep === 8 ? 0 : 8)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">8</div>
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {['Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '8'}
+                    </div>
                     <span className="font-medium text-sm">Email Hyperlinking</span>
                     {emailLinksAnalysis && (
                       <span className="text-xs bg-purple-500/10 text-purple-600 px-2 py-0.5 rounded-full">
@@ -2060,7 +2204,9 @@ export function PostProdWebPdfProcessor() {
                   onClick={() => setActiveStep(activeStep === 9 ? 0 : 9)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">9</div>
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {['Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '9'}
+                    </div>
                     <span className="font-medium text-sm">Endnote Links</span>
                     {endnoteLinksAnalysis && (
                       <span className="text-xs bg-blue-500/10 text-blue-600 px-2 py-0.5 rounded-full">
@@ -2183,7 +2329,9 @@ export function PostProdWebPdfProcessor() {
                   onClick={() => setActiveStep(activeStep === 10 ? 0 : 10)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">10</div>
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Crossref Linked' ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {selectedProject.status === 'Crossref Linked' ? <CheckCircle2 size={14} /> : '10'}
+                    </div>
                     <span className="font-medium text-sm">Cross-Reference Links</span>
                     {crossrefLinksAnalysis && (
                       <span className="text-xs bg-indigo-500/10 text-indigo-600 px-2 py-0.5 rounded-full">
@@ -2434,52 +2582,43 @@ export function PostProdWebPdfProcessor() {
               {errorMsg}
             </div>
           )}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-text block">Client Company *</label>
-            <select
-              value={customerName}
-              onChange={e => {
-                const selectedVal = e.target.value;
-                setCustomerName(selectedVal);
-                const matched = clients.find(c => c.company === selectedVal);
-                if (matched && matched.division) {
-                  setClientCode(matched.division);
-                } else {
-                  setClientCode('');
-                }
-              }}
-              required
-              className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">— Select Client —</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.company}>{c.company}</option>
-              ))}
-            </select>
-          </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-text block">Client Code / Division</label>
-            <input
-              type="text"
-              readOnly
-              value={clientCode}
-              placeholder="Auto-populated from client selection"
-              className="w-full text-xs p-2 rounded-lg border border-border bg-muted/40 text-text/80 cursor-not-allowed focus:outline-none"
-            />
-          </div>
+          <Select
+            id="clientCompany"
+            label="Client Company"
+            value={customerName}
+            onChange={e => {
+              const selectedVal = e.target.value;
+              setCustomerName(selectedVal);
+              const matched = clients.find(c => c.company === selectedVal);
+              if (matched && matched.division) {
+                setClientCode(matched.division);
+              } else {
+                setClientCode('');
+              }
+            }}
+            options={clients.map((c) => ({ label: c.company || '', value: c.company || '' }))}
+            placeholder="— Select Client —"
+            required
+          />
 
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-text block">Project Name *</label>
-            <input
-              type="text"
-              required
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              placeholder="e.g. pelagic-guide-book-v2"
-              className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </div>
+          <Input
+            id="clientCode"
+            label="Client Code / Division"
+            value={clientCode}
+            readOnly
+            placeholder="Auto-populated from client selection"
+            className="bg-muted/40 text-text/80 cursor-not-allowed"
+          />
+
+          <Input
+            id="projectName"
+            label="Project Name"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            placeholder="e.g. pelagic-guide-book-v2"
+            required
+          />
 
           <div className="space-y-1">
             <label className="text-xs font-semibold text-text block">ZIP File Upload *</label>

@@ -54,7 +54,7 @@ class XMLToInDesignEngine:
             raise ValueError("Associated project or chapter details are missing.")
             
         # 3. Create target directory
-        indesign_dir = os.path.join(upload_dir, project.code, chapter.number, "InDesign")
+        indesign_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.number, "InDesign")
         os.makedirs(indesign_dir, exist_ok=True)
         
         xml_base = os.path.splitext(os.path.basename(file_path))[0]
@@ -63,7 +63,7 @@ class XMLToInDesignEngine:
         temp_zip_fd, temp_zip_path = tempfile.mkstemp(suffix=".zip")
         os.close(temp_zip_fd)
         
-        project_dir = os.path.abspath(os.path.join(upload_dir, project.code))
+        project_dir = os.path.abspath(os.path.join(upload_dir, project.client_name or "unknown", project.code))
         chapter_dir = os.path.abspath(os.path.join(project_dir, chapter.number))
         
         try:
@@ -320,7 +320,7 @@ class XMLToInDesignEngine:
                     pdf_in_zip = next((f for f in file_list if f.lower().endswith(".pdf")), None)
                     if pdf_in_zip:
                         # target folder: uploads/{project_code}/{chapter_number}/Proof
-                        proof_dir = os.path.join(upload_dir, project.code, chapter.number, "Proof")
+                        proof_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.number, "Proof")
                         os.makedirs(proof_dir, exist_ok=True)
                         
                         clean_pdf_name = f"{xml_base}.pdf"

@@ -45,7 +45,7 @@ export const POST_PROD_SERVICES: PostProdService[] = [
   },
   {
     id: 'xml-conversion',
-    title: 'XML Conversion',
+    title: 'PDF2XML Conversion',
     description: 'Upload PDFs and convert them into structured JATS or BITS XML formats with DTD validation.',
     icon: 'FileText',
     enabled: true,

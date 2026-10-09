@@ -146,8 +146,8 @@ class InDesignToXMLEngine:
 
             # 3. Save response content (expecting a ZIP file containing the generated XML file)
             import io
-            misc_dir = os.path.join(upload_dir, project.code, chapter.chapters, "Misc")
-            proof_dir = os.path.join(upload_dir, project.code, chapter.chapters, "Proof")
+            misc_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.chapters, "Misc")
+            proof_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.chapters, "Proof")
             os.makedirs(misc_dir, exist_ok=True)
             os.makedirs(proof_dir, exist_ok=True)
 

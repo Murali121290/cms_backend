@@ -111,8 +111,10 @@ def _save_stylesheet_to_disk(db: Session, ss: ProjectStylesheet) -> str | None:
         if not project or not project.project_code:
             return None
 
+        client_folder = project.client_name or "unknown"
         ce_template_dir = os.path.join(
             str(UPLOADS_DIR),
+            client_folder,
             project.project_code,
             "CE support",
             "Style sheet template",
@@ -157,6 +159,7 @@ def _save_stylesheet_to_disk(db: Session, ss: ProjectStylesheet) -> str | None:
                     chapter_id=ce_chapter.id,
                     category="Style sheet template",
                     is_original=True,
+                    uploaded_by_id=ss.created_by_id,
                 )
                 db.add(db_file)
                 db.commit()
@@ -181,8 +184,10 @@ def _delete_stylesheet_from_disk(db: Session, ss: ProjectStylesheet) -> None:
         if not project or not project.project_code:
             return
 
+        client_folder = project.client_name or "unknown"
         ce_template_dir = os.path.join(
             str(UPLOADS_DIR),
+            client_folder,
             project.project_code,
             "CE support",
             "Style sheet template",

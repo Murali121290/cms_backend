@@ -66,8 +66,19 @@ def _extract_batch_schedule(text: str) -> list[dict]:
 
 
 def parse(pdf_path: str) -> dict:
+    prod_pm_from_table = None
     with pdfplumber.open(pdf_path) as pdf:
         text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+        for page in pdf.pages:
+            for t in page.extract_tables():
+                for i, row in enumerate(t):
+                    if row and any(c and "To: Prepress Vendor" in c and "Production Project Manager" in c for c in row):
+                        if i + 1 < len(t):
+                            vals = t[i+1]
+                            clean_vals = [n.clean(str(v)) for v in vals if v and n.clean(str(v))]
+                            if len(clean_vals) >= 2:
+                                prod_pm_from_table = clean_vals[1]
+                                break
 
     warnings: list[str] = []
 
@@ -102,11 +113,33 @@ def parse(pdf_path: str) -> dict:
     ec_contact = n.clean(_search(r"EC:\s*(.+)", text))
     manufacturing_coordinator = n.clean(_search(r"Manufacturing Coordinator:\s*\n?\s*(.+)", text))
     ppm = n.clean(_search(r"Ordered By \(PPM\):\s*(.+)", text))
+    
+    if prod_pm_from_table:
+        prod_pm = prod_pm_from_table
+    else:
+        prod_pm_match = re.search(r"From:\s*Production Project Manager[^\n]*\n\S+\s+(.*?)(?:\s+DE:|\s+EC:|\n|$)", text)
+        if prod_pm_match:
+            prod_pm = n.clean(prod_pm_match.group(1))
+        else:
+            prod_pm = n.clean(_search(r"Production Project Manager:?\s*(.+)", text))
+        
+    client_pm = prod_pm
 
     castoff_due = n.clean(_search(r"Castoff due at LWW by:\s*(\S+)", text))
     estimate_due = n.clean(_search(r"Estimate due at LWW by:\s*(\S+)", text))
     printer = n.clean(_search(r"Printer:\s*(.+?)\s+Contact:", text))
     printer_contact = n.clean(_search(r"Contact:\s*(.+)", text))
+
+    services_list = _extract_services(text)
+    
+    copyediting_level = "Level 1"
+    for s in services_list:
+        if s["service"].lower() == "copyediting" and s["note"]:
+            note_lower = s["note"].lower()
+            if "offshore" in note_lower:
+                copyediting_level = "Level 2"
+            elif "onshore" in note_lower:
+                copyediting_level = "Level 3"
 
     fields = {
         "project_title": project_title,
@@ -119,6 +152,8 @@ def parse(pdf_path: str) -> dict:
         "color": color,
         "trim_size": trim_size,
         "due_date": due_date,
+        "client_project_manager": client_pm,
+        "copyediting_level": copyediting_level,
     }
 
     extras = {
@@ -130,7 +165,7 @@ def parse(pdf_path: str) -> dict:
             "manufacturing_coordinator": manufacturing_coordinator,
             "ppm": ppm,
         },
-        "services_required": _extract_services(text),
+        "services_required": services_list,
         "batch_schedule": _extract_batch_schedule(text),
         "key_dates": {
             "castoff_due_at_lww": castoff_due,

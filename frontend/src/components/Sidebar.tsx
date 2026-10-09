@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, BarChart3,
   Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2, BookOpen, BookMarked
+  Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2, BookOpen, BookText, FileText
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -68,7 +69,7 @@ export function Sidebar() {
 
   const isAccessibilityUser =
     viewer?.team === 'Accessibility Team' ||
-    Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
+    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('accessibility')) ||
     Boolean(viewer?.roles && viewer.roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
 
   const isCustomerUser =
@@ -94,9 +95,6 @@ export function Sidebar() {
       { to: '/term-lists', icon: BookMarked, label: 'Term Library' },
       { to: '/reports', icon: BarChart3, label: 'Reports' }
       ]
-      : []),
-    ...(!isAccessibilityUser
-      ? [{ to: '/journal-production', icon: Briefcase, label: 'Journal Production' }]
       : []),
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || !isCustomerUser)
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist Hub' }]

@@ -159,6 +159,8 @@ def get_workspace_dashboard_data(db: Session, user: User):
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
             "roles": [r.name for r in user.roles],
             "is_active": user.is_active,
         },

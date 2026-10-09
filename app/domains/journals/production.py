@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+import app.models
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -63,23 +64,12 @@ def article_meta(db: Session, article: JournalArticle) -> ArticleMeta:
 
 
 def convert_to_jats(db: Session, article: JournalArticle, user_id: Optional[int] = None) -> Dict[str, Any]:
-    """Stage 3: produce a new JATS XML version, then run the XML & DTD check."""
+    """Stage 3: produce a new JATS XML version using local converter, then run the XML & DTD check."""
     docx_path = article.edited_docx_path if article.edited_docx_path and os.path.exists(article.edited_docx_path) \
         else resolve_manuscript_path(db, article)
     xml, converter, fallback_reason = None, "local", None
 
-    xslt = JatsXsltClient()
-    if xslt.configured and docx_path:
-        try:
-            xml = xslt.convert(docx_path)
-            converter = "xslt-server"
-        except JournalServerError as e:
-            fallback_reason = str(e)
-            logger.warning("JATS XSLT server failed for article %s, using local converter: %s", article.id, e)
-    elif xslt.configured:
-        fallback_reason = "No DOCX available for the XSLT server"
-
-    if xml is None and docx_path and os.path.exists(docx_path):
+    if docx_path and os.path.exists(docx_path):
         try:
             from app.domains.journals.jats.manuscript_to_jats import convert_docx_to_jats
             profile_path = os.path.join(os.path.dirname(__file__), "jats", "profiles", "jmir_mededu_profile.json")
@@ -93,7 +83,7 @@ def convert_to_jats(db: Session, article: JournalArticle, user_id: Optional[int]
         if article.xhtml_path and os.path.exists(article.xhtml_path):
             with open(article.xhtml_path, encoding="utf-8") as fh:
                 xhtml = fh.read()
-        elif docx_path:
+        elif docx_path and os.path.exists(docx_path):
             from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
             xhtml = DocxToXhtmlRunsEngine().convert(docx_path)
         else:
@@ -165,7 +155,10 @@ def run_indesign_job(article_id: int, user_id: Optional[int] = None) -> None:
         from app.domains.journals.service import INDESIGN
         stage5 = _stage(db, article_id, INDESIGN)
         journal = db.query(Journal).filter(Journal.id == article.journal_id).first()
-        client = db.query(JournalClient).filter(JournalClient.id == journal.client_id).first()
+        client = db.query(JournalClient).filter(JournalClient.id == journal.client_id).first() if journal else None
+        if stage5:
+            stage5.remarks = "InDesign generation running..."
+            db.commit()
         try:
             outputs = JournalInDesignClient().generate(
                 article.jats_xml_path, indesign_template(db, article), art_file_paths(db, article_id), client.client_code,
@@ -328,3 +321,152 @@ def run_reference_job(article_id: int, user_id: Optional[int] = None) -> None:
                 logger.exception("Re-running %s after reference processing failed", key)
     finally:
         db.close()
+
+
+def finish_stage5_qc(db: Session, article: JournalArticle, user_id: Optional[int] = None) -> Dict[str, Any]:
+    """Stage 5 Finish QC:
+    Triggers Windows Conversion Server endpoint executing Journal_Finaxml.jsx.
+    Saves outputs (without _v1 version suffix):
+    - Proof folder: Proof PDF (.pdf), Proof XHTML (.xhtml), Proof CSS (style.css)
+    - Delivery folder: Final EPUB (.epub), Final DOCX (_final.docx), Final JATS XML (_final.xml)
+    Advances to Stage 6 (View Proof).
+    """
+    from app.domains.journals.service import advance_article_stage
+    journal = db.query(Journal).filter(Journal.id == article.journal_id).first()
+    client = db.query(JournalClient).filter(JournalClient.id == journal.client_id).first() if journal else None
+    client_code = client.client_code if client else "default"
+
+    art_paths = art_file_paths(db, article.id)
+    outputs = JournalInDesignClient().export_final(
+        indd_path=article.indesign_path,
+        art_paths=art_paths,
+        client_code=client_code,
+        xml_path=article.jats_xml_path,
+        xhtml_path=article.xhtml_path
+    )
+
+    base = re.sub(r"[^\w.-]+", "_", article.article_doi or f"article_{article.id}")
+    base = re.sub(r"_v\d+$", "", base, flags=re.IGNORECASE)
+    saved = []
+
+    for name, data in outputs.items():
+        if name.lower() in ("article.xhtml", "article.xml", "article.indd", "article.idml", "package.zip"):
+            continue
+        clean_name = re.sub(r"_v\d+(?=\.[^.]+$)", "", name, flags=re.IGNORECASE)
+        clean_name = re.sub(r"_final(?=\.[^.]+$)", "", clean_name, flags=re.IGNORECASE)
+        ext = os.path.splitext(clean_name)[1].lower()
+
+        if ext == ".pdf":
+            p_row = save_version(db, article, "Proof_PDF", f"{base}.pdf", data, "proof")
+            article.proof_pdf_path = p_row.path
+            d_row = save_version(db, article, "Delivery_PDF", f"{base}.pdf", data, "delivery")
+            saved.extend([f"proof/{p_row.filename}", f"delivery/{d_row.filename}"])
+        elif ext in (".xhtml", ".html"):
+            p_row = save_version(db, article, "Proof_XHTML", f"{base}_proof.xhtml", data, "proof")
+            article.xhtml_path = p_row.path
+            saved.append(f"proof/{p_row.filename}")
+        elif ext == ".css":
+            c_row = save_version(db, article, "Proof_CSS", "style.css", data, "proof")
+            saved.append(f"proof/{c_row.filename}")
+        elif ext == ".epub":
+            d_row = save_version(db, article, "Delivery_EPUB", f"{base}.epub", data, "delivery")
+            saved.append(f"delivery/{d_row.filename}")
+        elif ext == ".docx":
+            d_row = save_version(db, article, "Delivery_DOCX", f"{base}.docx", data, "delivery")
+            saved.append(f"delivery/{d_row.filename}")
+        elif ext == ".xml":
+            x_row = save_version(db, article, "JATS_XML", f"{base}.xml", data, "xml")
+            article.jats_xml_path = x_row.path
+            d_row = save_version(db, article, "Delivery_XML", f"{base}.xml", data, "delivery")
+            saved.extend([f"xml/{x_row.filename}", f"delivery/{d_row.filename}"])
+        elif ext == ".indd":
+            i_row = save_version(db, article, "INDD", f"{base}.indd", data, "indesign")
+            article.indesign_path = i_row.path
+            d_row = save_version(db, article, "Delivery_INDD", f"{base}.indd", data, "delivery")
+            saved.extend([f"indesign/{i_row.filename}", f"delivery/{d_row.filename}"])
+        elif ext == ".idml":
+            i_row = save_version(db, article, "IDML", f"{base}.idml", data, "indesign")
+            d_row = save_version(db, article, "Delivery_IDML", f"{base}.idml", data, "delivery")
+            saved.extend([f"indesign/{i_row.filename}", f"delivery/{d_row.filename}"])
+
+    db.commit()
+    run_check(db, article, "indesign_qc", user_id)
+    res = advance_article_stage(db, article.id, f"Finish QC completed. Files saved: {', '.join(saved)}")
+    return res
+
+
+def complete_stage6_proof(db: Session, article: JournalArticle, user_id: Optional[int] = None,
+                          xhtml_content: Optional[str] = None) -> Dict[str, Any]:
+    """Stage 6 Complete Proof:
+    Sends updated XML, XHTML, INDD, and Art files to the Windows Conversion Server endpoint.
+    Saves regenerated outputs to indesign/, proof/, xml/, and delivery/ folders.
+    Advances to Stage 7 (Final Delivery).
+    """
+    from app.domains.journals.service import advance_article_stage
+    base = re.sub(r"[^\w.-]+", "_", article.article_doi or f"article_{article.id}")
+    base = re.sub(r"_v\d+$", "", base, flags=re.IGNORECASE)
+
+    # If updated XHTML content is provided from TinyMCE editor, save to proof/ folder first
+    if xhtml_content is not None:
+        row = save_version(db, article, "Proof_XHTML", f"{base}_proof.xhtml", xhtml_content.encode("utf-8"), "proof")
+        article.xhtml_path = row.path
+        db.commit()
+
+    journal = db.query(Journal).filter(Journal.id == article.journal_id).first()
+    client = db.query(JournalClient).filter(JournalClient.id == journal.client_id).first() if journal else None
+    client_code = client.client_code if client else "default"
+
+    art_paths = art_file_paths(db, article.id)
+    outputs = JournalInDesignClient().export_final(
+        indd_path=article.indesign_path,
+        art_paths=art_paths,
+        client_code=client_code,
+        xml_path=article.jats_xml_path,
+        xhtml_path=article.xhtml_path
+    )
+
+    saved = []
+    for name, data in outputs.items():
+        if name.lower() in ("article.xhtml", "article.xml", "article.indd", "article.idml", "package.zip"):
+            continue
+        clean_name = re.sub(r"_v\d+(?=\.[^.]+$)", "", name, flags=re.IGNORECASE)
+        clean_name = re.sub(r"_final(?=\.[^.]+$)", "", clean_name, flags=re.IGNORECASE)
+        ext = os.path.splitext(clean_name)[1].lower()
+        if ext == ".pdf":
+            p_row = save_version(db, article, "Proof_PDF", f"{base}.pdf", data, "proof")
+            article.proof_pdf_path = p_row.path
+            d_row = save_version(db, article, "Delivery_PDF", f"{base}.pdf", data, "delivery")
+            saved.extend([f"proof/{p_row.filename}", f"delivery/{d_row.filename}"])
+        elif ext in (".xhtml", ".html"):
+            p_row = save_version(db, article, "Proof_XHTML", f"{base}_proof.xhtml", data, "proof")
+            article.xhtml_path = p_row.path
+            saved.append(f"proof/{p_row.filename}")
+        elif ext == ".css":
+            c_row = save_version(db, article, "Proof_CSS", "style.css", data, "proof")
+            saved.append(f"proof/{c_row.filename}")
+        elif ext == ".xml":
+            x_row = save_version(db, article, "JATS_XML", f"{base}.xml", data, "xml")
+            article.jats_xml_path = x_row.path
+            d_row = save_version(db, article, "Delivery_XML", f"{base}.xml", data, "delivery")
+            saved.extend([f"xml/{x_row.filename}", f"delivery/{d_row.filename}"])
+        elif ext == ".epub":
+            d_row = save_version(db, article, "Delivery_EPUB", f"{base}.epub", data, "delivery")
+            saved.append(f"delivery/{d_row.filename}")
+        elif ext == ".indd":
+            i_row = save_version(db, article, "INDD", f"{base}.indd", data, "indesign")
+            article.indesign_path = i_row.path
+            d_row = save_version(db, article, "Delivery_INDD", f"{base}.indd", data, "delivery")
+            saved.extend([f"indesign/{i_row.filename}", f"delivery/{d_row.filename}"])
+        elif ext == ".idml":
+            i_row = save_version(db, article, "IDML", f"{base}.idml", data, "indesign")
+            d_row = save_version(db, article, "Delivery_IDML", f"{base}.idml", data, "delivery")
+            saved.extend([f"indesign/{i_row.filename}", f"delivery/{d_row.filename}"])
+        elif ext == ".docx":
+            d_row = save_version(db, article, "Delivery_DOCX", f"{base}.docx", data, "delivery")
+            saved.append(f"delivery/{d_row.filename}")
+
+    db.commit()
+    run_check(db, article, "proof", user_id)
+    res = advance_article_stage(db, article.id, f"Complete Proof finished. Files generated and delivered: {', '.join(saved)}")
+    return res
+

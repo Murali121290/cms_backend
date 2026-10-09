@@ -9,7 +9,7 @@ import os
 import re
 import tempfile
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
 from app.domains.auth.security import get_current_user_from_cookie
@@ -22,7 +22,7 @@ from app.domains.journals.schemas import (
     JournalClientCreate, JournalClientResponse,
     JournalCreate, JournalResponse,
     JournalArticleCreate, JournalArticleResponse,
-    StageAssignmentRequest, ArticleAssignRequest, ArticleDelayUpdateRequest, StageAdvanceBody,
+    StageAssignmentRequest, ArticleAssignRequest, ArticleDelayUpdateRequest, StageAdvanceBody, StageRevertBody,
     JournalStylesheetCreate, JournalStylesheetResponse,
     JournalGrammarsheetCreate, JournalGrammarsheetResponse,
     JournalCheckRunResponse, JournalIssueResponse, JournalIssueAction,
@@ -31,7 +31,7 @@ from app.domains.journals.schemas import (
 )
 from app.domains.journals.files import latest_file, save_version
 from app.domains.journals.service import (
-    initialize_article_stages, advance_article_stage, default_workflow, ensure_default_workflows, stage_names,
+    initialize_article_stages, advance_article_stage, revert_article_stage, default_workflow, ensure_default_workflows, stage_names,
     STAGE_PIPELINE as STAGE_NAMES, INDESIGN,
 )
 
@@ -140,6 +140,8 @@ def list_journal_articles(journal_id: Optional[int] = None, db: Session = Depend
 @router.post("/articles", response_model=JournalArticleResponse, status_code=status.HTTP_201_CREATED)
 def create_journal_article(article_in: JournalArticleCreate, db: Session = Depends(get_db)):
     article = JournalArticle(**article_in.model_dump())
+    if not article.due_date:
+        article.due_date = datetime.now(timezone.utc) + timedelta(days=2)
     db.add(article)
     db.commit()
     db.refresh(article)
@@ -188,6 +190,16 @@ def advance_stage(article_id: int, req: Optional[StageAdvanceBody] = None, db: S
     if res.get("new_stage"):
         db.refresh(article)
         res["check_runs"] = _run_text_checks(db, article, only_stage=True)
+    return res
+
+
+@router.post("/articles/{article_id}/revert-stage")
+@router.post("/articles/{article_id}/move-stage")
+def revert_stage(article_id: int, req: StageRevertBody, db: Session = Depends(get_db)):
+    try:
+        res = revert_article_stage(db, article_id, req.target_stage, req.remarks)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return res
 
 
@@ -246,6 +258,7 @@ def assign_article(article_id: int, req: ArticleAssignRequest, db: Session = Dep
         article.planned_start_date = req.planned_start_date
     if req.planned_end_date:
         article.planned_end_date = req.planned_end_date
+        article.due_date = req.planned_end_date
     if req.sla_hours is not None:
         article.sla_hours = req.sla_hours
     if req.complexity_level:
@@ -395,7 +408,8 @@ async def upload_article_zip_package(
         extracted_metadata=parsed_data,
         original_docx_path=parsed_data.get("primary_docx_path"),
         current_stage=STAGE_NAMES[0],
-        status="In-progress"
+        status="In-progress",
+        due_date=datetime.now(timezone.utc) + timedelta(days=2)
     )
     db.add(article)
     db.commit()
@@ -872,8 +886,6 @@ def update_issue(
     if body.action == "reopen":
         issue.status, issue.resolution, issue.resolved_by_id, issue.resolved_at = "open", None, None, None
     elif body.action == "ignore":
-        if issue.severity == "error":
-            raise HTTPException(status_code=422, detail="Errors cannot be ignored. Fix the issue or accept its suggested fix.")
         issue.status, issue.resolution = "ignored", "ignored"
         issue.resolved_by_id, issue.resolved_at = user.id, datetime.utcnow()
     else:
@@ -886,6 +898,33 @@ def update_issue(
     db.commit()
     db.refresh(issue)
     return issue
+
+
+class IgnoreAllBody(BaseModel):
+    module: Optional[str] = None
+    severity: Optional[str] = None
+
+
+@router.post("/articles/{article_id}/issues/ignore-all")
+def ignore_all_issues(article_id: int, body: Optional[IgnoreAllBody] = None, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    _get_article(db, article_id)
+    query = db.query(JournalIssue).filter(JournalIssue.article_id == article_id, JournalIssue.status == "open")
+    if body and body.module and body.module != "all":
+        query = query.filter(JournalIssue.module == body.module)
+    if body and body.severity and body.severity != "all":
+        query = query.filter(JournalIssue.severity == body.severity)
+
+    updated = 0
+    now = datetime.utcnow()
+    for issue in query.all():
+        issue.status = "ignored"
+        issue.resolution = "ignored"
+        issue.resolved_by_id = user.id
+        issue.resolved_at = now
+        updated += 1
+
+    db.commit()
+    return {"status": "success", "ignored_count": updated}
 
 
 def _open_counts(db: Session, article_id: int, modules: List[str]):
@@ -911,14 +950,19 @@ def article_workspace(article_id: int, db: Session = Depends(get_db)):
     journal = db.query(Journal).filter(Journal.id == article.journal_id).first()
     stages = db.query(JournalStageDetail).filter(JournalStageDetail.article_id == article_id) \
         .order_by(JournalStageDetail.stage_number).all()
-    xhtml_row = latest_file(db, article_id, "XHTML")
+    xhtml_row = latest_file(db, article_id, "Proof_XHTML") or latest_file(db, article_id, "XHTML")
+    xhtml_path = xhtml_row.path if (xhtml_row and os.path.exists(xhtml_row.path)) else (article.xhtml_path if (article.xhtml_path and os.path.exists(article.xhtml_path)) else None)
+
     xhtml = None
-    if xhtml_row and os.path.exists(xhtml_row.path):
-        with open(xhtml_row.path, encoding="utf-8") as fh:
+    if xhtml_path and os.path.exists(xhtml_path):
+        with open(xhtml_path, encoding="utf-8", errors="ignore") as fh:
             xhtml = fh.read()
-    jats_row = latest_file(db, article_id, "JATS_XML")
+    jats_row = latest_file(db, article_id, "Delivery_XML") or latest_file(db, article_id, "JATS_XML")
     if jats_row and not os.path.exists(jats_row.path):
         jats_row = None
+    proof_row = latest_file(db, article_id, "Proof_PDF")
+    if proof_row and not os.path.exists(proof_row.path):
+        proof_row = None
     last_runs = {}
     for run in db.query(JournalCheckRun).filter(JournalCheckRun.article_id == article_id).order_by(JournalCheckRun.id).all():
         last_runs[run.module] = JournalCheckRunResponse.model_validate(run).model_dump(mode="json")
@@ -935,6 +979,7 @@ def article_workspace(article_id: int, db: Session = Depends(get_db)):
                                       assignee_id=s.assignee_id, planned_end_date=s.planned_end_date).model_dump(mode="json") for s in stages],
         "xhtml": {"file": _file_info(xhtml_row), "content": xhtml} if xhtml is not None else None,
         "jats": _file_info(jats_row) if jats_row else None,  # the editor shows the XML tab once this exists
+        "proof_pdf": _file_info(proof_row) if proof_row else None,
         "pre_editing": _pre_editing_status(db, article),
         "check_runs": last_runs,
         "open_issues": _open_counts(db, article_id, list(CHECK_STAGES)),
@@ -986,17 +1031,35 @@ def validate_article_jats(article_id: int, db: Session = Depends(get_db), user=D
 
 def _xml_findings(db: Session, article_id: int, content: str) -> List[dict]:
     """DTD + publisher-rule findings for the XML editor: line-numbered, like a validation log."""
+    import re
     from app.domains.journals.files import art_file_paths
     from app.domains.journals.jats.validator import validate_jats
+    from app.domains.journals.models import JournalIssue
+
     assets = [os.path.basename(p) for p in art_file_paths(db, article_id)]
-    return [{"line": f.line, "severity": f.severity, "rule_id": f.rule_id, "title": f.title, "message": f.message}
-            for f in validate_jats(content.encode("utf-8"), assets=assets)]
+    raw_findings = validate_jats(content.encode("utf-8"), assets=assets)
+
+    ignored_fingerprints = set(
+        row.fingerprint for row in db.query(JournalIssue.fingerprint).filter(
+            JournalIssue.article_id == article_id,
+            JournalIssue.module == "xml",
+            JournalIssue.status == "ignored"
+        ).all() if row.fingerprint
+    )
+
+    result = []
+    for f in raw_findings:
+        fp = f"{f.rule_id}:{f.detail or re.sub(r'article.xml:[0-9]+: ', '', f.message)}"[:255]
+        if fp in ignored_fingerprints:
+            continue
+        result.append({"line": f.line, "severity": f.severity, "rule_id": f.rule_id, "title": f.title, "message": f.message})
+    return result
 
 
 @router.get("/articles/{article_id}/xml")
 def get_article_jats(article_id: int, db: Session = Depends(get_db)):
     article = _get_article(db, article_id)
-    row = latest_file(db, article_id, "JATS_XML")
+    row = latest_file(db, article_id, "Delivery_XML") or latest_file(db, article_id, "JATS_XML")
     if not row or not os.path.exists(row.path):
         raise HTTPException(status_code=404, detail="No JATS XML exists for this article yet")
     with open(row.path, encoding="utf-8") as fh:
@@ -1011,7 +1074,7 @@ def get_article_layout_html(article_id: int, db: Session = Depends(get_db)):
     from fastapi.responses import HTMLResponse
     from app.processing.xml_engine import XMLEngine
     article = _get_article(db, article_id)
-    row = latest_file(db, article_id, "JATS_XML")
+    row = latest_file(db, article_id, "Delivery_XML") or latest_file(db, article_id, "JATS_XML")
     if not row or not os.path.exists(row.path):
         raise HTTPException(status_code=404, detail="No JATS XML exists for this article yet")
     try:
@@ -1060,6 +1123,81 @@ def save_article_jats(article_id: int, body: XmlContentBody, db: Session = Depen
     }
 
 
+@router.post("/articles/{article_id}/convert-xml")
+def convert_journal_xhtml_to_xml(article_id: int, body: Optional[XmlContentBody] = None,
+                                  db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Convert Stage 6 XHTML from TinyMCE editor into updated JATS XML using Journal_universal_converter.pl."""
+    import subprocess
+    import tempfile
+    article = _get_article(db, article_id)
+
+    xhtml_content = body.content if (body and body.content) else None
+    if not xhtml_content:
+        xhtml_path = article.xhtml_path
+        if xhtml_path and os.path.exists(xhtml_path):
+            with open(xhtml_path, "r", encoding="utf-8", errors="ignore") as fh:
+                xhtml_content = fh.read()
+    if not xhtml_content:
+        raise HTTPException(status_code=400, detail="No XHTML content provided or found for this article.")
+
+    if "<html" not in xhtml_content.lower():
+        xhtml_content = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink">\n'
+            '  <head><link rel="stylesheet" type="text/css" href="style.css"/></head>\n'
+            f'  <body>\n{xhtml_content}\n  </body>\n'
+            '</html>'
+        )
+
+    scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "services", "scripts"))
+    perl_script = os.path.join(scripts_dir, "Journal_universal_converter.pl")
+    if not os.path.exists(perl_script):
+        perl_script = os.path.join(scripts_dir, "universal_converter.pl")
+
+    config_json = os.path.join(scripts_dir, "Journal_mapping_config.json")
+    if not os.path.exists(config_json):
+        config_json = os.path.join(scripts_dir, "mapping_config.json")
+
+    if not os.path.exists(perl_script) or not os.path.exists(config_json):
+        raise HTTPException(status_code=500, detail="Journal Perl converter script or mapping config missing.")
+
+    base = re.sub(r"[^\w.-]+", "_", article.article_doi or f"article_{article.id}")
+    temp_dir = tempfile.mkdtemp(prefix=f"journal_convert_xml_{article_id}_")
+    temp_xhtml = os.path.join(temp_dir, f"{base}.xhtml")
+    temp_out_xml = os.path.join(temp_dir, f"{base}.xml")
+
+    try:
+        with open(temp_xhtml, "w", encoding="utf-8") as xf:
+            xf.write(xhtml_content)
+
+        cmd = ["perl", perl_script, "xhtml2xml", os.path.abspath(temp_xhtml), os.path.abspath(config_json), os.path.abspath(temp_out_xml)]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+
+        if res.returncode != 0 or not os.path.exists(temp_out_xml) or os.path.getsize(temp_out_xml) == 0:
+            err_msg = res.stderr.strip() or res.stdout.strip() or "Perl converter failed to generate XML"
+            raise HTTPException(status_code=500, detail=f"XHTML to XML conversion failed: {err_msg}")
+
+        with open(temp_out_xml, "r", encoding="utf-8", errors="ignore") as xf:
+            xml_str = xf.read()
+
+        row = save_version(db, article, "JATS_XML", f"{base}.xml", xml_str.encode("utf-8"), "xml")
+        article.jats_xml_path = row.path
+        db.commit()
+
+        return {
+            "status": True,
+            "message": "Successfully converted XHTML to updated JATS XML",
+            "xml_content": xml_str,
+            "file": _file_info(row)
+        }
+    finally:
+        import shutil
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 # --- Stages 5-7: InDesign, Final QC, Proof ---
 @router.post("/articles/{article_id}/indesign/generate", status_code=status.HTTP_202_ACCEPTED)
 def generate_indesign(article_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
@@ -1092,6 +1230,60 @@ def indesign_status(article_id: int, db: Session = Depends(get_db)):
         "preflight": _file_info(latest_file(db, article_id, "Preflight")),
         "open_issues": _open_counts(db, article_id, ["indesign_qc", "proof"]),
     }
+
+
+class ProofContentBody(BaseModel):
+    content: Optional[str] = None
+
+
+@router.post("/articles/{article_id}/qc/finish")
+def finish_qc(article_id: int, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Stage 5 Finish QC: Triggers Windows Conversion server and saves Proof PDF & XHTML to proof/, Final XML & EPUB to delivery/."""
+    from app.domains.journals.production import finish_stage5_qc
+    article = _get_article(db, article_id)
+    res = finish_stage5_qc(db, article, user.id)
+    return res
+
+
+@router.post("/articles/{article_id}/proof/save")
+def save_proof_xhtml(article_id: int, body: ProofContentBody, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Stage 6: Save edited XHTML content into proof/ folder."""
+    article = _get_article(db, article_id)
+    if not body.content:
+        raise HTTPException(status_code=400, detail="XHTML content is required")
+    base = re.sub(r"[^\w.-]+", "_", article.article_doi or f"article_{article.id}")
+    row = save_version(db, article, "Proof_XHTML", f"{base}_proof.xhtml", body.content.encode("utf-8"), "proof")
+    article.xhtml_path = row.path
+    db.commit()
+    return {"status": "saved", "file": _file_info(row)}
+
+
+@router.post("/articles/{article_id}/proof/complete")
+def complete_proof(article_id: int, body: Optional[ProofContentBody] = None, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Stage 6 Complete Proof: Sends XML, XHTML, INDD, Art files to Windows server, saves regenerated outputs into indesign/, proof/, delivery/, and advances to Stage 7."""
+    from app.domains.journals.production import complete_stage6_proof
+    article = _get_article(db, article_id)
+    content = body.content if body else None
+    res = complete_stage6_proof(db, article, user.id, xhtml_content=content)
+    return res
+
+
+@router.get("/articles/{article_id}/delivery/status")
+def delivery_status(article_id: int, db: Session = Depends(get_db)):
+    """Stage 7: Delivery package files readiness status."""
+    article = _get_article(db, article_id)
+    from app.domains.journals.article_files import delivery_readiness
+    readiness = delivery_readiness(db, article.id)
+    return {
+        "article_id": article_id,
+        "current_stage": article.current_stage,
+        "readiness": readiness,
+        "final_xml": _file_info(latest_file(db, article_id, "Delivery_XML") or latest_file(db, article_id, "JATS_XML")),
+        "proof_pdf": _file_info(latest_file(db, article_id, "Proof_PDF")),
+        "epub": _file_info(latest_file(db, article_id, "EPUB")),
+        "indd": _file_info(latest_file(db, article_id, "INDD")),
+    }
+
 
 
 class IaRulesBody(BaseModel):
@@ -1373,7 +1565,7 @@ def download_latest_article_file(article_id: int, ext: str = "docx", db: Session
         if article.jats_xml_path and os.path.exists(article.jats_xml_path):
             file_path = article.jats_xml_path
         else:
-            row = latest_file(db, article_id, "JATS_XML")
+            row = latest_file(db, article_id, "Delivery_XML") or latest_file(db, article_id, "JATS_XML")
             if row and row.path and os.path.exists(row.path):
                 file_path = row.path
                 filename = row.filename
@@ -1420,7 +1612,7 @@ def download_proof(article_id: int, db: Session = Depends(get_db)):
     row = latest_file(db, article_id, "Proof_PDF")
     if not row or not os.path.exists(row.path):
         raise HTTPException(status_code=404, detail="No proof PDF has been generated yet")
-    return FileResponse(row.path, media_type="application/pdf", filename=row.filename)
+    return FileResponse(row.path, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{row.filename}"'})
 
 
 # --- Workflows, overviews and batch upload (client -> journal -> articles pages) ---
@@ -1575,10 +1767,15 @@ def journal_article_rows(journal_id: int, db: Session = Depends(get_db)):
     for a in articles:
         own = stages.get(a.id, [])
         assignee_name = names.get(a.current_assignee_id) or a.assigned_user_name
+        due_dt = a.due_date
+        if not due_dt and a.created_at:
+            due_dt = a.created_at + timedelta(days=2)
+        elif not due_dt:
+            due_dt = datetime.now(timezone.utc) + timedelta(days=2)
         rows.append(JournalArticleRow(
             id=a.id, article_doi=a.article_doi, article_title=a.article_title, article_type=a.article_type,
             lead_author=a.lead_author, current_stage=a.current_stage, status=a.status, priority=a.priority,
-            complexity_level=a.complexity_level or "Medium", due_date=a.due_date, revised_due_date=a.revised_due_date,
+            complexity_level=a.complexity_level or "Medium", due_date=due_dt, revised_due_date=a.revised_due_date,
             current_assignee_id=a.current_assignee_id, current_assignee_name=assignee_name,
             delayed=_is_delayed(a, own), delay_category=a.delay_category, delay_reason=a.delay_reason,
             delay_days=a.delay_days or 0, open_errors=errors.get(a.id, 0), created_at=a.created_at,

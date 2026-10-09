@@ -22,6 +22,7 @@ _LABELS = {
     "e-isbn:": "ebook_isbn",
     "trim size:": "trim_size",
     "color:": "color",
+    "copyedit:": "copyedit_raw",
     "turnover date:": "turnover_date",
     "final press pdf due:": "due_date",
 }
@@ -139,6 +140,15 @@ def parse(xlsx_path: str) -> dict:
     if turnover_warning:
         warnings.append(f"Turnover Date: {turnover_warning}")
 
+    ce_level_raw = n.clean(labeled.get("copyedit_raw"))
+    copyediting_level = "Level 1"
+    if ce_level_raw:
+        ce_lower = ce_level_raw.lower()
+        if "level 2" in ce_lower or "medium" in ce_lower:
+            copyediting_level = "Level 2"
+        elif "level 3" in ce_lower or "high" in ce_lower:
+            copyediting_level = "Level 3"
+
     fields = {
         "project_title": n.clean(labeled.get("project_title")),
         "isbn_no": isbn_no,
@@ -148,6 +158,7 @@ def parse(xlsx_path: str) -> dict:
         "manuscript_pages": total_pages,
         "chapter_count": chapter_count,
         "copyright_year": copyright_year,
+        "copyediting_level": copyediting_level,
     }
 
     extras = {

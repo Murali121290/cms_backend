@@ -222,9 +222,10 @@ class ReferencesCheck(JournalCheck):
 
         lookups = []
         for n, rb in sorted(refs.items()):
-            text = REF_NUMBER.sub("", rb.text)
+            clean_text = (rb.text or "").replace("\xa0", " ").replace("\u200b", " ").replace("\ufeff", " ").replace("\u00ad", "")
+            text = REF_NUMBER.sub("", clean_text)
             loc = {"block_id": rb.block_id, "para_idx": rb.idx}
-            year = YEAR.search(text)
+            year = YEAR.search(text) or re.search(r"(1[89]\d{2}|20\d{2})", text)
             if not year and not re.search(r"in press|forthcoming|n\.d\.", text, re.I):
                 issues.append(IssueDraft(
                     rule_id="REF-F03", severity="error", title=f"Reference {n} has no publication year",
@@ -239,7 +240,8 @@ class ReferencesCheck(JournalCheck):
                     location=loc, context_snippet=snippet(text, 0, 0, 80), fingerprint=f"REF-D01:{n}",
                 ))
             if use_crossref and len(lookups) < MAX_LOOKUPS:
-                lookups.append((n, rb, text, guess_title(text), year.group(1) if year else None, doi.group(1) if doi else None))
+                year_str = year.group(1) if (year and year.groups) else year.group(0) if year else None
+                lookups.append((n, rb, text, guess_title(text), year_str, doi.group(1) if doi else None))
 
         unverified = 0
 

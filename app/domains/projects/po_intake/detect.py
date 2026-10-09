@@ -7,21 +7,27 @@ entirely and lets the PM fill the Create Project form in by hand (see po_intake/
 from __future__ import annotations
 
 WK_LWW = "wk_lww"
+WK_PROJECT_CHECKLIST = "wk_project_checklist"
 KENDALL_HUNT = "kendall_hunt"
 ARTECH_HOUSE = "artech_house"
 SPRINGER = "springer"
+BEP = "bep"
 UNKNOWN = "unknown"
 
 TEMPLATE_LABELS = {
     WK_LWW: "Wolters Kluwer / LWW launch form",
+    WK_PROJECT_CHECKLIST: "Wolters Kluwer project information checklist",
     KENDALL_HUNT: "Kendall Hunt prepress RFQ",
     ARTECH_HOUSE: "Artech House transmittal",
     SPRINGER: "Springer Publishing Assignment Memo",
+    BEP: "Business Expert Press transmittal",
     UNKNOWN: "Unrecognized template",
 }
 
 
 def detect_pdf_template(pdf_text: str) -> str:
+    if "PROJECT INFORMATION CHECKLIST" in pdf_text:
+        return WK_PROJECT_CHECKLIST
     if "PREPRESS REQUEST FOR QUOTE" in pdf_text:
         return KENDALL_HUNT
     if "Prepress Vendor Launch Form and Purchase Order" in pdf_text or "LWW Purchase Order" in pdf_text:
@@ -30,6 +36,8 @@ def detect_pdf_template(pdf_text: str) -> str:
 
 
 def detect_xlsx_template(filename: str, sheet_names: list[str]) -> str:
+    if "bep" in filename.casefold():
+        return BEP
     if "transmittal" in filename.casefold():
         return ARTECH_HOUSE
     return UNKNOWN

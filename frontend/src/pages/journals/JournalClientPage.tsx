@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
+import { cn } from '@/utils/cn'
+import { getJournalTheme } from './journalUi'
 
 export function JournalClientPage() {
   const { clientId } = useParams()
@@ -68,43 +70,53 @@ export function JournalClientPage() {
               </tr>
             </thead>
             <tbody>
-              {journals.map(j => (
-                <tr
-                  key={j.id}
-                  onClick={() => navigate(`/journal-production/journals/${j.id}`)}
-                  className="border-t border-border hover:bg-surface/60 cursor-pointer"
-                >
-                  <td className="px-4 py-3">
-                    <a
-                      href={`/journal-production/journals/${j.id}`}
-                      onClick={e => { e.preventDefault(); navigate(`/journal-production/journals/${j.id}`) }}
-                      className="font-medium text-text hover:text-primary"
-                    >
-                      {j.journal_title}
-                    </a>
-                    <div className="text-xs text-muted font-mono">{j.journal_code}</div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted font-mono whitespace-nowrap">
-                    {[j.issn_print && `${j.issn_print} (print)`, j.issn_online && `${j.issn_online} (online)`].filter(Boolean).join(' · ') || '—'}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">{j.volume || j.issue ? `Vol ${j.volume ?? '—'} · Issue ${j.issue ?? '—'}` : '—'}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant="info" size="sm">{j.workflow_name ?? 'Full production'}</Badge>
-                    <div className="text-xs text-muted mt-1">{j.stages.length} stages</div>
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">{j.articles.total}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{j.articles.in_progress}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-green-600">{j.articles.completed}</td>
-                  <td className={`px-4 py-3 text-right tabular-nums ${j.articles.delayed ? 'text-red-500 font-semibold' : ''}`}>{j.articles.delayed}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button type="button" aria-label={`Settings for ${j.journal_code}`} title="Journal settings"
-                            onClick={e => { e.stopPropagation(); navigate(`/journal-production/journals/${j.id}/settings`) }}
-                            className="inline-flex size-8 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-primary">
-                      <Settings className="size-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {journals.map(j => {
+                const jtheme = getJournalTheme(j.journal_code || j.id)
+                return (
+                  <tr
+                    key={j.id}
+                    onClick={() => navigate(`/journal-production/journals/${j.id}`)}
+                    className={cn('border-t border-border hover:bg-surface/60 cursor-pointer transition-colors', jtheme.accentColor)}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className={cn('size-8 rounded-lg flex items-center justify-center text-xs shrink-0', jtheme.badgeBg, jtheme.badgeText)}>
+                          {j.journal_code.slice(0, 3)}
+                        </span>
+                        <div>
+                          <a
+                            href={`/journal-production/journals/${j.id}`}
+                            onClick={e => { e.preventDefault(); navigate(`/journal-production/journals/${j.id}`) }}
+                            className="font-semibold text-text hover:text-primary leading-tight"
+                          >
+                            {j.journal_title}
+                          </a>
+                          <div className="text-xs text-muted font-mono">{j.journal_code}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted font-mono whitespace-nowrap">
+                      {[j.issn_print && `${j.issn_print} (print)`, j.issn_online && `${j.issn_online} (online)`].filter(Boolean).join(' · ') || '—'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">{j.volume || j.issue ? `Vol ${j.volume ?? '—'} · Issue ${j.issue ?? '—'}` : '—'}</td>
+                    <td className="px-4 py-3">
+                      <Badge variant="info" size="sm">{j.workflow_name ?? 'Full production'}</Badge>
+                      <div className="text-xs text-muted mt-1">{j.stages.length} stages</div>
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold">{j.articles.total}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{j.articles.in_progress}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-green-500 font-semibold">{j.articles.completed}</td>
+                    <td className={`px-4 py-3 text-right tabular-nums ${j.articles.delayed ? 'text-red-400 font-semibold' : ''}`}>{j.articles.delayed}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button type="button" aria-label={`Settings for ${j.journal_code}`} title="Journal settings"
+                              onClick={e => { e.stopPropagation(); navigate(`/journal-production/journals/${j.id}/settings`) }}
+                              className="inline-flex size-8 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-primary">
+                        <Settings className="size-4" />
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

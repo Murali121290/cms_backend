@@ -172,16 +172,13 @@ class TechnicalCheck(JournalCheck):
                         location=_loc(b), context_snippet=snippet(b.text, 0, 0, 80), fingerprint=f"JT-CITE:{kind}:{n}"))
 
         # Artwork Folder & Image File Validation
-        from app.domains.journals.models import JournalFile
+        from app.domains.journals.files import art_files
         from app.domains.journals.art import figure_from_name
-        art_records = db.query(JournalFile).filter(
-            JournalFile.article_id == article.id,
-            JournalFile.category.in_(["art", "Artwork", "figure", "Figure"])
-        ).all() if article and getattr(article, "id", None) else []
+        art_records = art_files(db, article.id) if article and getattr(article, "id", None) else []
 
         art_file_map = {}
         for f in art_records:
-            num = figure_from_name(f.filename)
+            num = f.figure_number if f.figure_number is not None else figure_from_name(f.filename)
             if num is not None:
                 art_file_map.setdefault(num, []).append(f.filename)
 

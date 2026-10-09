@@ -199,6 +199,8 @@ interface WorkspaceDashboardResponse {
     id: number
     username: string
     email: string
+    first_name?: string
+    last_name?: string
   }
   user_workspace: {
     stats: WorkspaceStats
@@ -453,7 +455,7 @@ export function WorkspacePage() {
             <div className="max-h-48 overflow-y-auto space-y-0.5 custom-scrollbar px-1">
               {filteredValues.map(val => {
                 const isSelected = selectedList.includes(val)
-                const label = columnType === 'assignee' && val !== 'Unassigned' 
+                const label = columnType === 'assignee' && val !== 'Unassigned'
                   ? (getUserDisplayNameByUsername(val) || val)
                   : val
                 return (
@@ -464,15 +466,13 @@ export function WorkspacePage() {
                       e.stopPropagation()
                       handleToggle(val, !isSelected)
                     }}
-                    className={`w-full text-left px-2 py-1.5 text-[10px] transition-all rounded flex items-center gap-2 group ${
-                      isSelected 
-                        ? 'bg-primary/10 text-primary font-semibold' 
+                    className={`w-full text-left px-2 py-1.5 text-[10px] transition-all rounded flex items-center gap-2 group ${isSelected
+                        ? 'bg-primary/10 text-primary font-semibold'
                         : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50 font-medium'
-                    }`}
+                      }`}
                   >
-                    <div className={`w-3 h-3 rounded flex items-center justify-center shrink-0 transition-colors ${
-                      isSelected ? 'text-primary' : 'text-transparent'
-                    }`}>
+                    <div className={`w-3 h-3 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                      }`}>
                       {isSelected && <Check size={10} strokeWidth={3} />}
                     </div>
                     <span className={`truncate transition-transform duration-200 ${!isSelected ? 'group-hover:translate-x-0.5' : ''}`}>{label}</span>
@@ -684,7 +684,7 @@ export function WorkspacePage() {
             My Workspace ({role})
           </div>
           <h1 className="text-2xl md:text-3xl font-serif font-medium text-[#FBF9F4] tracking-tight">
-            Welcome back, {((viewer as any).first_name || viewer.username).trim()}.
+            Welcome back, {((viewer.first_name || viewer.last_name) ? `${viewer.first_name || ''} ${viewer.last_name || ''}`.trim() : viewer.username)}.
           </h1>
           <p className="text-white/60 text-sm">
             {role === 'user' && 'Manage your active stages, track assignments, and view KRA compliance.'}

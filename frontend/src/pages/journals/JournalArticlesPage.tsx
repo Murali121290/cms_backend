@@ -16,7 +16,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
 import { cn } from '@/utils/cn'
-import { STAGE, StageProgress, advanceError, shortStage, stageNumber } from './journalUi'
+import { STAGE, StageProgress, advanceError, getArticleTheme, shortStage, stageNumber } from './journalUi'
 
 const COMPLETED = '__completed__'
 const fmtDate = (d?: string) => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
@@ -266,12 +266,20 @@ export function JournalArticlesPage() {
             <tbody>
               {visible.map((a, i) => {
                 const done = a.status === 'Completed'
+                const atheme = getArticleTheme(a.article_doi || a.article_title || a.id)
                 return (
-                  <tr key={a.id} className={cn('border-t border-border', a.delayed && 'bg-red-500/5')}>
-                    <td className="px-4 py-3 text-muted tabular-nums">{i + 1}</td>
+                  <tr key={a.id} className={cn('border-t border-border hover:bg-surface/50 transition-colors', a.delayed && 'bg-red-500/5')}>
+                    <td className="px-4 py-3 text-muted tabular-nums">
+                      <span className={cn('size-7 rounded-md flex items-center justify-center text-xs shrink-0', atheme.avatarBg, atheme.avatarText)}>
+                        #{a.id}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 max-w-md">
-                      <div className="font-medium text-text line-clamp-2">{a.article_title}</div>
-                      <div className="text-xs text-muted font-mono">{a.article_doi ?? 'No DOI yet'}{a.lead_author && <span className="font-sans"> · {a.lead_author}</span>}</div>
+                      <div className="font-semibold text-text line-clamp-2 leading-snug">{a.article_title}</div>
+                      <div className="text-xs text-muted font-mono mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span className={cn('px-1.5 py-0.5 rounded text-[11px]', atheme.badgeBg, atheme.badgeText)}>{a.article_doi ?? 'No DOI'}</span>
+                        {a.lead_author && <span className="font-sans"> · {a.lead_author}</span>}
+                      </div>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">{a.article_type}</td>
                     <td className="px-4 py-3 whitespace-nowrap">

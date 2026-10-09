@@ -599,6 +599,8 @@ class XhtmlToDocxDeltaEngine:
                     continue
             html_blocks.append(el)
 
+        last_target_para = None
+        claimed_target_paras = set()
         for idx, block_el in enumerate(html_blocks):
             is_page_break = block_el.tag in ("div", "hr") and "page-break" in (block_el.get("class") or "")
             if is_page_break:
@@ -624,7 +626,9 @@ class XhtmlToDocxDeltaEngine:
             bm_name = block_el.get("data-bookmark")
             target_para = None
             if bm_name:
-                target_para = para_index.get(bm_name) or _find_note_para_by_bookmark(doc, bm_name)
+                cand = para_index.get(bm_name) or _find_note_para_by_bookmark(doc, bm_name)
+                if cand and id(cand._p) not in claimed_target_paras:
+                    target_para = cand
 
             if target_para is None:
                 para_idx_str = block_el.get("data-para-idx")
@@ -632,12 +636,28 @@ class XhtmlToDocxDeltaEngine:
                     try:
                         p_i = int(para_idx_str)
                         if 0 <= p_i < len(all_body_paras):
-                            target_para = all_body_paras[p_i]
+                            cand = all_body_paras[p_i]
+                            if cand and id(cand._p) not in claimed_target_paras:
+                                target_para = cand
                     except ValueError:
                         pass
 
+            if target_para is None:
+                # Handle newly added or duplicated paragraph in the editor (has no unique bookmark or data-para-idx)
+                if last_target_para is not None:
+                    try:
+                        new_p_el = OxmlElement("w:p")
+                        last_target_para._p.addnext(new_p_el)
+                        target_para = Paragraph(new_p_el, doc)
+                        logger.info(f"Inserted new DOCX paragraph after last_target_para for: '{block_el.text_content()[:30]}'")
+                    except Exception as ins_err:
+                        logger.warning(f"Failed to insert new DOCX paragraph: {ins_err}")
+
             if not target_para:
                 continue
+
+            claimed_target_paras.add(id(target_para._p))
+            last_target_para = target_para
 
             if block_el.tag == "li":
                 new_style = _determine_list_style(block_el)

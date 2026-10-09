@@ -1,5 +1,5 @@
 import { useState, type RefObject } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, Clock, FileText, Layers, MessageSquare, X } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Clock, FileText, Layers, MessageSquare, X, Layout } from "lucide-react";
 
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { CommentsPanel } from "./CommentsPanel";
@@ -13,9 +13,11 @@ export interface LeftStructuringSidebarProps {
   allStyles: string[];
   charStyles?: string[];
   onAddStyle: (newStyle: string) => void;
-  editorRef: RefObject<WysiwygEditorHandle | null>;
+  editorRef: RefObject<any>;
   onOpenVersion: (versionId: number) => void;
   defaultActiveTab?: StructuringTabId | null;
+  isDesignViewActive?: boolean;
+  onToggleDesignView?: () => void;
   className?: string;
 }
 
@@ -27,6 +29,8 @@ export function LeftStructuringSidebar({
   editorRef,
   onOpenVersion,
   defaultActiveTab = "comments",
+  isDesignViewActive = false,
+  onToggleDesignView,
   className = "",
 }: LeftStructuringSidebarProps) {
   const [activeTab, setActiveTab] = useState<StructuringTabId | null>(defaultActiveTab);
@@ -136,6 +140,21 @@ export function LeftStructuringSidebar({
         >
           <Clock className="w-4 h-4" />
           <span>History</span>
+        </button>
+
+        {/* Design Button (50/50 Split View) */}
+        <button
+          type="button"
+          onClick={onToggleDesignView}
+          title="Design PDF View (50/50 Split)"
+          className={`w-10 h-10 rounded-lg flex flex-col items-center justify-center gap-0.5 text-[9px] font-bold uppercase transition-all cursor-pointer ${
+            isDesignViewActive
+              ? "bg-rose-600 text-white shadow-md shadow-rose-900/40 ring-2 ring-rose-400 font-extrabold"
+              : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+          }`}
+        >
+          <Layout className="w-4 h-4" />
+          <span>Design</span>
         </button>
 
         <div className="mt-auto pt-2 border-t border-slate-800/80 w-full flex justify-center">

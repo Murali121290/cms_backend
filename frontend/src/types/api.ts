@@ -106,6 +106,7 @@ export interface ProjectSummary {
   estimated_pages?: number | null;
   actual_pages?: number | null;
   isbn_no?: string | null;
+  copyediting_level?: string | null;
   billing_location?: string | null;
   due_date?: string | null;
   file_details?: Record<string, unknown> | null;
