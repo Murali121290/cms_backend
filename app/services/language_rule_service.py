@@ -47,7 +47,8 @@ def save_project_language_rules(
     profile_key: str = "uk",
     rules: Optional[list[dict[str, Any]]] = None,
     variant_to_canonical: Optional[dict[str, str]] = None,
-    profile_name: Optional[str] = None
+    profile_name: Optional[str] = None,
+    uploaded_by_id: Optional[int] = None
 ) -> dict[str, Any]:
     """
     Saves/syncs the language editing rules JSON to the project's 'CE support/Style sheet template'
@@ -113,6 +114,7 @@ def save_project_language_rules(
                 chapter_id=ce_chapter.id,
                 category="Style sheet template",
                 is_original=True,
+                uploaded_by_id=uploaded_by_id,
             )
             db.add(db_file)
             db.commit()

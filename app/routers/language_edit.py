@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import get_db
+from app.domains.auth.security import get_current_user_from_cookie
 from app.domains.processing.language_edit_models import LanguageEditJob, LanguageEditFinding
 
 from app.processing.language_editing import docx_io, engine, segmenter
@@ -61,7 +62,8 @@ def get_project_rules(project_id: int, db: Session = Depends(get_db)):
 def update_project_rules(
     project_id: int,
     body: SaveRulesRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie)
 ):
     """Save/update project language rules, syncing JSON to project's CE support folder."""
     try:
@@ -72,6 +74,7 @@ def update_project_rules(
             rules=body.rules,
             variant_to_canonical=body.variant_to_canonical,
             profile_name=body.profile_name,
+            uploaded_by_id=user.id if user else None,
         )
         return {"ok": True, "rules": updated}
     except ValueError as err:

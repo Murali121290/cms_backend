@@ -1632,6 +1632,7 @@ def api_v2_project_bootstrap(
             chapter_count=chapter_count,
             files=files,
             upload_dir=file_service.UPLOAD_DIR,
+            uploaded_by_id=viewer.id,
         )
     except project_service.ProjectBootstrapValidationError as exc:
         logging.error(f"Project bootstrap validation error: {str(exc)}")

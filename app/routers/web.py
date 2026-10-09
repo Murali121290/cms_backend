@@ -903,6 +903,7 @@ async def create_project_with_files(
             chapter_count=chapter_count,
             files=files,
             upload_dir=UPLOAD_DIR,
+            uploaded_by_id=user.id,
         )
     except project_service.ProjectBootstrapValidationError as exc:
         return HTMLResponse(
