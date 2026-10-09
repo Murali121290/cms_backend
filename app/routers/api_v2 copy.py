@@ -1649,6 +1649,13 @@ def api_v2_project_bootstrap(
         .order_by(models.Chapter.chapters.asc())
         .all()
     )
+    
+    if po_file:
+        po_dir = os.path.join(file_service.UPLOAD_DIR, project.project_code, "po")
+        os.makedirs(po_dir, exist_ok=True)
+        po_file_path = os.path.join(po_dir, po_file.filename)
+        with open(po_file_path, "wb") as f:
+            shutil.copyfileobj(po_file.file, f)
     ingested_files = (
         db.query(models.File)
         .filter(models.File.project_id == project.id)
@@ -2732,12 +2739,10 @@ def api_v2_download_file(
             message="File not found.",
         )
 
-    import mimetypes
-    mime, _ = mimetypes.guess_type(file_record.filename)
     return _serve_docx_finalized(
         path=file_record.path,
         filename=file_record.filename,
-        media_type=mime or "application/octet-stream",
+        media_type="application/octet-stream",
     )
 
 
@@ -8633,7 +8638,6 @@ def _resolve_placeholders(text: str, chapter, project, client, current_stage: st
         "{current_stage}": current_stage,
         "{next_stage}": next_stage,
         "{project_code}": chapter.project or "",
-        "{client_name}": getattr(client, "company", None) or getattr(client, "name_company", None) or "",
         "{author_email}": getattr(project, "customer_contact", None) or getattr(client, "email", None) or "author@example.com",
         "{client_email}": getattr(client, "email", None) or "client@example.com",
         "{languageediting_team_email}": "languageediting_team@example.com",

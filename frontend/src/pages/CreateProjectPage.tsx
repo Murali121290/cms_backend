@@ -984,7 +984,6 @@ export function CreateProjectPage() {
             <Input
               id="isbn_no"
               label="ISBN No"
-              required
               value={form.isbn_no ?? ''}
               onChange={e => set('isbn_no', e.target.value)}
               error={errors.isbn_no}
