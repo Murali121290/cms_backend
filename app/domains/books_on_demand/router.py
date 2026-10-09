@@ -374,7 +374,12 @@ def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str, ace_path: s
             zip_filename = pdf_filename.replace('.pdf', '.zip')
         else:
             zip_filename = remote_epub_name.replace('.epub', '.zip')
-        local_dir = os.path.dirname(local_epub_path)
+        if local_epub_path:
+            local_dir = os.path.dirname(local_epub_path)
+        else:
+            upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+            local_dir = os.path.join(upload_dir, "bod")
+        os.makedirs(local_dir, exist_ok=True)
         zip_filepath = os.path.join(local_dir, zip_filename)
         
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
