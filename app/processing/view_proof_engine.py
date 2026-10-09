@@ -42,7 +42,7 @@ class ViewProofEngine:
         # 2. Find the project InDesign template (.indt) file recursively
         logger.info("Locating project InDesign template (.indt) file...")
         indt_path = None
-        project_dir = os.path.join(upload_dir, project.code)
+        project_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code)
         
         for root, dirs, files in os.walk(project_dir):
             dirs[:] = [d for d in dirs if d.lower() != "archive"]
@@ -78,7 +78,7 @@ class ViewProofEngine:
         # 3. Ensure we package ONLY the active .xhtml file as manuscript input for View Proof
         xhtml_file_path = file_path
         if not xhtml_file_path.lower().endswith(".xhtml"):
-            chapter_dir = os.path.join(upload_dir, project.code, chapter.chapters)
+            chapter_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.chapters)
             file_stem = os.path.splitext(os.path.basename(file_path))[0]
             candidate_xhtml = None
             
@@ -114,7 +114,7 @@ class ViewProofEngine:
                 zf.write(xhtml_file_path, f"{file_stem}.xhtml")
 
                 # Add template (.indt/.indd) under relative project path (e.g. Design/template/indesign/Degeneffe.indt)
-                project_dir = os.path.join(upload_dir, project.code)
+                project_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code)
                 if indt_path.startswith(project_dir):
                     template_rel = os.path.relpath(indt_path, project_dir)
                 else:
@@ -149,7 +149,7 @@ class ViewProofEngine:
                                 zf.write(full_file_path, rel_path)
                 
                 # Include adjacent artfile or Links folder if present next to the original chapter files
-                chapter_dir = os.path.join(upload_dir, project.code, chapter.chapters)
+                chapter_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.chapters)
                 seen_art_files = set()
                 for root, dirs, files in os.walk(chapter_dir):
                     for dname in dirs:
@@ -227,9 +227,9 @@ class ViewProofEngine:
                     return []
 
             # 5. Extract returned ZIP containing proofs & final files
-            indesign_dir = os.path.join(upload_dir, project.code, chapter.chapters, "InDesign")
-            misc_dir = os.path.join(upload_dir, project.code, chapter.chapters, "Misc")
-            proof_dir = os.path.join(upload_dir, project.code, chapter.chapters, "Proof")
+            indesign_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.chapters, "InDesign")
+            misc_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.chapters, "Misc")
+            proof_dir = os.path.join(upload_dir, project.client_name or "unknown", project.code, chapter.chapters, "Proof")
             os.makedirs(indesign_dir, exist_ok=True)
             os.makedirs(misc_dir, exist_ok=True)
             os.makedirs(proof_dir, exist_ok=True)

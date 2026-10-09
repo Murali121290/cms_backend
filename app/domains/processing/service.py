@@ -592,7 +592,7 @@ def background_processing_task(
                 project = db.query(Project).filter(Project.id == file_record.project_id).first()
                 chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
                 
-                misc_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc")
+                misc_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "Misc")
                 os.makedirs(misc_dir, exist_ok=True)
                 
                 css_output_path = os.path.join(misc_dir, "layout_design.css")
@@ -643,12 +643,13 @@ def background_processing_task(
                 primary_dir = os.path.dirname(file_path)
                 save_paths = [os.path.join(primary_dir, "design_style.json")]
                 if project and chapter:
+                    client_folder = project.client_name or "unknown"
                     save_paths.extend([
-                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "design_style.json"),
-                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Design", "design_style.json"),
-                        os.path.join(UPLOAD_DIR, project.code, "InDesign", "design_style.json"),
-                        os.path.join(UPLOAD_DIR, project.code, "Design", "design_style.json"),
-                        os.path.join(UPLOAD_DIR, project.code, "design_style.json"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, chapter.chapters, "InDesign", "design_style.json"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, chapter.chapters, "Design", "design_style.json"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, "InDesign", "design_style.json"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, "Design", "design_style.json"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, "design_style.json"),
                     ])
                 
                 json_output_path = save_paths[0]
@@ -675,7 +676,7 @@ def background_processing_task(
                 project = db.query(Project).filter(Project.id == file_record.project_id).first()
                 chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
                 
-                manuscript_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Manuscript")
+                manuscript_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "Manuscript")
                 os.makedirs(manuscript_dir, exist_ok=True)
                 
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -726,14 +727,15 @@ def background_processing_task(
                     os.path.dirname(os.path.dirname(file_path)),
                 ]
                 if project and chapter:
+                    client_folder = project.client_name or "unknown"
                     possible_design_dirs.extend([
-                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign"),
-                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Design"),
-                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "template"),
-                        os.path.join(UPLOAD_DIR, project.code, "InDesign"),
-                        os.path.join(UPLOAD_DIR, project.code, "Design"),
-                        os.path.join(UPLOAD_DIR, project.code, "template"),
-                        os.path.join(UPLOAD_DIR, project.code),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, chapter.chapters, "InDesign"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, chapter.chapters, "Design"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, chapter.chapters, "template"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, "InDesign"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, "Design"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code, "template"),
+                        os.path.join(UPLOAD_DIR, client_folder, project.code),
                     ])
                 
                 design_json_path = None
@@ -746,7 +748,7 @@ def background_processing_task(
                             
                 # Fallback 1: recursive search in project folder
                 if not design_json_path and project:
-                    proj_root = os.path.join(UPLOAD_DIR, project.code)
+                    proj_root = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code)
                     if os.path.exists(proj_root):
                         for root, _, files in os.walk(proj_root):
                             if "design_style.json" in files:
@@ -809,7 +811,7 @@ def background_processing_task(
                 matched_para = sorted([s for s in docx_para_styles if s in template_para_styles])
                 matched_char = sorted([s for s in docx_char_styles if s in template_char_styles])
                 
-                manuscript_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Manuscript")
+                manuscript_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "Manuscript")
                 os.makedirs(manuscript_dir, exist_ok=True)
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
                 
@@ -996,7 +998,7 @@ def background_processing_task(
                                 
                                 if project and chapter:
                                     backup_dir = os.path.abspath(
-                                        f"{UPLOAD_DIR}/{project.code}/{chapter.number}/{file_record.category}"
+                                        f"{UPLOAD_DIR}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{file_record.category}"
                                     )
                                 else:
                                     backup_dir = os.path.dirname(file_path)
@@ -1112,7 +1114,7 @@ def background_processing_task(
                                 chap_folder = (chapter.chapters if chapter and getattr(chapter, 'chapters', None) else chapter.number) if chapter else None
                                 if project and chap_folder:
                                     backup_dir = os.path.abspath(
-                                        f"{UPLOAD_DIR}/{project.code}/{chap_folder}/{new_category}"
+                                        f"{UPLOAD_DIR}/{project.client_name or 'unknown'}/{project.code}/{chap_folder}/{new_category}"
                                     )
                                 else:
                                     backup_dir = os.path.dirname(existing_file.path) if existing_file.path else UPLOAD_DIR
@@ -1264,7 +1266,7 @@ def start_process(
 
             if project and chapter:
                 backup_dir = os.path.abspath(
-                    f"{upload_dir}/{project.code}/{chapter.number}/{file_record.category}/Archive"
+                    f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{file_record.category}/Archive"
                 )
             else:
                 backup_dir = os.path.join(os.path.dirname(file_path), "Archive")

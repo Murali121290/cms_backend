@@ -41,7 +41,7 @@ def create_chapter(db: Session, *, project_id: int, number: str, title: str, upl
     db.refresh(new_chapter)
     db.refresh(project)
 
-    chapter_base_dir = f"{upload_dir}/{project.code}/{number}"
+    chapter_base_dir = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{number}"
     for category in _CHAPTER_CATEGORIES:
         os.makedirs(os.path.join(chapter_base_dir, category), exist_ok=True)
 
@@ -69,8 +69,8 @@ def rename_chapter(
     db.commit()
 
     if old_number != number:
-        old_dir = f"{upload_dir}/{project.code}/{old_number}"
-        new_dir = f"{upload_dir}/{project.code}/{number}"
+        old_dir = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{old_number}"
+        new_dir = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{number}"
         if os.path.exists(old_dir):
             os.rename(old_dir, new_dir)
 
@@ -84,7 +84,7 @@ def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upl
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
 
-    chapter_dir = f"{upload_dir}/{project.code}/{chapter.chapters}"
+    chapter_dir = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.chapters}"
     if os.path.exists(chapter_dir):
         shutil.rmtree(chapter_dir)
 
@@ -103,7 +103,7 @@ def delete_chapter_secondary(db: Session, *, project_id: int, chapter_id: int, u
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
 
-    chapter_path = f"{upload_dir}/{project.code}/{chapter.chapters}"
+    chapter_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.chapters}"
     if os.path.exists(chapter_path):
         shutil.rmtree(chapter_path, ignore_errors=True)
 

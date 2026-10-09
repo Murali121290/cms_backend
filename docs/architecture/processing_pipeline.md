@@ -62,7 +62,7 @@ Unknown process types fall back to `Admin` only.
 Before background work begins, `processing_service.start_process(...)` creates an archive snapshot:
 
 - archive directory:
-  - `{upload_dir}/{project.code}/{chapter.number}/{file.category}/Archive`
+  - `upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{file.category}/Archive`
   - or `dirname(file.path)/Archive` if project/chapter lookup fails
 - backup filename:
   - `{name_only}_v{current_version}.{ext}`

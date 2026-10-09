@@ -1711,7 +1711,8 @@ def api_v2_project_bootstrap(
 
     if po_file is not None and po_file.filename:
         try:
-            ce_support_dir = os.path.join(file_service.UPLOAD_DIR, code, "CE support")
+            client_folder = client_name or "unknown"
+            ce_support_dir = os.path.join(file_service.UPLOAD_DIR, client_folder, code, "CE support")
             os.makedirs(ce_support_dir, exist_ok=True)
 
             po_dest_path = os.path.join(ce_support_dir, po_file.filename)
@@ -2134,7 +2135,7 @@ def api_v2_project_intake(
                 continue
             target_ch = new_chapters[idx % len(new_chapters)]
             
-            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, target_ch.chapters, category)
+            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, target_ch.chapters, category)
             os.makedirs(dest_dir, exist_ok=True)
             
             dest_path = os.path.join(dest_dir, upload.filename)
@@ -3781,7 +3782,7 @@ def api_v2_upload_zip(
         with open(zip_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        zip_archive_dir = os.path.join(file_service.UPLOAD_DIR, project.code)
+        zip_archive_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code)
         os.makedirs(zip_archive_dir, exist_ok=True)
         project_service.create_predefined_project_folders(zip_archive_dir)
         zip_archive_path = os.path.join(zip_archive_dir, f"{project.code}_manuscript.zip")
@@ -3921,9 +3922,9 @@ def api_v2_upload_zip(
 
 
                 if chapter:
-                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, chapter.chapters, category)
+                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, category)
                 else:
-                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, "project_files", category)
+                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, "project_files", category)
 
                 os.makedirs(dest_dir, exist_ok=True)
                 dest_path = os.path.join(dest_dir, fname)
@@ -4757,8 +4758,7 @@ def api_v2_combine_project_book(
         with zipfile.ZipFile(response_zip_path, "r") as z_res:
             z_res.extractall(extract_dir)
 
-        # Dest directory for the "Final files" chapter
-        dest_dir = os.path.join(UPLOAD_DIR, project.project_code, final_chap.chapters, "Misc")
+        dest_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.project_code, final_chap.chapters, "Misc")
         os.makedirs(dest_dir, exist_ok=True)
         
         from app.domains.files import version_service
@@ -6029,7 +6029,7 @@ def api_v2_get_file_asset(
         if not project or not chapter:
             raise HTTPException(status_code=404, detail="Project or Chapter not found")
 
-        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
         
         candidate_folders = [
             os.path.join(chapter_dir, "artfile"),
@@ -6071,7 +6071,7 @@ def api_v2_get_file_asset(
             if clean_asset_name.lower().endswith(".eps"):
                 search_names.extend([base_name_no_ext + ext for ext in [".png", ".jpg", ".jpeg", ".webp", ".svg"]])
             
-            project_dir = os.path.join(UPLOAD_DIR, project.code) if project else None
+            project_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code) if project else None
             if project_dir and os.path.exists(project_dir):
                 for root, _, files in os.walk(project_dir):
                     lower_files = {f.lower(): f for f in files}
@@ -8073,7 +8073,7 @@ def api_v2_create_chapter_with_art(
         db.commit()
         db.refresh(new_chapter)
 
-    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, art_chapter_name, "Art")
+    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, art_chapter_name, "Art")
     os.makedirs(dest_dir, exist_ok=True)
 
     if file.filename.lower().endswith(".zip"):
@@ -8355,7 +8355,7 @@ def api_v2_create_chapters_with_art_zip(
                 new_chapter.workflow = existing_art_workflow
                 db.commit()
 
-            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, art_chapter_name, "Art")
+            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, art_chapter_name, "Art")
             os.makedirs(dest_dir, exist_ok=True)
 
             for fname, full_path in files_list:
@@ -9397,8 +9397,9 @@ def api_v2_finalize_mapping(
         if mapping.file_type == "Art": file_cat = "Art"
         elif mapping.file_type == "XML": file_cat = "XML"
         elif mapping.file_type == "InDesign": file_cat = "Design"
-        
-        dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, file_cat)
+
+        client_folder = project.client_name or "unknown"
+        dest_dir = os.path.join(file_service.UPLOAD_DIR, client_folder, project.code, ch_num, file_cat)
         os.makedirs(dest_dir, exist_ok=True)
         fname = os.path.basename(mapping.original_filename)
         dest_path = os.path.join(dest_dir, fname)
@@ -9456,7 +9457,8 @@ def api_v2_finalize_mapping(
                 ch_num = mapping.chapter_number
                 if ch_num not in chapter_docx_map:
                     chapter_docx_map[ch_num] = []
-                dest_path = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, "Manuscript", os.path.basename(mapping.original_filename))
+                client_folder = project.client_name or "unknown"
+                dest_path = os.path.join(file_service.UPLOAD_DIR, client_folder, project.code, ch_num, "Manuscript", os.path.basename(mapping.original_filename))
                 chapter_docx_map[ch_num].append(dest_path)
         
         if chapter_docx_map:
@@ -9601,10 +9603,10 @@ def api_v2_chapter_bulk_download(
             # 3. Direct filesystem candidates
             if not found_path:
                 candidates = [
-                    os.path.join(file_service.UPLOAD_DIR, project.code, chapter_folder_str, sub, fname),
-                    os.path.join(file_service.UPLOAD_DIR, project.code, chapter_folder_str, fname),
-                    os.path.join(file_service.UPLOAD_DIR, project.code, sub, fname),
-                    os.path.join(file_service.UPLOAD_DIR, project.code, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, chapter_folder_str, sub, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, chapter_folder_str, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, sub, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.client_name or "unknown", project.code, fname),
                 ]
                 for cand in candidates:
                     if os.path.exists(cand) and os.path.isfile(cand):
