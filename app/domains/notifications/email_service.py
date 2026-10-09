@@ -7,31 +7,44 @@ logger = logging.getLogger(__name__)
 
 def send_email(to_email: str, subject: str, text_body: str, html_body: str = None):
     settings = get_settings()
-    
+
     smtp_host = getattr(settings, "SMTP_HOST", "localhost")
     smtp_port = int(getattr(settings, "SMTP_PORT", 25))
     smtp_user = getattr(settings, "SMTP_USERNAME", None)
     smtp_pass = getattr(settings, "SMTP_PASSWORD", None)
     smtp_from = getattr(settings, "SMTP_FROM", "noreply@example.com")
-    
+    use_tls = getattr(settings, "SMTP_USE_TLS", False)
+    use_ssl = getattr(settings, "SMTP_USE_SSL", False)
+
     msg = EmailMessage()
     msg['Subject'] = subject
     msg['From'] = smtp_from
     msg['To'] = to_email
-    
+
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype='html')
 
     try:
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            if getattr(settings, "SMTP_USE_TLS", False):
+        if use_ssl:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+
+        with server:
+            if use_tls and not use_ssl:
                 server.starttls()
             if smtp_user and smtp_pass:
                 server.login(smtp_user, smtp_pass)
             server.send_message(msg)
         logger.info(f"Sent email to {to_email} with subject: {subject}")
         print(f"SUCCESS: Sent email to {to_email} with subject: {subject}")
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(f"SMTP Authentication failed for {smtp_user}: {str(e)}. Check credentials or use App Password for Office 365.")
+        print(f"FAILED: Authentication error. For Office 365, use an App Password instead of regular password.")
+    except smtplib.SMTPException as e:
+        logger.error(f"SMTP error sending to {to_email}: {str(e)}")
+        print(f"FAILED to send email to {to_email}. SMTP Error: {str(e)}")
     except Exception as e:
         logger.error(f"Failed to send email to {to_email}: {str(e)}")
         print(f"FAILED to send email to {to_email}. Error: {str(e)}")

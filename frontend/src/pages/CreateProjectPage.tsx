@@ -23,7 +23,7 @@ function clientLabel(c: Client): string {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes < 1024)        return `${bytes} B`
+  if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
@@ -66,17 +66,17 @@ function formatExtraValue(value: unknown): string | null {
 
 function validate(f: Partial<ProjectCreate>): Record<string, string> {
   const e: Record<string, string> = {}
-  if (!f.client_id)              e.client_id     = 'Client is required'
-  if (!f.project_code?.trim())   e.project_code  = 'Project Code is required'
-  if (!f.project_title?.trim())  e.project_title = 'Project Title is required'
-  if (!f.workflow_name?.trim())  e.workflow_name = 'Workflow is required'
-  if (!f.xml_standard?.trim())   e.xml_standard  = 'XML Standard is required'
-  if (!f.copyright_year)         e.copyright_year = 'Copyright Year is required'
-  if (!f.isbn_no?.trim()) {
-    e.isbn_no = 'ISBN is required'
-  } else if (!/^[0-9]{9}[0-9X]$|^[0-9]{13}$/i.test(f.isbn_no.trim())) {
-    e.isbn_no = 'ISBN must be 10 or 13 characters'
-  }
+  if (!f.client_id) e.client_id = 'Client is required'
+  if (!f.project_code?.trim()) e.project_code = 'Project Code is required'
+  if (!f.project_title?.trim()) e.project_title = 'Project Title is required'
+  if (!f.workflow_name?.trim()) e.workflow_name = 'Workflow is required'
+  if (!f.xml_standard?.trim()) e.xml_standard = 'XML Standard is required'
+  if (!f.copyright_year) e.copyright_year = 'Copyright Year is required'
+  // if (!f.isbn_no?.trim()) {
+  //   e.isbn_no = 'ISBN is required'
+  // } else if (!/^[0-9]{9}[0-9X]$|^[0-9]{13}$/i.test(f.isbn_no.trim())) {
+  //   e.isbn_no = 'ISBN must be 10 or 13 characters'
+  // }
   return e
 }
 
@@ -105,10 +105,10 @@ interface PoUploadProps {
 }
 
 function PoUpload({ onExtracted, onRemove }: PoUploadProps) {
-  const [poFile, setPoFile]     = useState<File | null>(null)
+  const [poFile, setPoFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [poState, setPoState]   = useState<PoState>('idle')
-  const [result, setResult]     = useState<POExtractionResponse | null>(null)
+  const [poState, setPoState] = useState<PoState>('idle')
+  const [result, setResult] = useState<POExtractionResponse | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   async function processFile(file: File) {
@@ -210,9 +210,8 @@ function PoUpload({ onExtracted, onRemove }: PoUploadProps) {
 
   return (
     <div
-      className={`col-span-2 rounded-xl border-2 border-dashed transition-colors cursor-pointer ${
-        isDragging ? 'border-primary bg-accent/40' : 'border-border hover:border-primary/50 bg-surface'
-      }`}
+      className={`col-span-2 rounded-xl border-2 border-dashed transition-colors cursor-pointer ${isDragging ? 'border-primary bg-accent/40' : 'border-border hover:border-primary/50 bg-surface'
+        }`}
       onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={onDrop}
@@ -246,10 +245,10 @@ interface ZipUploadProps {
 }
 
 function ZipUpload({ onFileReady }: ZipUploadProps) {
-  const [zipFile, setZipFile]     = useState<File | null>(null)
+  const [zipFile, setZipFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [zipState, setZipState]   = useState<ZipState>('idle')
-  const [progress, setProgress]   = useState(0)
+  const [zipState, setZipState] = useState<ZipState>('idle')
+  const [progress, setProgress] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -341,9 +340,8 @@ function ZipUpload({ onFileReady }: ZipUploadProps) {
 
   return (
     <div
-      className={`col-span-2 rounded-xl border-2 border-dashed transition-colors cursor-pointer ${
-        isDragging ? 'border-primary bg-accent/40' : 'border-border hover:border-primary/50 bg-surface'
-      }`}
+      className={`col-span-2 rounded-xl border-2 border-dashed transition-colors cursor-pointer ${isDragging ? 'border-primary bg-accent/40' : 'border-border hover:border-primary/50 bg-surface'
+        }`}
       onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={onDrop}
@@ -376,16 +374,16 @@ export function CreateProjectPage() {
   const parsedClientId = clientId ? Number(clientId) : undefined
 
   const INIT: Partial<ProjectCreate> = {
-    status:   'Planning',
+    status: 'Planning',
     priority: 'Normal',
     actual_pages: 0,
     client_id: parsedClientId ?? undefined,
     xml_standard: 'BITS',
   }
 
-  const [form,    setForm]    = useState<Partial<ProjectCreate>>(INIT)
-  const [errors,  setErrors]  = useState<Record<string, string>>({})
-  const [saving,  setSaving]  = useState(false)
+  const [form, setForm] = useState<Partial<ProjectCreate>>(INIT)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
   const [zipFile, setZipFile] = useState<File | null>(null)
 
   // PO import — poFilledValues tracks exactly which values we auto-filled, so removing
@@ -410,10 +408,10 @@ export function CreateProjectPage() {
   const [artDueDate, setArtDueDate] = useState('')
 
   // Reference data
-  const [clients,           setClients]          = useState<Client[]>([])
-  const [users,             setUsers]             = useState<User[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [users, setUsers] = useState<User[]>([])
   const [allWorkflowStages, setAllWorkflowStages] = useState<WorkflowStage[]>([])
-  const [initLoad,          setInitLoad]          = useState(true)
+  const [initLoad, setInitLoad] = useState(true)
 
   useEffect(() => {
     const clientsPromise = clientsApi.list().catch((err) => {
@@ -440,8 +438,8 @@ export function CreateProjectPage() {
           if (client) {
             setForm(f => ({
               ...f,
-              client_name:    client.name_company ?? client.company ?? [client.first_name, client.surname].filter(Boolean).join(' ') ?? '',
-              division_code:    client.division ?? '',
+              client_name: client.name_company ?? client.company ?? [client.first_name, client.surname].filter(Boolean).join(' ') ?? '',
+              division_code: client.division ?? '',
               customer_contact: client.email ?? client.phone_main ?? '',
             }))
           }
@@ -462,8 +460,8 @@ export function CreateProjectPage() {
     set('client_id', id || null)
     const c = clients.find(x => x.id === id)
     if (c) {
-      set('client_name',    c.name_company ?? c.company ?? [c.first_name, c.surname].filter(Boolean).join(' ') ?? '')
-      set('division_code',    c.division ?? '',)
+      set('client_name', c.name_company ?? c.company ?? [c.first_name, c.surname].filter(Boolean).join(' ') ?? '')
+      set('division_code', c.division ?? '',)
       set('customer_contact', c.email ?? c.phone_main ?? '')
     }
   }
@@ -472,7 +470,7 @@ export function CreateProjectPage() {
   // set (poFilledValues) so removing the PO later never reverts a manual edit made after import.
   function handlePoExtracted(file: File, result: POExtractionResponse | null) {
     setPoFile(file)
-    
+
     if (result) {
       // author_names actually populates the form's Author field, so visually move it
       // from extras to fields so the UI displays it under "Auto-filled Fields"
@@ -481,7 +479,7 @@ export function CreateProjectPage() {
         delete result.extras['author_names']
       }
     }
-    
+
     setPoResult(result)
     if (!result) return
 
@@ -576,7 +574,7 @@ export function CreateProjectPage() {
     if (!hasLinks) return stages
 
     const byName = new Map(stages.map(s => [s.stage_name, s]))
-    const first  = stages.find(s => !s.previous_stage)
+    const first = stages.find(s => !s.previous_stage)
     if (!first) return stages
     const result: WorkflowStage[] = []
     const visited = new Set<string>()
@@ -602,7 +600,7 @@ export function CreateProjectPage() {
       .filter(c => c.active_status)
       .sort((a, b) => clientLabel(a).localeCompare(clientLabel(b)))
       .map(c => ({ value: String(c.id), label: clientLabel(c) }))
-  , [clients])
+    , [clients])
 
   const handleCancel = () => {
     if (parsedClientId) {
@@ -635,15 +633,15 @@ export function CreateProjectPage() {
     setSaving(true)
     try {
       const formData = new FormData()
-      formData.append('code',          form.project_code ?? '')
-      formData.append('title',         form.project_title ?? '')
-      formData.append('xml_standard',  form.xml_standard ?? 'BITS')
-      if (form.client_id)          formData.append('client_id',        String(form.client_id))
-      if (form.client_name)        formData.append('client_name',      form.client_name)
-      
+      formData.append('code', form.project_code ?? '')
+      formData.append('title', form.project_title ?? '')
+      formData.append('xml_standard', form.xml_standard ?? 'BITS')
+      if (form.client_id) formData.append('client_id', String(form.client_id))
+      if (form.client_name) formData.append('client_name', form.client_name)
+
       // Set default workflow_name
       formData.append('workflow_name', primaryWf)
-      
+
       // Track configurations
       if (designWfEnabled && designWfName) {
         formData.append('design_workflow_name', designWfName)
@@ -655,26 +653,26 @@ export function CreateProjectPage() {
         formData.append('art_workflow_name', artWfName)
       }
 
-      if (form.division_code)      formData.append('division_code',    form.division_code)
-      if (form.customer_contact)   formData.append('customer_contact', form.customer_contact)
-      if (form.category)           formData.append('category',         form.category)
-      if (form.composition)        formData.append('composition',      form.composition)
-      if (form.copyediting_level)  formData.append('copyediting_level',form.copyediting_level)
-      if (form.project_manager)    formData.append('project_manager',  form.project_manager)
+      if (form.division_code) formData.append('division_code', form.division_code)
+      if (form.customer_contact) formData.append('customer_contact', form.customer_contact)
+      if (form.category) formData.append('category', form.category)
+      if (form.composition) formData.append('composition', form.composition)
+      if (form.copyediting_level) formData.append('copyediting_level', form.copyediting_level)
+      if (form.project_manager) formData.append('project_manager', form.project_manager)
       if (form.client_project_manager) formData.append('client_project_manager', form.client_project_manager)
-      if (form.sales_person)       formData.append('sales_person',     form.sales_person)
-      if (form.priority)           formData.append('priority',         form.priority)
-      if (form.status)             formData.append('status',           form.status)
-      if (form.edition)            formData.append('edition',          form.edition)
-      if (form.color)              formData.append('color',            form.color)
-      if (form.trim_size)          formData.append('trim_size',        form.trim_size)
-      if (form.copyright_year != null) formData.append('copyright_year',   String(form.copyright_year))
+      if (form.sales_person) formData.append('sales_person', form.sales_person)
+      if (form.priority) formData.append('priority', form.priority)
+      if (form.status) formData.append('status', form.status)
+      if (form.edition) formData.append('edition', form.edition)
+      if (form.color) formData.append('color', form.color)
+      if (form.trim_size) formData.append('trim_size', form.trim_size)
+      if (form.copyright_year != null) formData.append('copyright_year', String(form.copyright_year))
       if (form.manuscript_pages != null) formData.append('manuscript_pages', String(form.manuscript_pages))
-      if (form.estimated_pages != null)  formData.append('estimated_pages',  String(form.estimated_pages))
-      if (form.actual_pages != null)     formData.append('actual_pages',     String(form.actual_pages))
-      if (form.isbn_no)            formData.append('isbn_no',          form.isbn_no)
-      if (form.billing_location)   formData.append('billing_location', form.billing_location)
-      if (form.due_date)           formData.append('due_date',         form.due_date)
+      if (form.estimated_pages != null) formData.append('estimated_pages', String(form.estimated_pages))
+      if (form.actual_pages != null) formData.append('actual_pages', String(form.actual_pages))
+      if (form.isbn_no) formData.append('isbn_no', form.isbn_no)
+      if (form.billing_location) formData.append('billing_location', form.billing_location)
+      if (form.due_date) formData.append('due_date', form.due_date)
       if (poResult || authorName.trim()) {
         const fileDetails = { ...(poResult?.extras ?? {}), author_name: authorName.trim() || undefined }
         formData.append('extracted_po_data', JSON.stringify(fileDetails))
@@ -766,45 +764,45 @@ export function CreateProjectPage() {
               Object.keys(poResult.fields).some(k => formatExtraValue(poResult.fields[k]) !== null) ||
               Object.keys(poResult.extras).some(k => formatExtraValue(poResult.extras[k]) !== null)
             ) && (
-              <details className="col-span-2 rounded-xl border border-border overflow-hidden">
-                <summary className="list-none cursor-pointer px-4 py-3 bg-surface flex items-center justify-between text-sm font-semibold text-text">
-                  <span>Extracted PO Details</span>
-                  <ChevronDown size={14} className="text-muted" />
-                </summary>
-                <div className="px-4 py-3 flex flex-col gap-2">
-                  {Object.keys(poResult.fields).some(k => formatExtraValue(poResult.fields[k]) !== null) && (
-                    <>
-                      <div className="text-[10px] font-bold uppercase tracking-widest text-primary/80 mt-1 mb-1">Auto-filled Fields</div>
-                      {Object.entries(poResult.fields).map(([key, value]) => {
-                        const formatted = formatExtraValue(value)
-                        if (formatted === null) return null
-                        return (
-                          <div key={key} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
-                            <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
-                            <span className="text-text font-semibold">{formatted}</span>
-                          </div>
-                        )
-                      })}
-                    </>
-                  )}
-                  {Object.keys(poResult.extras).some(k => formatExtraValue(poResult.extras[k]) !== null) && (
-                    <>
-                      <div className="text-[10px] font-bold uppercase tracking-widest text-muted mt-3 mb-1 pt-3 border-t border-border/50">Extra Details</div>
-                      {Object.entries(poResult.extras).map(([key, value]) => {
-                        const formatted = formatExtraValue(value)
-                        if (formatted === null) return null
-                        return (
-                          <div key={`extra-${key}`} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
-                            <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
-                            <span className="text-text font-semibold">{formatted}</span>
-                          </div>
-                        )
-                      })}
-                    </>
-                  )}
-                </div>
-              </details>
-            )}
+                <details className="col-span-2 rounded-xl border border-border overflow-hidden">
+                  <summary className="list-none cursor-pointer px-4 py-3 bg-surface flex items-center justify-between text-sm font-semibold text-text">
+                    <span>Extracted PO Details</span>
+                    <ChevronDown size={14} className="text-muted" />
+                  </summary>
+                  <div className="px-4 py-3 flex flex-col gap-2">
+                    {Object.keys(poResult.fields).some(k => formatExtraValue(poResult.fields[k]) !== null) && (
+                      <>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-primary/80 mt-1 mb-1">Auto-filled Fields</div>
+                        {Object.entries(poResult.fields).map(([key, value]) => {
+                          const formatted = formatExtraValue(value)
+                          if (formatted === null) return null
+                          return (
+                            <div key={key} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
+                              <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
+                              <span className="text-text font-semibold">{formatted}</span>
+                            </div>
+                          )
+                        })}
+                      </>
+                    )}
+                    {Object.keys(poResult.extras).some(k => formatExtraValue(poResult.extras[k]) !== null) && (
+                      <>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-muted mt-3 mb-1 pt-3 border-t border-border/50">Extra Details</div>
+                        {Object.entries(poResult.extras).map(([key, value]) => {
+                          const formatted = formatExtraValue(value)
+                          if (formatted === null) return null
+                          return (
+                            <div key={`extra-${key}`} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
+                              <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
+                              <span className="text-text font-semibold">{formatted}</span>
+                            </div>
+                          )
+                        })}
+                      </>
+                    )}
+                  </div>
+                </details>
+              )}
 
             {/* ── Project Information ─────────────────── */}
             <Section title="Project Information" icon={BookOpen} />
@@ -833,7 +831,7 @@ export function CreateProjectPage() {
               label="Customer Name"
               value={form.client_name ?? ''}
               readOnly
-              onChange={() => {}}
+              onChange={() => { }}
               placeholder="Auto-filled from client"
               className="bg-surface cursor-default text-muted"
             />
@@ -841,7 +839,7 @@ export function CreateProjectPage() {
               label="Division Code"
               value={form.division_code ?? ''}
               readOnly
-              onChange={() => {}}
+              onChange={() => { }}
               placeholder="Auto-filled from client"
               className="bg-surface cursor-default text-muted"
             />
@@ -850,7 +848,7 @@ export function CreateProjectPage() {
               label="Customer Contact"
               value={form.customer_contact ?? ''}
               readOnly
-              onChange={() => {}}
+              onChange={() => { }}
               placeholder="Auto-filled from client"
               className="bg-surface cursor-default text-muted"
             />
@@ -865,9 +863,9 @@ export function CreateProjectPage() {
               value={form.composition ?? ''}
               onChange={e => set('composition', e.target.value || null)}
               options={[
-                { value: 'Low',      label: 'Low (Level 1)'      },
+                { value: 'Low', label: 'Low (Level 1)' },
                 { value: 'Medium', label: 'Medium (Level 2)' },
-                { value: 'High',     label: 'High (Level 3)'     },
+                { value: 'High', label: 'High (Level 3)' },
               ]}
               placeholder="Select composition level"
             />
@@ -888,7 +886,7 @@ export function CreateProjectPage() {
               value={form.priority ?? 'Normal'}
               onChange={e => set('priority', e.target.value)}
               options={[
-                { value: 'Normal',     label: 'Normal'     },
+                { value: 'Normal', label: 'Normal' },
                 { value: 'Fast Track', label: 'Fast Track' },
               ]}
               placeholder="Select priority"
@@ -940,9 +938,9 @@ export function CreateProjectPage() {
             {/* ── Publication Details ─────────────────── */}
             <Section title="Publication Details" icon={Layers} />
 
-            <Input label="Edition"    value={form.edition    ?? ''} onChange={e => set('edition',    e.target.value)} placeholder="e.g. 3rd Edition" />
-            <Input label="Color"      value={form.color      ?? ''} onChange={e => set('color',      e.target.value)} placeholder="e.g. 4-color, B&W" />
-            <Input label="Trim Size"  value={form.trim_size  ?? ''} onChange={e => set('trim_size',  e.target.value)} placeholder="e.g. 8.5 x 11" />
+            <Input label="Edition" value={form.edition ?? ''} onChange={e => set('edition', e.target.value)} placeholder="e.g. 3rd Edition" />
+            <Input label="Color" value={form.color ?? ''} onChange={e => set('color', e.target.value)} placeholder="e.g. 4-color, B&W" />
+            <Input label="Trim Size" value={form.trim_size ?? ''} onChange={e => set('trim_size', e.target.value)} placeholder="e.g. 8.5 x 11" />
             <Input
               id="xml_standard"
               label="XML Standard"
@@ -984,7 +982,6 @@ export function CreateProjectPage() {
             <Input
               id="isbn_no"
               label="ISBN No"
-              required
               value={form.isbn_no ?? ''}
               onChange={e => set('isbn_no', e.target.value)}
               error={errors.isbn_no}

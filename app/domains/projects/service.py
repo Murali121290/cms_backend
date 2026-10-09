@@ -115,6 +115,7 @@ def create_project_with_initial_files(
     chapter_count: int | None = None,
     files: list[UploadFile] | None = None,
     upload_dir: str,
+    uploaded_by_id: int | None = None,
 ):
     valid_uploads = [upload for upload in files or [] if upload.filename]
     if chapter_count is None or chapter_count <= 0:
@@ -134,7 +135,8 @@ def create_project_with_initial_files(
         db.commit()
         db.refresh(db_project)
 
-        base_path = f"{upload_dir}/{code}"
+        client_folder = client_name or "unknown"
+        base_path = f"{upload_dir}/{client_folder}/{code}"
         os.makedirs(base_path, exist_ok=True)
         create_predefined_project_folders(base_path)
 
@@ -201,7 +203,8 @@ def create_project_with_initial_files(
     db.commit()
     db.refresh(db_project)
 
-    base_path = f"{upload_dir}/{code}"
+    client_folder = client_name or "unknown"
+    base_path = f"{upload_dir}/{client_folder}/{code}"
     os.makedirs(base_path, exist_ok=True)
     create_predefined_project_folders(base_path)
 
@@ -237,6 +240,7 @@ def create_project_with_initial_files(
             file_type=plan_item["file_type"],
             category="Manuscript",
             path=file_path,
+            uploaded_by_id=uploaded_by_id,
         )
         db.add(db_file)
 
@@ -287,7 +291,7 @@ def delete_project(db, project_id: int):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
-    project_path = f"{UPLOAD_DIR}/{project.code}"
+    project_path = f"{UPLOAD_DIR}/{project.client_name or 'unknown'}/{project.code}"
     if os.path.exists(project_path):
         shutil.rmtree(project_path, ignore_errors=True)
     from app.domains.workflow.models import StageDetail, ChapterInfo
@@ -303,7 +307,7 @@ def delete_project_v2(db, project_id: int):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
-    project_path = f"{UPLOAD_DIR}/{project.code}"
+    project_path = f"{UPLOAD_DIR}/{project.client_name or 'unknown'}/{project.code}"
     if os.path.exists(project_path):
         shutil.rmtree(project_path, ignore_errors=True)
     from app.domains.workflow.models import StageDetail, ChapterInfo
@@ -328,7 +332,7 @@ def delete_project_with_filesystem(db: Session, *, project_id: int, upload_dir: 
     db.delete(project)
     db.commit()
 
-    project_path = f"{upload_dir}/{project.code}"
+    project_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}"
     if os.path.exists(project_path):
         shutil.rmtree(project_path, ignore_errors=True)
 

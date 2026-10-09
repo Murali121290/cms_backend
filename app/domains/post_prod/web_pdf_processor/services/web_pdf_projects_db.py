@@ -149,6 +149,32 @@ def hard_delete_project(db: Session, *, project_id: int) -> bool:
     return True
 
 
+def record_step_completion(
+    db: Session,
+    *,
+    project_id: int,
+    step_name: str,
+    user_id: Optional[int] = None,
+    username: Optional[str] = None,
+    status: str = "success",
+    details: Optional[dict] = None,
+) -> WebPdfHistory:
+    """Record completion of any workflow step with analysis details."""
+    history = WebPdfHistory(
+        project_id=project_id,
+        changed_by_id=user_id,
+        changed_by_username=username,
+        result_type=step_name,
+        created_at=datetime.utcnow(),
+        merge_status=status,
+        details=details,
+    )
+    db.add(history)
+    db.commit()
+    db.refresh(history)
+    return history
+
+
 def record_merge_history(
     db: Session,
     *,
@@ -159,7 +185,7 @@ def record_merge_history(
     merged_output_path: str,
     total_pages: int,
     merge_status: str,
-    error_message: Optional[str] = None,
+    details: Optional[dict] = None,
 ) -> WebPdfHistory:
     history = WebPdfHistory(
         project_id=project_id,
@@ -171,7 +197,7 @@ def record_merge_history(
         merged_output_path=merged_output_path,
         total_pages=total_pages,
         merge_status=merge_status,
-        error_message=error_message,
+        details=details,
     )
     db.add(history)
     db.commit()

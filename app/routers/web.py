@@ -315,7 +315,7 @@ async def download_backup_or_folder_file(
         ).first()
         if not version_entry or not version_entry.path or not os.path.exists(version_entry.path):
             found_path = None
-            chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+            chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
             if os.path.exists(chapter_dir):
                 for cat_folder in os.listdir(chapter_dir):
                     archive_path = os.path.join(chapter_dir, cat_folder, "Archive", file_name)
@@ -337,9 +337,9 @@ async def download_backup_or_folder_file(
         if file_record:
             file_path = os.path.join(UPLOAD_DIR, file_record.path)
             if not os.path.exists(file_path):
-                file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, subfolder, file_name)
+                file_path = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, subfolder, file_name)
         else:
-            file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, subfolder, file_name)
+            file_path = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, subfolder, file_name)
 
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="File not found")
@@ -390,13 +390,13 @@ async def get_folder_file_layout_preview(
         file_path = os.path.join(UPLOAD_DIR, file_record.path)
     else:
         resolved_subfolder = subfolder
-        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
         if os.path.exists(chapter_dir):
             for d in os.listdir(chapter_dir):
                 if d.lower() == subfolder.lower():
                     resolved_subfolder = d
                     break
-        file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, resolved_subfolder, file_name)
+        file_path = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, resolved_subfolder, file_name)
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="XML file not found")
@@ -458,13 +458,13 @@ async def save_folder_file(
     is_misc_delivery = any(file_name.lower().endswith(x) for x in ("epub.xml", "_epub.xml", "_final.xml", "_final.log", "_finalxml.xml", "_layout.html")) or (subfolder and subfolder.lower() in ("misc", "final delivery", "final_delivery", "miscellaneous"))
 
     if is_misc_delivery:
-        misc_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc")
+        misc_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "Misc")
         file_path = os.path.join(misc_dir, file_name)
         if file_record:
             file_record.category = "Misc"
             file_record.path = file_path
     elif file_name.lower().endswith((".xml", ".log")):
-        xml_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "XML")
+        xml_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "XML")
         file_path = os.path.join(xml_dir, file_name)
         if file_record:
             file_record.category = "XML"
@@ -473,13 +473,13 @@ async def save_folder_file(
         file_path = file_record.path if os.path.isabs(file_record.path) else os.path.join(UPLOAD_DIR, file_record.path)
     else:
         resolved_subfolder = subfolder
-        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
         if os.path.exists(chapter_dir):
             for d in os.listdir(chapter_dir):
                 if d.lower() == subfolder.lower():
                     resolved_subfolder = d
                     break
-        file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, resolved_subfolder, file_name)
+        file_path = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, resolved_subfolder, file_name)
 
     target_abs = os.path.abspath(file_path)
     upload_abs = os.path.abspath(UPLOAD_DIR)
@@ -614,7 +614,7 @@ async def save_folder_file(
             )
 
             if is_misc_layout:
-                target_layout_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc")
+                target_layout_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "Misc")
                 layout_cat = "Misc"
             else:
                 target_layout_dir = xml_dir
@@ -696,13 +696,13 @@ async def convert_xhtml_to_xml_endpoint(
         file_path = os.path.join(UPLOAD_DIR, file_record.path)
     else:
         resolved_subfolder = subfolder
-        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
         if os.path.exists(chapter_dir):
             for d in os.listdir(chapter_dir):
                 if d.lower() == subfolder.lower():
                     resolved_subfolder = d
                     break
-        file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, resolved_subfolder, file_name)
+        file_path = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, resolved_subfolder, file_name)
 
     # Save body content if provided
     if body and body.content:
@@ -741,12 +741,12 @@ async def convert_xhtml_to_xml_endpoint(
             xml_disk_paths.add(os.path.abspath(os.path.join(UPLOAD_DIR, rec.path)))
 
         for folder in ["XML", "xml", "Manuscript"]:
-            candidate_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, folder)
+            candidate_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, folder)
             candidate_file = os.path.abspath(os.path.join(candidate_dir, f"{base_name}.xml"))
             if os.path.exists(candidate_file) or os.path.exists(candidate_dir):
                 xml_disk_paths.add(candidate_file)
 
-        primary_target_xml_path = list(xml_disk_paths)[0] if xml_disk_paths else os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "XML", f"{base_name}.xml")
+        primary_target_xml_path = list(xml_disk_paths)[0] if xml_disk_paths else os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "XML", f"{base_name}.xml")
 
         scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "scripts"))
         converter_script = os.path.join(scripts_dir, "universal_converter.pl")
@@ -903,6 +903,7 @@ async def create_project_with_files(
             chapter_count=chapter_count,
             files=files,
             upload_dir=UPLOAD_DIR,
+            uploaded_by_id=user.id,
         )
     except project_service.ProjectBootstrapValidationError as exc:
         return HTMLResponse(
@@ -995,7 +996,7 @@ async def download_chapter_zip(
     import tempfile
     from fastapi.responses import FileResponse
     
-    chapter_dir = f"{UPLOAD_DIR}/{project.code}/{chapter.number}"
+    chapter_dir = f"{UPLOAD_DIR}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}"
     
     if not os.path.exists(chapter_dir):
         raise HTTPException(status_code=404, detail="Chapter directory not found")

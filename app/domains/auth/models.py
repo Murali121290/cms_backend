@@ -48,7 +48,7 @@ def map_role_to_capitalized(role_name: str) -> str:
     role_lower = role_name.lower()
     if role_lower in ROLE_MAP:
         return ROLE_MAP[role_lower]
-    return role_name.capitalize()
+    return role_name.strip()
 
 class User(Base):
     __tablename__ = "users"

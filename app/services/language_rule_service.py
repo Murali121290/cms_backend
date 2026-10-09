@@ -40,8 +40,8 @@ def get_available_style_profiles() -> dict[str, dict[str, Any]]:
     return profiles
 
 
-def get_project_language_rules_dir(project_code: str) -> str:
-    path = os.path.join(str(UPLOADS_DIR), project_code, "CE support", "Style sheet template")
+def get_project_language_rules_dir(project_code: str, client_name: str = "unknown") -> str:
+    path = os.path.join(str(UPLOADS_DIR), client_name, project_code, "CE support", "Style sheet template")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -100,6 +100,7 @@ def save_project_language_rules(
     profile_name: Optional[str] = None,
     changed_by_id: Optional[int] = None,
     note: Optional[str] = None,
+    uploaded_by_id: Optional[int] = None
 ) -> dict[str, Any]:
     """Write the per-project rules selection to the project's CE Support folder.
 
@@ -163,6 +164,9 @@ def save_project_language_rules(
                 previous_rules = json.load(f)
         except Exception as exc:
             logger.warning("Could not read previous rules JSON at %s: %s", file_path, exc)
+    ce_template_dir = get_project_language_rules_dir(project.project_code, project.client_name or "unknown")
+    filename = f"{project.project_code}_language_rules.json"
+    file_path = os.path.join(ce_template_dir, filename)
 
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(rule_data, f, indent=2, ensure_ascii=False)
@@ -250,6 +254,33 @@ def _ensure_ce_support_chapter(db: Session, project):
     logger.info("Auto-created CE support chapter %s for project %s",
                 ce_chapter.id, project.project_code)
     return ce_chapter
+        db_file = (
+            db.query(models.File)
+            .filter(
+                models.File.project_id == project.id,
+                models.File.chapter_id == ce_chapter.id,
+                models.File.filename == filename,
+            )
+            .first()
+        )
+        if not db_file:
+            db_file = models.File(
+                filename=filename,
+                file_type=".json",
+                path=file_path,
+                project_id=project.id,
+                chapter_id=ce_chapter.id,
+                category="Style sheet template",
+                is_original=True,
+                uploaded_by_id=uploaded_by_id,
+            )
+            db.add(db_file)
+            db.commit()
+            logger.info("Registered language rules JSON in DB files table with ID %s", db_file.id)
+        else:
+            db_file.path = file_path
+            db_file.category = "Style sheet template"
+            db.commit()
 
 
 # ─── Read (disk-first with profile fallback) ──────────────────────────────────
@@ -277,6 +308,16 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
                 return data
             except Exception as exc:
                 logger.warning("Error reading language rules JSON at %s: %s", file_path, exc)
+    ce_template_dir = get_project_language_rules_dir(project.project_code, project.client_name or "unknown")
+    filename = f"{project.project_code}_language_rules.json"
+    file_path = os.path.join(ce_template_dir, filename)
+
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.warning("Error reading language rules JSON at %s: %s", file_path, exc)
 
     profiles = get_available_style_profiles()
     default_data = dict(profiles.get("uk", {}))

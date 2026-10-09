@@ -19,8 +19,8 @@ There are three distinct ways `File` rows are created today:
 
 | Workflow | Service | Path convention | Notes |
 | --- | --- | --- | --- |
-| Project bootstrap | `project_service.create_project_with_initial_files` | `{upload_dir}/{project.code}/Chapter <index> - <stem>/Manuscript/{filename}` | One file per created chapter |
-| Later chapter upload | `file_service.upload_chapter_files` | `{upload_dir}/{project.code}/{chapter.number}/{category}/{filename}` | Category-based upload path |
+| Project bootstrap | `project_service.create_project_with_initial_files` | `upload_dir}/{project.client_name or 'unknown'}/{project.code}/Chapter <index> - <stem>/Manuscript/{filename}` | One file per created chapter |
+| Later chapter upload | `file_service.upload_chapter_files` | `upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{category}/{filename}` | Category-based upload path |
 | Compatibility flat upload | `file_service.create_file_record` | `{UPLOAD_DIR}/{project_id}_{timestamp}_{original_name}` | Does not use chapter/category layout |
 
 ## Chapter Upload Workflow
@@ -41,7 +41,7 @@ The service converts spaces in category names to underscores:
 
 The target directory becomes:
 
-`{upload_dir}/{project.code}/{chapter.number}/{safe_cat}`
+`upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{safe_cat}`
 
 ## New Upload Behavior
 

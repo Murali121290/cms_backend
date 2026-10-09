@@ -1021,7 +1021,7 @@ def generate_figure_pdf(
             )
             _insert_image_centered(page, src, image_area)
 
-        base_path = f"{upload_dir}/{project.code}/{chapter.chapters}/Art"
+        base_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.chapters}/Art"
         os.makedirs(base_path, exist_ok=True)
 
         if source_file is not None:
@@ -1248,7 +1248,7 @@ def generate_figure_assessment(
         for col_idx, value in enumerate(_assessment_row_values(src, chapter_prefix), start=1):
             ws.cell(row=row_idx, column=col_idx, value=value)
 
-    base_path = f"{upload_dir}/{project.code}/{chapter.chapters}/Art"
+    base_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.chapters}/Art"
     os.makedirs(base_path, exist_ok=True)
 
     if source_file is not None:

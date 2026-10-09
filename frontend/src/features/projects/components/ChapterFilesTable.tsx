@@ -1,4 +1,4 @@
-﻿import { Fragment, useState, useRef } from "react";
+import { Fragment, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -33,6 +33,7 @@ import { getFileVersions, downloadFileVersion } from "@/api/files";
 import { useToast } from "@/components/ui/useToast";
 import type { FileRecord } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
+import { useUsersStore } from "@/stores/usersStore";
 import type { ChapterSection } from "@/features/projects/components/ChapterCategorySummary";
 
 type FileActionKind = "download" | "checkout" | "cancel_checkout" | "delete";
@@ -924,7 +925,7 @@ export function ChapterFilesTable({
                           <Lock size={12} style={{ color: "#92400E", flexShrink: 0 }} aria-hidden />
                           <span style={{ fontSize: "12px", color: "#92400E", whiteSpace: "nowrap" }}>
                             {file.lock.checked_out_by_username
-                              ? `By ${file.lock.checked_out_by_username}`
+                              ? `By ${useUsersStore.getState().getUserDisplayNameByUsername(file.lock.checked_out_by_username) || file.lock.checked_out_by_username}`
                               : "Locked"}
                           </span>
                         </span>
