@@ -89,6 +89,8 @@ class BodFtpService:
             with open(local_path, 'rb') as f:
                 self.ftp.storbinary(f"STOR {remote_filename}", f)
             logger.info(f"Uploaded {local_path} to {remote_filename}")
+        except ssl.SSLEOFError:
+            logger.info(f"Uploaded {local_path} to {remote_filename} (suppressed SSLEOFError)")
         except Exception as e:
             logger.error(f"Failed to upload {local_path}: {str(e)}")
             raise
