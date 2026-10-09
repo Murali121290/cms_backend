@@ -1,6 +1,6 @@
 """Add project_language_rules table — DB-first storage for the per-project Rules Picker selection.
 
-Revision ID: 0045_project_language_rules
+Revision ID: 0047_project_language_rules
 Revises: 0044_language_rules_history
 Create Date: 2026-10-06 07:40:00.000000
 
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0045_project_language_rules'
+revision: str = '0047_project_language_rules'
 down_revision: Union[str, Sequence[str], None] = '0044_language_rules_history'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
