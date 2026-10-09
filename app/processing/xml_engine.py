@@ -234,7 +234,7 @@ class XMLEngine:
                 
                 if project and chapter:
                     # Check current chapter first
-                    design_css_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc", "layout_design.css")
+                    design_css_path = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "Misc", "layout_design.css")
                     if not os.path.exists(design_css_path):
                         # Fallback: look for the Design template chapter in the same project
                         design_chapter = db.query(ChapterInfo).filter(
@@ -242,7 +242,7 @@ class XMLEngine:
                             ChapterInfo.chapters.ilike("Design%")
                         ).first()
                         if design_chapter:
-                            design_css_path = os.path.join(UPLOAD_DIR, project.code, design_chapter.chapters, "Misc", "layout_design.css")
+                            design_css_path = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, design_chapter.chapters, "Misc", "layout_design.css")
                     
                     if os.path.exists(design_css_path):
                         with open(design_css_path, "r", encoding="utf-8") as design_css_f:
@@ -269,7 +269,7 @@ class XMLEngine:
             # Scan potential art/links directories for the chapter
             art_files = {}
             for sub_dir in ["Art", "Links"]:
-                art_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, sub_dir)
+                art_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, sub_dir)
                 if os.path.exists(art_dir):
                     for f_name in os.listdir(art_dir):
                         art_files[f_name.lower()] = os.path.join(sub_dir, f_name)

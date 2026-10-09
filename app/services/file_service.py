@@ -156,7 +156,7 @@ def upload_chapter_files(
                             member_category = normalized_category
 
                         member_safe_cat = member_category.replace(" ", "_")
-                        member_base_path = f"{upload_dir}/{project.code}/{chapter.number}/{member_safe_cat}"
+                        member_base_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{member_safe_cat}"
                         os.makedirs(member_base_path, exist_ok=True)
 
                         existing_file = db.query(models.File).filter(
@@ -238,7 +238,7 @@ def upload_chapter_files(
                 )
         else:
             file_safe_cat = file_category.replace(" ", "_")
-            file_base_path = f"{upload_dir}/{project.code}/{chapter.number}/{file_safe_cat}"
+            file_base_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{file_safe_cat}"
             os.makedirs(file_base_path, exist_ok=True)
 
             existing_file = db.query(models.File).filter(

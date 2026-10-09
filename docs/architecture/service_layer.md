@@ -175,7 +175,7 @@ The bootstrap path is documented in detail in [Project Bootstrap](project_bootst
 
 Responsibilities:
 
-- create chapter row and create category directories under `{upload_dir}/{project.code}/{number}`
+- create chapter row and create category directories under `upload_dir}/{project.client_name or 'unknown'}/{project.code}/{number}`
 - rename chapter row and rename the chapter directory if the chapter number changes
 - preserve two chapter delete variants with different redirect semantics
 
