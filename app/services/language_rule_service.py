@@ -254,33 +254,6 @@ def _ensure_ce_support_chapter(db: Session, project):
     logger.info("Auto-created CE support chapter %s for project %s",
                 ce_chapter.id, project.project_code)
     return ce_chapter
-        db_file = (
-            db.query(models.File)
-            .filter(
-                models.File.project_id == project.id,
-                models.File.chapter_id == ce_chapter.id,
-                models.File.filename == filename,
-            )
-            .first()
-        )
-        if not db_file:
-            db_file = models.File(
-                filename=filename,
-                file_type=".json",
-                path=file_path,
-                project_id=project.id,
-                chapter_id=ce_chapter.id,
-                category="Style sheet template",
-                is_original=True,
-                uploaded_by_id=uploaded_by_id,
-            )
-            db.add(db_file)
-            db.commit()
-            logger.info("Registered language rules JSON in DB files table with ID %s", db_file.id)
-        else:
-            db_file.path = file_path
-            db_file.category = "Style sheet template"
-            db.commit()
 
 
 # ─── Read (disk-first with profile fallback) ──────────────────────────────────

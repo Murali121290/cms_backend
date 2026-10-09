@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = '0046_language_rules_history'
-down_revision: Union[str, Sequence[str], None] = '0043_journal_assign_delay'
+down_revision: Union[str, Sequence[str], None] = '0045_rename_error_msg_to_details'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

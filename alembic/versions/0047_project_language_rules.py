@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = '0047_project_language_rules'
-down_revision: Union[str, Sequence[str], None] = '0044_language_rules_history'
+down_revision: Union[str, Sequence[str], None] = '0046_language_rules_history'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

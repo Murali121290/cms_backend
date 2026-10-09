@@ -3163,6 +3163,15 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label="BL-FIRST"],
         .ProseMirror p[data-style-label="BL-MID"],
         .ProseMirror p[data-style-label="BL-LAST"],
+        .ProseMirror p[data-style-label="TBL-FIRST"],
+        .ProseMirror p[data-style-label="TBL-MID"],
+        .ProseMirror p[data-style-label="TBL-LAST"],
+        .ProseMirror p[data-style-label="TBL-BL-FIRST"],
+        .ProseMirror p[data-style-label="TBL-BL-MID"],
+        .ProseMirror p[data-style-label="TBL-BL-LAST"],
+        .ProseMirror p[data-style-label="TB-BulletList1"],
+        .ProseMirror p[data-style-label="TB-BulletList"],
+        .ProseMirror p[data-style-label="UN-TB-BulletList1"],
         .ProseMirror p[data-style-label="BX1-BL-FIRST"],
         .ProseMirror p[data-style-label="BX1-BL-MID"],
         .ProseMirror p[data-style-label="BX1-BL-LAST"],
@@ -3205,10 +3214,25 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label="UNT-BL"],
         .ProseMirror p[data-style-label="UNT-UL"],
         .ProseMirror p[data-style-label="GLOS-BL-FIRST"],
-        .ProseMirror p[data-style-label="GLOS-BL-MID"] {
+        .ProseMirror p[data-style-label="GLOS-BL-MID"],
+        .ProseMirror p[data-style-label*="BulletList1"],
+        .ProseMirror p[data-style-label*="TB-Bullet"],
+        .ProseMirror p.TBL-FIRST,
+        .ProseMirror p.TBL-MID,
+        .ProseMirror p.TBL-LAST,
+        .ProseMirror p.TBL-BL-FIRST,
+        .ProseMirror p.TBL-BL-MID,
+        .ProseMirror p.TBL-BL-LAST,
+        .ProseMirror p.TB-BulletList1,
+        .ProseMirror p.BL-FIRST,
+        .ProseMirror p.BL-MID,
+        .ProseMirror p.BL-LAST,
+        .ProseMirror p.UL-FIRST,
+        .ProseMirror p.UL-MID,
+        .ProseMirror p.UL-LAST {
           position: relative !important;
-          margin-left: 2rem !important;
-          padding-left: 0.5rem !important;
+          margin-left: 1.75rem !important;
+          padding-left: 0.25rem !important;
           margin-top: 0.25rem !important;
           margin-bottom: 0.25rem !important;
         }
@@ -3216,6 +3240,15 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label="BL-FIRST"]::before,
         .ProseMirror p[data-style-label="BL-MID"]::before,
         .ProseMirror p[data-style-label="BL-LAST"]::before,
+        .ProseMirror p[data-style-label="TBL-FIRST"]::before,
+        .ProseMirror p[data-style-label="TBL-MID"]::before,
+        .ProseMirror p[data-style-label="TBL-LAST"]::before,
+        .ProseMirror p[data-style-label="TBL-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="TBL-BL-MID"]::before,
+        .ProseMirror p[data-style-label="TBL-BL-LAST"]::before,
+        .ProseMirror p[data-style-label="TB-BulletList1"]::before,
+        .ProseMirror p[data-style-label="TB-BulletList"]::before,
+        .ProseMirror p[data-style-label="UN-TB-BulletList1"]::before,
         .ProseMirror p[data-style-label="BX1-BL-FIRST"]::before,
         .ProseMirror p[data-style-label="BX1-BL-MID"]::before,
         .ProseMirror p[data-style-label="BX1-BL-LAST"]::before,
@@ -3258,7 +3291,22 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label="UNT-BL"]::before,
         .ProseMirror p[data-style-label="UNT-UL"]::before,
         .ProseMirror p[data-style-label="GLOS-BL-FIRST"]::before,
-        .ProseMirror p[data-style-label="GLOS-BL-MID"]::before {
+        .ProseMirror p[data-style-label="GLOS-BL-MID"]::before,
+        .ProseMirror p[data-style-label*="BulletList1"]::before,
+        .ProseMirror p[data-style-label*="TB-Bullet"]::before,
+        .ProseMirror p.TBL-FIRST::before,
+        .ProseMirror p.TBL-MID::before,
+        .ProseMirror p.TBL-LAST::before,
+        .ProseMirror p.TBL-BL-FIRST::before,
+        .ProseMirror p.TBL-BL-MID::before,
+        .ProseMirror p.TBL-BL-LAST::before,
+        .ProseMirror p.TB-BulletList1::before,
+        .ProseMirror p.BL-FIRST::before,
+        .ProseMirror p.BL-MID::before,
+        .ProseMirror p.BL-LAST::before,
+        .ProseMirror p.UL-FIRST::before,
+        .ProseMirror p.UL-MID::before,
+        .ProseMirror p.UL-LAST::before {
           content: "•" !important;
           position: absolute !important;
           left: -1rem !important;
@@ -3269,17 +3317,37 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         /* Level 2 Bullet List Styles */
         .ProseMirror p[data-style-label="BL2-MID"],
+        .ProseMirror p[data-style-label="BL2-FIRST"],
+        .ProseMirror p[data-style-label="BL2-LAST"],
+        .ProseMirror p[data-style-label="TBL2-FIRST"],
+        .ProseMirror p[data-style-label="TBL2-MID"],
+        .ProseMirror p[data-style-label="TBL2-LAST"],
+        .ProseMirror p[data-style-label="TB-BulletList2"],
         .ProseMirror p[data-style-label="BX1-BL2-MID"],
-        .ProseMirror p[data-style-label="NBX-BL2-MID"] {
+        .ProseMirror p[data-style-label="NBX-BL2-MID"],
+        .ProseMirror p.TBL2-FIRST,
+        .ProseMirror p.TBL2-MID,
+        .ProseMirror p.TBL2-LAST,
+        .ProseMirror p.BL2-MID {
           position: relative !important;
-          margin-left: 3.5rem !important;
-          padding-left: 0.5rem !important;
+          margin-left: 2.75rem !important;
+          padding-left: 0.25rem !important;
           margin-top: 0.25rem !important;
           margin-bottom: 0.25rem !important;
         }
         .ProseMirror p[data-style-label="BL2-MID"]::before,
+        .ProseMirror p[data-style-label="BL2-FIRST"]::before,
+        .ProseMirror p[data-style-label="BL2-LAST"]::before,
+        .ProseMirror p[data-style-label="TBL2-FIRST"]::before,
+        .ProseMirror p[data-style-label="TBL2-MID"]::before,
+        .ProseMirror p[data-style-label="TBL2-LAST"]::before,
+        .ProseMirror p[data-style-label="TB-BulletList2"]::before,
         .ProseMirror p[data-style-label="BX1-BL2-MID"]::before,
-        .ProseMirror p[data-style-label="NBX-BL2-MID"]::before {
+        .ProseMirror p[data-style-label="NBX-BL2-MID"]::before,
+        .ProseMirror p.TBL2-FIRST::before,
+        .ProseMirror p.TBL2-MID::before,
+        .ProseMirror p.TBL2-LAST::before,
+        .ProseMirror p.BL2-MID::before {
           content: "◦" !important;
           position: absolute !important;
           left: -1rem !important;
@@ -3289,14 +3357,24 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
 
         /* Level 3 Bullet List Styles */
-        .ProseMirror p[data-style-label="BL3-MID"] {
+        .ProseMirror p[data-style-label="BL3-MID"],
+        .ProseMirror p[data-style-label="TBL3-FIRST"],
+        .ProseMirror p[data-style-label="TBL3-MID"],
+        .ProseMirror p[data-style-label="TBL3-LAST"],
+        .ProseMirror p[data-style-label="TB-BulletList3"],
+        .ProseMirror p.TBL3-MID {
           position: relative !important;
-          margin-left: 5rem !important;
-          padding-left: 0.5rem !important;
+          margin-left: 3.75rem !important;
+          padding-left: 0.25rem !important;
           margin-top: 0.25rem !important;
           margin-bottom: 0.25rem !important;
         }
-        .ProseMirror p[data-style-label="BL3-MID"]::before {
+        .ProseMirror p[data-style-label="BL3-MID"]::before,
+        .ProseMirror p[data-style-label="TBL3-FIRST"]::before,
+        .ProseMirror p[data-style-label="TBL3-MID"]::before,
+        .ProseMirror p[data-style-label="TBL3-LAST"]::before,
+        .ProseMirror p[data-style-label="TB-BulletList3"]::before,
+        .ProseMirror p.TBL3-MID::before {
           content: "▪" !important;
           position: absolute !important;
           left: -1rem !important;
@@ -3308,8 +3386,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         /* Levels 4, 5, 6 Bullet List Styles */
         .ProseMirror p[data-style-label="BL4-MID"] {
           position: relative !important;
-          margin-left: 6.5rem !important;
-          padding-left: 0.5rem !important;
+          margin-left: 5rem !important;
+          padding-left: 0.25rem !important;
           margin-top: 0.25rem !important;
           margin-bottom: 0.25rem !important;
         }
@@ -3324,8 +3402,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         .ProseMirror p[data-style-label="BL5-MID"] {
           position: relative !important;
-          margin-left: 8rem !important;
-          padding-left: 0.5rem !important;
+          margin-left: 6.25rem !important;
+          padding-left: 0.25rem !important;
           margin-top: 0.25rem !important;
           margin-bottom: 0.25rem !important;
         }
@@ -3340,8 +3418,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         .ProseMirror p[data-style-label="BL6-MID"] {
           position: relative !important;
-          margin-left: 9.5rem !important;
-          padding-left: 0.5rem !important;
+          margin-left: 7.5rem !important;
+          padding-left: 0.25rem !important;
           margin-top: 0.25rem !important;
           margin-bottom: 0.25rem !important;
         }
@@ -3358,6 +3436,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label="NL-FIRST"],
         .ProseMirror p[data-style-label="NL-MID"],
         .ProseMirror p[data-style-label="NL-LAST"],
+        .ProseMirror p[data-style-label="TNL-FIRST"],
+        .ProseMirror p[data-style-label="TNL-MID"],
+        .ProseMirror p[data-style-label="TNL-LAST"],
+        .ProseMirror p[data-style-label="TBL-NL-FIRST"],
+        .ProseMirror p[data-style-label="TBL-NL-MID"],
+        .ProseMirror p[data-style-label="TBL-NL-LAST"],
         .ProseMirror p[data-style-label="BX1-NL-FIRST"],
         .ProseMirror p[data-style-label="BX1-NL-MID"],
         .ProseMirror p[data-style-label="BX1-NL-LAST"],
@@ -3382,11 +3466,17 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label="GLOS-NL-FIRST"],
         .ProseMirror p[data-style-label="GLOS-NL-MID"],
         .ProseMirror p[data-style-label="UNBX-NL"],
+        .ProseMirror p[data-style-label^="TNL-"],
+        .ProseMirror p[data-style-label*="-TNL-"],
         .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"],
-        .ProseMirror p[data-style-label*="NumberList"] {
+        .ProseMirror p[data-style-label*="NumberList"],
+        .ProseMirror p.TNL-FIRST,
+        .ProseMirror p.TNL-MID,
+        .ProseMirror p.TNL-LAST,
+        .ProseMirror p.NL-MID {
           position: relative !important;
-          margin-left: 2rem !important;
-          padding-left: 0.5rem !important;
+          margin-left: 1.75rem !important;
+          padding-left: 0.25rem !important;
           margin-top: 0.25rem !important;
           margin-bottom: 0.25rem !important;
         }
@@ -3397,11 +3487,15 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
 
         /* Reset the counter for a new sequence of consecutive numbered list items */
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label^="NL-"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label*="-NL-"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label$="-NL"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label^="EXER-"][data-style-label*="-NL-"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]) + p[data-style-label*="NumberList"] {
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p[data-style-label^="NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p[data-style-label*="-NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p[data-style-label$="-NL"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p[data-style-label^="TNL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p[data-style-label*="-TNL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p[data-style-label^="EXER-"][data-style-label*="-NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p[data-style-label*="NumberList"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p.TNL-MID,
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="TNL-"]):not(p[data-style-label*="-TNL-"]):not(p[data-style-label$="-TNL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p.TNL-MID):not(p.NL-MID) + p.NL-MID {
           counter-reset: structured-num-list;
         }
 
@@ -3409,8 +3503,13 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label^="NL-"],
         .ProseMirror p[data-style-label*="-NL-"],
         .ProseMirror p[data-style-label$="-NL"],
+        .ProseMirror p[data-style-label^="TNL-"],
+        .ProseMirror p[data-style-label*="-TNL-"],
+        .ProseMirror p[data-style-label$="-TNL"],
         .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"],
-        .ProseMirror p[data-style-label*="NumberList"] {
+        .ProseMirror p[data-style-label*="NumberList"],
+        .ProseMirror p.TNL-MID,
+        .ProseMirror p.NL-MID {
           counter-increment: structured-num-list;
         }
 
@@ -3418,8 +3517,13 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label^="NL-"]::before,
         .ProseMirror p[data-style-label*="-NL-"]::before,
         .ProseMirror p[data-style-label$="-NL"]::before,
+        .ProseMirror p[data-style-label^="TNL-"]::before,
+        .ProseMirror p[data-style-label*="-TNL-"]::before,
+        .ProseMirror p[data-style-label$="-TNL"]::before,
         .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"]::before,
-        .ProseMirror p[data-style-label*="NumberList"]::before {
+        .ProseMirror p[data-style-label*="NumberList"]::before,
+        .ProseMirror p.TNL-MID::before,
+        .ProseMirror p.NL-MID::before {
           content: counter(structured-num-list) ". " !important;
           position: absolute !important;
           left: -1rem !important;
