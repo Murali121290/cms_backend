@@ -76,26 +76,32 @@ def _run_via_pph(file_path: str, endpoint: str, extra_data: dict = None, file_fi
     return generated_files
 
 
+PRE_EDITOR_ROLES = ["Pre Editor", "Pre-Editor", "Team Lead - Prediting", "Team Lead - Pre-Editing", "Team Leader - Pre-Editing", "Admin", "Non-XML Manager", "Non-XML Operator"]
+
 PROCESS_PERMISSIONS = {
-    "language": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
-    "technical": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
-    "macro_processing": ["Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator"],
+    "language": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing"],
+    "technical": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing"],
+    "macro_processing": PRE_EDITOR_ROLES,
     "ppd": ["Manuscript Analysis Operator", "ProjectManager", "Admin"],
     "permissions": ["PermissionsManager", "ProjectManager", "Admin"],
-    "reference_validation": ["Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator"],
-    "structuring": ["ProjectManager","Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator", "XML Manager", "XML Operator", "Senior XML Operator"],
-    "structuring_qa": ["ProjectManager","Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator", "XML Manager", "XML Operator", "Senior XML Operator"],
-    "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
+    "reference_validation": PRE_EDITOR_ROLES,
+    "reference_number_validation": PRE_EDITOR_ROLES,
+    "reference_apa_chicago_validation": PRE_EDITOR_ROLES,
+    "reference_report_only": PRE_EDITOR_ROLES,
+    "reference_structuring": PRE_EDITOR_ROLES,
+    "structuring": ["ProjectManager", "XML Manager", "XML Operator", "Senior XML Operator"] + PRE_EDITOR_ROLES,
+    "structuring_qa": ["ProjectManager", "XML Manager", "XML Operator", "Senior XML Operator"] + PRE_EDITOR_ROLES,
+    "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "xml_to_indesign": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "indesign_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Compositor", "Senior Compositor", "Production Manager"],
     "extract_design_css": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "extract_design_style": ["Admin", "Template Manager", "template manager", "Template Operator", "template operator", "Production Manager", "production manager"],
-    "style_validation": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML operator", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
-    "style_match_design": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
-    "art_validation": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
-    "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Pre Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"],
+    "style_validation": ["XML Manager", "XML operator", "XML Operator", "Senior XML Operator", "Production Manager"] + PRE_EDITOR_ROLES,
+    "style_match_design": ["XML Manager", "XML Operator", "Senior XML Operator", "Production Manager"] + PRE_EDITOR_ROLES,
+    "art_validation": ["XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Production Manager"] + PRE_EDITOR_ROLES,
+    "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"] + PRE_EDITOR_ROLES,
 }
 
 

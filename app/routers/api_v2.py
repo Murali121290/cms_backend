@@ -333,7 +333,9 @@ def _serialize_lock(file_record: models.File, db: Session | None = None):
     from datetime import timezone as _tz
     checked_out_by_username = None
     if file_record.checked_out_by is not None:
-        checked_out_by_username = file_record.checked_out_by.username
+        user_obj = file_record.checked_out_by
+        full_name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+        checked_out_by_username = full_name if full_name else user_obj.username
 
     webdav_locked = False
     webdav_locked_by = None
@@ -356,7 +358,8 @@ def _serialize_lock(file_record: models.File, db: Session | None = None):
             webdav_locked = True
             webdav_locked_at = active_lock.created_at
             if lock_owner is not None:
-                webdav_locked_by = lock_owner.username
+                full_name = f"{lock_owner.first_name or ''} {lock_owner.last_name or ''}".strip()
+                webdav_locked_by = full_name if full_name else lock_owner.username
 
     return schemas_v2.LockState(
         is_checked_out=file_record.is_checked_out,
@@ -411,7 +414,9 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
 
     uploaded_by = None
     if file_record.uploaded_by:
-        uploaded_by = file_record.uploaded_by.username
+        user_obj = file_record.uploaded_by
+        full_name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+        uploaded_by = full_name if full_name else user_obj.username
 
     # Image / PDF metadata for the chapter file list's Dimensions / DPI /
     # Color Profile columns. Cheap for images (PIL only reads the header);
@@ -5223,6 +5228,8 @@ def api_v2_list_processing_jobs(
         func.coalesce(ProcessingJob.project_code, Project.project_code).label("project_code"),
         func.coalesce(ProcessingJob.chapter_number, ChapterInfo.chapters).label("chapter_number"),
         User.username.label("username"),
+        User.first_name.label("first_name"),
+        User.last_name.label("last_name"),
         User.role.label("user_role")
     ).outerjoin(File, ProcessingJob.file_id == File.id)\
      .outerjoin(Project, File.project_id == Project.id)\
@@ -5251,6 +5258,8 @@ def api_v2_list_processing_jobs(
             elif isinstance(row.options, dict):
                 options_dict = row.options
 
+        user_display_name = f"{row.first_name or ''} {row.last_name or ''}".strip() or row.username
+
         result.append(schemas_v2.ProcessingJobListItem(
             id=row.id,
             file_id=row.file_id,
@@ -5267,7 +5276,7 @@ def api_v2_list_processing_jobs(
             chapter_number=row.chapter_number,
             priority=row.priority,
             options=options_dict,
-            username=row.username,
+            username=user_display_name,
             user_role=row.user_role
         ))
     return result

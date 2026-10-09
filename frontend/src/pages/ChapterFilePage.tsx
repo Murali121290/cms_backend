@@ -1071,7 +1071,7 @@ export function ChapterFilePage({
               <div className="flex flex-col gap-0.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 whitespace-nowrap">
                   <LogOut size={9} className="flex-shrink-0" />
-                  {lockedBy ?? 'Unknown'}
+                  {useUsersStore.getState().getUserDisplayNameByUsername(lockedBy) || lockedBy || 'Unknown'}
                 </span>
                 {lockedAt && (
                   <span className="text-[10px] text-muted whitespace-nowrap">{fmtDate(lockedAt)}</span>
@@ -1082,7 +1082,7 @@ export function ChapterFilePage({
               <div className="flex flex-col gap-0.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 whitespace-nowrap">
                   <ExternalLink size={9} className="flex-shrink-0" />
-                  {webdavLockedBy ?? 'Unknown'} (Word)
+                  {useUsersStore.getState().getUserDisplayNameByUsername(webdavLockedBy) || webdavLockedBy || 'Unknown'} (Word)
                 </span>
                 {webdavLockedAt && (
                   <span className="text-[10px] text-muted whitespace-nowrap">{fmtDate(webdavLockedAt)}</span>
