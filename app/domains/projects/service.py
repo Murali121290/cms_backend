@@ -115,6 +115,7 @@ def create_project_with_initial_files(
     chapter_count: int | None = None,
     files: list[UploadFile] | None = None,
     upload_dir: str,
+    uploaded_by_id: int | None = None,
 ):
     valid_uploads = [upload for upload in files or [] if upload.filename]
     if chapter_count is None or chapter_count <= 0:
@@ -239,6 +240,7 @@ def create_project_with_initial_files(
             file_type=plan_item["file_type"],
             category="Manuscript",
             path=file_path,
+            uploaded_by_id=uploaded_by_id,
         )
         db.add(db_file)
 

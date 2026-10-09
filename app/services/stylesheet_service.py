@@ -159,6 +159,7 @@ def _save_stylesheet_to_disk(db: Session, ss: ProjectStylesheet) -> str | None:
                     chapter_id=ce_chapter.id,
                     category="Style sheet template",
                     is_original=True,
+                    uploaded_by_id=ss.created_by_id,
                 )
                 db.add(db_file)
                 db.commit()
