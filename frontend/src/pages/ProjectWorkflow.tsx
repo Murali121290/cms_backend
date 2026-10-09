@@ -1625,6 +1625,14 @@ export function ProjectWorkflow() {
             <BookMarked size={12} />
             Rules
           </button>
+          <button
+            onClick={() => navigate(uiPaths.projectTermLists(id))}
+            title="Term lists assigned to this project — highlighted during Language Editing"
+            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+          >
+            <BookMarked size={12} />
+            Term Lists
+          </button>
         </div>
       </div>
 

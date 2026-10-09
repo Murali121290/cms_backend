@@ -331,6 +331,10 @@ def start_language_edit_analysis(
     rules = load_rules_from_dict(project_rules_cfg.get("rules", []))
     dictionary = load_house_style_from_dict(project_rules_cfg.get("variant_to_canonical", {}))
 
+    # Compile the project's assigned term lists once (separate concern from rules).
+    from app.processing.language_editing.term_matcher import build_matcher_for_project, find_term_matches
+    compiled_term_lists = build_matcher_for_project(db, project_id=file_record.project_id)
+
     # Read paragraphs from DOCX
     try:
         _, paragraphs = docx_io.read_paragraphs(file_record.path)
@@ -350,6 +354,7 @@ def start_language_edit_analysis(
     db.commit()
 
     total_findings_count = 0
+    term_match_count = 0
     findings_to_insert = []
 
     for para_idx, text in paragraphs:
@@ -371,8 +376,38 @@ def start_language_edit_analysis(
                 message=fd.message,
                 autofixable=fd.autofixable,
                 status="pending",
+                source="rule",
             )
             findings_to_insert.append(finding_row)
+
+        # Term-list highlights (separate category, no suggestion, view-only).
+        # find_term_matches already dedupes overlapping spans across lists —
+        # one finding per span, attribution via message.
+        for tm in find_term_matches(text, compiled_term_lists):
+            term_match_count += 1
+            total_findings_count += 1
+            if tm.get("also_in_list_names"):
+                also = ", ".join(tm["also_in_list_names"])
+                msg = f"Term from list: {tm['term_list_name']} (also in: {also})"
+            else:
+                msg = f"Term from list: {tm['term_list_name']}"
+            findings_to_insert.append(LanguageEditFinding(
+                job_id=job_uuid,
+                file_id=file_record.id,
+                para_index=para_idx,
+                start_offset=tm["start"],
+                end_offset=tm["end"],
+                rule_id=f"term:{tm['term_list_id']}" + (f":{tm['term_id']}" if tm['term_id'] else ""),
+                category="term",
+                severity="info",
+                original_text=tm["matched_text"],
+                suggestion=tm["matched_text"],  # view-only, no replacement proposed
+                message=msg,
+                autofixable=False,
+                status="pending",
+                source="term",
+                term_list_id=tm["term_list_id"],
+            ))
 
     if findings_to_insert:
         db.bulk_save_objects(findings_to_insert)
@@ -384,6 +419,9 @@ def start_language_edit_analysis(
         "ok": True,
         "job_id": job_uuid,
         "total_findings": total_findings_count,
+        "rule_findings": total_findings_count - term_match_count,
+        "term_matches": term_match_count,
+        "term_lists_applied": [{"id": cl.list_id, "name": cl.list_name} for cl in compiled_term_lists],
         "file_name": file_record.filename,
     }
 
@@ -435,6 +473,8 @@ def get_job_findings(
                 "edited_text": f.edited_text,
                 "reviewer": f.reviewer,
                 "decided_at": f.decided_at.isoformat() if f.decided_at else None,
+                "source": getattr(f, "source", "rule"),
+                "term_list_id": getattr(f, "term_list_id", None),
             }
             for f in findings
         ]

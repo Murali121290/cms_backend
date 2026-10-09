@@ -40,6 +40,8 @@ import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
 import { StylesheetsPage } from '@/pages/StylesheetsPage'
 import { ProjectRulesPage } from '@/pages/ProjectRulesPage'
+import { TermLibraryPage } from '@/pages/TermLibraryPage'
+import { ProjectTermListsPage } from '@/pages/ProjectTermListsPage'
 import { ImageReviewPage } from '@/features/imageReview/ImageReviewPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import ScheduleReport from '@/Reports/ScheduleReport'
@@ -224,6 +226,9 @@ const router = createBrowserRouter([
       { path: 'projects/:projectId/stylesheets', element: <StylesheetsPage /> },
       { path: 'projects/:projectId/rules', element: <ProjectRulesPage /> },
       { path: 'clients/:clientId/projects/:projectId/rules', element: <ProjectRulesPage /> },
+      { path: 'term-lists', element: <TermLibraryPage /> },
+      { path: 'projects/:projectId/term-lists', element: <ProjectTermListsPage /> },
+      { path: 'clients/:clientId/projects/:projectId/term-lists', element: <ProjectTermListsPage /> },
       { path: 'projects/:projectId/image-review', element: <ImageReviewPage /> },
 
       // ── Settings: admin + manager only ───────────────────────────────────
