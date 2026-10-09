@@ -191,6 +191,60 @@
       "function": "passive_voice",
       "severity": "suggestion",
       "enabled": true
+    },
+    {
+      "id": "GP011",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "\\b(\\w+), (\\w+) (and|or) (\\w+)\\b",
+      "replacement": "\\1, \\2, \\3 \\4",
+      "message": "Serial (Oxford) comma: add a comma before 'and' / 'or' in a list of three or more.",
+      "severity": "suggestion",
+      "enabled": false
+    },
+    {
+      "id": "GP012",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "\"([^\"\\n]{1,120}?)\"",
+      "replacement": "'\\1'",
+      "message": "House style: use single quotes for primary quotations (book-specific).",
+      "severity": "suggestion",
+      "enabled": false
+    },
+    {
+      "id": "GP013",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "([.,])(['\"])",
+      "replacement": "\\2\\1",
+      "message": "Move the period/comma outside the closing quote (UK style).",
+      "severity": "suggestion",
+      "enabled": false
+    },
+    {
+      "id": "MC_UK_US",
+      "category": "spelling",
+      "type": "builtin",
+      "message": "Flag UK spellings and propose the US equivalent (built-in dictionary).",
+      "severity": "warning",
+      "enabled": true
+    },
+    {
+      "id": "MC_BIAS",
+      "category": "inclusive",
+      "type": "builtin",
+      "message": "Flag biased or non-inclusive terms and propose a preferred alternative.",
+      "severity": "warning",
+      "enabled": true
+    },
+    {
+      "id": "MC_COMPOUNDS",
+      "category": "compounds",
+      "type": "builtin",
+      "message": "Flag hyphenated compound variants and propose the canonical form.",
+      "severity": "suggestion",
+      "enabled": true
     }
   ]
 }

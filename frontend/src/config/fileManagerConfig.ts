@@ -176,7 +176,7 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   referenceReview:      ['Pre-editing','Pre-editing QA'],
   styleValidation:      ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
   artValidation:        ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
-  languageEdit:         ['Language Editing', 'Language Editing QA'],
+  languageEdit:         ['Pre-editing', 'Copyediting', 'Language Editing', 'Language Editing QA'],
   technicalEdit:        ['Language Editing','Language Editing QA'],
   unifiedReview:        ['Pre-editing','Pre-editing QA','Language Editing','Language Editing QA'],
   manuscriptAnalysis:   ['Manuscript Analysis'],

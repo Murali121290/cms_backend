@@ -122,72 +122,106 @@ def filter_markup_tag_findings(text: str, findings: list[Finding]) -> list[Findi
     return clean_findings
 
 
-def run_manuscript_core_rules(text: str) -> list[Finding]:
+def run_manuscript_core_rules(
+    text: str,
+    *,
+    enable_uk_us: bool = True,
+    enable_bias: bool = True,
+    enable_compounds: bool = True,
+) -> list[Finding]:
+    """Run the three built-in manuscript_core rule families.
+
+    Each family is gated by a meta-toggle (MC_UK_US / MC_BIAS / MC_COMPOUNDS in
+    the profile JSON). Defaults are True so profiles that don't declare the
+    meta-toggles behave as before.
+    """
     out: list[Finding] = []
-    
+
     # 1. UK/US Spelling Pairs
-    try:
-        from app.processing.manuscript_core.data.uk_us_pairs import UK_US_PAIRS
-        for uk, us in UK_US_PAIRS:
-            pat_uk = re.compile(r"\b" + re.escape(uk) + r"\b", re.IGNORECASE)
-            for m in pat_uk.finditer(text):
-                sug = _match_case(m.group(0), us)
-                out.append(Finding(
-                    rule_id=f"uk_us_{us}",
-                    category="spelling",
-                    start=m.start(),
-                    end=m.end(),
-                    original=m.group(0),
-                    suggestion=sug,
-                    message=f"UK/US spelling: '{m.group(0)}' -> suggested US form '{sug}'.",
-                    severity="warning"
-                ))
-    except Exception:
-        pass
-
-    # 2. Inclusive Language & Bias Terms
-    try:
-        from app.processing.manuscript_core.rules.bias_and_articles import BIAS_TERMS
-        for pat_str, label, suggestion in BIAS_TERMS:
-            pat = re.compile(r"\b" + pat_str + r"\b", re.IGNORECASE)
-            for m in pat.finditer(text):
-                out.append(Finding(
-                    rule_id=f"bias_{label}",
-                    category="bias",
-                    start=m.start(),
-                    end=m.end(),
-                    original=m.group(0),
-                    suggestion=suggestion,
-                    message=f"Inclusive Language: preferred term for '{m.group(0)}' is '{suggestion}'.",
-                    severity="warning"
-                ))
-    except Exception:
-        pass
-
-    # 3. Compound Variants
-    try:
-        from app.processing.manuscript_core.rules.compounds import COMPOUND_BASES
-        for base in COMPOUND_BASES:
-            parts = base.split()
-            if len(parts) == 2:
-                spaced = f"{parts[0]} {parts[1]}"
-                hyphenated = f"{parts[0]}-{parts[1]}"
-                pat_hyp = re.compile(r"\b" + re.escape(hyphenated) + r"\b", re.IGNORECASE)
-                for m in pat_hyp.finditer(text):
+    if enable_uk_us:
+        try:
+            from app.processing.manuscript_core.data.uk_us_pairs import UK_US_PAIRS
+            for uk, us in UK_US_PAIRS:
+                pat_uk = re.compile(r"\b" + re.escape(uk) + r"\b", re.IGNORECASE)
+                for m in pat_uk.finditer(text):
+                    sug = _match_case(m.group(0), us)
                     out.append(Finding(
-                        rule_id=f"compound_{parts[0]}_{parts[1]}",
-                        category="compounds",
+                        rule_id=f"uk_us_{us}",
+                        category="spelling",
                         start=m.start(),
                         end=m.end(),
                         original=m.group(0),
-                        suggestion=spaced,
-                        message=f"Compound term variant: '{m.group(0)}' (canonical: '{spaced}').",
-                        severity="suggestion"
+                        suggestion=sug,
+                        message=f"UK/US spelling: '{m.group(0)}' -> suggested US form '{sug}'.",
+                        severity="warning"
                     ))
-    except Exception:
-        pass
+        except Exception:
+            pass
+
+    # 2. Inclusive Language & Bias Terms
+    if enable_bias:
+        try:
+            from app.processing.manuscript_core.rules.bias_and_articles import BIAS_TERMS
+            for pat_str, label, suggestion in BIAS_TERMS:
+                pat = re.compile(r"\b" + pat_str + r"\b", re.IGNORECASE)
+                for m in pat.finditer(text):
+                    out.append(Finding(
+                        rule_id=f"bias_{label}",
+                        category="bias",
+                        start=m.start(),
+                        end=m.end(),
+                        original=m.group(0),
+                        suggestion=suggestion,
+                        message=f"Inclusive Language: preferred term for '{m.group(0)}' is '{suggestion}'.",
+                        severity="warning"
+                    ))
+        except Exception:
+            pass
+
+    # 3. Compound Variants
+    if enable_compounds:
+        try:
+            from app.processing.manuscript_core.rules.compounds import COMPOUND_BASES
+            for base in COMPOUND_BASES:
+                parts = base.split()
+                if len(parts) == 2:
+                    spaced = f"{parts[0]} {parts[1]}"
+                    hyphenated = f"{parts[0]}-{parts[1]}"
+                    pat_hyp = re.compile(r"\b" + re.escape(hyphenated) + r"\b", re.IGNORECASE)
+                    for m in pat_hyp.finditer(text):
+                        out.append(Finding(
+                            rule_id=f"compound_{parts[0]}_{parts[1]}",
+                            category="compounds",
+                            start=m.start(),
+                            end=m.end(),
+                            original=m.group(0),
+                            suggestion=spaced,
+                            message=f"Compound term variant: '{m.group(0)}' (canonical: '{spaced}').",
+                            severity="suggestion"
+                        ))
+        except Exception:
+            pass
 
     return out
+
+
+# Meta-toggles for the three manuscript_core rule families. When these rule
+# ids appear in a profile's rules list with `enabled: false`, the matching
+# family is skipped. When absent, the family runs (backwards compatible).
+_META_RULE_IDS = {
+    "MC_UK_US": "enable_uk_us",
+    "MC_BIAS": "enable_bias",
+    "MC_COMPOUNDS": "enable_compounds",
+}
+
+
+def _resolve_manuscript_core_toggles(rules: list[Rule]) -> dict[str, bool]:
+    toggles = {kw: True for kw in _META_RULE_IDS.values()}
+    for r in rules:
+        kw = _META_RULE_IDS.get(r.id)
+        if kw is not None:
+            toggles[kw] = bool(r.enabled)
+    return toggles
 
 
 def analyze(
@@ -204,6 +238,9 @@ def analyze(
     for r in rules:
         if not r.enabled:
             continue
+        if r.id in _META_RULE_IDS:
+            # Meta-toggles are gating flags, not analysable rules.
+            continue
         if r.type == "regex":
             findings.extend(run_regex_rule(r, text))
         elif r.type == "dictionary":
@@ -211,6 +248,7 @@ def analyze(
         elif r.type == "function":
             findings.extend(run_function_rule(r, sents))
 
-    findings.extend(run_manuscript_core_rules(text))
+    mc_toggles = _resolve_manuscript_core_toggles(rules)
+    findings.extend(run_manuscript_core_rules(text, **mc_toggles))
     resolved = resolve_overlaps(findings)
     return filter_markup_tag_findings(text, resolved)
