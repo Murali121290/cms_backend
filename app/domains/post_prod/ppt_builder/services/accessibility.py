@@ -23,14 +23,18 @@ def check_ppt_accessibility(file_path):
     issues = []
 
     for slide_index, slide in enumerate(prs.slides, start=1):
+        # Check slide title
         if not slide.shapes.title or not slide.shapes.title.text.strip():
             issues.append({"slide": slide_index, "category": "Missing Slide Title", "severity": "Error", "detail": "Slide is missing a title shape."})
 
         for shape in slide.shapes:
+
+            # Check empty text boxes
             if hasattr(shape, "text"):
                 if not shape.text.strip():
                     issues.append({"slide": slide_index, "category": "Empty Text Box", "severity": "Tip", "detail": "An empty text box was found on the slide."})
 
+            # Check font sizes
             if shape.has_text_frame:
                 for para in shape.text_frame.paragraphs:
                     for run in para.runs:
@@ -39,14 +43,17 @@ def check_ppt_accessibility(file_path):
                             if font_size < MIN_FONT_SIZE:
                                 issues.append({"slide": slide_index, "category": "Small Font Size", "severity": "Tip", "detail": f"Small font ({font_size}pt) used in text '{run.text}'"})
 
+                        # Check generic hyperlink text
                         if run.hyperlink.address:
                             if run.text.lower() in GENERIC_LINK_TEXT:
                                 issues.append({"slide": slide_index, "category": "Generic Hyperlink Text", "severity": "Warning", "detail": f"Generic hyperlink text '{run.text}' used."})
 
+            # Check reading order (title should be read first)
             if slide.shapes.title and len(slide.shapes) > 0:
                 if slide.shapes[0] != slide.shapes.title:
                     issues.append({"slide": slide_index, "category": "Reading Order Issue", "severity": "Warning", "detail": "Title is not the first element read by screen readers."})
 
+            # Check images alt text
             if shape.shape_type == 13:  # Picture
                 try:
                     descr = (shape._element.nvPicPr.cNvPr.get('descr') or '').strip()
@@ -55,6 +62,7 @@ def check_ppt_accessibility(file_path):
                 if not descr:
                     issues.append({"slide": slide_index, "category": "Missing Alt Text", "severity": "Error", "detail": "Image is missing meaningful alt text."})
 
+            # Check tables
             if shape.has_table:
                 table = shape.table
                 first_row_empty = all(
@@ -66,6 +74,7 @@ def check_ppt_accessibility(file_path):
                 elif header_style_disabled:
                     issues.append({"slide": slide_index, "category": "Missing Table Header", "severity": "Warning", "detail": "Table has header text, but header row styling is disabled."})
                     
+            # Color Contrast Warning (WCAG 2.1 Contrast Ratio Check)
             if hasattr(shape, "fill") and shape.fill.type == 1: # SOLID
                 try:
                     bg_color = shape.fill.fore_color.rgb
@@ -88,6 +97,7 @@ def check_ppt_accessibility(file_path):
                 except Exception:
                     pass
 
+            # Check for audio/video media subtitles
             is_media = (
                 (hasattr(shape, "shape_type") and int(shape.shape_type) in [16, 24]) or 
                 "video" in shape.name.lower() or 
@@ -102,15 +112,17 @@ def check_ppt_accessibility(file_path):
                     "detail": f"Media element '{shape.name}' was found. Ensure it has subtitles, closed captions, or a text transcript."
                 })
 
+            # Check text overflow
             if shape.has_text_frame and shape.text_frame.text.strip():
                 import math
                 tf = shape.text_frame
                 width_pt = shape.width / 12700
                 height_pt = shape.height / 12700
 
-                lIns = 91440 / 12700
+                # PPTX default internal margins (in EMU → pt)
+                lIns = 91440 / 12700   # 7.2pt
                 rIns = 91440 / 12700
-                tIns = 45720 / 12700
+                tIns = 45720 / 12700   # 3.6pt
                 bIns = 45720 / 12700
                 bodyPr = tf._txBody.find("{http://schemas.openxmlformats.org/drawingml/2006/main}bodyPr")
                 sp_autofit = False
@@ -123,6 +135,8 @@ def check_ppt_accessibility(file_path):
                     sp_autofit   = bodyPr.find("{http://schemas.openxmlformats.org/drawingml/2006/main}spAutoFit") is not None
                     norm_autofit = bodyPr.find("{http://schemas.openxmlformats.org/drawingml/2006/main}normAutofit") is not None
 
+                # spAutoFit: shape expands to fit — no overflow possible, skip entirely.
+                # normAutofit: text shrinks to fit — flag separately as a readability issue.
                 if sp_autofit:
                     pass
                 else:
@@ -144,6 +158,7 @@ def check_ppt_accessibility(file_path):
                         if not text.strip():
                             continue
 
+                        # Sub-bullet indentation reduces available width per paragraph
                         pPr = para._p.find("{http://schemas.openxmlformats.org/drawingml/2006/main}pPr")
                         mar_l_pt = 0.0
                         if pPr is not None and pPr.get("marL"):
@@ -161,6 +176,8 @@ def check_ppt_accessibility(file_path):
 
                         total_est_h += lines * (pt_sz * ls) + sb + sa
 
+                    # normAutofit: any overflow causes shrinking — use 0pt grace.
+                    # noAutofit: use 5pt grace to absorb estimation error.
                     threshold = 0.0 if norm_autofit else 5.0
                     if total_est_h > avail_h + threshold:
                         if norm_autofit:
@@ -178,6 +195,8 @@ def check_ppt_accessibility(file_path):
                                 "detail": f"Text in '{shape.name}' potentially overflows shape bounds (requires ~{total_est_h:.1f}pt, shape height {height_pt:.1f}pt)."
                             })
 
+        # Check shapes that extend beyond slide boundaries (content gets clipped).
+        # Skip spAutoFit shapes — template decorative elements commonly use this and bleed off-edge intentionally.
         for shape in slide.shapes:
             if not shape.width or not shape.height:
                 continue
@@ -207,12 +226,14 @@ def check_ppt_accessibility(file_path):
                     "detail": f"Shape '{shape.name}' extends {bottom_pt - slide_h_pt:.1f}pt below the bottom edge of the slide — content will be clipped."
                 })
 
+        # Check overlaps between text and image shapes on this slide
         spatial_shapes = []
         for shape in slide.shapes:
             if not shape.width or not shape.height:
                 continue
             w_pt = shape.width / 12700
             h_pt = shape.height / 12700
+            # Skip background elements (width or height > 90% of slide dimensions)
             if w_pt > 864 or h_pt > 486:
                 continue
             has_text = shape.has_text_frame and shape.text_frame.text.strip()
@@ -230,6 +251,8 @@ def check_ppt_accessibility(file_path):
             for idx2 in range(idx1 + 1, len(spatial_shapes)):
                 s1 = spatial_shapes[idx1]
                 s2 = spatial_shapes[idx2]
+                # Only flag when a picture overlaps a text shape — decorative
+                # shape-on-shape overlaps (two rectangles, two text boxes) are intentional layout.
                 if not (s1["is_pic"] ^ s2["is_pic"]):
                     continue
                 box1 = s1["box"]
@@ -251,6 +274,7 @@ def check_ppt_accessibility(file_path):
                             "detail": f"Shape '{s1['name']}' overlaps with shape '{s2['name']}' by {overlap_w:.1f}pt x {overlap_h:.1f}pt."
                         })
 
+    # Check for duplicate slide titles
     title_map = {}
     for slide_index, slide in enumerate(prs.slides, start=1):
         if slide.shapes.title and slide.shapes.title.text.strip():
@@ -270,13 +294,14 @@ def check_ppt_accessibility(file_path):
                     "detail": f"This slide has the same title as slide(s): {', '.join(other_slides)}."
                 })
 
+    # Check for duplicate slides (identically matched content)
     slide_contents = []
     for slide_index, slide in enumerate(prs.slides, start=1):
         texts = []
         for shape in slide.shapes:
             if shape.has_text_frame:
                 texts.append(shape.text_frame.text.strip())
-            elif shape.shape_type == 13:
+            elif shape.shape_type == 13:  # Picture
                 texts.append(f"[Image:{shape.name}]")
         content_sig = "||".join(sorted(texts))
         slide_contents.append((slide_index, content_sig))
@@ -300,3 +325,14 @@ def check_ppt_accessibility(file_path):
                 })
 
     return issues
+
+if __name__ == "__main__":
+    file_path = "sample.pptx"
+    results = check_ppt_accessibility(file_path)
+
+    if results:
+        print("Accessibility Issues Found:")
+        for issue in results:
+            print(f"- Slide {issue['slide']}: {issue['category']} - {issue['detail']}")
+    else:
+        print("No accessibility issues found.")

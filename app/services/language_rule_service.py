@@ -100,7 +100,6 @@ def save_project_language_rules(
     profile_name: Optional[str] = None,
     changed_by_id: Optional[int] = None,
     note: Optional[str] = None,
-    uploaded_by_id: Optional[int] = None
 ) -> dict[str, Any]:
     """Write the per-project rules selection to the project's CE Support folder.
 
@@ -164,9 +163,6 @@ def save_project_language_rules(
                 previous_rules = json.load(f)
         except Exception as exc:
             logger.warning("Could not read previous rules JSON at %s: %s", file_path, exc)
-    ce_template_dir = get_project_language_rules_dir(project.project_code, project.client_name or "unknown")
-    filename = f"{project.project_code}_language_rules.json"
-    file_path = os.path.join(ce_template_dir, filename)
 
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(rule_data, f, indent=2, ensure_ascii=False)
@@ -258,6 +254,8 @@ def _ensure_ce_support_chapter(db: Session, project):
 
 # ─── Read (disk-first with profile fallback) ──────────────────────────────────
 
+# ─── Read (disk-first with profile fallback) ──────────────────────────────────
+
 def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any]:
     """Return per-project rules from the project's CE Support JSON.
 
@@ -281,16 +279,6 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
                 return data
             except Exception as exc:
                 logger.warning("Error reading language rules JSON at %s: %s", file_path, exc)
-    ce_template_dir = get_project_language_rules_dir(project.project_code, project.client_name or "unknown")
-    filename = f"{project.project_code}_language_rules.json"
-    file_path = os.path.join(ce_template_dir, filename)
-
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as exc:
-            logger.warning("Error reading language rules JSON at %s: %s", file_path, exc)
 
     profiles = get_available_style_profiles()
     default_data = dict(profiles.get("uk", {}))

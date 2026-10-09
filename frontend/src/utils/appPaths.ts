@@ -70,6 +70,9 @@ export const uiPaths = {
     `/projects/${projectId}/stylesheets`,
   projectRules: (projectId: number | string) =>
     `/projects/${projectId}/rules`,
+  projectTermLists: (projectId: number | string) =>
+    `/projects/${projectId}/term-lists`,
+  termLibrary: () => '/term-lists',
 } as const;
 
 export const ssrPaths = {
