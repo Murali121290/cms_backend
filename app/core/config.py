@@ -99,8 +99,8 @@ class Settings(BaseSettings):
     BOD_FTP_HOST: str = ""
     BOD_FTP_USERNAME: str = ""
     BOD_FTP_PASSWORD: str = ""
-    BOD_FTP_BASE_PATH: str = "BOD"
-    BOD_FTP_DELIVERY_PATH: str = "/BOD/Delivery"
+    BOD_FTP_BASE_PATH: str = "Input"
+    BOD_FTP_DELIVERY_PATH: str = "Delivery"
     BOD_MANAGER_EMAIL: str = ""
     BOD_CUSTOM_STAGES: str = "Add job,Production,QC,Archive"
 
