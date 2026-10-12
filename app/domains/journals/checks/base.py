@@ -13,16 +13,17 @@ SEVERITIES = ("error", "warning", "info")
 
 # Check key -> stage number the check belongs to. Stage gates block on open
 # errors from checks at or before the article's current stage.
-# Stage 1 (Pre-Editing) runs its four checks as gated steps, in this order (pre_editing.STEPS).
+# Stage 1: MS Analysis & ELOG; Stage 2: Pre-Editing (4 gated steps: structuring, references, ia_rules, technical).
 CHECK_STAGES: Dict[str, int] = {
-    "structuring": 1,
-    "references": 1,
-    "ia_rules": 1,
-    "technical": 1,
-    "language": 2,
-    "xml": 3,
-    "indesign_qc": 5,
-    "proof": 6,
+    "ms_analysis": 1,
+    "structuring": 2,
+    "references": 2,
+    "ia_rules": 2,
+    "technical": 2,
+    "language": 3,
+    "xml": 4,
+    "indesign_qc": 6,
+    "proof": 7,
 }
 
 

@@ -13,11 +13,26 @@ import { cn } from '@/utils/cn'
 export const shortStage = (name: string) => name.replace(/^\d+\.\s*/, '')
 export const stageNumber = (name: string) => Number.parseInt(name, 10) || 0
 
-/** Stage numbers of the 7-stage pipeline (Pre-Editing includes the technical checks). */
-export const STAGE = { PRE_EDITING: 1, LANGUAGE: 2, XML: 3, INDESIGN: 4, INDESIGN_QC: 5, PROOF: 6, DELIVERY: 7 } as const
+/** Stage numbers of the 8-stage pipeline (Stage 1 is MS Analysis & ELOG). */
+export const STAGE = {
+  MS_ANALYSIS: 1,
+  PRE_EDITING: 2,
+  LANGUAGE: 3,
+  XML: 4,
+  INDESIGN: 5,
+  INDESIGN_QC: 6,
+  PROOF: 7,
+  DELIVERY: 8,
+} as const
 export const STAGE_NAMES = [
-  '1. Pre-Editing', '2. Language Editing', '3. XML Conversion', '4. Generate InDesign',
-  '5. InDesign Final QC', '6. View Proof', '7. Final Delivery',
+  '1. MS Analysis & ELOG',
+  '2. Pre-Editing',
+  '3. Language Editing',
+  '4. XML Conversion',
+  '5. Generate InDesign',
+  '6. InDesign Final QC',
+  '7. View Proof',
+  '8. Final Delivery',
 ]
 
 export function initials(name: string) {

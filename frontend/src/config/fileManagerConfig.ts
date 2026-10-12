@@ -164,10 +164,18 @@ export type ProcessingActionKey =
   | 'structuring' | 'structuringQa' | 'referenceValidation' | 'referenceReview'
   | 'languageEdit' | 'technicalEdit' | 'unifiedReview'
   | 'manuscriptAnalysis'
-  | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
+  | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml' | 'wordToIndesign'
   | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'styleValidation' | 'artValidation'
 
-const PRODUCTION_STAGES = ['XML Conversion', 'Typesetting', 'Proofreading']
+const PRODUCTION_STAGES = [
+  'XML Conversion',
+  'Typesetting',
+  'Typesetting / Layout',
+  'Typesetting (Revised)',
+  'Non-XML Conversion',
+  'Non-XML Processing',
+  'Proofreading'
+]
 
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
   structuring:          ['Pre-editing','Pre-editing QA'],
@@ -184,6 +192,7 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   aiCreditExtraction:   ['Digital Processing'],
   biasScan:             ['Digital Processing'],
   wordToXml:            PRODUCTION_STAGES,
+  wordToIndesign:       PRODUCTION_STAGES,
   xmlToIndesign:        PRODUCTION_STAGES,
   indesignToXml:        PRODUCTION_STAGES,
   viewProof:            PRODUCTION_STAGES

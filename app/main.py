@@ -90,6 +90,7 @@ app.include_router(xml_conversion_router, prefix="/api/v2/post-prod", tags=["XML
 # Journal Production Router
 from app.domains.journals.router import router as journals_router
 app.include_router(journals_router, prefix="/api/v2", tags=["Journal Production"])
+app.include_router(journals_router, prefix="/api", tags=["Journal Production Fallback"], include_in_schema=False)
 
 # Books on Demand Router
 from app.domains.books_on_demand.router import router as bod_router

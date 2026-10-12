@@ -147,14 +147,68 @@ export interface JournalArticleRow {
   created_at: string
 }
 
+export interface AuthorQuery {
+  id: string
+  category: string
+  query: string
+  status: string
+}
+
+export interface ChecklistItem {
+  step: number
+  title: string
+  status: 'pass' | 'warning'
+  details: string
+}
+
+export interface MsAnalysisState {
+  article_id: number
+  title: string
+  doi: string
+  lead_author: string
+  journal_code: string
+  journal_title: string
+  client_code: string
+  publisher_name: string
+  word_count: number
+  estimated_pages: number
+  paragraphs_count: number
+  table_count: number
+  imrad_sections?: Record<string, boolean>
+  declarations: Record<string, { present: boolean; label: string; snippet?: string; status: string; message: string }>
+  figures: { label: string; number: string; called_in_text: boolean; matched_file?: string; status: 'ok' | 'missing_file' }[]
+  tables: { label: string; number: string; called_in_text: boolean; status: string }[]
+  citations_count: number
+  references_count: number
+  le_error_count: number
+  le_density: number
+  le_recommended_level: string
+  le_chosen_level: string
+  sample_language_issues?: { type: string; message: string; snippet: string }[]
+  author_queries: AuthorQuery[]
+  checklist: ChecklistItem[]
+  elog_html?: string
+  analyzed_at: string
+}
+
 export interface ArticleWorkspace {
-  article: { id: number; journal_id: number; article_title: string; article_doi?: string; current_stage: string; status: string }
+  article: {
+    id: number
+    journal_id: number
+    article_title: string
+    article_doi?: string
+    current_stage: string
+    status: string
+    complexity_level?: string
+    le_level?: string
+  }
   journal: { id: number; journal_code: string; journal_title: string } | null
   stages: ArticleStageStatus[]
   xhtml: { file: { id: number; filename: string; version: number }; content: string } | null
   /** Latest JATS XML version (Stage 4 onwards); the editor shows the XML tab once it exists. */
   jats: JournalFileInfo | null
   proof_pdf?: JournalFileInfo | null
+  ms_analysis?: MsAnalysisState | null
   pre_editing: PreEditingState
   check_runs: Partial<Record<string, { status: string; rules_total: number; rules_passed: number; finished_at?: string }>>
   open_issues: Partial<Record<string, Record<'error' | 'warning' | 'info', number>>>
@@ -713,6 +767,27 @@ export const journalsApi = {
   },
   updateDelay: async (articleId: number, data: { delay_category: string; revised_due_date: string; delay_days?: number; delay_reason: string }): Promise<any> => {
     const res = await apiClient.patch(`/journals/articles/${articleId}/delay`, data)
+    return res.data
+  },
+  runMsAnalysis: async (articleId: number): Promise<MsAnalysisState> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/ms-analysis/run`)
+    return res.data
+  },
+  getMsAnalysis: async (articleId: number): Promise<MsAnalysisState> => {
+    const res = await apiClient.get(`/journals/articles/${articleId}/ms-analysis`)
+    return res.data
+  },
+  getElog: async (articleId: number): Promise<{ article_id: number; elog_html: string; author_queries: AuthorQuery[]; le_chosen_level: string; checklist: ChecklistItem[] }> => {
+    const res = await apiClient.get(`/journals/articles/${articleId}/elog`)
+    return res.data
+  },
+  elogDownloadUrl: (articleId: number) => `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/elog/download`,
+  setLeLevel: async (articleId: number, le_level: string, reason?: string): Promise<{ status: string; le_level: string }> => {
+    const res = await apiClient.put(`/journals/articles/${articleId}/le-level`, { le_level, reason })
+    return res.data
+  },
+  completeMsAnalysis: async (articleId: number): Promise<any> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/ms-analysis/complete`)
     return res.data
   },
 }

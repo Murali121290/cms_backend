@@ -4449,7 +4449,7 @@ def api_v2_start_batch_jobs(
     
     # Resolve batch options dictionary
     batch_options = payload.options or {}
-    if payload.process_type == "xml_to_indesign" and "template_file_id" not in batch_options:
+    if payload.process_type in ("xml_to_indesign", "word_to_indesign") and "template_file_id" not in batch_options:
         try:
             from app.services import stylesheet_service
             active_ss = stylesheet_service.get_active_stylesheet_for_project(db, project_id=project.id)
@@ -4457,7 +4457,7 @@ def api_v2_start_batch_jobs(
                 file_ids = stylesheet_service._deserialize_file_ids(active_ss.analyzed_file_ids)
                 if file_ids:
                     batch_options["template_file_id"] = file_ids[0]
-                    logger.info(f"Resolved default template_file_id={file_ids[0]} from active stylesheet for batch XML to InDesign.")
+                    logger.info(f"Resolved default template_file_id={file_ids[0]} from active stylesheet for batch {payload.process_type}.")
         except Exception as ss_err:
             logger.warning(f"Failed to resolve stylesheet template: {ss_err}")
             
@@ -4484,6 +4484,9 @@ def api_v2_start_batch_jobs(
     target_extensions = []
     
     if payload.process_type == "word_to_xml":
+        target_category = "Manuscript"
+        target_extensions = [".docx"]
+    elif payload.process_type == "word_to_indesign":
         target_category = "Manuscript"
         target_extensions = [".docx"]
     elif payload.process_type == "xml_to_indesign":
@@ -4925,6 +4928,7 @@ def api_v2_processing_status(
         "bias_scan",
         "credit_extractor_ai",
         "word_to_xml",
+        "word_to_indesign",
         "indesign_to_xml",
         "xml_to_indesign",
         "style_validation",

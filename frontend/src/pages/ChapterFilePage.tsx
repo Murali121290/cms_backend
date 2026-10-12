@@ -39,7 +39,7 @@ import {
   startProcessingJob,
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
+  startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -280,11 +280,12 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId,
+  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId,
 }: {
   row: FileRow | null
   onOpenReferenceCheck: (file: FileRecord) => void
   onOpenXmlToIndesign: (fileId: number, fileName: string) => void
+  onOpenWordToIndesign?: (fileId: number, fileName: string) => void
   onOpenArtValidation: (fileId: number, fileName: string) => void
   onOpenLanguageEdit?: (fileId: number, fileName: string) => void
   stageName: string
@@ -504,6 +505,20 @@ function ProcessingActionsMenu({
             onClick={() => fid && setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' })}
           >
             <FileCode size={12} /> Word to XML
+          </button>
+        )}
+
+        {showAction('wordToIndesign') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={() => {
+              if (fid) {
+                onOpenWordToIndesign?.(fid, row?.file_name || '')
+              }
+            }}
+          >
+            <Layers size={12} /> Word to InDesign
           </button>
         )}
 
@@ -735,7 +750,7 @@ export function ChapterFilePage({
   const [batchBusy, setBatchBusy] = useState<string | null>(null)
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
   const queryClient = useQueryClient()
-  const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string } | null>(null)
+  const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string; processType?: 'xml_to_indesign' | 'word_to_indesign' } | null>(null)
   const [artValidationFile, setArtValidationFile] = useState<{ id: number; name: string } | null>(null)
   const [langEditFile, setLangEditFile] = useState<{ id: number; name: string } | null>(null)
 
@@ -1287,18 +1302,23 @@ export function ChapterFilePage({
     }
   }
 
-  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation') {
+  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation' | 'word_to_indesign') {
     if (selectedCount === 0 || batchBusy) return
     setBatchBusy(processType)
     try {
-      const apiFn = processType === 'word_to_xml' ? startWordToXml : startStyleValidation
+      const apiFn = processType === 'word_to_xml'
+        ? startWordToXml
+        : processType === 'word_to_indesign'
+          ? startWordToIndesign
+          : startStyleValidation
       await Promise.all(
         selectedRows
           .filter(r => r.db_id)
           .map(r => apiFn(r.db_id!))
       )
+      const label = processType === 'word_to_xml' ? 'Word to XML' : processType === 'word_to_indesign' ? 'Word to InDesign' : 'Style Validation'
       toast.success(
-        `Successfully started ${processType === 'word_to_xml' ? 'Word to XML' : 'Style Validation'} for ${selectedCount} file(s)`
+        `Successfully started ${label} for ${selectedCount} file(s)`
       )
       void filesQuery.refetch()
     } catch (e: any) {
@@ -1419,6 +1439,21 @@ export function ChapterFilePage({
           >
             {batchBusy === 'word_to_xml' ? <Loader2 size={12} className="animate-spin" /> : <FileCode size={12} />}
             {batchBusy === 'word_to_xml' ? 'Processing…' : 'Batch Word to XML'}
+          </button>
+        )}
+
+        {/* Batch Word to InDesign - Manuscript folder only */}
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && (
+          <button
+            onClick={() => void handleBatchProcess('word_to_indesign')}
+            disabled={!!batchBusy}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+              ${!batchBusy
+                ? 'border-primary text-primary hover:bg-accent'
+                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+          >
+            {batchBusy === 'word_to_indesign' ? <Loader2 size={12} className="animate-spin" /> : <Layers size={12} />}
+            {batchBusy === 'word_to_indesign' ? 'Processing…' : 'Batch Word to InDesign'}
           </button>
         )}
 
@@ -1582,7 +1617,8 @@ export function ChapterFilePage({
                 <ProcessingActionsMenu
                   row={selectedCount === 1 ? selectedRows[0] : null}
                   onOpenReferenceCheck={setRefCheckFile}
-                  onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName })}
+                  onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'xml_to_indesign' })}
+                  onOpenWordToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'word_to_indesign' })}
                   onOpenArtValidation={(fileId, fileName) => setArtValidationFile({ id: fileId, name: fileName })}
                   onOpenLanguageEdit={(fileId, fileName) => setLangEditFile({ id: fileId, name: fileName })}
                   stageName={resolvedStageName}
@@ -1750,13 +1786,14 @@ export function ChapterFilePage({
         </div>
       )}
 
-      {/* ── XML to InDesign Conversion Modal ────────────────────────────── */}
+      {/* ── XML / Word to InDesign Conversion Modal ────────────────────────────── */}
       {xmlToIndesignFile && (
         <XmlToIndesignModal
           isOpen={xmlToIndesignFile !== null}
           onClose={() => setXmlToIndesignFile(null)}
           fileId={xmlToIndesignFile.id}
           fileName={xmlToIndesignFile.name}
+          processType={xmlToIndesignFile.processType || 'xml_to_indesign'}
           projectId={pid}
           onComplete={invalidateFiles}
         />

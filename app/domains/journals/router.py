@@ -1,5 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -581,6 +581,76 @@ def get_article_files(article_id: int, db: Session = Depends(get_db)):
     return files
 
 
+# --- Stage 1: Manuscript Analysis & ELOG ---
+class LeLevelUpdateBody(BaseModel):
+    le_level: str
+    reason: Optional[str] = None
+
+
+@router.post("/articles/{article_id}/ms-analysis/run")
+def run_article_ms_analysis(article_id: int, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Runs or re-runs Stage 1 Manuscript Analysis & ELOG generation."""
+    from app.domains.journals.ms_analysis import analyze_manuscript
+    article = _get_article(db, article_id)
+    return analyze_manuscript(db, article)
+
+
+@router.get("/articles/{article_id}/ms-analysis")
+def get_article_ms_analysis_endpoint(article_id: int, db: Session = Depends(get_db)):
+    """Gets Stage 1 Manuscript Analysis and 7-step checklist state."""
+    from app.domains.journals.ms_analysis import get_ms_analysis
+    article = _get_article(db, article_id)
+    return get_ms_analysis(db, article)
+
+
+@router.get("/articles/{article_id}/elog")
+def get_article_elog(article_id: int, db: Session = Depends(get_db)):
+    """Gets the Editorial Log (ELOG) report HTML and metadata."""
+    from app.domains.journals.ms_analysis import get_ms_analysis
+    article = _get_article(db, article_id)
+    analysis = get_ms_analysis(db, article)
+    return {
+        "article_id": article.id,
+        "elog_html": analysis.get("elog_html"),
+        "author_queries": analysis.get("author_queries", []),
+        "le_chosen_level": analysis.get("le_chosen_level"),
+        "checklist": analysis.get("checklist", [])
+    }
+
+
+@router.get("/articles/{article_id}/elog/download")
+def download_article_elog(article_id: int, db: Session = Depends(get_db)):
+    """Downloads the ELOG HTML report as an attachment."""
+    from app.domains.journals.ms_analysis import get_ms_analysis
+    article = _get_article(db, article_id)
+    analysis = get_ms_analysis(db, article)
+    html_content = analysis.get("elog_html", "<html><body>No ELOG generated</body></html>")
+    filename = f"Article_{article.id}_ELOG.html"
+    return Response(
+        content=html_content,
+        media_type="text/html",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""}
+    )
+
+
+@router.put("/articles/{article_id}/le-level")
+def update_article_le_level(article_id: int, body: LeLevelUpdateBody, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Updates the Advisory Language Editing Level (Light, Medium, Heavy) and updates ELOG."""
+    from app.domains.journals.ms_analysis import set_le_level
+    article = _get_article(db, article_id)
+    return set_le_level(db, article, body.le_level, body.reason)
+
+
+@router.post("/articles/{article_id}/ms-analysis/complete")
+def complete_article_ms_analysis(article_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Completes Stage 1 (MS Analysis & ELOG) and advances article to Stage 2 (Pre-Editing)."""
+    from app.domains.journals.ms_analysis import complete_ms_analysis_stage
+    article = _get_article(db, article_id)
+    res = complete_ms_analysis_stage(db, article, user_id=user.id)
+    _queue_structuring(background_tasks, article.id, user.id)
+    return res
+
+
 @router.post("/articles/{article_id}/process-pre-editing")
 def process_pre_editing_xhtml(article_id: int, restructure: bool = False, db: Session = Depends(get_db),
                               user=Depends(require_journal_user)):
@@ -973,6 +1043,8 @@ def article_workspace(article_id: int, db: Session = Depends(get_db)):
         "article": {
             "id": article.id, "journal_id": article.journal_id, "article_title": article.article_title,
             "article_doi": article.article_doi, "current_stage": article.current_stage, "status": article.status,
+            "complexity_level": article.complexity_level,
+            "le_level": (article.extracted_metadata or {}).get("le_level") or article.complexity_level or "Level 2 – Medium",
         },
         "journal": {"id": journal.id, "journal_code": journal.journal_code, "journal_title": journal.journal_title} if journal else None,
         "stages": [ArticleStageStatus(stage_number=s.stage_number, stage_name=s.stage_name, stage_status=s.stage_status,
@@ -980,6 +1052,7 @@ def article_workspace(article_id: int, db: Session = Depends(get_db)):
         "xhtml": {"file": _file_info(xhtml_row), "content": xhtml} if xhtml is not None else None,
         "jats": _file_info(jats_row) if jats_row else None,  # the editor shows the XML tab once this exists
         "proof_pdf": _file_info(proof_row) if proof_row else None,
+        "ms_analysis": _ms_analysis_status(db, article),
         "pre_editing": _pre_editing_status(db, article),
         "check_runs": last_runs,
         "open_issues": _open_counts(db, article_id, list(CHECK_STAGES)),
@@ -988,6 +1061,15 @@ def article_workspace(article_id: int, db: Session = Depends(get_db)):
         # Saved in a book review page since the last XHTML: the editor offers to refresh.
         "working_copy_changed": _working_copy_changed(article),
     }
+
+
+def _ms_analysis_status(db, article):
+    from app.domains.journals.ms_analysis import get_ms_analysis
+    try:
+        return get_ms_analysis(db, article)
+    except Exception as e:
+        logger.warning("Error getting MS analysis for article %s: %s", article.id, e)
+        return None
 
 
 def _pre_editing_status(db, article):
@@ -1845,7 +1927,11 @@ async def upload_articles(journal_id: int, background_tasks: BackgroundTasks, fi
                                figure_number=figure_from_name(item["filename"]) if is_art else None))
         db.commit()
         initialize_article_stages(db, article)
-        _queue_structuring(background_tasks, article.id, user.id)
+        try:
+            from app.domains.journals.ms_analysis import analyze_manuscript
+            analyze_manuscript(db, article)
+        except Exception as e:
+            logger.warning("Could not auto-analyze manuscript for article %s: %s", article.id, e)
         created.append({"id": article.id, "article_title": article.article_title, "article_doi": article.article_doi,
                         "current_stage": article.current_stage, "filename": name})
     return {"created": created, "failed": failed}

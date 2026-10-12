@@ -98,10 +98,10 @@ def run_check(db: Session, article: JournalArticle, key: str, user_id: Optional[
 
 # Output a stage must have produced before the article can leave it.
 STAGE_OUTPUTS = {
-    1: ("xhtml_path", "Run pre-editing to convert the manuscript to XHTML"),
-    3: ("jats_xml_path", "Convert the article to JATS XML"),
-    4: ("indesign_path", "Generate the InDesign layout"),
-    6: ("proof_pdf_path", "Generate a proof PDF"),
+    2: ("xhtml_path", "Run pre-editing to convert the manuscript to XHTML"),
+    4: ("jats_xml_path", "Convert the article to JATS XML"),
+    5: ("indesign_path", "Generate the InDesign layout"),
+    7: ("proof_pdf_path", "Generate a proof PDF"),
 }
 
 
