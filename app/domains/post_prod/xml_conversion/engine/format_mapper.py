@@ -20,6 +20,8 @@ def convert_s4c_to_target(s4c_xml: str, target_format: str) -> str:
         return _convert_to_jats(s4c_xml)
     elif target == "BITS":
         return _convert_to_bits(s4c_xml)
+    elif target == "XML":
+        return s4c_xml
     else:
         raise ValueError(f"Unsupported target format: {target_format}")
 

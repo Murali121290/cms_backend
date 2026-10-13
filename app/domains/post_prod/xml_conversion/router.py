@@ -25,7 +25,7 @@ router = APIRouter(prefix="/xml-conversion", tags=["XML Conversion"], dependenci
 async def create_xml_conversion_project(
     client_code: str = Form(...),
     project_name: str = Form(...),
-    target_format: str = Form("JATS"),
+    target_format: str = Form("XML"),
     file: UploadFile = File(...),
     db: Session = Depends(database.get_db),
     current_user: dict = Depends(get_current_user_from_cookie)
@@ -52,7 +52,7 @@ async def create_xml_conversion_project(
     project = PostProdXMLConversionProject(
         client_code=client_code,
         project_name=project_name,
-        target_format=target_format,
+        target_format=target_format or "XML",
         status="Active",
         filename=file.filename,
         filepath=filepath,
@@ -205,10 +205,11 @@ def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(
     url = os.environ.get("PDF2XML_API_URL")
     if not url:
         raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
+    return_xml_val = "rawxml" if format.upper() == "XML" else format.lower()
     params = {
         "engine": "docling",
         "targets": "json,xml,jats,bits",
-        "return_xml": format.lower()
+        "return_xml": return_xml_val
     }
     
     try:
@@ -439,7 +440,7 @@ def validate_xml_endpoint(project_id: int, req: ValidateRequest, db: Session = D
     # DTD Validation only for final XML for now
     if is_well_formed and req.xmlType == "final":
         from app.domains.post_prod.xml_conversion.validators.dtd_validator import validate_xml
-        v_errors = validate_xml(xml_filepath, project.target_format or "JATS")
+        v_errors = validate_xml(xml_filepath, project.target_format or "XML")
         for err in v_errors:
             if err["error_type"] == "DTD":
                 is_dtd_valid = False
