@@ -30,13 +30,13 @@ import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileMan
 import { BulkUploadModal } from '@/components/BulkUploadModal'
 import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
-import { TagSetSelectModal } from '@/features/projects/components/TagSetSelectModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import { ArtValidationModal } from '@/components/ArtValidationModal'
 import { LanguageEditReviewModal } from '@/features/language_edit/LanguageEditReviewModal'
 
 import {
   startProcessingJob,
+  startStructuring,
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
   startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
@@ -280,7 +280,7 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId,
+  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId, clientName,
 }: {
   row: FileRow | null
   onOpenReferenceCheck: (file: FileRecord) => void
@@ -292,17 +292,22 @@ function ProcessingActionsMenu({
   isAssigned: boolean
   projectId: number
   chapterId: number
+  clientName?: string
 }) {
 
   const navigate = useNavigate()
   const [confirmStep, setConfirmStep] = useState<ConfirmStep | null>(null)
-  const [tagSetModalOpen, setTagSetModalOpen] = useState(false)
   const queryClient = useQueryClient()
   const invalidateFiles = () =>
     queryClient.invalidateQueries({ queryKey: ['chapter-files', projectId, chapterId] })
 
   const fid = row?.db_id
   const fname = row?.file_name.toLowerCase() ?? ''
+
+  const isSpringer = Boolean(
+    clientName && (clientName.toLowerCase().includes('springer') || clientName.toLowerCase() === 'spr')
+  )
+  const tagSet = isSpringer ? 'springer' : 'lww'
 
   // Gate stage-specific processing actions to the stage they actually belong to.
   // The stage-to-action mapping lives in fileManagerConfig.ts (PROCESSING_ACTION_STAGE_MAP) —
@@ -312,9 +317,10 @@ function ProcessingActionsMenu({
   const btnCls = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-primary/30 text-primary hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap transition-colors'
 
   async function fire(label: string, fn: () => Promise<unknown>, pollFileId?: number, pollProcessType?: string) {
+    const fileName = row?.file_name || 'file'
     try {
       await fn()
-      toast.success(`${label} started for ${row?.file_name}`)
+      toast.success(`${label} started for ${fileName}`)
       // Refetch immediately so the row flips to "Processing…" without a manual refresh.
       void invalidateFiles()
     } catch {
@@ -328,7 +334,7 @@ function ProcessingActionsMenu({
     const interval = setInterval(async () => {
       if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
         clearInterval(interval)
-        toast.error(`${label} timed out for ${row?.file_name}`)
+        toast.error(`${label} timed out for ${fileName}`)
         void invalidateFiles()
         return
       }
@@ -336,11 +342,11 @@ function ProcessingActionsMenu({
         const result = await getProcessingStatus(pollFileId, pollProcessType)
         if (result.status === 'failed') {
           clearInterval(interval)
-          toast.error(`${label} failed for ${row?.file_name}: ${result.error ?? 'Unknown error'}`)
+          toast.error(`${label} failed for ${fileName}: ${result.error ?? 'Unknown error'}`)
           void invalidateFiles()
         } else if (result.status === 'completed') {
           clearInterval(interval)
-          toast.success(`${label} completed for ${row?.file_name}`)
+          toast.success(`${label} completed for ${fileName}`)
           void invalidateFiles()
         }
       } catch {
@@ -372,7 +378,14 @@ function ProcessingActionsMenu({
     <>
       <div className="flex items-center gap-1.5 flex-wrap">
         {showAction('structuring') && (
-          <button disabled={!fid || !fname.endsWith('.docx')} className={btnCls} onClick={() => setTagSetModalOpen(true)}>
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={() => {
+              if (!fid) return
+              void fire('Structuring', () => startStructuring(fid, tagSet), fid, 'structuring')
+            }}
+          >
             <Layers size={12} className="text-amber-500" /> Structuring
           </button>
         )}
@@ -661,15 +674,6 @@ function ProcessingActionsMenu({
           </div>
         </div>
       )}
-
-      {fid && row && (
-        <TagSetSelectModal
-          fileId={fid}
-          fileName={row.file_name}
-          isOpen={tagSetModalOpen}
-          onClose={() => setTagSetModalOpen(false)}
-        />
-      )}
     </>
   )
 }
@@ -713,7 +717,7 @@ export function ChapterFilePage({
   const resolvedChapterTitle = propChapterTitle ?? chapterMeta?.title ?? null
   const resolvedStageName = propStageName ?? ''
   const resolvedIsAssigned = propIsAssigned ?? true
-  const resolvedClientName = propClientName ?? ''
+  const resolvedClientName = propClientName || filesQuery.data?.project?.client_name || ''
   const resolvedProjectName = propProjectName ?? filesQuery.data?.project?.title ?? ''
   const resolvedChapterLabel = filesQuery.data?.chapter?.number ?? String(cid)
 
@@ -1626,6 +1630,7 @@ export function ChapterFilePage({
                   isAssigned={resolvedIsAssigned}
                   projectId={pid}
                   chapterId={cid}
+                  clientName={resolvedClientName}
                 />
 
               )}

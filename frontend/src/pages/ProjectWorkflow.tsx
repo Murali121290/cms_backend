@@ -1261,7 +1261,12 @@ export function ProjectWorkflow() {
           process_type: processType,
           chapter_ids: selectedBulkChapters.map(c => c.id),
           mode: 'style',
-          options: processType === 'structuring' ? { structuring_method: 'manual' } : undefined
+          options: processType === 'structuring'
+            ? {
+                structuring_method: 'manual',
+                tag_set: (project?.client_name && (project.client_name.toLowerCase().includes('springer') || project.client_name.toLowerCase() === 'spr')) ? 'springer' : 'lww'
+              }
+            : undefined
         })
       })
       const result = await response.json()
@@ -1310,7 +1315,8 @@ export function ProjectWorkflow() {
       if (templateFileId) {
         batchOptions = { template_file_id: templateFileId }
       } else if (batchModalType === 'structuring') {
-        batchOptions = { structuring_method: 'manual' }
+        const isSpringer = Boolean(project?.client_name && (project.client_name.toLowerCase().includes('springer') || project.client_name.toLowerCase() === 'spr'))
+        batchOptions = { structuring_method: 'manual', tag_set: isSpringer ? 'springer' : 'lww' }
       }
 
       const response = await fetch(`/api/v2/projects/${project.id}/batch-jobs`, {
