@@ -177,13 +177,19 @@ const PRODUCTION_STAGES = [
   'Proofreading'
 ]
 
+const WORD_TO_INDESIGN_STAGES = [
+  ...PRODUCTION_STAGES,
+  'Word 2 Indesign Converstion',
+  'Word 2 Indesign Conversion'
+]
+
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
   structuring:          ['Pre-editing','Pre-editing QA'],
   structuringQa:        ['Pre-editing','Pre-editing QA'],
   referenceValidation:  ['Pre-editing','Pre-editing QA'],
   referenceReview:      ['Pre-editing','Pre-editing QA'],
-  styleValidation:      ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
-  artValidation:        ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
+  styleValidation:      ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Word 2 Indesign Converstion', 'Word 2 Indesign Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
+  artValidation:        ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Word 2 Indesign Converstion', 'Word 2 Indesign Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
   languageEdit:         ['Pre-editing', 'Copyediting', 'Language Editing', 'Language Editing QA'],
   technicalEdit:        ['Language Editing','Language Editing QA'],
   unifiedReview:        ['Pre-editing','Pre-editing QA','Language Editing','Language Editing QA'],
@@ -192,10 +198,10 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   aiCreditExtraction:   ['Digital Processing'],
   biasScan:             ['Digital Processing'],
   wordToXml:            PRODUCTION_STAGES,
-  wordToIndesign:       PRODUCTION_STAGES,
-  xmlToIndesign:        PRODUCTION_STAGES,
-  indesignToXml:        PRODUCTION_STAGES,
-  viewProof:            PRODUCTION_STAGES
+  wordToIndesign:       WORD_TO_INDESIGN_STAGES,
+  xmlToIndesign:        WORD_TO_INDESIGN_STAGES,
+  indesignToXml:        WORD_TO_INDESIGN_STAGES,
+  viewProof:            WORD_TO_INDESIGN_STAGES
 }
 
 export function isProcessingActionVisibleForStage(action: ProcessingActionKey, stageName: string): boolean {

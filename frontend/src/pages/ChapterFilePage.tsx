@@ -498,13 +498,46 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+        {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
             disabled={!fid || !fname.endsWith('.docx')}
+            type="button"
             className={btnCls}
-            onClick={() => fid && setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' })}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Style Match Design',
+              jobFn: () => startStyleMatchDesign(fid),
+              pollFileId: fid,
+              pollProcessType: 'style_match_design'
+            })}
           >
-            <FileCode size={12} /> Word to XML
+            <ShieldCheck size={12} /> Style Match Design
+          </button>
+        )}
+
+        {showAction('artValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            type="button"
+            className={btnCls}
+            onClick={() => fid && onOpenArtValidation(fid, row?.file_name || '')}
+          >
+            <Image size={12} /> Art Validation
+          </button>
+        )}
+
+        {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            type="button"
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Style Validation',
+              jobFn: () => startStyleValidation(fid),
+              pollFileId: fid,
+              pollProcessType: 'style_validation'
+            })}
+          >
+            <ShieldCheck size={12} /> Style Validation
           </button>
         )}
 
@@ -522,45 +555,13 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
-          <>
-            <button
-              disabled={!fid || !fname.endsWith('.docx')}
-              type="button"
-              className={btnCls}
-              onClick={() => fid && setConfirmStep({
-                actionName: 'Style Match Design',
-                jobFn: () => startStyleMatchDesign(fid),
-                pollFileId: fid,
-                pollProcessType: 'style_match_design'
-              })}
-            >
-              <ShieldCheck size={12} /> Style Match Design
-            </button>
-            <button
-              disabled={!fid || !fname.endsWith('.docx')}
-              type="button"
-              className={btnCls}
-              onClick={() => fid && setConfirmStep({
-                actionName: 'Style Validation',
-                jobFn: () => startStyleValidation(fid),
-                pollFileId: fid,
-                pollProcessType: 'style_validation'
-              })}
-            >
-              <ShieldCheck size={12} /> Style Validation
-            </button>
-          </>
-        )}
-
-        {showAction('artValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+        {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
             disabled={!fid || !fname.endsWith('.docx')}
-            type="button"
             className={btnCls}
-            onClick={() => fid && onOpenArtValidation(fid, row?.file_name || '')}
+            onClick={() => fid && setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' })}
           >
-            <Image size={12} /> Art Validation
+            <FileCode size={12} /> Word to XML
           </button>
         )}
 
@@ -1428,7 +1429,7 @@ export function ChapterFilePage({
         )}
 
         {/* Batch Word to XML - Manuscript folder only */}
-        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && (
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && isProcessingActionVisibleForStage('wordToXml', resolvedStageName) && (
           <button
             onClick={() => void handleBatchProcess('word_to_xml')}
             disabled={!!batchBusy}
@@ -1443,7 +1444,7 @@ export function ChapterFilePage({
         )}
 
         {/* Batch Word to InDesign - Manuscript folder only */}
-        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && (
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && isProcessingActionVisibleForStage('wordToIndesign', resolvedStageName) && (
           <button
             onClick={() => void handleBatchProcess('word_to_indesign')}
             disabled={!!batchBusy}

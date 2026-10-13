@@ -1857,6 +1857,58 @@ export function ProjectWorkflow() {
                   </button>
                 </>
               )}
+              {(filterStage?.toLowerCase() === 'word 2 indesign converstion' || filterStage?.toLowerCase() === 'word 2 indesign conversion') && (
+                <>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      setBatchModalType('style_validation')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                  >
+                    Batch Style Validation
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      const templates = templatesQuery.data ?? []
+                      if (templates.length > 0) {
+                        setBatchTemplateId(templates[0].id)
+                      } else {
+                        setBatchTemplateId('')
+                      }
+                      setBatchModalType('word_to_indesign')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                  >
+                    Batch Word to InDesign
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      const templates = templatesQuery.data ?? []
+                      if (templates.length > 0) {
+                        setBatchTemplateId(templates[0].id)
+                      } else {
+                        setBatchTemplateId('')
+                      }
+                      setBatchModalType('xml_to_indesign')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                  >
+                    Batch XML to InDesign
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      setBatchModalType('indesign_to_xml')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors"
+                  >
+                    Batch InDesign to Final
+                  </button>
+                </>
+              )}
               <button
                 onClick={handleOpenCombineModal}
                 className="text-xs font-medium px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors"
@@ -2093,6 +2145,26 @@ export function ProjectWorkflow() {
                 {batchProcessing && <Spinner size="sm" />}
                 Batch InDesign to Word
               </button>
+            )}
+            {bulkStage && (bulkStage.toLowerCase().includes('word 2 indesign') || bulkStage.toLowerCase().includes('word to indesign')) && (
+              <>
+                <button
+                  onClick={() => handleBatchProcess('style_validation')}
+                  disabled={batchProcessing || selectedBulkChapters.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {batchProcessing && <Spinner size="sm" />}
+                  Batch Style Validation
+                </button>
+                <button
+                  onClick={() => handleBatchProcess('word_to_indesign')}
+                  disabled={batchProcessing || selectedBulkChapters.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {batchProcessing && <Spinner size="sm" />}
+                  Batch Word to InDesign
+                </button>
+              </>
             )}
             <button
               onClick={() => setBulkAssignModalOpen(false)}
