@@ -18,13 +18,13 @@ export function PostProdXmlConversionEditor() {
   const [isS4cConverting, setIsS4cConverting] = useState(false)
   const [isTargetConverting, setIsTargetConverting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [targetFormat, setTargetFormat] = useState('JATS')
+  const [targetFormat, setTargetFormat] = useState('XML')
   const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false)
   const [xmlType, setXmlType] = useState<'s4c' | 'final' | null>(null)
-  
+
   const [isQcModalOpen, setIsQcModalOpen] = useState(false)
   const [isQcRunning, setIsQcRunning] = useState(false)
-  const [qcResult, setQcResult] = useState<{isWellFormed: boolean, wellFormedErrors: string[], isDtdValid: boolean, dtdErrors: string[]} | null>(null)
+  const [qcResult, setQcResult] = useState<{ isWellFormed: boolean, wellFormedErrors: string[], isDtdValid: boolean, dtdErrors: string[] } | null>(null)
   const [isManuallyVerified, setIsManuallyVerified] = useState(false)
   const [isCompleting, setIsCompleting] = useState(false)
 
@@ -42,13 +42,18 @@ export function PostProdXmlConversionEditor() {
       const found = res.data.find((p: any) => p.id === Number(projectId))
       if (found) {
         setProject(found)
+        if (found.target_format) {
+          setTargetFormat(found.target_format)
+        } else {
+          setTargetFormat('XML')
+        }
         // Also fetch the existing XML if any
         try {
           const xmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/xml`)
           if (xmlRes.data?.xml) {
             setXmlContent(xmlRes.data.xml)
             if (xmlRes.data.type) setXmlType(xmlRes.data.type)
-            
+
             if (xmlRes.data.type === 's4c') {
               const s4cHtmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/s4c-html`)
               if (s4cHtmlRes.data?.html && s4cHtmlRes.data.html.indexOf('No S4C XML') === -1) {
@@ -82,13 +87,13 @@ export function PostProdXmlConversionEditor() {
       const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/s4c-convert`)
       setXmlContent(res.data.xml)
       setXmlType('s4c')
-      
+
       const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/s4c-html`)
       if (htmlRes.data?.html) {
         setHtmlContent(htmlRes.data.html)
         setViewMode('html')
       }
-      
+
       toast.success('Converted to S4C XML successfully')
     } catch (err) {
       console.error(err)
@@ -108,6 +113,7 @@ export function PostProdXmlConversionEditor() {
       const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/target-convert?format=${targetFormat}`)
       setXmlContent(res.data.xml)
       setXmlType('final')
+      setProject(prev => prev ? { ...prev, target_format: targetFormat } : prev)
 
       const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html`)
       if (htmlRes.data?.html) {
@@ -228,7 +234,7 @@ export function PostProdXmlConversionEditor() {
             <h1 className="text-sm font-bold text-text m-0 flex items-center gap-2">
               {project.project_name}
               <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary border border-primary/20">
-                {project.target_format}
+                {project.target_format || 'XML'}
               </span>
             </h1>
             <p className="text-[11px] text-muted">{project.filename}</p>
@@ -291,11 +297,11 @@ export function PostProdXmlConversionEditor() {
               <span>{targetFormat}</span>
               <ChevronDown size={14} className={`text-muted transition-transform ${isFormatDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
-            
+
             {isFormatDropdownOpen && (
               <>
-                <div 
-                  className="fixed inset-0 z-40" 
+                <div
+                  className="fixed inset-0 z-40"
                   onClick={() => setIsFormatDropdownOpen(false)}
                 />
                 <div className="absolute top-full left-0 mt-1 w-[120px] bg-white dark:bg-[#202020] border border-gray-200 dark:border-white/10 rounded-md shadow-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
@@ -314,9 +320,9 @@ export function PostProdXmlConversionEditor() {
                 </div>
               </>
             )}
-            
+
             <div className="w-px h-5 bg-gray-200 dark:bg-white/10" />
-            
+
             <button
               onClick={handleTargetConversion}
               disabled={isTargetConverting || !xmlContent}
@@ -408,9 +414,9 @@ export function PostProdXmlConversionEditor() {
                     await handleSaveXml();
                   }
                   const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/validate`, { xmlType });
-                  
-                  const mappedErrors: Array<{line_number: number, message: string, error_type?: string}> = [];
-                  
+
+                  const mappedErrors: Array<{ line_number: number, message: string, error_type?: string }> = [];
+
                   if (!res.data.isWellFormed && res.data.wellFormedErrors) {
                     res.data.wellFormedErrors.forEach((err: string) => {
                       const match = err.match(/Line (\d+): (.*)/);
@@ -421,7 +427,7 @@ export function PostProdXmlConversionEditor() {
                       }
                     });
                   }
-                  
+
                   if (!res.data.isDtdValid && res.data.dtdErrors) {
                     res.data.dtdErrors.forEach((err: string) => {
                       const match = err.match(/Line (\d+): (.*)/);
@@ -432,7 +438,7 @@ export function PostProdXmlConversionEditor() {
                       }
                     });
                   }
-                  
+
                   return { errors: mappedErrors };
                 }}
                 className="w-full h-full text-[13px]"
@@ -462,7 +468,7 @@ export function PostProdXmlConversionEditor() {
                 &times;
               </button>
             </div>
-            
+
             <div className="p-6 flex-1 overflow-y-auto space-y-6">
               {isQcRunning ? (
                 <div className="flex flex-col items-center justify-center py-12 text-muted">
@@ -527,8 +533,8 @@ export function PostProdXmlConversionEditor() {
                           Please verify the contents match the original PDF structure and text before marking as complete.
                         </p>
                         <label className={`flex items-center gap-2 text-sm ${(qcResult.isWellFormed && qcResult.isDtdValid) ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                          <input 
-                            type="checkbox" 
+                          <input
+                            type="checkbox"
                             className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
                             checked={isManuallyVerified}
                             onChange={(e) => setIsManuallyVerified(e.target.checked)}
@@ -547,8 +553,8 @@ export function PostProdXmlConversionEditor() {
               <Button variant="outline" onClick={() => setIsQcModalOpen(false)}>
                 Cancel
               </Button>
-              <Button 
-                onClick={handleMarkComplete} 
+              <Button
+                onClick={handleMarkComplete}
                 disabled={!isManuallyVerified || isCompleting}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
               >

@@ -12,7 +12,7 @@ class PostProdXMLConversionProject(Base):
     project_name = Column(String, index=True, unique=True, nullable=False)
     status = Column(String, default="Active")
     assignee = Column(String, nullable=True)
-    target_format = Column(String, nullable=True) # e.g., JATS, BITS
+    target_format = Column(String, default="XML", nullable=True) # e.g., JATS, BITS, XML
     filename = Column(String, nullable=False)
     filepath = Column(String, nullable=False)
     conversion_status = Column(String, default="YTS") # Overall status

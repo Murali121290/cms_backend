@@ -146,7 +146,7 @@ export function PostProdXmlConversion() {
   const [customerName, setCustomerName] = useState('')
   const [clientCode, setClientCode] = useState('')
   const [projectName, setProjectName] = useState('')
-  const [targetFormat, setTargetFormat] = useState('JATS')
+  const [targetFormat, setTargetFormat] = useState('XML')
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -262,7 +262,7 @@ export function PostProdXmlConversion() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = filename.replace('.pdf', `.${format.toLowerCase()}.xml`)
+      a.download = filename.replace('.pdf', `.${(format || 'xml').toLowerCase()}.xml`)
       a.click()
     } catch (err) {
       toast.error('Download failed')
@@ -525,7 +525,7 @@ export function PostProdXmlConversion() {
 
                       {isCompleted && (
                         <button
-                          onClick={(e) => handleDownload(e, proj.id, proj.filename, proj.target_format)}
+                          onClick={(e) => handleDownload(e, proj.id, proj.filename, proj.target_format || 'XML')}
                           className="p-1.5 text-green-600 hover:bg-green-500/10 rounded transition-colors"
                           title="Download XML"
                         >
