@@ -390,7 +390,13 @@ def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str, ace_path: s
             if epubcheck_path and os.path.exists(epubcheck_path):
                 zipf.write(epubcheck_path, os.path.basename(epubcheck_path))
                 
-        with BodFtpService(settings.BOD_FTP_HOST, settings.BOD_FTP_USERNAME, settings.BOD_FTP_PASSWORD) as ftp:
+        with BodFtpService(
+            settings.BOD_FTP_HOST,
+            settings.BOD_FTP_USERNAME,
+            settings.BOD_FTP_PASSWORD,
+            port=getattr(settings, "BOD_FTP_PORT", 21),
+            timeout=getattr(settings, "BOD_FTP_TIMEOUT", 30)
+        ) as ftp:
             ftp.ensure_dir(delivery_dir)
             ftp.upload_file(zip_filepath, zip_filename)
     except Exception as e:

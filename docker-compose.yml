@@ -91,6 +91,7 @@ services:
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "ftp.s4carlisle.org:10.1.1.100"
 
   # ── Celery Worker ─────────────────────────────────────────────────────────
   celery_worker:
@@ -122,6 +123,7 @@ services:
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "ftp.s4carlisle.org:10.1.1.100"
 
   # ── Collabora Online (LibreOffice) ────────────────────────────────────────
   # HOST_DOMAIN and HOST_PORT are read from .env.
