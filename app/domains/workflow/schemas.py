@@ -143,6 +143,7 @@ class BulkPlannedCreate(BaseModel):
     complexity_level: Optional[str] = None
     project_manager_name: Optional[str] = None
     reason: Optional[str] = None
+    changed_by: Optional[str] = None
     items: List[BulkPlannedItem]
 
 

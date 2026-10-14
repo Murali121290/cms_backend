@@ -13,6 +13,21 @@ import { toast } from '@/store/useToastStore'
 import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/Button'
 import { stageDetailsApi, type StageHistoryEntry } from '@/api/stageDetails'
+import { useAuthStore } from '@/store/useAuthStore'
+import { useSessionStore } from '@/stores/sessionStore'
+
+function getUserFullName(u?: { first_name?: string | null; last_name?: string | null; username?: string } | null): string | null {
+  if (!u) return null
+  const fn = (u.first_name || '').trim()
+  const ln = (u.last_name || '').trim()
+  if (fn && ln) {
+    if (fn.endsWith(` ${ln}`) || fn.endsWith(ln)) {
+      return fn
+    }
+    return `${fn} ${ln}`
+  }
+  return fn || ln || u.username || null
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +54,25 @@ function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
 
 function fmt(d: Date): string {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+function fmtDateTime(dateStr: string): string {
+  if (!dateStr) return '—'
+  let normalized = dateStr.trim()
+  if (!normalized.endsWith('Z') && !/[+-]\d{2}(:\d{2})?$/.test(normalized)) {
+    normalized += 'Z'
+  }
+  const d = new Date(normalized)
+  if (isNaN(d.getTime())) return dateStr
+  return d.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })
 }
 
 function sortChapters(a: { chapters: string }, b: { chapters: string }) {
@@ -245,6 +279,9 @@ function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: Sta
 export function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const viewer = useSessionStore(s => s.viewer)
+  const { user } = useAuthStore()
+  const currentUserFullName = getUserFullName(viewer) || getUserFullName(user) || null
   const id = Number(projectId)
 
   const [project, setProject] = useState<Project | null>(null)
@@ -676,6 +713,7 @@ export function ProjectPlanningPage() {
             complexity_level: previewComposition,
             project_manager_name: project.project_manager ?? null,
             reason: reason || null,
+            changed_by: currentUserFullName || project.project_manager || null,
             items,
           })
         } catch (err: unknown) {
@@ -741,6 +779,7 @@ export function ProjectPlanningPage() {
           workflow: wfName ?? '',
           complexity_level: previewComposition,
           project_manager_name: project.project_manager ?? null,
+          changed_by: currentUserFullName || project.project_manager || null,
           items,
         })
 
@@ -1280,8 +1319,15 @@ export function ProjectPlanningPage() {
               {viewingHistory.history.map((entry, idx) => (
                 <div key={idx} className="bg-surface/60 border border-border/80 rounded-lg p-3 text-xs space-y-2">
                   <div className="flex items-center justify-between text-muted">
-                    <span className="font-semibold text-text">Revision #{idx + 1}</span>
-                    <span className="text-[11px]">{new Date(entry.changed_at).toLocaleString()}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-text">Revision #{idx + 1}</span>
+                      {entry.changed_by && (
+                        <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium text-[10px]">
+                          by {entry.changed_by}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px]">{fmtDateTime(entry.changed_at)}</span>
                   </div>
                   <div className="bg-background/80 rounded p-2 text-text font-medium text-[11px]">
                     <span className="text-muted block text-[10px] uppercase font-semibold">Reason:</span>

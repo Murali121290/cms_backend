@@ -57,6 +57,7 @@ export interface PlanningPayload {
   complexity_level: string | null
   project_manager_name: string | null
   reason?: string | null
+  changed_by?: string | null
   items: PlanningItem[]
 }
 

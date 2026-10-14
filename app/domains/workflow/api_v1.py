@@ -144,12 +144,62 @@ def delete_stage_detail(detail_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Stage detail not found")
 
 
+from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.models import User
+
+
 @router.post("/stage-details/plan", response_model=List[StageDetailResponse])
-def create_planning_rows(payload: BulkPlannedCreate, db: Session = Depends(get_db)):
+def create_planning_rows(
+    payload: BulkPlannedCreate,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_from_cookie),
+):
     from sqlalchemy import select, or_
     from sqlalchemy.orm.attributes import flag_modified
-    from datetime import datetime
+    from datetime import datetime, timezone
     from app.domains.projects.models import Project
+
+    def _format_user_full_name(u) -> Optional[str]:
+        if not u:
+            return None
+        fn = (getattr(u, "first_name", None) or "").strip()
+        ln = (getattr(u, "last_name", None) or "").strip()
+        if fn and ln:
+            if fn.endswith(f" {ln}") or fn.endswith(ln):
+                return fn
+            return f"{fn} {ln}"
+        return fn or ln or getattr(u, "username", None)
+
+    operator = None
+    if payload.changed_by:
+        matched = db.query(User).filter(
+            or_(
+                User.username == payload.changed_by,
+                User.email == payload.changed_by,
+            )
+        ).first()
+        if matched:
+            operator = _format_user_full_name(matched)
+        else:
+            operator = payload.changed_by
+
+    if not operator and current_user:
+        operator = _format_user_full_name(current_user)
+
+    if not operator and payload.project_manager_name:
+        matched_pm = db.query(User).filter(
+            or_(
+                User.username == payload.project_manager_name,
+                User.email == payload.project_manager_name,
+            )
+        ).first()
+        if matched_pm:
+            operator = _format_user_full_name(matched_pm)
+        else:
+            operator = payload.project_manager_name
+
+    if not operator:
+        operator = "System"
 
     # Validate against project due date
     project = db.query(Project).filter(
@@ -203,8 +253,8 @@ def create_planning_rows(payload: BulkPlannedCreate, db: Session = Depends(get_d
                 history_list = list(existing.history or [])
                 history_entry = {
                     "reason": payload.reason or "Planning adjustment",
-                    "changed_at": datetime.utcnow().isoformat(),
-                    "changed_by": payload.project_manager_name,
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "changed_by": operator,
                     "before": {
                         "planned_start_date": old_start,
                         "planned_end_date": old_due,
