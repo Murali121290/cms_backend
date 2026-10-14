@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import Optional
 from jose import jwt, JWTError
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel
 
 from app import database, models
@@ -532,7 +532,7 @@ async def save_folder_file(
         f.write(content_to_write)
 
     if file_record:
-        file_record.uploaded_at = datetime.utcnow()
+        file_record.uploaded_at = datetime.now(timezone.utc)
         file_record.uploaded_by_id = user.id
         db.commit()
         
@@ -595,7 +595,7 @@ async def save_folder_file(
                 else:
                     db_log.path = rel_log_path
                     db_log.category = file_record.category if file_record else "Misc"
-                    db_log.uploaded_at = datetime.utcnow()
+                    db_log.uploaded_at = datetime.now(timezone.utc)
                     if user:
                         db_log.uploaded_by_id = user.id
                     db.commit()
@@ -651,7 +651,7 @@ async def save_folder_file(
             else:
                 db_layout.path = rel_layout_path
                 db_layout.category = layout_cat
-                db_layout.uploaded_at = datetime.utcnow()
+                db_layout.uploaded_at = datetime.now(timezone.utc)
                 if user:
                     db_layout.uploaded_by_id = user.id
                 db.commit()
@@ -786,7 +786,7 @@ async def convert_xhtml_to_xml_endpoint(
                 import shutil
                 if matching_xml_records:
                     for rec in matching_xml_records:
-                        rec.uploaded_at = datetime.utcnow()
+                        rec.uploaded_at = datetime.now(timezone.utc)
                         if user:
                             rec.uploaded_by_id = user.id
 

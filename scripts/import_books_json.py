@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Allow running as `python scripts/import_books_json.py` from repo root.
@@ -28,13 +28,13 @@ BOOKS_FILE = Path(os.environ.get("BOOKS_FILE", "uploads/epub_validator/books.jso
 
 def _parse_uploaded_at(value) -> datetime:
     if not value:
-        return datetime.utcnow()
+        return datetime.now(timezone.utc)
     if isinstance(value, str):
         try:
             return datetime.fromisoformat(value)
         except ValueError:
             pass
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 def main() -> int:

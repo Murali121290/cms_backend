@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
 import { useUsersStore } from '@/stores/usersStore'
+import { formatDateTime } from '@/utils/dateUtils'
 
 interface ProcessingJob {
   id: number
@@ -118,11 +119,7 @@ export function QueueManagement() {
   })
 
   function fmtDate(iso: string | null) {
-    if (!iso) return '—'
-    return new Date(iso).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit'
-    })
+    return formatDateTime(iso)
   }
 
   function getStatusBadge(status: string) {

@@ -206,11 +206,18 @@ def update_due_date(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format")
 
+    fn = (getattr(current_user, "first_name", None) or "").strip()
+    ln = (getattr(current_user, "last_name", None) or "").strip()
+    if fn and ln:
+        full_name = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
+    else:
+        full_name = fn or ln or getattr(current_user, "username", getattr(current_user, "user_name", "Unknown"))
+
     history_entry = {
         "date": payload.due_date,
         "reason": payload.reason,
-        "changed_by": current_user.username if hasattr(current_user, 'username') else (current_user.user_name if hasattr(current_user, 'user_name') else "Unknown"),
-        "timestamp": datetime.utcnow().isoformat()
+        "changed_by": full_name,
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
     history = list(job.due_date_history) if job.due_date_history else []
@@ -566,7 +573,7 @@ def create_job(
     first_stage = stages[0]
     
     now_iso = datetime.now(timezone.utc).isoformat()
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc)
     from datetime import timedelta
     
     initial_history = {

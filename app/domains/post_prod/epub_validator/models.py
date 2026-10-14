@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import relationship
@@ -49,9 +49,9 @@ class EvProject(Base):
     uploaded_by_id = Column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    uploaded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
     is_deleted = Column(Boolean, nullable=False, default=False)
 
@@ -78,7 +78,7 @@ class EvHistory(Base):
     new_assignee = Column(String(255), nullable=True)
     result_type = Column(String(50), nullable=False, default="assignee_change")  # "assignee_change" | "validation" | "file_replacement"
     reason = Column(String, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     project = relationship("EvProject", foreign_keys=[project_id])
     changed_by = relationship("User", foreign_keys=[changed_by_id])

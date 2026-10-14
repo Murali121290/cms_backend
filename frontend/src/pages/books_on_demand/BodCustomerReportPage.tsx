@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import * as XLSX from 'xlsx'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
+import { formatDateTime as fmtUtcDateTime } from '@/utils/dateUtils'
 
 export function BodCustomerReportPage() {
   const navigate = useNavigate()
@@ -66,18 +67,7 @@ export function BodCustomerReportPage() {
 
   const formatDateTime = (dateStr: string | null) => {
     if (!dateStr) return '-'
-    try {
-      const hasTz = dateStr.endsWith('Z') || dateStr.includes('+') || !!dateStr.match(/-\d{2}:\d{2}$/)
-      const validStr = hasTz ? dateStr : `${dateStr}Z`
-      const d = new Date(validStr)
-      if (isNaN(d.getTime())) return 'Invalid Date'
-      return d.toLocaleString('en-IN', {
-        year: 'numeric', month: 'short', day: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      })
-    } catch {
-      return 'Invalid Date'
-    }
+    return fmtUtcDateTime(dateStr)
   }
 
   const getJobStatuses = (job: any) => {

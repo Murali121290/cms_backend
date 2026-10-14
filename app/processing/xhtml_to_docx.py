@@ -374,7 +374,7 @@ class XhtmlToDocxEngine:
         Each ins/del element gets a unique w:id and ISO 8601 timestamp.
         """
         import re
-        from datetime import datetime
+        from datetime import datetime, timezone
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
         from lxml import etree
@@ -391,7 +391,7 @@ class XhtmlToDocxEngine:
                 p_elem.remove(child)
 
         # ISO 8601 timestamp with UTC timezone
-        timestamp = datetime.utcnow().isoformat() + "Z"
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         def parse_style(style_str):
             if not style_str:

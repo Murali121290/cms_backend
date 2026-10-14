@@ -4,7 +4,7 @@ import zipfile
 import tempfile
 import shutil
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from lxml import etree
 
@@ -24,7 +24,7 @@ def qn(tag):
 _rev_id_counter = 1
 
 def _get_time_str():
-    return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 def _get_para_style(p_element) -> str:

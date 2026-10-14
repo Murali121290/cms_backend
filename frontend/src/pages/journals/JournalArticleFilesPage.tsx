@@ -13,6 +13,7 @@ import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
 import { cn } from '@/utils/cn'
 import { shortStage } from './journalUi'
+import { formatDateTime } from '@/utils/dateUtils'
 
 const FOLDER_ICON: Record<ArticleFolderKey, typeof FileText> = {
   manuscript: FileText, art: Image, xml: Code2, indesign: Layers, proof: FileCheck2, delivery: Send, backup: Archive,
@@ -26,7 +27,7 @@ const STATUS_CLASS = {
 } as const
 
 const fmtSize = (n: number | null) => n == null ? '—' : n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`
-const fmtDate = (s: string) => new Date(s).toLocaleString(undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+const fmtDate = (s: string) => formatDateTime(s, undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: undefined })
 
 function saveBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob)

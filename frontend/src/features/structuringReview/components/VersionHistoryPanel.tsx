@@ -12,6 +12,7 @@ import {
 import { getFileVersions } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
 import type { FileVersionsResponse } from "@/types/api";
+import { formatDateTime as formatUtcDateTime } from "@/utils/dateUtils";
 
 interface VersionHistoryPanelProps {
   fileId: number | null;
@@ -21,13 +22,14 @@ interface VersionHistoryPanelProps {
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("en-US", {
+  return formatUtcDateTime(iso, "en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    second: undefined,
   });
 }
 

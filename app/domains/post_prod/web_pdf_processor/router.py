@@ -5,12 +5,15 @@ from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException, Q
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_db
 from app.core.config import get_settings
-from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie, get_user_full_name
 from app.domains.auth.rbac_config import has_post_prod_access
+
+def _actor_name(u: Any) -> Optional[str]:
+    return get_user_full_name(u) or (getattr(u, "username", None) if u else None)
 
 from .models import WebPdfProject
 from .services import web_pdf_projects_db, font_service, security_service
@@ -118,7 +121,7 @@ def update_project(
         project_id,
         assignee=body.assignee,
         user_id=user.id if user else None,
-        username=user.username if user else None,
+        username=_actor_name(user),
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -277,7 +280,7 @@ def merge_project_files(
             db,
             project_id=project_id,
             user_id=user.id if user else None,
-            username=user.username if user else None,
+            username=_actor_name(user),
             merged_files=merged_files_data,
             merged_output_path=merged_output_path,
             total_pages=result['total_pages'],
@@ -293,7 +296,7 @@ def merge_project_files(
             db,
             project_id=project_id,
             user_id=user.id if user else None,
-            username=user.username if user else None,
+            username=_actor_name(user),
             merged_files=merged_files_data,
             merged_output_path=merged_output_path,
             total_pages=0,
@@ -338,7 +341,7 @@ def trim_project_pdf(
         web_pdf_projects_db.record_step_completion(
             db, project_id=project_id, step_name="trim",
             user_id=user.id if user else None,
-            username=user.username if user else None,
+            username=_actor_name(user),
             details={"mode": body.mode, "message": result_msg}
         )
 
@@ -370,6 +373,13 @@ def get_merged_pdf(
 
 
 def _serialize_history(h: Any) -> dict:
+    created_str = None
+    if h.created_at:
+        if h.created_at.tzinfo is None:
+            created_str = h.created_at.replace(tzinfo=timezone.utc).isoformat()
+        else:
+            created_str = h.created_at.astimezone(timezone.utc).isoformat()
+
     return {
         "id": h.id,
         "project_id": h.project_id,
@@ -378,7 +388,7 @@ def _serialize_history(h: Any) -> dict:
         "old_assignee": h.old_assignee,
         "new_assignee": h.new_assignee,
         "result_type": h.result_type,
-        "created_at": h.created_at.isoformat() if h.created_at else None,
+        "created_at": created_str,
         "merged_files": h.merged_files,
         "merged_output_path": h.merged_output_path,
         "total_pages": h.total_pages,
@@ -464,7 +474,7 @@ def check_fonts_status(
             web_pdf_projects_db.record_step_completion(
                 db, project_id=project_id, step_name="fonts_check",
                 user_id=user.id if user else None,
-                username=user.username if user else None,
+                username=_actor_name(user),
                 details=font_status
             )
         return font_status
@@ -501,7 +511,7 @@ def check_security_status(
             web_pdf_projects_db.record_step_completion(
                 db, project_id=project_id, step_name="security_check",
                 user_id=user.id if user else None,
-                username=user.username if user else None,
+                username=_actor_name(user),
                 details=security_status
             )
         return security_status
@@ -544,7 +554,7 @@ def generate_bookmarks(
             web_pdf_projects_db.record_step_completion(
                 db, project_id=project_id, step_name="bookmarks",
                 user_id=user.id if user else None,
-                username=user.username if user else None,
+                username=_actor_name(user),
                 details=result
             )
 
@@ -628,7 +638,7 @@ def generate_links(
                 web_pdf_projects_db.record_step_completion(
                     db, project_id=project_id, step_name="toc_links",
                     user_id=user.id if user else None,
-                    username=user.username if user else None,
+                    username=_actor_name(user),
                     details=result
                 )
         return {"success": True, **result}
@@ -709,7 +719,7 @@ def generate_url_links(
         web_pdf_projects_db.record_step_completion(
             db, project_id=project_id, step_name="url_links",
             user_id=user.id if user else None,
-            username=user.username if user else None,
+            username=_actor_name(user),
             details=result
         )
 
@@ -763,7 +773,7 @@ def generate_email_links(
         web_pdf_projects_db.record_step_completion(
             db, project_id=project_id, step_name="email_links",
             user_id=user.id if user else None,
-            username=user.username if user else None,
+            username=_actor_name(user),
             details=result
         )
 
@@ -821,7 +831,7 @@ def generate_endnote_links(
         web_pdf_projects_db.record_step_completion(
             db, project_id=project_id, step_name="endnote_links",
             user_id=user.id if user else None,
-            username=user.username if user else None,
+            username=_actor_name(user),
             details=result
         )
 
@@ -871,7 +881,7 @@ def generate_crossref_links(
         web_pdf_projects_db.record_step_completion(
             db, project_id=project_id, step_name="crossref_links",
             user_id=user.id if user else None,
-            username=user.username if user else None,
+            username=_actor_name(user),
             details=result
         )
 

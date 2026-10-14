@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/Button'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { toast } from '@/store/useToastStore'
 import api from '@/api/client'
+import { getUserDisplayName as formatUserDisplayName } from '@/utils/userUtils'
+import { formatDateTime } from '@/utils/dateUtils'
 
 export function BodInternalPage() {
   useDocumentTitle('Books on Demand — S4Carlisle CMS')
@@ -197,9 +199,9 @@ export function BodInternalPage() {
   const getUserDisplayName = (username: string | null | undefined) => {
     if (!username) return ''
     if (!users || users.length === 0) return username
-    const u = users.find(user => user.user_name === username)
-    if (u && u.first_name) {
-      return `${u.first_name} ${u.last_name || ''}`.trim()
+    const u = users.find(user => user.user_name === username || (user as any).username === username || String(user.id) === String(username))
+    if (u) {
+      return formatUserDisplayName(u)
     }
     return username
   }
@@ -573,7 +575,7 @@ export function BodInternalPage() {
                     { value: '', label: 'Unassigned' },
                     ...users.filter(u => u.active_status).map(u => ({
                       value: u.user_name,
-                      label: u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : u.user_name
+                      label: formatUserDisplayName(u)
                     }))
                   ]
                   if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
@@ -634,7 +636,7 @@ export function BodInternalPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-[11px] text-muted font-medium">
-                        {new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}
+                        {formatDateTime(job.created_at)}
                       </td>
                       <td
                         className={`px-4 py-3 text-[11px] font-medium ${isManager ? 'text-primary hover:underline cursor-pointer' : 'text-muted'}`}
@@ -647,7 +649,7 @@ export function BodInternalPage() {
                           }
                         }}
                       >
-                        {job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : (isManager ? 'Set Date' : '-')}
+                        {job.due_date ? formatDateTime(job.due_date) : (isManager ? 'Set Date' : '-')}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -680,7 +682,7 @@ export function BodInternalPage() {
               { value: '', label: 'Unassigned' },
               ...users.filter(u => u.active_status).map(u => ({
                 value: u.user_name,
-                label: u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : u.user_name
+                label: formatUserDisplayName(u)
               }))
             ]
             if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
@@ -761,7 +763,7 @@ export function BodInternalPage() {
 
                 <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
                   <div className="flex flex-col gap-0.5">
-                    <span>Created: {new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}</span>
+                    <span>Created: {formatDateTime(job.created_at)}</span>
                     <span
                       className={isManager ? 'text-primary hover:underline cursor-pointer' : ''}
                       onClick={(e) => {
@@ -773,7 +775,7 @@ export function BodInternalPage() {
                         }
                       }}
                     >
-                      Due: {job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : (isManager ? 'Set Date' : '-')}
+                      Due: {job.due_date ? formatDateTime(job.due_date) : (isManager ? 'Set Date' : '-')}
                     </span>
                   </div>
                   <span className="flex items-center gap-1 text-primary">View Details <ArrowRight size={10} /></span>

@@ -139,7 +139,7 @@ def update_job_status(
         return
     try:
         from app.models import ProcessingJob
-        from datetime import datetime
+        from datetime import datetime, timezone
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job:
             job.status = status
@@ -150,7 +150,7 @@ def update_job_status(
             if error is not None:
                 job.error_message = error
             if status in ("completed", "failed"):
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
             db.commit()
     except Exception:
         pass

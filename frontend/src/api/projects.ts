@@ -211,6 +211,28 @@ export const projectsApi = {
     const r = await api.post<FinalizeMappingResponse>(`/projects/${projectId}/finalize-mapping`, data)
     return r.data
   },
+
+  getDocuments: async (projectId: number): Promise<ProjectDocument[]> => {
+    const r = await api.get<{ documents: ProjectDocument[] }>(`/projects/${projectId}/documents`)
+    return r.data.documents || []
+  },
+
+  getDocumentDownloadUrl: (projectId: number, relPath: string): string => {
+    return `/api/v2/projects/${projectId}/documents/download?path=${encodeURIComponent(relPath)}`
+  },
+
+  getDocumentViewUrl: (projectId: number, relPath: string): string => {
+    return `/api/v2/projects/${projectId}/documents/view?path=${encodeURIComponent(relPath)}`
+  },
+}
+
+export interface ProjectDocument {
+  filename: string
+  relative_path: string
+  category: 'PO Document' | 'CE Support' | 'Extracted PO Data' | 'Input file' | string
+  size_bytes: number
+  size_formatted: string
+  updated_at: string
 }
 
 // Named exports for WMS features
@@ -228,3 +250,6 @@ export const getProjectDetail = projectsApi.getById
 export const previewZip = projectsApi.previewZip
 export const resumeMapping = projectsApi.resumeMapping
 export const finalizeMapping = projectsApi.finalizeMapping
+export const getProjectDocuments = projectsApi.getDocuments
+
+

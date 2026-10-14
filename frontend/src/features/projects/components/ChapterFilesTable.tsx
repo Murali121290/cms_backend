@@ -34,6 +34,7 @@ import { useToast } from "@/components/ui/useToast";
 import type { FileRecord } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
 import { useUsersStore } from "@/stores/usersStore";
+import { formatDate } from "@/utils/dateUtils";
 import type { ChapterSection } from "@/features/projects/components/ChapterCategorySummary";
 
 type FileActionKind = "download" | "checkout" | "cancel_checkout" | "delete";
@@ -393,11 +394,7 @@ function InlineFileVersionsList({
       {sortedVersions.map((v, idx) => {
         const isLast = idx === sortedVersions.length - 1;
         const treeConnector = isLast ? "â””â”€â”€" : "â”œâ”€â”€";
-        const uploadedDate = new Date(v.uploaded_at).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        });
+        const uploadedDate = formatDate(v.uploaded_at);
 
         return (
           <tr
@@ -759,9 +756,7 @@ export function ChapterFilesTable({
               const chevronColor   = isExpanded ? "#C9821A" : "#D4CFC9";
 
               // Formatted date
-              const uploadedDate = new Date(file.uploaded_at).toLocaleDateString("en-US", {
-                month: "short", day: "numeric", year: "numeric",
-              });
+              const uploadedDate = formatDate(file.uploaded_at);
 
               return (
                 <Fragment key={file.id}>

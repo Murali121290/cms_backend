@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -144,25 +145,155 @@ def delete_stage_detail(detail_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Stage detail not found")
 
 
+from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.models import User
+
+
 @router.post("/stage-details/plan", response_model=List[StageDetailResponse])
-def create_planning_rows(payload: BulkPlannedCreate, db: Session = Depends(get_db)):
+def create_planning_rows(
+    payload: BulkPlannedCreate,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_from_cookie),
+):
+    from sqlalchemy import select, or_
+    from sqlalchemy.orm.attributes import flag_modified
+    from datetime import datetime, timezone
+    from app.domains.projects.models import Project
+
+    def _format_user_full_name(u) -> Optional[str]:
+        if not u:
+            return None
+        fn = (getattr(u, "first_name", None) or "").strip()
+        ln = (getattr(u, "last_name", None) or "").strip()
+        if fn and ln:
+            if fn.endswith(f" {ln}") or fn.endswith(ln):
+                return fn
+            return f"{fn} {ln}"
+        return fn or ln or getattr(u, "username", None)
+
+    operator = None
+    if payload.changed_by:
+        matched = db.query(User).filter(
+            or_(
+                User.username == payload.changed_by,
+                User.email == payload.changed_by,
+            )
+        ).first()
+        if matched:
+            operator = _format_user_full_name(matched)
+        else:
+            operator = payload.changed_by
+
+    if not operator and current_user:
+        operator = _format_user_full_name(current_user)
+
+    if not operator and payload.project_manager_name:
+        matched_pm = db.query(User).filter(
+            or_(
+                User.username == payload.project_manager_name,
+                User.email == payload.project_manager_name,
+            )
+        ).first()
+        if matched_pm:
+            operator = _format_user_full_name(matched_pm)
+        else:
+            operator = payload.project_manager_name
+
+    if not operator:
+        operator = "System"
+
+    # Validate against project due date
+    project = db.query(Project).filter(
+        or_(Project.project_code == payload.project, Project.code == payload.project)
+    ).first()
+
+    if project and project.due_date:
+        due_str = str(project.due_date)
+        for item in payload.items:
+            if item.planned_end_date:
+                end_str = str(item.planned_end_date).split("T")[0]
+                if end_str > due_str:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Planned date {end_str} for {item.chapters} - {item.stage_name} cannot be above the project due date {due_str}.",
+                    )
+
     details = []
     for item in payload.items:
-        db_detail = StageDetail(
-            client=payload.client,
-            project=payload.project,
-            workflow=item.workflow if item.workflow else payload.workflow,
-            complexity_level=payload.complexity_level,
-            project_manager_name=payload.project_manager_name,
-            chapters=item.chapters,
-            stage_name=item.stage_name,
-            planned_start_date=item.planned_start_date,
-            planned_end_date=item.planned_end_date,
-            sla=item.sla,
-            stage_status="In-progress",
-        )
-        db.add(db_detail)
-        details.append(db_detail)
+        existing = db.execute(
+            select(StageDetail).where(
+                StageDetail.project == payload.project,
+                StageDetail.chapters == item.chapters,
+                StageDetail.stage_name == item.stage_name,
+            )
+        ).scalars().first()
+
+        if existing:
+            if existing.stage_status == "Completed":
+                details.append(existing)
+                continue
+
+            old_start = existing.planned_start_date.isoformat() if existing.planned_start_date else None
+            old_due = existing.planned_end_date.isoformat() if existing.planned_end_date else None
+            old_sla = existing.sla
+
+            new_start = item.planned_start_date.isoformat() if item.planned_start_date else None
+            new_due = item.planned_end_date.isoformat() if item.planned_end_date else None
+            new_sla = item.sla
+
+            # Check if dates or SLA actually changed
+            dates_changed = (
+                (old_start and new_start and old_start.split("T")[0] != new_start.split("T")[0]) or
+                (bool(old_start) != bool(new_start)) or
+                (old_due and new_due and old_due.split("T")[0] != new_due.split("T")[0]) or
+                (bool(old_due) != bool(new_due)) or
+                (old_sla != new_sla)
+            )
+
+            if dates_changed:
+                history_list = list(existing.history or [])
+                history_entry = {
+                    "reason": payload.reason or "Planning adjustment",
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "changed_by": operator,
+                    "before": {
+                        "planned_start_date": old_start,
+                        "planned_end_date": old_due,
+                        "sla": old_sla,
+                    },
+                    "after": {
+                        "planned_start_date": new_start,
+                        "planned_end_date": new_due,
+                        "sla": new_sla,
+                    }
+                }
+                history_list.append(history_entry)
+                existing.history = history_list
+                flag_modified(existing, "history")
+
+            existing.workflow = item.workflow if item.workflow else payload.workflow
+            existing.complexity_level = payload.complexity_level
+            existing.project_manager_name = payload.project_manager_name
+            existing.planned_start_date = item.planned_start_date
+            existing.planned_end_date = item.planned_end_date
+            existing.sla = item.sla
+            details.append(existing)
+        else:
+            db_detail = StageDetail(
+                client=payload.client,
+                project=payload.project,
+                workflow=item.workflow if item.workflow else payload.workflow,
+                complexity_level=payload.complexity_level,
+                project_manager_name=payload.project_manager_name,
+                chapters=item.chapters,
+                stage_name=item.stage_name,
+                planned_start_date=item.planned_start_date,
+                planned_end_date=item.planned_end_date,
+                sla=item.sla,
+                stage_status="In-progress",
+            )
+            db.add(db_detail)
+            details.append(db_detail)
     db.commit()
     for d in details:
         db.refresh(d)
@@ -218,9 +349,9 @@ def assign_stage(project: str, chapters: str, stage_name: str, payload: AssignPa
                     dt_val = dt_val.replace(tzinfo=None)
                 db_detail.actual_start_date = dt_val
             except ValueError:
-                db_detail.actual_start_date = datetime.utcnow()
+                db_detail.actual_start_date = datetime.now(timezone.utc)
         else:
-            db_detail.actual_start_date = datetime.utcnow()
+            db_detail.actual_start_date = datetime.now(timezone.utc)
         
     db.commit()
     db.refresh(db_detail)
@@ -246,7 +377,7 @@ def bulk_assign_stages(payload: BulkAssignPayload, db: Session = Depends(get_db)
     
     updated_details = []
     
-    assign_time = datetime.utcnow()
+    assign_time = datetime.now(timezone.utc)
     if payload.dt:
         try:
             assign_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
@@ -307,7 +438,7 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
         )
     ).scalars().first()
     
-    transition_time = datetime.utcnow()
+    transition_time = datetime.now(timezone.utc)
     if payload.dt:
         try:
             transition_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))

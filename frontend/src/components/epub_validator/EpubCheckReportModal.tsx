@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import type { EpubCheckReport } from '@/api/epubValidator';
+import { formatDateTime } from '@/utils/dateUtils';
 
 interface Props {
   report: EpubCheckReport;
@@ -21,14 +22,13 @@ interface Props {
 }
 
 function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
+  return formatDateTime(iso, undefined, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    second: undefined,
   });
 }
 

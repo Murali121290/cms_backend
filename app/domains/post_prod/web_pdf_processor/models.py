@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -27,9 +27,9 @@ class WebPdfProject(Base):
     uploaded_by_id = Column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    uploaded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
     is_deleted = Column(Boolean, nullable=False, default=False)
 
@@ -55,7 +55,7 @@ class WebPdfHistory(Base):
     old_assignee = Column(String(255), nullable=True)
     new_assignee = Column(String(255), nullable=True)
     result_type = Column(String(50), nullable=False, default="assignee_change")
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Merge-specific fields
     merged_files = Column(JSON, nullable=True)

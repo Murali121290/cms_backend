@@ -1,7 +1,7 @@
 import enum
 from sqlalchemy import (
     BigInteger, Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey,
-    Integer, String, Text, UniqueConstraint
+    Integer, JSON, String, Text, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.compiler import compiles
@@ -120,6 +120,7 @@ class StageDetail(Base):
     delayed               = Column(Boolean,     nullable=False, default=False)
     delay_days            = Column(Integer,     nullable=True)
     remarks               = Column(Text,        nullable=True)
+    history               = Column(JSON,        nullable=True, default=list)
     created_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

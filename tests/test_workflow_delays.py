@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.domains.workflow.models import StageMaster, StageDetail, WorkflowMaster, ChapterInfo
 
 def test_workflow_delay_calculation_on_transition(db_session, client):
@@ -20,8 +20,8 @@ def test_workflow_delay_calculation_on_transition(db_session, client):
     db_session.add(chapter)
 
     # Create planning rows
-    planned_start = datetime.utcnow() - timedelta(days=5)
-    planned_end = datetime.utcnow() - timedelta(days=2) # Planned end was 2 days ago
+    planned_start = datetime.now(timezone.utc) - timedelta(days=5)
+    planned_end = datetime.now(timezone.utc) - timedelta(days=2) # Planned end was 2 days ago
     
     sd1 = StageDetail(
         client="ClientA",
@@ -54,7 +54,7 @@ def test_workflow_delay_calculation_on_transition(db_session, client):
     payload = {
         "from_stage": "Stage 1",
         "to_stage": "Stage 2",
-        "dt": datetime.utcnow().isoformat()
+        "dt": datetime.now(timezone.utc).isoformat()
     }
     
     response = client.post(
@@ -88,8 +88,8 @@ def test_cascade_shift_endpoint(db_session, client):
     db_session.commit()
 
     # Setup planning rows
-    planned_start = datetime.utcnow()
-    planned_end = datetime.utcnow() + timedelta(days=2)
+    planned_start = datetime.now(timezone.utc)
+    planned_end = datetime.now(timezone.utc) + timedelta(days=2)
 
     sd1 = StageDetail(
         client="ClientA",

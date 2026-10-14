@@ -311,7 +311,7 @@ def update_article_delay(article_id: int, req: ArticleDelayUpdateRequest, db: Se
     article.delay_reason = req.delay_reason
     article.revised_due_date = req.revised_due_date
     article.delay_days = req.delay_days or 0
-    article.delay_logged_at = datetime.utcnow()
+    article.delay_logged_at = datetime.now(timezone.utc)
 
     # Also update stage detail
     stage_detail = db.query(JournalStageDetail).filter(
@@ -957,13 +957,13 @@ def update_issue(
         issue.status, issue.resolution, issue.resolved_by_id, issue.resolved_at = "open", None, None, None
     elif body.action == "ignore":
         issue.status, issue.resolution = "ignored", "ignored"
-        issue.resolved_by_id, issue.resolved_at = user.id, datetime.utcnow()
+        issue.resolved_by_id, issue.resolved_at = user.id, datetime.now(timezone.utc)
     else:
         # Applying the suggestion to the XHTML as a tracked change is added with the Week 2 editor.
         kind = (issue.suggestion or {}).get("type")
         issue.status = "fixed"
         issue.resolution = "signed_off" if kind == "signoff" else "accepted_fix" if issue.suggestion else "manual_edit"
-        issue.resolved_by_id, issue.resolved_at = user.id, datetime.utcnow()
+        issue.resolved_by_id, issue.resolved_at = user.id, datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(issue)
@@ -985,7 +985,7 @@ def ignore_all_issues(article_id: int, body: Optional[IgnoreAllBody] = None, db:
         query = query.filter(JournalIssue.severity == body.severity)
 
     updated = 0
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for issue in query.all():
         issue.status = "ignored"
         issue.resolution = "ignored"
@@ -1711,7 +1711,7 @@ def _is_delayed(article: JournalArticle, stages) -> bool:
     due = article.due_date
     if due is None:
         return False
-    now = datetime.now(due.tzinfo) if due.tzinfo else datetime.utcnow()
+    now = datetime.now(due.tzinfo) if due.tzinfo else datetime.now(timezone.utc)
     return due < now
 
 

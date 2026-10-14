@@ -35,6 +35,8 @@ import {
 import { rulesApi, type LanguageRule, type RuleHistoryEntry } from '@/api/rulesApi'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+import { formatDateTime } from '@/utils/dateUtils'
+import { useUsersStore } from '@/stores/usersStore'
 
 type CategoryKey = 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'inclusive' | 'other'
 
@@ -774,12 +776,14 @@ export function ProjectRulesPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-500 text-white text-xs font-bold flex items-center justify-center shadow-sm">
-                        {(h.changed_by_username || '?').slice(0, 2).toUpperCase()}
+                        {((h.changed_by_username ? useUsersStore.getState().getUserDisplayNameByUsername(h.changed_by_username) : null) || h.changed_by_username || '?').slice(0, 2).toUpperCase()}
                       </div>
-                      <span className="font-medium text-sm">{h.changed_by_username ?? 'system'}</span>
+                      <span className="font-medium text-sm">
+                        {(h.changed_by_username ? useUsersStore.getState().getUserDisplayNameByUsername(h.changed_by_username) : null) || h.changed_by_username || 'System'}
+                      </span>
                     </div>
                     <span className="text-[11px] text-slate-500">
-                      {h.changed_at ? new Date(h.changed_at).toLocaleString() : ''}
+                      {formatDateTime(h.changed_at)}
                     </span>
                   </div>
                   <div className="mt-2 flex items-center gap-2 text-xs">

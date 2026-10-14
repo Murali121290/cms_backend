@@ -7,7 +7,7 @@ import tempfile
 import logging
 import time
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app import models
 from app.core.config import get_settings
@@ -307,7 +307,7 @@ class XMLToInDesignEngine:
                         else:
                             db_indd_file.version = (db_indd_file.version or 1) + 1
                             db_indd_file.path = indd_path
-                            db_indd_file.uploaded_at = datetime.utcnow()
+                            db_indd_file.uploaded_at = datetime.now(timezone.utc)
                             if user_id:
                                 db_indd_file.uploaded_by_id = user_id
                         db.commit()
@@ -351,7 +351,7 @@ class XMLToInDesignEngine:
                         else:
                             db_pdf_file.version = (db_pdf_file.version or 1) + 1
                             db_pdf_file.path = pdf_path
-                            db_pdf_file.uploaded_at = datetime.utcnow()
+                            db_pdf_file.uploaded_at = datetime.now(timezone.utc)
                             if user_id:
                                 db_pdf_file.uploaded_by_id = user_id
                         db.commit()
@@ -408,7 +408,7 @@ class XMLToInDesignEngine:
                 else:
                     db_indd_file.version = (db_indd_file.version or 1) + 1
                     db_indd_file.path = indd_path
-                    db_indd_file.uploaded_at = datetime.utcnow()
+                    db_indd_file.uploaded_at = datetime.now(timezone.utc)
                     if user_id:
                         db_indd_file.uploaded_by_id = user_id
                 db.commit()

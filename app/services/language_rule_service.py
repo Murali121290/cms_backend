@@ -12,6 +12,7 @@ import json
 import logging
 import os
 from typing import Any, Optional
+from datetime import timezone
 from sqlalchemy.orm import Session
 from app.core.paths import UPLOADS_DIR
 
@@ -327,11 +328,22 @@ def get_project_language_rules_history(
     out = []
     for r in rows:
         u = users.get(r.changed_by_id)
+        fn = (getattr(u, "first_name", None) or "").strip() if u else ""
+        ln = (getattr(u, "last_name", None) or "").strip() if u else ""
+        if fn and ln:
+            full_name = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
+        else:
+            full_name = fn or ln or (u.username if u else None)
+
+        dt_val = r.changed_at
+        if dt_val and dt_val.tzinfo is None:
+            dt_val = dt_val.replace(tzinfo=timezone.utc)
+
         out.append({
             "id": r.id,
-            "changed_at": r.changed_at.isoformat() if r.changed_at else None,
+            "changed_at": dt_val.isoformat() if dt_val else None,
             "changed_by_id": r.changed_by_id,
-            "changed_by_username": u.username if u else None,
+            "changed_by_username": full_name or (u.username if u else None),
             "profile_key": r.profile_key,
             "enabled_rule_ids": r.enabled_rule_ids or [],
             "disabled_rule_ids": r.disabled_rule_ids or [],

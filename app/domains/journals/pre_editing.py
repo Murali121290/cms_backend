@@ -337,7 +337,7 @@ def finish_step(db: Session, article: JournalArticle, key: str, user_id: Optiona
     if current["open"]["warning"] and not accept_warnings:
         raise StepError(409, current["blocked_reason"])
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if accept_warnings:
         for issue in db.query(JournalIssue).filter(JournalIssue.article_id == article.id, JournalIssue.module == spec["module"],
                                                    JournalIssue.status == "open", JournalIssue.severity == "warning").all():

@@ -1,9 +1,10 @@
-﻿import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/api/client";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonTable } from "@/components/ui/SkeletonLoader";
 import type { ActivitiesResponse } from "@/types/api";
+import { formatDateTime } from "@/utils/dateUtils";
 
 async function getActivities() {
   const response = await apiClient.get<ActivitiesResponse>("/activities", { params: { limit: 100 } });
@@ -53,7 +54,7 @@ export function ActivitiesPage() {
                   <td className="px-4 py-3 text-sm text-text font-medium">{a.title}</td>
                   <td className="px-4 py-3 text-sm text-text">{a.project?.title ?? "â€”"}</td>
                   <td className="px-4 py-3 text-sm text-text">{a.chapter?.title ?? "â€”"}</td>
-                  <td className="px-4 py-3 text-sm text-muted">{new Date(a.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</td>
+                  <td className="px-4 py-3 text-sm text-muted">{formatDateTime(a.timestamp)}</td>
                 </tr>
               ))}
             </tbody>
