@@ -146,23 +146,62 @@ def delete_stage_detail(detail_id: int, db: Session = Depends(get_db)):
 
 @router.post("/stage-details/plan", response_model=List[StageDetailResponse])
 def create_planning_rows(payload: BulkPlannedCreate, db: Session = Depends(get_db)):
+    from sqlalchemy import select, or_
+    from app.domains.projects.models import Project
+
+    # Validate against project due date
+    project = db.query(Project).filter(
+        or_(Project.project_code == payload.project, Project.code == payload.project)
+    ).first()
+
+    if project and project.due_date:
+        due_str = str(project.due_date)
+        for item in payload.items:
+            if item.planned_end_date:
+                end_str = str(item.planned_end_date).split("T")[0]
+                if end_str > due_str:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Planned date {end_str} for {item.chapters} - {item.stage_name} cannot be above the project due date {due_str}.",
+                    )
+
     details = []
     for item in payload.items:
-        db_detail = StageDetail(
-            client=payload.client,
-            project=payload.project,
-            workflow=item.workflow if item.workflow else payload.workflow,
-            complexity_level=payload.complexity_level,
-            project_manager_name=payload.project_manager_name,
-            chapters=item.chapters,
-            stage_name=item.stage_name,
-            planned_start_date=item.planned_start_date,
-            planned_end_date=item.planned_end_date,
-            sla=item.sla,
-            stage_status="In-progress",
-        )
-        db.add(db_detail)
-        details.append(db_detail)
+        existing = db.execute(
+            select(StageDetail).where(
+                StageDetail.project == payload.project,
+                StageDetail.chapters == item.chapters,
+                StageDetail.stage_name == item.stage_name,
+            )
+        ).scalars().first()
+
+        if existing:
+            if existing.stage_status == "Completed":
+                details.append(existing)
+                continue
+            existing.workflow = item.workflow if item.workflow else payload.workflow
+            existing.complexity_level = payload.complexity_level
+            existing.project_manager_name = payload.project_manager_name
+            existing.planned_start_date = item.planned_start_date
+            existing.planned_end_date = item.planned_end_date
+            existing.sla = item.sla
+            details.append(existing)
+        else:
+            db_detail = StageDetail(
+                client=payload.client,
+                project=payload.project,
+                workflow=item.workflow if item.workflow else payload.workflow,
+                complexity_level=payload.complexity_level,
+                project_manager_name=payload.project_manager_name,
+                chapters=item.chapters,
+                stage_name=item.stage_name,
+                planned_start_date=item.planned_start_date,
+                planned_end_date=item.planned_end_date,
+                sla=item.sla,
+                stage_status="In-progress",
+            )
+            db.add(db_detail)
+            details.append(db_detail)
     db.commit()
     for d in details:
         db.refresh(d)
