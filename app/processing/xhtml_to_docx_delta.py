@@ -586,13 +586,20 @@ class XhtmlToDocxDeltaEngine:
         import docx.text.paragraph
         all_body_paras = [docx.text.paragraph.Paragraph(p, doc) for p in doc.element.body.iter(qn("w:p"))]
 
-        # Find all HTML paragraphs, headings, list items, cell paragraphs, and page breaks
+        # 1. Structural table patching: matches HTML tables to DOCX tables,
+        # aligns cells via grid coordinates, and updates paragraphs directly inside each w:tc.
+        tbl_patched, tbl_claimed_para_ids = self._patch_tables(root, doc, username)
+        patched += tbl_patched
+        claimed_target_paras = set(tbl_claimed_para_ids)
+
+        # 2. Find all HTML paragraphs, headings, list items, and page breaks OUTSIDE tables
         all_elements = root.xpath("//p | //h1 | //h2 | //h3 | //h4 | //h5 | //h6 | //li | //div[contains(@class, 'page-break')] | //hr[contains(@class, 'page-break')]")
         
-        # Filter out li elements that contain p, h1, h2, h3, h4, h5, or h6 descendants
-        # to prevent parent-child double matching when list items contain styled paragraphs.
+        # Filter out table elements and nested li elements to prevent parent-child double matching
         html_blocks = []
         for el in all_elements:
+            if any(parent.tag == "table" for parent in el.iterancestors()):
+                continue
             if el.tag == "li":
                 has_nested_block = any(child.tag in ("p", "h1", "h2", "h3", "h4", "h5", "h6") for child in el.iterdescendants())
                 if has_nested_block:
@@ -600,7 +607,6 @@ class XhtmlToDocxDeltaEngine:
             html_blocks.append(el)
 
         last_target_para = None
-        claimed_target_paras = set()
         for idx, block_el in enumerate(html_blocks):
             is_page_break = block_el.tag in ("div", "hr") and "page-break" in (block_el.get("class") or "")
             if is_page_break:
@@ -785,6 +791,233 @@ class XhtmlToDocxDeltaEngine:
         os.replace(tmp_path, out_docx_path)
         logger.info(f"Lossless Delta-patched DOCX saved: {out_docx_path}")
         return out_docx_path
+
+    def _patch_tables(self, root, doc, username: str) -> tuple[int, set[int]]:
+        """Dedicated structural table patching: matches HTML tables to DOCX tables,
+        aligns cells via grid coordinates, and updates paragraphs directly inside each w:tc."""
+        patched_count = 0
+        claimed_para_ids = set()
+        html_tables = root.xpath("//table")
+        if not html_tables or not doc.tables:
+            return 0, claimed_para_ids
+
+        # Build table index by bookmark if present
+        tbl_bm_index = {}
+        for tbl in doc.tables:
+            tbl_elem = tbl._element
+            parent = tbl_elem.getparent()
+            parent_children = list(parent) if parent is not None else []
+            try:
+                t_idx = parent_children.index(tbl_elem)
+                for idx in range(t_idx - 1, -1, -1):
+                    elem = parent_children[idx]
+                    if elem.tag == qn("w:bookmarkStart"):
+                        name = elem.get(qn("w:name"), "")
+                        if name.startswith("tbl_bm_"):
+                            tbl_bm_index[name] = tbl
+                            break
+                    elif elem.tag in (qn("w:tbl"), qn("w:p")):
+                        break
+            except (ValueError, TypeError):
+                pass
+
+        for t_idx, html_tbl in enumerate(html_tables):
+            # Match docx table: by bookmark first, fallback to positional index
+            docx_tbl = None
+            tbl_bm = html_tbl.get("data-bookmark")
+            if tbl_bm and tbl_bm in tbl_bm_index:
+                docx_tbl = tbl_bm_index[tbl_bm]
+            elif t_idx < len(doc.tables):
+                docx_tbl = doc.tables[t_idx]
+
+            if docx_tbl is None:
+                continue
+
+            docx_tr_elements = docx_tbl._tbl.findall(qn("w:tr"))
+            html_rows = html_tbl.xpath(".//tr")
+
+            # Grid mapping for docx table to locate non-continuation w:tc elements per row
+            active_vmerges = {}
+            row_non_continue_tcs = []
+
+            for r_idx, tr in enumerate(docx_tr_elements):
+                tcs = tr.findall(qn("w:tc"))
+                col_ptr = 0
+                non_cont = []
+
+                for tc in tcs:
+                    tcPr = tc.find(qn("w:tcPr"))
+                    grid_span = 1
+                    if tcPr is not None:
+                        gs_elem = tcPr.find(qn("w:gridSpan"))
+                        if gs_elem is not None:
+                            try:
+                                grid_span = int(gs_elem.get(qn("w:val"), 1))
+                            except (ValueError, TypeError):
+                                grid_span = 1
+
+                    vmerge_val = None
+                    if tcPr is not None:
+                        vm_elem = tcPr.find(qn("w:vMerge"))
+                        if vm_elem is not None:
+                            vmerge_val = vm_elem.get(qn("w:val"), "continue")
+                            if vmerge_val is None:
+                                vmerge_val = "continue"
+
+                    if vmerge_val == "continue" and col_ptr in active_vmerges:
+                        # continuation of vertical merge
+                        pass
+                    elif vmerge_val == "restart":
+                        for c in range(col_ptr, col_ptr + grid_span):
+                            active_vmerges[c] = True
+                        non_cont.append(tc)
+                    else:
+                        for c in range(col_ptr, col_ptr + grid_span):
+                            active_vmerges.pop(c, None)
+                        non_cont.append(tc)
+
+                    col_ptr += grid_span
+
+                row_non_continue_tcs.append(non_cont)
+
+            # Handle user added rows in editor
+            for new_r_idx in range(len(docx_tr_elements), len(html_rows)):
+                tr_html = html_rows[new_r_idx]
+                new_tr = OxmlElement("w:tr")
+                docx_tbl._tbl.append(new_tr)
+                new_non_cont = []
+                for cell_html in tr_html.xpath("./td | ./th"):
+                    new_tc = OxmlElement("w:tc")
+                    new_tr.append(new_tc)
+                    new_tcPr = OxmlElement("w:tcPr")
+                    new_tc.append(new_tcPr)
+                    cs = 1
+                    try:
+                        cs = int(cell_html.get("colspan", "1"))
+                    except (ValueError, TypeError):
+                        cs = 1
+                    if cs > 1:
+                        gs = OxmlElement("w:gridSpan")
+                        gs.set(qn("w:val"), str(cs))
+                        new_tcPr.append(gs)
+                    new_p = OxmlElement("w:p")
+                    new_tc.append(new_p)
+                    new_non_cont.append(new_tc)
+                row_non_continue_tcs.append(new_non_cont)
+                docx_tr_elements.append(new_tr)
+
+            # Handle user deleted rows in editor
+            if len(html_rows) < len(docx_tr_elements):
+                for excess_tr in docx_tr_elements[len(html_rows):]:
+                    docx_tbl._tbl.remove(excess_tr)
+                docx_tr_elements = docx_tr_elements[:len(html_rows)]
+                row_non_continue_tcs = row_non_continue_tcs[:len(html_rows)]
+
+            # Patch each cell
+            import docx.text.paragraph
+            for r_idx, tr_html in enumerate(html_rows):
+                if r_idx >= len(row_non_continue_tcs):
+                    break
+                docx_tcs = row_non_continue_tcs[r_idx]
+                html_cells = tr_html.xpath("./td | ./th")
+
+                for c_idx, cell_html in enumerate(html_cells):
+                    if c_idx >= len(docx_tcs):
+                        new_tc = OxmlElement("w:tc")
+                        docx_tr_elements[r_idx].append(new_tc)
+                        new_tcPr = OxmlElement("w:tcPr")
+                        new_tc.append(new_tcPr)
+                        new_p = OxmlElement("w:p")
+                        new_tc.append(new_p)
+                        docx_tcs.append(new_tc)
+
+                    tc = docx_tcs[c_idx]
+
+                    # Extract block elements inside cell
+                    cell_blocks = cell_html.xpath("./p | ./h1 | ./h2 | ./h3 | ./h4 | ./h5 | ./h6 | ./li")
+                    if not cell_blocks:
+                        cell_blocks = [cell_html]
+
+                    tc_p_elements = tc.findall(qn("w:p"))
+                    if not tc_p_elements:
+                        new_p = OxmlElement("w:p")
+                        tc.append(new_p)
+                        tc_p_elements = [new_p]
+
+                    tc_paras = [docx.text.paragraph.Paragraph(p, doc) for p in tc_p_elements]
+
+                    for p_i, block_el in enumerate(cell_blocks):
+                        if p_i < len(tc_paras):
+                            target_para = tc_paras[p_i]
+                        else:
+                            new_p = OxmlElement("w:p")
+                            tc_paras[-1]._p.addnext(new_p)
+                            target_para = docx.text.paragraph.Paragraph(new_p, doc)
+                            tc_paras.append(target_para)
+
+                        claimed_para_ids.add(id(target_para._p))
+
+                        # Sync style label
+                        p_label = (block_el.get("data-style-label") or "").strip()
+                        if not p_label:
+                            classes = (block_el.get("class") or "").split()
+                            p_label = classes[0] if classes else "Normal"
+                        if p_label in ("Normal", "MsoNormal", ""):
+                            p_label = "Normal"
+                        p_label = normalize_structural_tag_case(p_label)
+
+                        try:
+                            pPr = target_para._p.get_or_add_pPr()
+                            pStyle = OxmlElement("w:pStyle")
+                            pStyle.set(qn("w:val"), p_label)
+                            for existing in pPr.findall(qn("w:pStyle")):
+                                pPr.remove(existing)
+                            pPr.insert(0, pStyle)
+                        except Exception:
+                            pass
+
+                        # Sync alignment
+                        inline_style = (block_el.get("style") or "").lower()
+                        align_match = re.search(r"text-align\s*:\s*(left|center|right|justify)", inline_style)
+                        try:
+                            pPr = target_para._p.get_or_add_pPr()
+                            for existing in pPr.findall(qn("w:jc")):
+                                pPr.remove(existing)
+                            if align_match:
+                                val = align_match.group(1)
+                                jc_val = "both" if val == "justify" else val
+                                jc = OxmlElement("w:jc")
+                                jc.set(qn("w:val"), jc_val)
+                                pPr.append(jc)
+                        except Exception:
+                            pass
+
+                        # Patch runs in-place
+                        try:
+                            self._patch_paragraph_runs(target_para, block_el, doc, username)
+                            patched_count += 1
+                        except Exception as p_err:
+                            logger.warning(f"Failed to patch runs in table cell paragraph: {p_err}")
+
+                    # Remove excess paragraphs in tc if user deleted them
+                    if len(cell_blocks) < len(tc_paras):
+                        for excess_p in tc_paras[len(cell_blocks):]:
+                            tc.remove(excess_p._p)
+
+                    # Sync cell vertical-align if set
+                    cell_style = (cell_html.get("style") or "").lower()
+                    valign_match = re.search(r"vertical-align\s*:\s*(top|middle|bottom)", cell_style)
+                    if valign_match:
+                        v_val = valign_match.group(1)
+                        v_docx = "center" if v_val == "middle" else v_val
+                        tcPr = tc.get_or_add_tcPr()
+                        for existing in tcPr.findall(qn("w:vAlign")):
+                            tcPr.remove(existing)
+                        vAlign_el = OxmlElement("w:vAlign")
+                        vAlign_el.set(qn("w:val"), v_docx)
+                        tcPr.append(vAlign_el)
+
+        return patched_count, claimed_para_ids
 
     def _insert_new_images(self, root, doc, para_index: dict) -> None:
         """Insert images that were pasted into the editor into the DOCX.
