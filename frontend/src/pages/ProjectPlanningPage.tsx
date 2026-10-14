@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, Layers, Calendar, Flag, AlertTriangle, Edit3, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Layers, Calendar, Flag, AlertTriangle, Edit3, X, History } from 'lucide-react'
 import { projectsApi } from '@/api/projects'
 import type { Project } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
@@ -12,7 +12,7 @@ import type { Stage } from '@/api/stages'
 import { toast } from '@/store/useToastStore'
 import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/Button'
-import { stageDetailsApi } from '@/api/stageDetails'
+import { stageDetailsApi, type StageHistoryEntry } from '@/api/stageDetails'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -261,6 +261,10 @@ export function ProjectPlanningPage() {
   const [actualFinalDue, setActualFinalDue] = useState<Date | null>(null)
   const [dbDates, setDbDates] = useState<Record<string, { start: Date; due: Date }>>({})
   const [completedStages, setCompletedStages] = useState<Set<string>>(new Set())
+  const [stageHistoryMap, setStageHistoryMap] = useState<Map<string, StageHistoryEntry[]>>(new Map())
+  const [isReasonModalOpen, setIsReasonModalOpen] = useState(false)
+  const [adjustmentReason, setAdjustmentReason] = useState('')
+  const [viewingHistory, setViewingHistory] = useState<{ chapter: string; stageName: string; history: StageHistoryEntry[] } | null>(null)
   const [activeTab, setActiveTab] = useState<'manuscript' | 'art' | 'design'>('manuscript')
 
   const loadPlanningData = useCallback(async (opts?: { silent?: boolean }) => {
@@ -318,6 +322,7 @@ export function ProjectPlanningPage() {
       let dMap = new Map<string, number>()
       let datesMap: Record<string, { start: Date; due: Date }> = {}
       let compStages = new Set<string>()
+      let histMap = new Map<string, StageHistoryEntry[]>()
       let maxDue: Date | null = null
 
       if (stageDetails.length > 0 && chsRaw.length > 0) {
@@ -330,6 +335,9 @@ export function ProjectPlanningPage() {
           const key = `${d.chapters}||${d.stage_name}`
           if (d.stage_status === 'Completed') {
             compStages.add(key)
+          }
+          if (d.history && Array.isArray(d.history) && d.history.length > 0 && !histMap.has(key)) {
+            histMap.set(key, d.history)
           }
           if (!slaSeen.has(key) && d.sla != null) {
             slaSeen.add(key)
@@ -358,6 +366,7 @@ export function ProjectPlanningPage() {
         }
       }
       setCompletedStages(compStages)
+      setStageHistoryMap(histMap)
       setCellSlas(loaded)
       setDelayMap(dMap)
       setDbDates(datesMap)
@@ -607,6 +616,19 @@ export function ProjectPlanningPage() {
       return
     }
 
+    // Prompt for adjustment reason if re-approving an existing plan
+    if (alreadyApproved) {
+      setAdjustmentReason('')
+      setIsReasonModalOpen(true)
+      return
+    }
+
+    await executeApprove()
+  }
+
+  async function executeApprove(reason?: string) {
+    if (!project || !finalDue) return
+
     setApproving(true)
     try {
       await projectsApi.update(project.id, {
@@ -653,6 +675,7 @@ export function ProjectPlanningPage() {
             workflow: wfName ?? '',
             complexity_level: previewComposition,
             project_manager_name: project.project_manager ?? null,
+            reason: reason || null,
             items,
           })
         } catch (err: unknown) {
@@ -674,6 +697,8 @@ export function ProjectPlanningPage() {
 
     toast.success(alreadyApproved ? 'Planning re-approved successfully' : 'Planning approved — project is now Active')
     setIsAdjusting(false)
+    setIsReasonModalOpen(false)
+    setAdjustmentReason('')
     if (alreadyApproved) {
       await loadPlanningData({ silent: true })
     } else {
@@ -776,6 +801,7 @@ export function ProjectPlanningPage() {
           const dbKey = `${ch.chapters}||${s.stageName}`
           const isCompleted = isStageCompleted(ch, s.stageName)
           const isCellEditable = editable && !isCompleted
+          const stageHist = stageHistoryMap.get(dbKey)
 
           const displayStart = dbDates[dbKey] ? dbDates[dbKey].start : s.start
           const displayDue = dbDates[dbKey] && (!editable || isCompleted) ? dbDates[dbKey].due : s.due
@@ -862,6 +888,19 @@ export function ProjectPlanningPage() {
                     </div>
                   )}
                 </div>
+                {stageHist && stageHist.length > 0 && (
+                  <div className="pt-1 border-t border-border/40 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setViewingHistory({ chapter: ch.chapters, stageName: s.stageName, history: stageHist })}
+                      className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary-hover hover:underline transition-colors"
+                      title="View adjustment history"
+                    >
+                      <History size={10} className="flex-shrink-0" />
+                      <span>{stageHist.length} adjustment{stageHist.length !== 1 ? 's' : ''}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </td>
           )
@@ -1137,6 +1176,143 @@ export function ProjectPlanningPage() {
           </>
         )}
       </div>
+
+      {/* Adjustment Reason Modal */}
+      {isReasonModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <History size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-text">Adjustment Reason</h3>
+                  <p className="text-xs text-muted">Provide a reason for re-approving planning changes</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsReasonModalOpen(false)
+                  setAdjustmentReason('')
+                }}
+                className="text-muted hover:text-text p-1 rounded-lg hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-text block">
+                Reason for Date / SLA Change <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                rows={3}
+                value={adjustmentReason}
+                onChange={e => setAdjustmentReason(e.target.value)}
+                placeholder="e.g., Client requested extension due to late manuscript delivery, author review delay..."
+                className="w-full text-xs bg-surface border border-border rounded-lg p-3 text-text placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
+                autoFocus
+              />
+              <p className="text-[11px] text-muted">
+                This reason will be recorded in the stage audit history alongside the before and after dates.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setIsReasonModalOpen(false)
+                  setAdjustmentReason('')
+                }}
+                disabled={approving}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  if (!adjustmentReason.trim()) {
+                    toast.error('Please enter a reason for the adjustment')
+                    return
+                  }
+                  executeApprove(adjustmentReason.trim())
+                }}
+                isLoading={approving}
+                disabled={!adjustmentReason.trim() || approving}
+                leftIcon={<CheckCircle2 size={14} />}
+              >
+                Confirm & Re-approve
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Viewing Adjustment History Modal */}
+      {viewingHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <History size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-text">Adjustment History</h3>
+                  <p className="text-xs text-muted">
+                    Chapter {viewingHistory.chapter} · {viewingHistory.stageName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingHistory(null)}
+                className="text-muted hover:text-text p-1.5 rounded-lg hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="max-h-80 overflow-y-auto space-y-3 pr-1">
+              {viewingHistory.history.map((entry, idx) => (
+                <div key={idx} className="bg-surface/60 border border-border/80 rounded-lg p-3 text-xs space-y-2">
+                  <div className="flex items-center justify-between text-muted">
+                    <span className="font-semibold text-text">Revision #{idx + 1}</span>
+                    <span className="text-[11px]">{new Date(entry.changed_at).toLocaleString()}</span>
+                  </div>
+                  <div className="bg-background/80 rounded p-2 text-text font-medium text-[11px]">
+                    <span className="text-muted block text-[10px] uppercase font-semibold">Reason:</span>
+                    {entry.reason}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="p-2 rounded bg-amber-50/60 border border-amber-200/60 text-amber-900">
+                      <span className="font-bold text-[10px] block uppercase text-amber-700">Before</span>
+                      <div>Start: {entry.before?.planned_start_date ? fmt(new Date(entry.before.planned_start_date)) : '—'}</div>
+                      <div>Due: {entry.before?.planned_end_date ? fmt(new Date(entry.before.planned_end_date)) : '—'}</div>
+                      <div>SLA: {entry.before?.sla != null ? `${entry.before.sla}d` : '—'}</div>
+                    </div>
+                    <div className="p-2 rounded bg-emerald-50/60 border border-emerald-200/60 text-emerald-900">
+                      <span className="font-bold text-[10px] block uppercase text-emerald-700">After</span>
+                      <div>Start: {entry.after?.planned_start_date ? fmt(new Date(entry.after.planned_start_date)) : '—'}</div>
+                      <div>Due: {entry.after?.planned_end_date ? fmt(new Date(entry.after.planned_end_date)) : '—'}</div>
+                      <div>SLA: {entry.after?.sla != null ? `${entry.after.sla}d` : '—'}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-border">
+              <Button size="sm" variant="outline" onClick={() => setViewingHistory(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

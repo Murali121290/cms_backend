@@ -86,6 +86,7 @@ class StageDetailBase(BaseModel):
     delayed: bool = False
     delay_days: Optional[int] = None
     remarks: Optional[str] = None
+    history: Optional[List[Dict[str, Any]]] = None
 
     @model_validator(mode="after")
     def validate_dates_and_sla(self):
@@ -123,6 +124,7 @@ class StageDetailUpdate(BaseModel):
     delayed: Optional[bool] = None
     delay_days: Optional[int] = None
     remarks: Optional[str] = None
+    history: Optional[List[Dict[str, Any]]] = None
 
 
 class BulkPlannedItem(BaseModel):
@@ -140,6 +142,7 @@ class BulkPlannedCreate(BaseModel):
     workflow: str
     complexity_level: Optional[str] = None
     project_manager_name: Optional[str] = None
+    reason: Optional[str] = None
     items: List[BulkPlannedItem]
 
 

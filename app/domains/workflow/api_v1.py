@@ -147,6 +147,8 @@ def delete_stage_detail(detail_id: int, db: Session = Depends(get_db)):
 @router.post("/stage-details/plan", response_model=List[StageDetailResponse])
 def create_planning_rows(payload: BulkPlannedCreate, db: Session = Depends(get_db)):
     from sqlalchemy import select, or_
+    from sqlalchemy.orm.attributes import flag_modified
+    from datetime import datetime
     from app.domains.projects.models import Project
 
     # Validate against project due date
@@ -179,6 +181,45 @@ def create_planning_rows(payload: BulkPlannedCreate, db: Session = Depends(get_d
             if existing.stage_status == "Completed":
                 details.append(existing)
                 continue
+
+            old_start = existing.planned_start_date.isoformat() if existing.planned_start_date else None
+            old_due = existing.planned_end_date.isoformat() if existing.planned_end_date else None
+            old_sla = existing.sla
+
+            new_start = item.planned_start_date.isoformat() if item.planned_start_date else None
+            new_due = item.planned_end_date.isoformat() if item.planned_end_date else None
+            new_sla = item.sla
+
+            # Check if dates or SLA actually changed
+            dates_changed = (
+                (old_start and new_start and old_start.split("T")[0] != new_start.split("T")[0]) or
+                (bool(old_start) != bool(new_start)) or
+                (old_due and new_due and old_due.split("T")[0] != new_due.split("T")[0]) or
+                (bool(old_due) != bool(new_due)) or
+                (old_sla != new_sla)
+            )
+
+            if dates_changed:
+                history_list = list(existing.history or [])
+                history_entry = {
+                    "reason": payload.reason or "Planning adjustment",
+                    "changed_at": datetime.utcnow().isoformat(),
+                    "changed_by": payload.project_manager_name,
+                    "before": {
+                        "planned_start_date": old_start,
+                        "planned_end_date": old_due,
+                        "sla": old_sla,
+                    },
+                    "after": {
+                        "planned_start_date": new_start,
+                        "planned_end_date": new_due,
+                        "sla": new_sla,
+                    }
+                }
+                history_list.append(history_entry)
+                existing.history = history_list
+                flag_modified(existing, "history")
+
             existing.workflow = item.workflow if item.workflow else payload.workflow
             existing.complexity_level = payload.complexity_level
             existing.project_manager_name = payload.project_manager_name

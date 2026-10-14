@@ -21,8 +21,25 @@ export interface StageDetail {
   delayed: boolean
   delay_days: number | null
   remarks: string | null
+  history?: StageHistoryEntry[] | null
   created_at: string
   updated_at: string
+}
+
+export interface StageHistoryEntry {
+  reason: string
+  changed_at: string
+  changed_by?: string | null
+  before: {
+    planned_start_date: string | null
+    planned_end_date: string | null
+    sla: number | null
+  }
+  after: {
+    planned_start_date: string | null
+    planned_end_date: string | null
+    sla: number | null
+  }
 }
 
 export interface PlanningItem {
@@ -39,6 +56,7 @@ export interface PlanningPayload {
   workflow: string
   complexity_level: string | null
   project_manager_name: string | null
+  reason?: string | null
   items: PlanningItem[]
 }
 
