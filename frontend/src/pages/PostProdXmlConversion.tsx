@@ -11,6 +11,8 @@ import { useRBAC } from '@/hooks/useRBAC'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
+import { getUserDisplayName } from '@/utils/userUtils'
+import { formatDateTime } from '@/utils/dateUtils'
 
 // ── Assignee Dropdown ────────────────────────────────────────────────────────
 
@@ -42,9 +44,7 @@ function AssigneeDropdown({
 
   const filteredUsers = activeUsers.filter((u) => {
     if (!searchQuery) return true;
-    const display = u.first_name || u.last_name
-      ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
-      : u.user_name;
+    const display = getUserDisplayName(u);
     return display.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
@@ -52,9 +52,7 @@ function AssigneeDropdown({
     if (!value) return '— Unassigned —';
     const u = activeUsers.find((u) => u.user_name === value);
     if (!u) return value;
-    return u.first_name || u.last_name
-      ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
-      : u.user_name;
+    return getUserDisplayName(u);
   })();
 
   return (
@@ -578,7 +576,7 @@ export function PostProdXmlConversion() {
                 </div>
 
                 <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
-                  <span>Created: {new Date(proj.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}</span>
+                  <span>Created: {formatDateTime(proj.created_at)}</span>
                   <span>{percent}% Done</span>
                 </div>
               </div>

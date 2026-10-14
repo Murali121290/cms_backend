@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import Base
 
 
@@ -13,7 +13,7 @@ class PostProdProject(Base):
     project_name = Column(String(255), nullable=False)
     status = Column(String(50), default="Active")
     assignee = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
 
     chapters = relationship(
@@ -45,7 +45,7 @@ class PostProdChapter(Base):
     converted_file_path = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
     size_bytes = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
     attempts = Column(Integer, default=0)
 

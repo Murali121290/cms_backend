@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -348,9 +349,9 @@ def assign_stage(project: str, chapters: str, stage_name: str, payload: AssignPa
                     dt_val = dt_val.replace(tzinfo=None)
                 db_detail.actual_start_date = dt_val
             except ValueError:
-                db_detail.actual_start_date = datetime.utcnow()
+                db_detail.actual_start_date = datetime.now(timezone.utc)
         else:
-            db_detail.actual_start_date = datetime.utcnow()
+            db_detail.actual_start_date = datetime.now(timezone.utc)
         
     db.commit()
     db.refresh(db_detail)
@@ -376,7 +377,7 @@ def bulk_assign_stages(payload: BulkAssignPayload, db: Session = Depends(get_db)
     
     updated_details = []
     
-    assign_time = datetime.utcnow()
+    assign_time = datetime.now(timezone.utc)
     if payload.dt:
         try:
             assign_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
@@ -437,7 +438,7 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
         )
     ).scalars().first()
     
-    transition_time = datetime.utcnow()
+    transition_time = datetime.now(timezone.utc)
     if payload.dt:
         try:
             transition_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from docx.oxml.shared import OxmlElement, qn
 from docx.oxml import parse_xml
 import difflib
@@ -18,7 +18,7 @@ def create_element(name):
     return OxmlElement(name)
 
 def get_current_iso_time():
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 import random
 

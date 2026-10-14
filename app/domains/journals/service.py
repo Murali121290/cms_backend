@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Union
 from sqlalchemy.orm import Session
 from app.domains.journals.models import Journal, JournalArticle, JournalStageDetail, JournalWorkflow
@@ -126,7 +126,7 @@ def initialize_article_stages(db: Session, article: JournalArticle):
             stage_number=number,
             stage_name=STAGE_PIPELINE[number - 1],
             stage_status="In-progress" if pos == 0 else "Pending",
-            actual_start_date=datetime.utcnow() if pos == 0 else None,
+            actual_start_date=datetime.now(timezone.utc) if pos == 0 else None,
         ))
     article.current_stage = STAGE_PIPELINE[numbers[0] - 1]
     db.commit()
@@ -149,7 +149,7 @@ def advance_article_stage(db: Session, article_id: int, remarks: Optional[str] =
     if stages:
         curr = stages[idx]
         curr.stage_status = "Completed"
-        curr.actual_end_date = datetime.utcnow()
+        curr.actual_end_date = datetime.now(timezone.utc)
         if remarks:
             curr.remarks = remarks
 
@@ -157,7 +157,7 @@ def advance_article_stage(db: Session, article_id: int, remarks: Optional[str] =
         nxt = stages[idx + 1]
         article.current_stage = nxt.stage_name
         nxt.stage_status = "In-progress"
-        nxt.actual_start_date = datetime.utcnow()
+        nxt.actual_start_date = datetime.now(timezone.utc)
         article.current_assignee_id = nxt.assignee_id
         db.commit()
         return {"status": "success", "previous_stage": current_stage, "new_stage": nxt.stage_name}

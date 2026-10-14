@@ -5,7 +5,7 @@ import tempfile
 import zipfile
 import uuid
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, List, Optional
 
@@ -22,7 +22,7 @@ from app import database, models, schemas_v2
 from app.domains.projects.models import Project, ProjectStylesheet
 from app.domains.workflow.models import StageMaster, WorkflowMaster
 from app.domains.projects.po_intake import service as po_intake_service
-from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie, get_user_full_name
 from app.domains.files import image_preview_service
 from app.core.config import get_settings
 from app.core.paths import UPLOADS_DIR
@@ -244,11 +244,10 @@ def _get_filtered_projects_query(db: Session, user: models.User):
 
 
 def _serialize_project_summary(project: Project):
-    from datetime import datetime as _dt
     due = project.due_date.isoformat() if getattr(project, "due_date", None) else None
     # Fall back to today for projects created before the created_at column was added
     _cat_raw = getattr(project, "created_at", None)
-    cat = _cat_raw.isoformat() if _cat_raw else _dt.utcnow().date().isoformat()
+    cat = _cat_raw.isoformat() if _cat_raw else datetime.now(timezone.utc).date().isoformat()
     uat = project.updated_at.isoformat() if getattr(project, "updated_at", None) else None
 
     is_delayed = False
@@ -256,9 +255,9 @@ def _serialize_project_summary(project: Project):
         if ch.status != "complete" and ch.due_date:
             due_dt = ch.due_date
             if due_dt.tzinfo is not None:
-                now = _dt.now(due_dt.tzinfo)
+                now = datetime.now(due_dt.tzinfo)
             else:
-                now = _dt.now()
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
             if due_dt < now:
                 is_delayed = True
                 break
@@ -5029,7 +5028,7 @@ def api_v2_combine_project_book(
                     version_service.archive_existing_file(db, existing_file)
                     shutil.copy2(src_file_path, dest_file_path)
                     existing_file.version += 1
-                    existing_file.uploaded_at = datetime.utcnow()
+                    existing_file.uploaded_at = datetime.now(timezone.utc)
                     existing_file.uploaded_by_id = viewer.id
                     db.commit()
                     logger.info(f"Bumped version for {fname} in 'Final files' chapter.")
@@ -5560,7 +5559,7 @@ def api_v2_cancel_processing_job(
 
     job.status = "cancelled"
     job.error_message = "Cancelled by user"
-    job.completed_at = datetime.utcnow()
+    job.completed_at = datetime.now(timezone.utc)
     db.commit()
 
     # Force release InDesign Redis lock
@@ -6401,8 +6400,8 @@ def _serialize_comment(c: "models.Comment") -> dict:
         "text": c.text or "",
         "author_id": c.author_id,
         "author_name": c.author_name or "",
-        "created_at": (c.created_at.isoformat() if c.created_at else ""),
-        "updated_at": (c.updated_at.isoformat() if c.updated_at else ""),
+        "created_at": ((c.created_at.replace(tzinfo=timezone.utc).isoformat() if c.created_at.tzinfo is None else c.created_at.isoformat()) if c.created_at else ""),
+        "updated_at": ((c.updated_at.replace(tzinfo=timezone.utc).isoformat() if c.updated_at.tzinfo is None else c.updated_at.isoformat()) if c.updated_at else ""),
         "resolved": bool(c.resolved),
     }
 
@@ -6460,7 +6459,7 @@ def api_v2_create_file_comment(
         comment_uuid=payload.comment_uuid,
         text=payload.text or "",
         author_id=getattr(viewer, "id", None),
-        author_name=getattr(viewer, "username", "") or "",
+        author_name=get_user_full_name(viewer) or getattr(viewer, "username", "") or "",
     )
     db.add(row)
     db.commit()
@@ -7050,7 +7049,7 @@ def api_v2_reference_edit(
             resolved["processed_path"],
             ref_number=ref_number,
             new_text=payload.new_text,
-            author=viewer.username or "reviewer",
+            author=get_user_full_name(viewer) or viewer.username or "reviewer",
             track_changes=payload.track_changes,
         )
     except ValueError as exc:
@@ -7136,7 +7135,7 @@ def api_v2_reference_manual_links_upsert(
             ref_number=payload.ref_number,
             ref_text=payload.ref_text,
             citation_text=payload.citation_text,
-            linked_by=viewer.username,
+            linked_by=get_user_full_name(viewer) or viewer.username,
             logger=logger,
         )
     except Exception as exc:
@@ -7400,7 +7399,7 @@ def api_v2_link_citation(
             ref_text=ref_text,
             match_type=match_type,
             confidence=confidence,
-            linked_by=viewer.username if viewer else None,
+            linked_by=(get_user_full_name(viewer) or viewer.username) if viewer else None,
             link_flags=link_flags,
         )
 
@@ -7413,7 +7412,7 @@ def api_v2_link_citation(
             citation_key=citation_key,
             para_idx=para_idx,
             ref_idx=ref_idx,
-            created_by=viewer.username if viewer else None,
+            created_by=(get_user_full_name(viewer) or viewer.username) if viewer else None,
             flags=["auto_linked"],
         )
 
@@ -7541,14 +7540,14 @@ def api_v2_add_citation_comment(
             citation_key=citation_key,
             para_idx=para_idx,
             ref_idx=ref_idx,
-            created_by=viewer.username if viewer else None,
+            created_by=(get_user_full_name(viewer) or viewer.username) if viewer else None,
             flags=flags,
         )
 
         return {
             "status": "ok",
             "comment_id": comment_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
     except HTTPException as exc:
         return _error_response(

@@ -10,6 +10,9 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 REF_CACHE_PATH = RUNTIME_ROOT / "ref_cache.json"
 
 def ensure_runtime_dirs() -> None:
-    DB_DIR.mkdir(parents=True, exist_ok=True)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        DB_DIR.mkdir(parents=True, exist_ok=True)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass

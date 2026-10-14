@@ -14,7 +14,7 @@ import os
 import re
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 
 import docx
@@ -540,7 +540,7 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
         "sample_language_issues": sample_issues,
         "author_queries": author_queries,
         "checklist": checklist,
-        "analyzed_at": datetime.utcnow().isoformat()
+        "analyzed_at": datetime.now(timezone.utc).isoformat()
     }
 
     # Generate ELOG HTML
@@ -652,7 +652,7 @@ def generate_elog_html(article: JournalArticle, data: Dict[str, Any]) -> str:
     </div>
     <div style="text-align: right;">
       <div style="font-size: 13px; font-weight: 600;">{data.get('client_code')} / {data.get('journal_code')}</div>
-      <div style="font-size: 12px; color: #64748b;">Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</div>
+      <div style="font-size: 12px; color: #64748b;">Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</div>
     </div>
   </div>
 

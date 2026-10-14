@@ -78,6 +78,7 @@ def process_document_task(self, job_id: str):
     # Import here to avoid circular imports
     from app import create_app
     from app.models import db, Job, Batch, JobStatus
+    from app.models.database import get_ist_now
     from processor.pipeline import process_document
     
     app = create_app()
@@ -95,7 +96,7 @@ def process_document_task(self, job_id: str):
         
         # Update status to processing
         job.status = JobStatus.PROCESSING
-        job.started_at = datetime.utcnow()
+        job.started_at = get_ist_now()
         db.session.commit()
         
         start_time = time.time()
@@ -122,7 +123,7 @@ def process_document_task(self, job_id: str):
 
             # Update job with results
             job.status = JobStatus.COMPLETED
-            job.completed_at = datetime.utcnow()
+            job.completed_at = get_ist_now()
             job.processing_time_seconds = time.time() - start_time
             job.output_path = output_path
             job.review_path = result.get('review_path')
@@ -137,7 +138,7 @@ def process_document_task(self, job_id: str):
             # Update batch counters
             batch.completed_jobs += 1
             if batch.completed_jobs + batch.failed_jobs == batch.total_jobs:
-                batch.completed_at = datetime.utcnow()
+                batch.completed_at = get_ist_now()
             
             db.session.commit()
             
@@ -157,14 +158,14 @@ def process_document_task(self, job_id: str):
             # Update job with error
             job.status = JobStatus.FAILED
             job.error_message = str(e)[:500]  # Truncate long errors
-            job.completed_at = datetime.utcnow()
+            job.completed_at = get_ist_now()
             job.processing_time_seconds = time.time() - start_time
             
             # Update batch counters
             batch = job.batch
             batch.failed_jobs += 1
             if batch.completed_jobs + batch.failed_jobs == batch.total_jobs:
-                batch.completed_at = datetime.utcnow()
+                batch.completed_at = get_ist_now()
             
             db.session.commit()
             
@@ -187,7 +188,8 @@ def cleanup_old_batches(days: int = 30):
     app = create_app()
     
     with app.app_context():
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        from app.models.database import get_ist_now
+        cutoff = get_ist_now() - timedelta(days=days)
         old_batches = Batch.query.filter(Batch.completed_at < cutoff).all()
         
         deleted_count = 0
@@ -214,4 +216,5 @@ def cleanup_old_batches(days: int = 30):
 @celery_app.task
 def health_check():
     """Simple health check task."""
-    return {'status': 'healthy', 'timestamp': datetime.utcnow().isoformat()}
+    from app.models.database import get_ist_now
+    return {'status': 'healthy', 'timestamp': get_ist_now().isoformat()}

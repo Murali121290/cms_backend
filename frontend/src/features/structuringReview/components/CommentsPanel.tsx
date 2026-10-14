@@ -2,6 +2,7 @@ import { useState, type RefObject } from "react";
 import { Check, MessageSquare, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCommentsQuery, useCommentMutations } from "@/features/editor/useComments";
 import type { WysiwygEditorHandle } from "@/features/editor";
+import { formatDateTime } from "@/utils/dateUtils";
 
 interface CommentsPanelProps {
   fileId: number | null;
@@ -10,9 +11,7 @@ interface CommentsPanelProps {
 
 function formatTimestamp(iso: string): string {
   if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  return formatDateTime(iso, undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
 export function CommentsPanel({ fileId, editorRef }: CommentsPanelProps) {

@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
 import { ProjectInfoModal } from './ProjectInfoModal'
 import { useUsersStore } from '@/stores/usersStore'
+import { formatDate } from '@/utils/dateUtils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -411,7 +412,7 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
               <CalendarDays size={11} className="text-muted" />
               <span className="text-xs text-muted font-medium">Due:</span>
               <span className="text-xs text-text font-semibold">
-                {new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                {formatDate(project.due_date)}
               </span>
             </div>
           )}
@@ -733,7 +734,7 @@ export function ClientProjects() {
                       {project.project_manager
                         ? <span className="truncate">PM: {useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager)}</span>
                         : <span className="italic">No PM</span>}
-                      {project.due_date && <span className="flex-shrink-0 flex items-center gap-0.5"><CalendarDays size={10} /> {new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>}
+                      {project.due_date && <span className="flex-shrink-0 flex items-center gap-0.5"><CalendarDays size={10} /> {formatDate(project.due_date, 'en-GB', { day: '2-digit', month: 'short' })}</span>}
                     </div>
                   </div>
                 )
@@ -760,7 +761,7 @@ export function ClientProjects() {
                     {project.status && <Badge variant={statusV} className="flex-shrink-0">{project.status}</Badge>}
                     <div className="flex items-center gap-4 text-xs text-muted flex-shrink-0">
                       {project.project_manager && <span>PM: {useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager)}</span>}
-                      {project.due_date && <span className="flex items-center gap-1"><CalendarDays size={11} /> {new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>}
+                      {project.due_date && <span className="flex items-center gap-1"><CalendarDays size={11} /> {formatDate(project.due_date)}</span>}
                     </div>
                     <ChevronRight size={14} className="text-muted flex-shrink-0" />
                   </div>
@@ -794,7 +795,7 @@ export function ClientProjects() {
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.workflow_name ?? '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.project_manager ? useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager) : '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">
-                          {project.due_date ? new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                          {formatDate(project.due_date)}
                         </td>
                         <td className="px-4 py-3 text-xs text-center text-text font-medium">{(project as any).chapter_count ?? '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">

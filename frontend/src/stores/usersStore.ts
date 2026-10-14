@@ -25,7 +25,9 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
       const usersList = await usersApi.list();
       const mapped: Record<string, User> = {};
       usersList.forEach(u => {
-        mapped[u.user_name] = u;
+        if (u.user_name) mapped[u.user_name] = u;
+        if ((u as any).username) mapped[(u as any).username] = u;
+        if (u.id != null) mapped[String(u.id)] = u;
       });
       set({ users: usersList, usersByUsername: mapped, loading: false });
     } catch (err: any) {
@@ -34,7 +36,11 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
   },
   getUserDisplayNameByUsername: (username) => {
     if (!username) return 'Unknown User';
-    const user = get().usersByUsername[username];
+    if (get().users.length === 0 && !get().loading) {
+      get().fetchUsers();
+    }
+    const key = String(username).trim();
+    const user = get().usersByUsername[key] || get().usersByUsername[key.toLowerCase()];
     if (user) {
       return getUserDisplayName(user);
     }

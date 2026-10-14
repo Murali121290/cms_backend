@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -980,7 +980,7 @@ class XhtmlToDocxDeltaEngine:
         """Modifies and synchronizes runs inside `<w:p>` completely in-place by rebuilding them."""
         import re
         import uuid
-        from datetime import datetime
+        from datetime import datetime, timezone
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
         from lxml import etree
@@ -1024,7 +1024,7 @@ class XhtmlToDocxDeltaEngine:
                 p_elem.remove(child)
 
         # ISO 8601 timestamp with UTC timezone
-        timestamp = datetime.utcnow().isoformat() + "Z"
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         
         # Track unique revision/bookmark IDs
         next_id = [_get_unique_bookmark_id(doc)]  # Use list to allow mutation

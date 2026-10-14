@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/Button'
 import { stageDetailsApi, type StageHistoryEntry } from '@/api/stageDetails'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useUsersStore } from '@/stores/usersStore'
+import { formatDateTime } from '@/utils/dateUtils'
 
 function getUserFullName(u?: { first_name?: string | null; last_name?: string | null; username?: string } | null): string | null {
   if (!u) return null
@@ -57,22 +59,7 @@ function fmt(d: Date): string {
 }
 
 function fmtDateTime(dateStr: string): string {
-  if (!dateStr) return '—'
-  let normalized = dateStr.trim()
-  if (!normalized.endsWith('Z') && !/[+-]\d{2}(:\d{2})?$/.test(normalized)) {
-    normalized += 'Z'
-  }
-  const d = new Date(normalized)
-  if (isNaN(d.getTime())) return dateStr
-  return d.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  })
+  return formatDateTime(dateStr)
 }
 
 function sortChapters(a: { chapters: string }, b: { chapters: string }) {
@@ -1323,7 +1310,7 @@ export function ProjectPlanningPage() {
                       <span className="font-semibold text-text">Revision #{idx + 1}</span>
                       {entry.changed_by && (
                         <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium text-[10px]">
-                          by {entry.changed_by}
+                          by {useUsersStore.getState().getUserDisplayNameByUsername(entry.changed_by)}
                         </span>
                       )}
                     </div>

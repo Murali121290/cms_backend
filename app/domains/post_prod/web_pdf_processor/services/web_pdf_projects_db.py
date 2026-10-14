@@ -1,7 +1,15 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from sqlalchemy.orm import Session
 from ..models import WebPdfProject, WebPdfHistory
+
+
+def _iso_utc(dt_val: Optional[datetime]) -> Optional[str]:
+    if not dt_val:
+        return None
+    if dt_val.tzinfo is None:
+        return dt_val.replace(tzinfo=timezone.utc).isoformat()
+    return dt_val.astimezone(timezone.utc).isoformat()
 
 
 def _serialize(p: WebPdfProject) -> dict[str, Any]:
@@ -18,8 +26,8 @@ def _serialize(p: WebPdfProject) -> dict[str, Any]:
         "latest_validation_file": p.latest_validation_file,
         "assignee": p.assignee,
         "uploaded_by_id": p.uploaded_by_id,
-        "uploaded_at": p.uploaded_at.isoformat() if p.uploaded_at else None,
-        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        "uploaded_at": _iso_utc(p.uploaded_at),
+        "updated_at": _iso_utc(p.updated_at),
     }
 
 
@@ -68,7 +76,7 @@ def create_project(
         WebPdfProject.is_deleted.is_(True),
     ).delete(synchronize_session=False)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     project = WebPdfProject(
         client=client,
         client_code=client_code,
@@ -114,7 +122,7 @@ def update_project(
                 old_assignee=p.assignee,
                 new_assignee=target_val,
                 result_type="assignee_change",
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
             )
             db.add(history)
             p.assignee = target_val
@@ -165,7 +173,7 @@ def record_step_completion(
         changed_by_id=user_id,
         changed_by_username=username,
         result_type=step_name,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         merge_status=status,
         details=details,
     )
@@ -192,7 +200,7 @@ def record_merge_history(
         changed_by_id=user_id,
         changed_by_username=username,
         result_type="merge",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         merged_files=merged_files,
         merged_output_path=merged_output_path,
         total_pages=total_pages,

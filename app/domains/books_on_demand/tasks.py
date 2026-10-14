@@ -94,7 +94,7 @@ def watch_ftp_for_new_pdfs():
                         stages = [s.strip() for s in stages_str.split(",")]
                         initial_stage_name = stages[0]
                         now_iso = datetime.now(timezone.utc).isoformat()
-                        now_utc = datetime.utcnow()
+                        now_utc = datetime.now(timezone.utc)
                         from datetime import timedelta
                         
                         initial_history = {

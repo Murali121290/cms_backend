@@ -23,6 +23,7 @@ import { getProcessingStatus, startProcessingJob } from "@/api/processing";
 import { useToast } from "@/components/ui/useToast";
 import type { FileRecord } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
+import { formatDateTime as formatUtcDateTime, formatDate } from "@/utils/dateUtils";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -48,13 +49,14 @@ function fileTypeLabel(mime: string): string {
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("en-US", {
+  return formatUtcDateTime(iso, "en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    second: undefined,
   });
 }
 
@@ -289,7 +291,7 @@ function PropertiesColumn({ file }: { file: FileRecord }) {
                             v{v.version_num}
                           </span>
                           <span style={{ fontSize: "11px", color: "#A09B96" }}>
-                            {new Date(v.uploaded_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {formatDate(v.uploaded_at)}
                           </span>
                           <a
                             href={`/api/v2/files/${file.id}/versions/${v.id}/download`}

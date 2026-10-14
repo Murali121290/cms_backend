@@ -3,6 +3,8 @@ import { AlertCircle, CheckCircle2, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useCitationComments, useAddCitationComment } from "./hooks";
+import { formatDateTime } from "@/utils/dateUtils";
+import { useUsersStore } from "@/stores/usersStore";
 
 interface MissingReferencesTabProps {
   fileId: number;
@@ -180,7 +182,7 @@ function CommentCard({ comment, isExpanded, onToggle }: CommentCardProps) {
                 {comment.comment_text}
               </p>
               <p className="text-xs text-gray-500">
-                {comment.created_by} • {new Date(comment.created_at).toLocaleString()}
+                {(comment.created_by ? useUsersStore.getState().getUserDisplayNameByUsername(comment.created_by) : null) || comment.created_by || 'Unknown'} • {formatDateTime(comment.created_at)}
               </p>
             </>
           )}

@@ -28,6 +28,7 @@ import {
 import { FOLDER_CONFIG, COLUMN_DEFINITIONS, fileTypeIcon, isProcessingActionVisibleForStage, getFolderConfigForChapter } from '@/config/fileManagerConfig'
 import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
 import { BulkUploadModal } from '@/components/BulkUploadModal'
+import { formatDateTime } from '@/utils/dateUtils'
 import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
@@ -185,9 +186,10 @@ function fileToFolderKey(
 
 function fmtDate(iso: string) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString('en-GB', {
+  return formatDateTime(iso, 'en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
+    second: undefined,
   })
 }
 

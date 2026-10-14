@@ -4,7 +4,7 @@ Handles RuleSelection and SelectionHistory with raw SQL.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 
@@ -48,7 +48,7 @@ class RuleSelection:
         self.description = description
         self.selected_ia_rows = selected_ia_rows
         self.custom_grouping = custom_grouping
-        self.created_at = created_at or datetime.utcnow().isoformat()
+        self.created_at = created_at or datetime.now(timezone.utc).isoformat()
         self.created_by = created_by
         self.active = active
 
@@ -221,7 +221,7 @@ class SelectionHistory:
         self.selection_id = selection_id
         self.version = version
         self.data = data
-        self.created_at = created_at or datetime.utcnow().isoformat()
+        self.created_at = created_at or datetime.now(timezone.utc).isoformat()
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for database storage."""

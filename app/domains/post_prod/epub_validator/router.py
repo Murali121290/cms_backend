@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie, get_user_full_name
 from app.domains.auth.rbac_config import has_post_prod_access
 
 from .services.upload_service import process_upload, get_extract_files, UPLOAD_DIR, EXTRACT_DIR
@@ -173,7 +173,7 @@ def update_project(
         eisbn=body.eisbn,
         copyright_year=body.copyright_year,
         user_id=getattr(user, "id", None),
-        username=getattr(user, "username", None) or getattr(user, "user_name", None),
+        username=get_user_full_name(user) or getattr(user, "username", None) or getattr(user, "user_name", None),
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -704,7 +704,7 @@ async def validate_file(
 
 
     user_id = getattr(user, "id", None)
-    username = getattr(user, "username", None) or getattr(user, "user_name", None)
+    username = get_user_full_name(user) or getattr(user, "username", None) or getattr(user, "user_name", None)
 
     # Save full validation run snapshot to history table
     if isinstance(result, dict):

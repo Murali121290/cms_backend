@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import Base
 
@@ -20,7 +20,7 @@ class PostProdXMLConversionProject(Base):
     final_xml_status = Column(String, default="YTS")
     qc_status = Column(String, default="YTS")
     result_filepath = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
     due_at = Column(DateTime, nullable=True)
 
@@ -35,7 +35,7 @@ class PostProdXMLConversionHistory(Base):
     project_id = Column(Integer, ForeignKey("post_prod_xmlConversion_projects.id"), nullable=False)
     action = Column(String, nullable=False) # e.g., 'Assignee Changed', 'Processing Started'
     details = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     project = relationship("PostProdXMLConversionProject", back_populates="history")

@@ -4,7 +4,7 @@ import os
 import zipfile
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.config import get_settings
 from app.domains.post_prod.word_conversion.models import PostProdChapter
@@ -44,7 +44,7 @@ def run_conversion_background(chapter_id: int, session_factory, job_id: int | No
 
         chapter.status = "In-Progress"
         chapter.conversion_status = "Converting"
-        chapter.conversion_started_at = datetime.utcnow()
+        chapter.conversion_started_at = datetime.now(timezone.utc)
         chapter.attempts += 1
         db.commit()
 
@@ -82,17 +82,17 @@ def run_conversion_background(chapter_id: int, session_factory, job_id: int | No
                 logger.warning(f"DOCX post-processor failed for {dest_path}: {post_err}")
 
             chapter.conversion_status = "Completed"
-            chapter.conversion_completed_at = datetime.utcnow()
+            chapter.conversion_completed_at = datetime.now(timezone.utc)
             chapter.converted_file_path = dest_path
 
             if chapter.qc_status == "Completed":
                 chapter.status = "Completed"
-                chapter.completed_at = datetime.utcnow()
+                chapter.completed_at = datetime.now(timezone.utc)
 
             if job:
                 job.status = "completed"
                 job.progress_pct = 100
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
         else:
             chapter.status = "Failed"
             chapter.conversion_status = "Failed"
@@ -102,7 +102,7 @@ def run_conversion_background(chapter_id: int, session_factory, job_id: int | No
                 job.status = "failed"
                 job.progress_pct = 100
                 job.error_message = error_msg or "Unknown error"
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
 
         db.commit()
         try:
@@ -123,7 +123,7 @@ def run_conversion_background(chapter_id: int, session_factory, job_id: int | No
                 job.status = "failed"
                 job.progress_pct = 100
                 job.error_message = str(e)
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
                 db.commit()
         except:
             pass

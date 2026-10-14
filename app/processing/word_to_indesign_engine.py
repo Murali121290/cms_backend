@@ -7,7 +7,7 @@ import tempfile
 import logging
 import time
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app import models
 from app.core.config import get_settings
@@ -344,7 +344,7 @@ class WordToInDesignEngine:
             existing.path = file_path
             existing.version = (existing.version or 1) + 1
             existing.uploaded_by_id = user_id
-            existing.uploaded_at = datetime.utcnow()
+            existing.uploaded_at = datetime.now(timezone.utc)
             existing.file_type = file_type
             logger.info(f"Updated file version: {existing.filename} (v{existing.version})")
         else:
@@ -358,7 +358,7 @@ class WordToInDesignEngine:
                 project_id=project_id,
                 chapter_id=chapter_id,
                 uploaded_by_id=user_id,
-                uploaded_at=datetime.utcnow(),
+                uploaded_at=datetime.now(timezone.utc),
             )
             db.add(new_file)
             logger.info(f"Created new file record: {filename}")

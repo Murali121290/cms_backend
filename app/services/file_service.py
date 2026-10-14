@@ -13,7 +13,10 @@ from app.core.paths import UPLOADS_DIR
 from app.services import checkout_service, version_service
 
 UPLOAD_DIR = str(UPLOADS_DIR)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+try:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+except Exception:
+    pass
 
 
 def extract_chapter_number_from_filename(name: str) -> str | None:

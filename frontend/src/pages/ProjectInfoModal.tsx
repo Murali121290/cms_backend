@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { Badge, statusToBadge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
+import { useUsersStore } from '@/stores/usersStore'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -195,8 +196,8 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         <InfoField label="Category"         value={project.category} />
         <InfoField label="Composition"      value={project.composition} />
         <InfoField label="Workflow"         value={project.workflow_name} />
-        <InfoField label="Project Manager"  value={project.project_manager} />
-        <InfoField label="Sales Person"     value={project.sales_person} />
+        <InfoField label="Project Manager"  value={project.project_manager ? useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager) : '—'} />
+        <InfoField label="Sales Person"     value={project.sales_person ? useUsersStore.getState().getUserDisplayNameByUsername(project.sales_person) : '—'} />
         <InfoField label="Billing Location" value={project.billing_location} />
         <InfoField label="ISBN No"          value={project.isbn_no} />
 

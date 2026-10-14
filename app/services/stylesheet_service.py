@@ -232,7 +232,7 @@ def create_stylesheet(
         selected_ia_rows=json.dumps([r.model_dump() for r in selected_ia_rows]),
         analyzed_file_ids=json.dumps(analyzed_file_ids or []),
         is_active=False,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         created_by_id=created_by_id,
     )
     db.add(ss)
