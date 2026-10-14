@@ -83,6 +83,7 @@ def create_predefined_project_folders(base_path: str):
         "Design/template/Library",
         "Design/Print Preset",
         "CE support/Style sheet template",
+        "po",
     ]
     for folder in predefined_folders:
         os.makedirs(os.path.join(base_path, folder), exist_ok=True)

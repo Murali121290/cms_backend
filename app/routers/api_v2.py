@@ -1124,6 +1124,245 @@ def api_v2_project_chapters(
     )
 
 
+def _format_project_doc_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def _get_project_candidate_dirs(project: Project, db: Session) -> list[str]:
+    candidates = []
+    code = project.project_code or project.code or ""
+    client_name = project.client_name or ""
+    if not code:
+        return []
+
+    upload_root = file_service.UPLOAD_DIR
+
+    if client_name:
+        candidates.append(os.path.join(upload_root, client_name, code))
+        candidates.append(os.path.join(upload_root, "uploads", client_name, code))
+
+    if project.client_id:
+        from app.domains.clients.models import Client as _Client
+        c = db.query(_Client).filter(_Client.id == project.client_id).first()
+        if c and c.company and c.company != client_name:
+            candidates.append(os.path.join(upload_root, c.company, code))
+            candidates.append(os.path.join(upload_root, "uploads", c.company, code))
+
+    candidates.append(os.path.join(upload_root, "unknown", code))
+    candidates.append(os.path.join(upload_root, code))
+    candidates.append(os.path.join(upload_root, "uploads", code))
+
+    seen = set()
+    valid_dirs = []
+    for d in candidates:
+        if d not in seen and os.path.isdir(d):
+            seen.add(d)
+            valid_dirs.append(d)
+    return valid_dirs
+
+
+def _scan_project_documents(project: Project, db: Session) -> list[dict]:
+    dirs = _get_project_candidate_dirs(project, db)
+    seen_filenames = set()
+    documents = []
+
+    for c_dir in dirs:
+        # 1. Scan po/ folder
+        po_dir = os.path.join(c_dir, "po")
+        if os.path.isdir(po_dir):
+            for fname in sorted(os.listdir(po_dir)):
+                fpath = os.path.join(po_dir, fname)
+                if os.path.isfile(fpath) and not fname.startswith("."):
+                    if fname not in seen_filenames:
+                        seen_filenames.add(fname)
+                        sz = os.path.getsize(fpath)
+                        mtime = datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat()
+                        rel_path = f"po/{fname}"
+                        cat = "Extracted PO Data" if fname.endswith("_extracted.json") else "PO Document"
+                        documents.append({
+                            "filename": fname,
+                            "relative_path": rel_path,
+                            "category": cat,
+                            "size_bytes": sz,
+                            "size_formatted": _format_project_doc_size(sz),
+                            "updated_at": mtime,
+                        })
+
+        # 2. Scan CE support/ folder
+        ce_dir = os.path.join(c_dir, "CE support")
+        if os.path.isdir(ce_dir):
+            for fname in sorted(os.listdir(ce_dir)):
+                fpath = os.path.join(ce_dir, fname)
+                if os.path.isfile(fpath) and not fname.startswith("."):
+                    if fname not in seen_filenames:
+                        seen_filenames.add(fname)
+                        sz = os.path.getsize(fpath)
+                        mtime = datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat()
+                        rel_path = f"CE support/{fname}"
+                        cat = "Extracted PO Data" if fname.endswith("_extracted.json") else ("PO Document" if fname.lower().endswith((".pdf", ".xlsx", ".docx")) else "CE Support")
+                        documents.append({
+                            "filename": fname,
+                            "relative_path": rel_path,
+                            "category": cat,
+                            "size_bytes": sz,
+                            "size_formatted": _format_project_doc_size(sz),
+                            "updated_at": mtime,
+                        })
+
+        # 3. Root files of the project directory (e.g. mapping zip, archive)
+        for fname in sorted(os.listdir(c_dir)):
+            fpath = os.path.join(c_dir, fname)
+            if os.path.isfile(fpath) and not fname.startswith("."):
+                if fname not in seen_filenames:
+                    seen_filenames.add(fname)
+                    sz = os.path.getsize(fpath)
+                    mtime = datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat()
+                    rel_path = fname
+                    documents.append({
+                        "filename": fname,
+                        "relative_path": rel_path,
+                        "category": "Input file",
+                        "size_bytes": sz,
+                        "size_formatted": _format_project_doc_size(sz),
+                        "updated_at": mtime,
+                    })
+
+    return documents
+
+
+def _resolve_project_document_path(project: Project, rel_path: str, db: Session) -> str | None:
+    rel_path = rel_path.strip().lstrip("/\\")
+    dirs = _get_project_candidate_dirs(project, db)
+    upload_root_abs = os.path.abspath(file_service.UPLOAD_DIR)
+
+    for c_dir in dirs:
+        candidate_path = os.path.abspath(os.path.join(c_dir, rel_path))
+        if candidate_path.startswith(upload_root_abs) and os.path.isfile(candidate_path):
+            return candidate_path
+
+    target_base = os.path.basename(rel_path)
+    for c_dir in dirs:
+        for sub in ("po", "CE support", ""):
+            cand = os.path.abspath(os.path.join(c_dir, sub, target_base) if sub else os.path.join(c_dir, target_base))
+            if cand.startswith(upload_root_abs) and os.path.isfile(cand):
+                return cand
+
+    return None
+
+
+@router.get("/projects/{project_id}/documents")
+def api_v2_get_project_documents(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    docs = _scan_project_documents(project, db)
+    return {"documents": docs}
+
+
+@router.get("/projects/{project_id}/documents/download")
+def api_v2_download_project_document(
+    project_id: int,
+    path: str = Query(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    file_path = _resolve_project_document_path(project, path, db)
+    if not file_path or not os.path.isfile(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="DOCUMENT_NOT_FOUND",
+            message="Document not found.",
+        )
+
+    import mimetypes
+    mime, _ = mimetypes.guess_type(file_path)
+    return FileResponse(
+        path=file_path,
+        filename=os.path.basename(file_path),
+        media_type=mime or "application/octet-stream",
+        content_disposition_type="attachment",
+    )
+
+
+@router.get("/projects/{project_id}/documents/view")
+def api_v2_view_project_document(
+    project_id: int,
+    path: str = Query(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    file_path = _resolve_project_document_path(project, path, db)
+    if not file_path or not os.path.isfile(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="DOCUMENT_NOT_FOUND",
+            message="Document not found.",
+        )
+
+    import mimetypes
+    mime, _ = mimetypes.guess_type(file_path)
+    return FileResponse(
+        path=file_path,
+        filename=os.path.basename(file_path),
+        media_type=mime or "application/octet-stream",
+        content_disposition_type="inline",
+    )
+
+
 @router.get("/projects/{project_id}/indesign-templates")
 def api_v2_project_indesign_templates(
     project_id: int,
@@ -1655,13 +1894,7 @@ def api_v2_project_bootstrap(
         .order_by(models.Chapter.chapters.asc())
         .all()
     )
-    
-    if po_file:
-        po_dir = os.path.join(file_service.UPLOAD_DIR, client_name or "unknown", project.project_code, "po")
-        os.makedirs(po_dir, exist_ok=True)
-        po_file_path = os.path.join(po_dir, po_file.filename)
-        with open(po_file_path, "wb") as f:
-            shutil.copyfileobj(po_file.file, f)
+
     ingested_files = (
         db.query(models.File)
         .filter(models.File.project_id == project.id)
@@ -1715,24 +1948,29 @@ def api_v2_project_bootstrap(
         track_wfs["art"] = art_workflow_name
     parsed_po_data["track_workflows"] = track_wfs
 
+    if po_file is not None and po_file.filename:
+        parsed_po_data["po_filename"] = po_file.filename
+
     project.file_details = parsed_po_data
 
     if po_file is not None and po_file.filename:
         try:
-            client_folder = client_name or "unknown"
-            ce_support_dir = os.path.join(file_service.UPLOAD_DIR, client_folder, code, "CE support")
-            os.makedirs(ce_support_dir, exist_ok=True)
+            client_folder = project.client_name or client_name or "unknown"
+            target_code = project.project_code or project.code or code
+            po_dir = os.path.join(file_service.UPLOAD_DIR, client_folder, target_code, "po")
+            os.makedirs(po_dir, exist_ok=True)
 
-            po_dest_path = os.path.join(ce_support_dir, po_file.filename)
+            po_dest_path = os.path.join(po_dir, po_file.filename)
+            po_file.file.seek(0)
             with open(po_dest_path, "wb") as po_dest:
                 shutil.copyfileobj(po_file.file, po_dest)
 
             json_stem = Path(po_file.filename).stem
-            json_dest_path = os.path.join(ce_support_dir, f"{json_stem}_extracted.json")
+            json_dest_path = os.path.join(po_dir, f"{json_stem}_extracted.json")
             with open(json_dest_path, "w", encoding="utf-8") as json_dest:
                 json.dump(parsed_po_data or {}, json_dest, indent=2, ensure_ascii=False)
         except OSError as exc:
-            logging.error("Failed to save PO file/JSON to CE support for project %s: %s", code, exc)
+            logging.error("Failed to save PO file/JSON to po directory for project %s: %s", code, exc)
 
     db.commit()
     db.refresh(project)

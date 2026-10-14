@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { BookOpen, Layers } from 'lucide-react'
-import { projectsApi, type Project, type ProjectUpdate } from '@/api/projects'
+import { BookOpen, Layers, FileText, Download, ExternalLink, FileSpreadsheet, FileCode, FolderArchive } from 'lucide-react'
+import { projectsApi, type Project, type ProjectUpdate, type ProjectDocument } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
 import { Select } from '@/components/ui/Select'
 import { toast } from '@/store/useToastStore'
@@ -55,6 +55,23 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
   const [saving, setSaving] = useState(false)
   const [chapterManuscriptPages, setChapterManuscriptPages] = useState<number | null>(null)
   const [chapterWordCount, setChapterWordCount] = useState<number | null>(null)
+  const [documents, setDocuments] = useState<ProjectDocument[]>([])
+  const [loadingDocs, setLoadingDocs] = useState(false)
+
+  useEffect(() => {
+    if (!open || !project?.id) {
+      setDocuments([])
+      return
+    }
+    setLoadingDocs(true)
+    projectsApi.getDocuments(project.id)
+      .then(docs => setDocuments(docs))
+      .catch(err => {
+        console.error('Failed to load project documents:', err)
+        setDocuments([])
+      })
+      .finally(() => setLoadingDocs(false))
+  }, [open, project?.id])
 
   useEffect(() => {
     if (project) {
@@ -229,6 +246,123 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         <InfoField label="CE Pages"         value={cePages} />
         <InfoField label="Estimated Pages"  value={project.estimated_pages} />
         <InfoField label="Chapter Count"    value={project.chapter_count} />
+
+        {/* ── Extracted PO Metadata (if available) ── */}
+        {((project.file_details as any)?.author_name || (project.file_details as any)?.author_names?.length || (project.file_details as any)?.ebook_isbn || (project.file_details as any)?.publisher) && (
+          <>
+            <Section title="Extracted PO Details" icon={BookOpen} />
+            {((project.file_details as any)?.author_name || (project.file_details as any)?.author_names?.length) && (
+              <InfoField
+                label="Author"
+                value={(project.file_details as any)?.author_name || (Array.isArray((project.file_details as any)?.author_names) ? (project.file_details as any)?.author_names.join(', ') : (project.file_details as any)?.author_names)}
+              />
+            )}
+            {(project.file_details as any)?.ebook_isbn && (
+              <InfoField label="E-Book ISBN" value={(project.file_details as any)?.ebook_isbn} />
+            )}
+            {(project.file_details as any)?.publisher && (
+              <InfoField label="Publisher" value={(project.file_details as any)?.publisher} />
+            )}
+            {(project.file_details as any)?.job_number && (
+              <InfoField label="PO / Job Number" value={(project.file_details as any)?.job_number} />
+            )}
+          </>
+        )}
+
+        {/* ── Uploaded Documents / PO ── */}
+        <Section title="Uploaded Documents / PO" icon={FileText} />
+
+        <div className="col-span-2 space-y-2 pt-1">
+          {loadingDocs ? (
+            <div className="flex items-center justify-center py-6 text-muted text-xs gap-2">
+              <Spinner size="sm" /> Loading documents…
+            </div>
+          ) : documents.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 px-4 rounded-lg bg-surface-subtle/40 border border-border/50 text-center">
+              <FileText size={28} className="text-muted/40 mb-1.5" />
+              <p className="text-xs text-muted">No documents found in uploads folder for this project.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {documents.map((doc, idx) => {
+                const ext = doc.filename.split('.').pop()?.toLowerCase() || ''
+                const isPdf = ext === 'pdf'
+                const isExcel = ['xlsx', 'xls', 'csv'].includes(ext)
+                const isWord = ['docx', 'doc'].includes(ext)
+                const isZip = ext === 'zip'
+                const isJson = ext === 'json'
+
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-border bg-surface hover:bg-surface-subtle/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        isPdf ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
+                        isExcel ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                        isWord ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
+                        isZip ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                        'bg-gray-500/10 text-gray-600 dark:text-gray-400'
+                      }`}>
+                        {isPdf && <FileText size={16} />}
+                        {isExcel && <FileSpreadsheet size={16} />}
+                        {isWord && <FileText size={16} />}
+                        {isZip && <FolderArchive size={16} />}
+                        {isJson && <FileCode size={16} />}
+                        {!isPdf && !isExcel && !isWord && !isZip && !isJson && <FileText size={16} />}
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-medium text-text truncate max-w-[260px]" title={doc.filename}>
+                            {doc.filename}
+                          </p>
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                            doc.category === 'PO Document'
+                              ? 'bg-primary/10 text-primary border-primary/20'
+                              : doc.category === 'Extracted PO Data'
+                              ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
+                              : 'bg-muted/10 text-muted border-border'
+                          }`}>
+                            {doc.category}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-muted mt-0.5">
+                          <span>{doc.size_formatted}</span>
+                          <span>•</span>
+                          <span className="truncate">{doc.relative_path}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <a
+                        href={projectsApi.getDocumentViewUrl(project.id, doc.relative_path)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-muted hover:text-text rounded border border-border hover:bg-surface-subtle transition-colors"
+                        title="View document in new tab"
+                      >
+                        <ExternalLink size={12} />
+                        View
+                      </a>
+                      <a
+                        href={projectsApi.getDocumentDownloadUrl(project.id, doc.relative_path)}
+                        download={doc.filename}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-primary hover:text-primary-hover rounded border border-primary/30 hover:bg-primary/10 transition-colors"
+                        title="Download document"
+                      >
+                        <Download size={12} />
+                        Download
+                      </a>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
       </div>
     </Modal>
