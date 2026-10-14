@@ -1655,6 +1655,13 @@ def api_v2_project_bootstrap(
         .order_by(models.Chapter.chapters.asc())
         .all()
     )
+    
+    if po_file:
+        po_dir = os.path.join(file_service.UPLOAD_DIR, client_name or "unknown", project.project_code, "po")
+        os.makedirs(po_dir, exist_ok=True)
+        po_file_path = os.path.join(po_dir, po_file.filename)
+        with open(po_file_path, "wb") as f:
+            shutil.copyfileobj(po_file.file, f)
     ingested_files = (
         db.query(models.File)
         .filter(models.File.project_id == project.id)
