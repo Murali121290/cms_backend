@@ -54,6 +54,8 @@ app.include_router(webdav_router.router, prefix="/webdav", tags=["WebDAV"])
 
 # Workflow & Clients Routers (WMS Integration)
 app.include_router(workflow.router, tags=["Workflow"])
+from app.domains.workflow.transition_settings_api import router as transition_settings_router
+app.include_router(transition_settings_router)
 
 # Document Conversion Router
 from app.routers import conversion

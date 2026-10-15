@@ -1,7 +1,7 @@
 """Add processing_actions column to stage_master table and seed default mappings.
 
 Revision ID: 0049_add_processing_actions_to_stage_master
-Revises: 0048_add_history_to_stage_details
+Revises: 0048_stage_details_history
 Create Date: 2026-10-14 17:15:00.000000
 
 """
@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 
 
 revision: str = '0049_add_processing_actions_to_stage_master'
-down_revision: Union[str, Sequence[str], None] = '0048_add_history_to_stage_details'
+down_revision: Union[str, Sequence[str], None] = '0048_stage_details_history'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

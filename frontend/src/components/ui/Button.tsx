@@ -84,7 +84,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             </span>
           )
         )}
-        {children && <span>{children}</span>}
+        {children && <span className="inline-flex items-center justify-center gap-1.5">{children}</span>}
         {!isLoading && rightIcon && (
           <span className={cn(iconSizeClasses[size], "shrink-0 inline-flex items-center justify-center [&>svg]:size-full")} aria-hidden="true">
             {rightIcon}
