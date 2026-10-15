@@ -824,6 +824,13 @@ export function ProjectPlanningPage() {
     return manuscriptFinalDue
   }, [activeTab, manuscriptFinalDue, artFinalDue, designFinalDue])
 
+  const hasActiveDelays = useMemo(() => {
+    for (const d of delayMap.values()) {
+      if (d > 0) return true
+    }
+    return false
+  }, [delayMap])
+
   function toLocalDateStr(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   }
@@ -1340,7 +1347,7 @@ export function ProjectPlanningPage() {
                     {activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Target: <span className="font-semibold">{fmt(activeTabFinalDue)}</span>
                   </span>
                 </div>
-                {alreadyApproved && actualFinalDue && finalDue && actualFinalDue > finalDue && (
+                {alreadyApproved && hasActiveDelays && actualFinalDue && finalDue && actualFinalDue > finalDue && (
                   <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md whitespace-nowrap">
                     <Flag size={9} className="flex-shrink-0" /> Updated: {fmt(actualFinalDue)} due to delays
                   </div>
