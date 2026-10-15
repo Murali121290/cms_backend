@@ -86,6 +86,7 @@ class StageMaster(Base):
     sla_level2       = Column(Integer,           nullable=True)                        # SLA in days for Level 2
     sla_level3       = Column(Integer,           nullable=True)                        # SLA in days for Level 3
     roles            = Column(ARRAY(String),     nullable=False, server_default="{}")  # array of role names
+    processing_actions = Column(ARRAY(String),   nullable=False, server_default="{}")  # array of processing action keys
     active_status    = Column(Boolean,           nullable=False, default=True)
     created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

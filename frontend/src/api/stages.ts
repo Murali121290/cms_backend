@@ -8,6 +8,7 @@ export interface Stage {
   sla_level2: number | null
   sla_level3: number | null
   roles: string[]
+  processing_actions: string[]
   active_status: boolean
   created_at: string
 }
@@ -19,7 +20,24 @@ export interface StagePayload {
   sla_level2?: number
   sla_level3?: number
   roles?: string[]
+  processing_actions?: string[]
   active_status?: boolean
+}
+
+export interface ProcessingActionDefinition {
+  key: string
+  label: string
+  description: string
+  icon: string
+  category?: string
+}
+
+export interface ProcessingActionsMappingResponse {
+  definitions: ProcessingActionDefinition[]
+  mapping: Record<string, string[]>
+  stages: { id: number; stage_name: string; active_status: boolean; processing_actions: string[] }[]
+  success?: boolean
+  message?: string
 }
 
 export const stagesApi = {
@@ -34,4 +52,13 @@ export const stagesApi = {
 
   setStatus: (stageName: string, active_status: boolean) =>
     api.patch<Stage>(`/api/v1/stages/${encodeURIComponent(stageName)}/status`, { active_status }).then(r => r.data),
+
+  getDefinitions: () =>
+    api.get<ProcessingActionDefinition[]>('/api/v1/stages/processing-actions/definitions').then(r => r.data),
+
+  getMapping: () =>
+    api.get<ProcessingActionsMappingResponse>('/api/v1/stages/processing-actions/mapping').then(r => r.data),
+
+  updateMapping: (mapping: Record<string, string[]>) =>
+    api.put<ProcessingActionsMappingResponse>('/api/v1/stages/processing-actions/mapping', { mapping }).then(r => r.data),
 }

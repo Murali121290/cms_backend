@@ -42,6 +42,7 @@ class StageMasterBase(BaseModel):
     sla_level2: Optional[int] = None
     sla_level3: Optional[int] = None
     roles: List[str] = []
+    processing_actions: List[str] = []
     active_status: bool = True
 
 
@@ -56,7 +57,21 @@ class StageMasterUpdate(BaseModel):
     sla_level2: Optional[int] = None
     sla_level3: Optional[int] = None
     roles: Optional[List[str]] = None
+    processing_actions: Optional[List[str]] = None
     active_status: Optional[bool] = None
+
+
+class ProcessingActionDefinition(BaseModel):
+    key: str
+    label: str
+    description: str
+    icon: str
+    category: Optional[str] = None
+
+
+class ProcessingActionsMappingUpdate(BaseModel):
+    mapping: dict[str, List[str]]  # action_key -> list of stage names
+
 
 
 class StageMasterResponse(StageMasterBase):
@@ -219,6 +234,28 @@ class ChapterInfoBase(BaseModel):
     priority: str = "Normal"
     delayed_stages: Optional[Dict[str, int]] = None
 
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def coerce_due_date(cls, v: Any) -> Optional[date]:
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            return v.date()
+        if isinstance(v, date):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            try:
+                return datetime.fromisoformat(v.replace("Z", "+00:00")).date()
+            except Exception:
+                try:
+                    return date.fromisoformat(v[:10])
+                except Exception:
+                    return None
+        return v
+
     @field_validator("delayed_stages", mode="before")
     @classmethod
     def coerce_delayed_stages(cls, v: Any) -> Optional[Dict[str, int]]:
@@ -256,6 +293,28 @@ class ChapterInfoUpdate(BaseModel):
     manuscript_pages: Optional[int] = None
     priority: Optional[str] = None
     delayed_stages: Optional[Dict[str, int]] = None
+
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def coerce_due_date(cls, v: Any) -> Optional[date]:
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            return v.date()
+        if isinstance(v, date):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            try:
+                return datetime.fromisoformat(v.replace("Z", "+00:00")).date()
+            except Exception:
+                try:
+                    return date.fromisoformat(v[:10])
+                except Exception:
+                    return None
+        return v
 
 
 class ChapterInfoResponse(ChapterInfoBase):

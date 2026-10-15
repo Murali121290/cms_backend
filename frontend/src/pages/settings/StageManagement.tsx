@@ -1,17 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Plus, Pencil, RefreshCw,
   ChevronDown, ChevronRight, Search,
-  Layers, Clock, X, AlertCircle,
+  Layers, Clock, X, AlertCircle, Sliders, Check, Sparkles, Filter
 } from 'lucide-react'
 import { stagesApi } from '@/api/stages'
-import type { Stage, StagePayload } from '@/api/stages'
+import type { Stage, StagePayload, ProcessingActionDefinition } from '@/api/stages'
 import { rolesApi } from '@/api/workflow'
 import type { RolesMaster } from '@/api/workflow'
 import { Toggle } from '@/components/ui/Toggle'
 import { Spinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
+import { useStageActionsStore } from '@/store/useStageActionsStore'
+import { ProcessingActionsManager } from './ProcessingActionsManager'
 
 // ── Tiny helpers ───────────────────────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ interface StageModalProps {
   onSaved: () => void
   initial?: Stage | null
   allRoles: RolesMaster[]
+  definitions: ProcessingActionDefinition[]
 }
 
 interface StageForm {
@@ -56,19 +59,21 @@ interface StageForm {
   description: string
   active_status: boolean
   role_names: string[]
+  processing_actions: string[]
 }
 
 const EMPTY_FORM: StageForm = {
   stage_name: '', sla_level1: '', sla_level2: '', sla_level3: '',
-  description: '', active_status: true, role_names: [],
+  description: '', active_status: true, role_names: [], processing_actions: [],
 }
 
-function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalProps) {
+function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }: StageModalProps) {
   const [form, setForm] = useState<StageForm>(EMPTY_FORM)
   const [errors, setErrors] = useState<Partial<Record<keyof StageForm | 'general', string>>>({})
   const [saving, setSaving] = useState(false)
   const [roleSearch, setRoleSearch] = useState('')
   const [roleDropOpen, setRoleDropOpen] = useState(false)
+  const [actionSearch, setActionSearch] = useState('')
   const roleDropRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -82,12 +87,14 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
         description: initial.description ?? '',
         active_status: initial.active_status,
         role_names: initial.roles ?? [],
+        processing_actions: initial.processing_actions ?? [],
       })
     } else {
       setForm(EMPTY_FORM)
     }
     setErrors({})
     setRoleSearch('')
+    setActionSearch('')
     setRoleDropOpen(false)
   }, [isOpen, initial])
 
@@ -123,6 +130,7 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
         description: form.description.trim() || undefined,
         active_status: form.active_status,
         roles: form.role_names,
+        processing_actions: form.processing_actions,
       }
       if (initial) {
         await stagesApi.update(initial.stage_name, payload)
@@ -155,6 +163,15 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
     setForm(f => ({ ...f, role_names: f.role_names.filter(x => x !== roleName) }))
   }
 
+  const toggleAction = (actionKey: string) => {
+    setForm(f => ({
+      ...f,
+      processing_actions: f.processing_actions.includes(actionKey)
+        ? f.processing_actions.filter(x => x !== actionKey)
+        : [...f.processing_actions, actionKey]
+    }))
+  }
+
   const filteredRoles = allRoles.filter(r =>
     r.active_status && (
       r.role_name.toLowerCase().includes(roleSearch.toLowerCase()) ||
@@ -162,12 +179,20 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
     )
   )
 
+  const filteredActions = definitions.filter(d => {
+    const matchSearch = !actionSearch.trim() ||
+      d.label.toLowerCase().includes(actionSearch.toLowerCase()) ||
+      d.description.toLowerCase().includes(actionSearch.toLowerCase()) ||
+      d.key.toLowerCase().includes(actionSearch.toLowerCase())
+    return matchSearch
+  })
+
   if (!isOpen) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-card rounded-2xl shadow-2xl border border-border flex w-full max-w-4xl max-h-[90vh] overflow-hidden">
+      <div className="relative bg-card rounded-2xl shadow-2xl border border-border flex w-full max-w-4xl max-h-[92vh] overflow-hidden">
 
         {/* ── Left: Form ── */}
         <div className="flex flex-col flex-1 min-w-0 overflow-y-auto">
@@ -180,73 +205,124 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
             </button>
           </div>
 
-          <form id="stage-form" onSubmit={handleSubmit} className="px-6 py-5 space-y-5 flex-1">
-            {/* Stage Information */}
+          <form id="stage-form" onSubmit={handleSubmit} className="p-6 space-y-4">
+            {errors.general && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                <AlertCircle size={14} className="flex-shrink-0" />
+                <span>{errors.general}</span>
+              </div>
+            )}
+
+            {/* Stage Name */}
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Stage Information</p>
-              <div className="space-y-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-text">Stage Name <span className="text-red-500">*</span></label>
-                  <input value={form.stage_name}
-                    onChange={e => setForm(f => ({ ...f, stage_name: e.target.value }))}
-                    disabled={!!initial}
-                    className="w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-60 border-border"
-                    placeholder="e.g. Copy Editing" />
-                  {errors.stage_name && <p className="text-xs text-red-500 flex items-center gap-1"><AlertCircle size={11} />{errors.stage_name}</p>}
-                </div>
+              <label className="block text-xs font-semibold text-text mb-1 uppercase tracking-wider">
+                Stage Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={form.stage_name}
+                onChange={e => setForm(f => ({ ...f, stage_name: e.target.value }))}
+                placeholder="e.g. Pre-editing, XML Conversion, Typesetting"
+                className={`w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary ${
+                  errors.stage_name ? 'border-red-400' : 'border-border'
+                }`}
+              />
+              {errors.stage_name && <p className="text-xs text-red-500 mt-1">{errors.stage_name}</p>}
+            </div>
 
+            {/* SLA by Level */}
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1 uppercase tracking-wider">
+                SLA (Days) by Level
+              </label>
+              <p className="text-[11px] text-muted mb-2">Turnaround time in days based on project complexity level</p>
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">SLA (days per level)</p>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-sm font-medium text-text">Level 1</label>
-                      <input type="number" min={0} value={form.sla_level1}
-                        onChange={e => setForm(f => ({ ...f, sla_level1: e.target.value }))}
-                        className="w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary border-border"
-                        placeholder="e.g. 3" />
-                      {errors.sla_level1 && <p className="text-xs text-red-500 flex items-center gap-1"><AlertCircle size={11} />{errors.sla_level1}</p>}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-sm font-medium text-text">Level 2</label>
-                      <input type="number" min={0} value={form.sla_level2}
-                        onChange={e => setForm(f => ({ ...f, sla_level2: e.target.value }))}
-                        className="w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary border-border"
-                        placeholder="e.g. 5" />
-                      {errors.sla_level2 && <p className="text-xs text-red-500 flex items-center gap-1"><AlertCircle size={11} />{errors.sla_level2}</p>}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-sm font-medium text-text">Level 3</label>
-                      <input type="number" min={0} value={form.sla_level3}
-                        onChange={e => setForm(f => ({ ...f, sla_level3: e.target.value }))}
-                        className="w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary border-border"
-                        placeholder="e.g. 7" />
-                      {errors.sla_level3 && <p className="text-xs text-red-500 flex items-center gap-1"><AlertCircle size={11} />{errors.sla_level3}</p>}
-                    </div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                    <span className="text-xs font-medium text-text">Level 1 (Simple)</span>
                   </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.sla_level1}
+                    onChange={e => setForm(f => ({ ...f, sla_level1: e.target.value }))}
+                    placeholder="e.g. 2"
+                    className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  {errors.sla_level1 && <p className="text-xs text-red-500 mt-0.5">{errors.sla_level1}</p>}
                 </div>
-
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-text">Description</label>
-                  <textarea value={form.description}
-                    onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                    rows={2}
-                    className="w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary border-border resize-none"
-                    placeholder="Brief description of this stage" />
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                    <span className="text-xs font-medium text-text">Level 2 (Medium)</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.sla_level2}
+                    onChange={e => setForm(f => ({ ...f, sla_level2: e.target.value }))}
+                    placeholder="e.g. 5"
+                    className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  {errors.sla_level2 && <p className="text-xs text-red-500 mt-0.5">{errors.sla_level2}</p>}
                 </div>
-
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-red-500" />
+                    <span className="text-xs font-medium text-text">Level 3 (Complex)</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.sla_level3}
+                    onChange={e => setForm(f => ({ ...f, sla_level3: e.target.value }))}
+                    placeholder="e.g. 10"
+                    className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  {errors.sla_level3 && <p className="text-xs text-red-500 mt-0.5">{errors.sla_level3}</p>}
+                </div>
               </div>
             </div>
 
-            {/* Role Mapping */}
+            {/* Description */}
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Role Mapping</p>
+              <label className="block text-xs font-semibold text-text mb-1 uppercase tracking-wider">
+                Description
+              </label>
+              <textarea
+                rows={2}
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="Optional description of stage responsibilities and deliverables…"
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"
+              />
+            </div>
 
+            {/* Active Status */}
+            <div className="flex items-center justify-between p-3 bg-background rounded-lg border border-border">
+              <div>
+                <p className="text-xs font-semibold text-text">Active Stage</p>
+                <p className="text-[11px] text-muted">Inactive stages cannot be assigned to new projects</p>
+              </div>
+              <Toggle checked={form.active_status} onChange={checked => setForm(f => ({ ...f, active_status: checked }))} />
+            </div>
+
+            {/* Mapped Roles */}
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1 uppercase tracking-wider">
+                Mapped Roles ({form.role_names.length})
+              </label>
               <div className="relative" ref={roleDropRef}>
-                <button type="button"
+                <button
+                  type="button"
                   onClick={() => setRoleDropOpen(o => !o)}
-                  className="w-full flex items-center justify-between px-3 py-2 text-sm bg-background border border-border rounded-lg hover:border-primary transition-colors">
-                  <span className="text-muted">Select roles…</span>
-                  <ChevronDown size={14} className={`text-muted transition-transform ${roleDropOpen ? 'rotate-180' : ''}`} />
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm bg-background border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <span className={form.role_names.length ? 'text-text' : 'text-muted'}>
+                    {form.role_names.length ? `${form.role_names.length} role(s) selected` : 'Select roles…'}
+                  </span>
+                  <ChevronDown size={14} className="text-muted" />
                 </button>
 
                 {roleDropOpen && (
@@ -294,9 +370,85 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
                 </div>
               )}
             </div>
+
+            {/* ── Allowed Processing Actions ── */}
+            <div className="pt-2 border-t border-border/50 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-xs font-semibold text-text uppercase tracking-wider">
+                    Allowed Processing Actions ({form.processing_actions.length})
+                  </label>
+                  <p className="text-[11px] text-muted mt-0.5">
+                    Select file tools and review actions visible when chapters are in this stage.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, processing_actions: definitions.map(d => d.key) }))}
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-muted text-[10px]">•</span>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, processing_actions: [] }))}
+                    className="text-[11px] font-medium text-muted hover:underline hover:text-danger"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Search */}
+              <div className="pt-1">
+                <div className="relative">
+                  <Search size={12} className="absolute left-2.5 top-2 text-muted" />
+                  <input
+                    type="text"
+                    value={actionSearch}
+                    onChange={e => setActionSearch(e.target.value)}
+                    placeholder="Search actions…"
+                    className="w-full pl-7 pr-3 py-1 text-xs bg-background border border-border rounded-md text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              {/* Action Selection Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto p-1 bg-background/30 rounded-xl border border-border/50">
+                {filteredActions.map(action => {
+                  const isSelected = form.processing_actions.includes(action.key)
+                  return (
+                    <button
+                      key={action.key}
+                      type="button"
+                      onClick={() => toggleAction(action.key)}
+                      className={`flex items-start gap-2.5 p-2 rounded-lg border text-left transition-all ${
+                        isSelected
+                          ? 'bg-primary/10 border-primary text-text shadow-xs'
+                          : 'bg-card border-border text-muted hover:text-text hover:bg-background'
+                      }`}
+                    >
+                      <span className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
+                        isSelected ? 'bg-primary border-primary text-white' : 'border-border'
+                      }`}>
+                        {isSelected && <Check size={10} />}
+                      </span>
+                      <div className="min-w-0">
+                        <p className={`text-xs font-semibold leading-tight ${isSelected ? 'text-primary' : 'text-text'}`}>
+                          {action.label}
+                        </p>
+                        <p className="text-[10px] font-mono text-muted truncate mt-0.5">{action.key}</p>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           </form>
 
-          <div className="px-6 py-4 border-t border-border flex justify-end gap-2 flex-shrink-0">
+          <div className="px-6 py-4 border-t border-border flex justify-end gap-2 flex-shrink-0 bg-background/50">
             <button type="button" onClick={onClose}
               className="px-4 py-2 text-sm rounded-lg border border-border text-text hover:bg-background transition-colors">
               Cancel
@@ -309,12 +461,12 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
         </div>
 
         {/* ── Right: Live Preview ── */}
-        <div className="w-64 flex-shrink-0 border-l border-border bg-background flex flex-col">
+        <div className="w-72 flex-shrink-0 border-l border-border bg-background flex flex-col">
           <div className="px-4 py-3.5 border-b border-border">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted">Live Preview</p>
           </div>
-          <div className="p-4 flex-1 overflow-y-auto">
-            <div className="bg-card rounded-xl border border-border p-3 space-y-2.5">
+          <div className="p-4 flex-1 overflow-y-auto space-y-3">
+            <div className="bg-card rounded-xl border border-border p-3 space-y-2.5 shadow-xs">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
                   style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, white)', color: 'var(--color-primary)' }}>
@@ -357,9 +509,26 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
                 </div>
               )}
 
-              {form.role_names.length === 0 && (
-                <p className="text-[11px] text-muted italic">No roles selected</p>
-              )}
+              {/* Live Preview Allowed Actions */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 flex items-center gap-1">
+                  <Sliders size={10} /> Allowed Actions ({form.processing_actions.length})
+                </p>
+                {form.processing_actions.length === 0 ? (
+                  <p className="text-[11px] text-muted italic">No actions configured</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1 max-h-36 overflow-y-auto">
+                    {form.processing_actions.map(actionKey => {
+                      const def = definitions.find(d => d.key === actionKey)
+                      return (
+                        <span key={actionKey} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium">
+                          {def?.label || actionKey}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -370,12 +539,21 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles }: StageModalP
 
 // ── Expanded Stage Row ─────────────────────────────────────────────────────────
 
-function ExpandedStageRow({ stage }: { stage: Stage }) {
+function ExpandedStageRow({ stage, definitions }: { stage: Stage; definitions: ProcessingActionDefinition[] }) {
   const hasLevels = stage.sla_level1 != null || stage.sla_level2 != null || stage.sla_level3 != null
+  const stageActions = stage.processing_actions || []
+
   return (
     <tr>
-      <td colSpan={6} className="bg-background/40 border-b border-border/50">
-        <div className="px-12 py-3 space-y-3">
+      <td colSpan={7} className="bg-background/40 border-b border-border/50">
+        <div className="px-12 py-3.5 space-y-3">
+          {stage.description && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1">Description</p>
+              <p className="text-xs text-text">{stage.description}</p>
+            </div>
+          )}
+
           {hasLevels && (
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 flex items-center gap-1">
@@ -400,7 +578,7 @@ function ExpandedStageRow({ stage }: { stage: Stage }) {
           ) : (
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1">
-                <Layers size={10} /> Mapped Roles
+                <Layers size={10} /> Mapped Roles ({stage.roles.length})
               </p>
               <div className="flex flex-wrap gap-2">
                 {stage.roles.map(roleName => (
@@ -411,6 +589,28 @@ function ExpandedStageRow({ stage }: { stage: Stage }) {
               </div>
             </div>
           )}
+
+          {/* Allowed Processing Actions */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1">
+              <Sliders size={10} /> Allowed Processing Actions ({stageActions.length})
+            </p>
+            {stageActions.length === 0 ? (
+              <p className="text-xs text-muted italic">No processing actions configured</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {stageActions.map(actionKey => {
+                  const def = definitions.find(d => d.key === actionKey)
+                  return (
+                    <span key={actionKey} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border bg-card text-xs text-text font-medium shadow-2xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      {def?.label || actionKey}
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </td>
     </tr>
@@ -421,7 +621,9 @@ function ExpandedStageRow({ stage }: { stage: Stage }) {
 
 export function StageManagement() {
   const navigate = useNavigate()
+  const { definitions, fetchMapping } = useStageActionsStore()
 
+  const [activeTab, setActiveTab] = useState<'stages' | 'actions'>('stages')
   const [stages, setStages] = useState<Stage[]>([])
   const [roles, setRoles] = useState<RolesMaster[]>([])
   const [loading, setLoading] = useState(true)
@@ -441,12 +643,13 @@ export function StageManagement() {
       const [s, r] = await Promise.all([stagesApi.list(), rolesApi.listActive()])
       setStages(s)
       setRoles(r)
+      await fetchMapping(true)
     } catch {
-      toast.error('Failed to load data')
+      toast.error('Failed to load stage data')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fetchMapping])
 
   useEffect(() => { loadAll() }, [loadAll])
 
@@ -477,22 +680,61 @@ export function StageManagement() {
           </button>
           <div>
             <h2 className="text-xl font-bold text-text">Stage Management</h2>
-            <p className="text-sm text-muted mt-0.5">Define workflow stages and their role mapping</p>
+            <p className="text-sm text-muted mt-0.5">Define workflow stages, role mappings, and allowed processing actions</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => { setEditingStage(null); setStageModalOpen(true) }}
-            className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors">
-            <Plus size={15} /> Create New Stage
-          </button>
-        </div>
+
+        {activeTab === 'stages' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setEditingStage(null); setStageModalOpen(true) }}
+              className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors shadow-xs">
+              <Plus size={15} /> Create New Stage
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* ── Tabs Navigation ── */}
+      <div className="flex items-center gap-2 border-b border-border">
+        <button
+          onClick={() => setActiveTab('stages')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-all ${
+            activeTab === 'stages'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted hover:text-text'
+          }`}
+        >
+          <Layers size={16} />
+          Stages Overview
+          <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-card border border-border text-muted font-medium">
+            {stages.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('actions')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-all ${
+            activeTab === 'actions'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted hover:text-text'
+          }`}
+        >
+          <Sliders size={16} />
+          Processing Actions Mapping
+          <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-card border border-border text-muted font-medium">
+            {definitions.length}
+          </span>
+        </button>
+      </div>
+
+      {/* ── Tab Contents ── */}
       {loading ? (
         <div className="flex items-center justify-center h-48 text-muted text-sm">Loading…</div>
+      ) : activeTab === 'actions' ? (
+        <ProcessingActionsManager stages={stages} onMappingSaved={loadAll} />
       ) : (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="bg-card border border-border rounded-xl overflow-hidden shadow-xs">
           <SectionHeader title="Stages" count={filteredStages.length} icon={Layers} />
 
           {/* Search + Filter bar */}
@@ -500,7 +742,7 @@ export function StageManagement() {
             <div className="relative flex-1 max-w-xs">
               <Search size={13} className="absolute left-3 top-2.5 text-muted" />
               <input value={stageSearch} onChange={e => setStageSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                className="w-full pl-8 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary text-text"
                 placeholder="Search stages…" />
             </div>
 
@@ -529,6 +771,7 @@ export function StageManagement() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Stage Name</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">SLA Levels</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Roles</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Allowed Actions</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Status</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Actions</th>
                 </tr>
@@ -536,88 +779,102 @@ export function StageManagement() {
               <tbody>
                 {filteredStages.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-sm text-muted">
+                    <td colSpan={7} className="px-6 py-12 text-center text-sm text-muted">
                       <Layers size={28} className="mx-auto mb-2 opacity-30" />
                       {stageSearch || stageStatusFilter ? 'No stages match your filters' : 'No stages yet — create your first stage'}
                     </td>
                   </tr>
                 ) : (
-                  filteredStages.map(stage => (
-                    <>
-                      <tr key={stage.id}
-                        className={`border-b border-border/50 hover:bg-background/50 transition-colors ${expandedStage === stage.id ? 'bg-background/50' : ''}`}>
-                        <td className="pl-3 pr-0 py-3">
-                          <button onClick={() => setExpandedStage(expandedStage === stage.id ? null : stage.id)}
-                            className="p-1 rounded text-muted hover:text-text transition-colors">
-                            {expandedStage === stage.id
-                              ? <ChevronDown size={14} />
-                              : <ChevronRight size={14} />}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
-                              style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, white)', color: 'var(--color-primary)' }}>
-                              {stage.stage_name[0].toUpperCase()}
+                  filteredStages.map(stage => {
+                    const actionCount = stage.processing_actions?.length || 0
+                    return (
+                      <React.Fragment key={stage.id}>
+                        <tr
+                          className={`border-b border-border/50 hover:bg-background/50 transition-colors ${expandedStage === stage.id ? 'bg-background/50' : ''}`}>
+                          <td className="pl-3 pr-0 py-3">
+                            <button onClick={() => setExpandedStage(expandedStage === stage.id ? null : stage.id)}
+                              className="p-1 rounded text-muted hover:text-text transition-colors">
+                              {expandedStage === stage.id
+                                ? <ChevronDown size={14} />
+                                : <ChevronRight size={14} />}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
+                                style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, white)', color: 'var(--color-primary)' }}>
+                                {stage.stage_name[0].toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-medium text-text">{stage.stage_name}</p>
+                                {stage.description && <p className="text-xs text-muted truncate max-w-[160px]">{stage.description}</p>}
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-medium text-text">{stage.stage_name}</p>
-                              {stage.description && <p className="text-xs text-muted truncate max-w-[160px]">{stage.description}</p>}
+                          </td>
+                          <td className="px-4 py-3">
+                            {(stage.sla_level1 != null || stage.sla_level2 != null || stage.sla_level3 != null) ? (
+                              <div className="flex flex-wrap gap-1">
+                                {stage.sla_level1 != null && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">L1: {stage.sla_level1}d</span>
+                                )}
+                                {stage.sla_level2 != null && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">L2: {stage.sla_level2}d</span>
+                                )}
+                                {stage.sla_level3 != null && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">L3: {stage.sla_level3}d</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-muted">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 max-w-[200px]">
+                            {stage.roles.length === 0 ? (
+                              <span className="text-muted">—</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                {stage.roles.map(roleName => (
+                                  <span key={roleName} className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-medium">
+                                    {roleName}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          {/* Allowed Actions Count */}
+                          <td className="px-4 py-3">
+                            {actionCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                                <Sliders size={10} />
+                                {actionCount} {actionCount === 1 ? 'Action' : 'Actions'}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted">0 Actions</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              {stageStatusLoading === stage.id
+                                ? <Spinner />
+                                : <Toggle checked={stage.active_status} onChange={() => handleToggleStageStatus(stage)} />}
+                              <span className={`text-xs font-medium ${stage.active_status ? 'text-success' : 'text-muted'}`}>
+                                {stage.active_status ? 'Active' : 'Inactive'}
+                              </span>
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          {(stage.sla_level1 != null || stage.sla_level2 != null || stage.sla_level3 != null) ? (
-                            <div className="flex flex-wrap gap-1">
-                              {stage.sla_level1 != null && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">L1: {stage.sla_level1}d</span>
-                              )}
-                              {stage.sla_level2 != null && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">L2: {stage.sla_level2}d</span>
-                              )}
-                              {stage.sla_level3 != null && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">L3: {stage.sla_level3}d</span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-muted">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 max-w-[220px]">
-                          {stage.roles.length === 0 ? (
-                            <span className="text-muted">—</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1">
-                              {stage.roles.map(roleName => (
-                                <span key={roleName} className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-medium">
-                                  {roleName}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            {stageStatusLoading === stage.id
-                              ? <Spinner />
-                              : <Toggle checked={stage.active_status} onChange={() => handleToggleStageStatus(stage)} />}
-                            <span className={`text-xs font-medium ${stage.active_status ? 'text-success' : 'text-muted'}`}>
-                              {stage.active_status ? 'Active' : 'Inactive'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button onClick={() => { setEditingStage(stage); setStageModalOpen(true) }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary bg-accent rounded-lg hover:bg-primary hover:text-white transition-colors">
-                            <Pencil size={12} /> Edit
-                          </button>
-                        </td>
-                      </tr>
-                      {expandedStage === stage.id && (
-                        <ExpandedStageRow key={`exp-${stage.id}`} stage={stage} />
-                      )}
-                    </>
-                  ))
+                          </td>
+                          <td className="px-4 py-3">
+                            <button onClick={() => { setEditingStage(stage); setStageModalOpen(true) }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary bg-accent rounded-lg hover:bg-primary hover:text-white transition-colors">
+                              <Pencil size={12} /> Edit
+                            </button>
+                          </td>
+                        </tr>
+                        {expandedStage === stage.id && (
+                          <ExpandedStageRow key={`exp-${stage.id}`} stage={stage} definitions={definitions} />
+                        )}
+                      </React.Fragment>
+                    )
+                  })
                 )}
               </tbody>
             </table>
@@ -632,6 +889,7 @@ export function StageManagement() {
         onSaved={loadAll}
         initial={editingStage}
         allRoles={roles}
+        definitions={definitions}
       />
     </div>
   )

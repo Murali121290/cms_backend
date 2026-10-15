@@ -14,10 +14,122 @@ from app.domains.workflow.models import StageDetail, StageMaster
 from app.domains.workflow.schemas import (
     RolesMasterCreate, RolesMasterResponse, RolesMasterUpdate,
     StageMasterCreate, StageMasterResponse, StageMasterUpdate,
+    ProcessingActionDefinition, ProcessingActionsMappingUpdate,
     StageDetailCreate, StageDetailResponse, StageDetailUpdate, BulkPlannedCreate,
     WorkflowCreate, WorkflowStageResponse, WorkflowUpdate,
     ChapterInfoCreate, ChapterInfoResponse, ChapterInfoUpdate
 )
+
+AVAILABLE_PROCESSING_ACTIONS = [
+    {
+        "key": "structuring",
+        "label": "Structuring",
+        "description": "Generate structured document tags, styling, and XML markers",
+        "icon": "Layers"
+    },
+    {
+        "key": "structuringQa",
+        "label": "Run QA Report",
+        "description": "Run automated style and structuring QA report",
+        "icon": "ShieldCheck"
+    },
+    {
+        "key": "referenceValidation",
+        "label": "Reference Validation",
+        "description": "Validate citations and references against CrossRef and PubMed APIs",
+        "icon": "BookCheck"
+    },
+    {
+        "key": "referenceReview",
+        "label": "Reference Review",
+        "description": "Review and edit bibliography references in the Reference Editor",
+        "icon": "BookCheck"
+    },
+    {
+        "key": "styleValidation",
+        "label": "Style Validation & Match",
+        "description": "Validate and match manuscript styling against publisher templates",
+        "icon": "ShieldCheck"
+    },
+    {
+        "key": "artValidation",
+        "label": "Art Validation",
+        "description": "Inspect and validate embedded figures, resolution, and color profiles",
+        "icon": "Image"
+    },
+    {
+        "key": "languageEdit",
+        "label": "Language Edit",
+        "description": "Linguistic copyediting for grammar, syntax, and phrasing",
+        "icon": "Languages"
+    },
+    {
+        "key": "technicalEdit",
+        "label": "Technical Edit",
+        "description": "Review mathematical notation, equations, and technical nomenclature",
+        "icon": "Wrench"
+    },
+    {
+        "key": "unifiedReview",
+        "label": "Review Studio",
+        "description": "Unified interactive editor with track changes, comments, and side-by-side view",
+        "icon": "Layout"
+    },
+    {
+        "key": "manuscriptAnalysis",
+        "label": "Manuscript Analysis",
+        "description": "Automated analysis of manuscript content, structural integrity, and word count",
+        "icon": "FileOutput"
+    },
+    {
+        "key": "permissionsCheck",
+        "label": "Permissions Check",
+        "description": "Audit and track third-party copyright, figures, and citation permissions",
+        "icon": "ShieldCheck"
+    },
+    {
+        "key": "aiCreditExtraction",
+        "label": "AI Credit Extraction",
+        "description": "Extract contributor credits, affiliations, and funding sources using AI",
+        "icon": "Sparkles"
+    },
+    {
+        "key": "biasScan",
+        "label": "Bias Scan",
+        "description": "Scan text for cultural, gender, accessibility, or inclusivity bias",
+        "icon": "ScanLine"
+    },
+    {
+        "key": "wordToXml",
+        "label": "Word to XML",
+        "description": "Convert Word DOCX manuscript directly into JATS or BITS XML",
+        "icon": "FileCode"
+    },
+    {
+        "key": "wordToIndesign",
+        "label": "Word to InDesign",
+        "description": "Typeset Word document into Adobe InDesign INDD/IDML layout",
+        "icon": "Layers"
+    },
+    {
+        "key": "xmlToIndesign",
+        "label": "Generate InDesign (XML to INDD)",
+        "description": "Flow structured XML content into an InDesign template layout",
+        "icon": "Layers"
+    },
+    {
+        "key": "indesignToXml",
+        "label": "InDesign to XML",
+        "description": "Extract structured XML from an InDesign document",
+        "icon": "FileCode"
+    },
+    {
+        "key": "viewProof",
+        "label": "View Proof",
+        "description": "Inspect and view rendered page proof PDF",
+        "icon": "Eye"
+    }
+]
 
 router = APIRouter(prefix="/api/v1", tags=["Workflow"])
 
@@ -66,6 +178,72 @@ def create_stage(data: StageMasterCreate, db: Session = Depends(get_db)):
 @router.get("/stages", response_model=List[StageMasterResponse])
 def list_stages(skip: int = 0, limit: int = 500, db: Session = Depends(get_db)):
     return crud.get_stages(db, skip=skip, limit=limit)
+
+
+@router.get("/stages/processing-actions/definitions", response_model=List[ProcessingActionDefinition])
+def get_processing_action_definitions():
+    return AVAILABLE_PROCESSING_ACTIONS
+
+
+@router.get("/stages/processing-actions/mapping")
+def get_processing_actions_mapping(db: Session = Depends(get_db)):
+    from sqlalchemy import select
+    stages = list(db.execute(select(StageMaster).order_by(StageMaster.id)).scalars().all())
+    mapping: dict[str, list[str]] = {a["key"]: [] for a in AVAILABLE_PROCESSING_ACTIONS}
+    for stage in stages:
+        for action in (stage.processing_actions or []):
+            if action in mapping:
+                mapping[action].append(stage.stage_name)
+            else:
+                mapping[action] = [stage.stage_name]
+    return {
+        "definitions": AVAILABLE_PROCESSING_ACTIONS,
+        "mapping": mapping,
+        "stages": [{"id": s.id, "stage_name": s.stage_name, "active_status": s.active_status, "processing_actions": s.processing_actions} for s in stages]
+    }
+
+
+@router.put("/stages/processing-actions/mapping")
+def update_processing_actions_mapping(data: ProcessingActionsMappingUpdate, db: Session = Depends(get_db)):
+    from sqlalchemy import select
+    stages = list(db.execute(select(StageMaster)).scalars().all())
+    
+    # Invert mapping: for each stage name, compute list of action keys
+    stage_actions_map: dict[str, list[str]] = {s.stage_name.lower(): [] for s in stages}
+    for action_key, stage_names in data.mapping.items():
+        for sname in stage_names:
+            low = sname.strip().lower()
+            if low in stage_actions_map:
+                if action_key not in stage_actions_map[low]:
+                    stage_actions_map[low].append(action_key)
+            else:
+                for real_stage in stages:
+                    if real_stage.stage_name.lower() == low:
+                        if action_key not in stage_actions_map[real_stage.stage_name.lower()]:
+                            stage_actions_map[real_stage.stage_name.lower()].append(action_key)
+
+    for stage in stages:
+        stage.processing_actions = stage_actions_map.get(stage.stage_name.lower(), [])
+
+    db.commit()
+    for s in stages:
+        db.refresh(s)
+
+    mapping: dict[str, list[str]] = {a["key"]: [] for a in AVAILABLE_PROCESSING_ACTIONS}
+    for stage in stages:
+        for action in (stage.processing_actions or []):
+            if action in mapping:
+                mapping[action].append(stage.stage_name)
+            else:
+                mapping[action] = [stage.stage_name]
+
+    return {
+        "success": True,
+        "message": "Processing actions mapping updated successfully",
+        "definitions": AVAILABLE_PROCESSING_ACTIONS,
+        "mapping": mapping,
+        "stages": [{"id": s.id, "stage_name": s.stage_name, "active_status": s.active_status, "processing_actions": s.processing_actions} for s in stages]
+    }
 
 
 def resolve_stage(db: Session, identifier: str):
