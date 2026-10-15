@@ -40,11 +40,14 @@ def _ensure_paragraph_style(doc, style_name: str) -> None:
 
     try:
         from docx.enum.style import WD_STYLE_TYPE
+        from docx.shared import Pt
         new_style = doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
         try:
             new_style.base_style = doc.styles['Normal']
         except Exception:
             pass
+        new_style.font.name = 'Times New Roman'
+        new_style.font.size = Pt(12)
     except Exception as e:
         logger.warning(f"Could not create paragraph style '{style_name}': {e}")
 
@@ -792,10 +795,10 @@ def _determine_list_style(li_el) -> str:
 
 def apply_final_docx_formatting(doc):
     from docx.shared import Pt
-    # Only update the Normal style as a fallback for unstyled runs.
-    # Run-level rFonts/sz are left untouched so original formatting survives.
     from docx.oxml.ns import qn
-    # 1. Update Normal style
+    from docx.oxml import OxmlElement
+
+    # 1. Update Normal style so unstyled runs inherit Times New Roman 12pt double-spaced.
     try:
         normal_style = doc.styles['Normal']
         normal_style.font.name = 'Times New Roman'
@@ -803,6 +806,76 @@ def apply_final_docx_formatting(doc):
         normal_style.paragraph_format.line_spacing = 2.0
     except Exception as e:
         logger.warning(f"Could not set Normal style: {e}")
+
+    # 2. Standardize all style definitions (and docDefaults) to Times New Roman 12pt.
+    # This ensures every style name (H1, TN, T1, TXT, BIB, etc.) defined in styles.xml
+    # inherits or specifies Times New Roman 12pt at the style definition level without
+    # applying direct paragraph run overrides.
+    try:
+        styles_elm = doc.styles._element
+
+        # Standardize docDefaults
+        doc_defaults = styles_elm.find(qn('w:docDefaults'))
+        if doc_defaults is not None:
+            rpr_default = doc_defaults.find(qn('w:rPrDefault'))
+            if rpr_default is not None:
+                rpr = rpr_default.find(qn('w:rPr'))
+                if rpr is None:
+                    rpr = OxmlElement('w:rPr')
+                    rpr_default.append(rpr)
+                rfonts = rpr.find(qn('w:rFonts'))
+                if rfonts is None:
+                    rfonts = OxmlElement('w:rFonts')
+                    rpr.append(rfonts)
+                rfonts.set(qn('w:ascii'), 'Times New Roman')
+                rfonts.set(qn('w:hAnsi'), 'Times New Roman')
+                rfonts.set(qn('w:cs'), 'Times New Roman')
+                rfonts.set(qn('w:eastAsia'), 'Times New Roman')
+                for theme_attr in [qn('w:asciiTheme'), qn('w:hAnsiTheme'), qn('w:eastAsiaTheme'), qn('w:cstheme')]:
+                    if theme_attr in rfonts.attrib:
+                        del rfonts.attrib[theme_attr]
+                sz = rpr.find(qn('w:sz'))
+                if sz is None:
+                    sz = OxmlElement('w:sz')
+                    rpr.append(sz)
+                sz.set(qn('w:val'), '24')
+                sz_cs = rpr.find(qn('w:szCs'))
+                if sz_cs is None:
+                    sz_cs = OxmlElement('w:szCs')
+                    rpr.append(sz_cs)
+                sz_cs.set(qn('w:val'), '24')
+
+        # Standardize every style defined in styles.xml
+        for style_elm in styles_elm.findall(qn('w:style')):
+            stype = style_elm.get(qn('w:type'))
+            if stype in ('paragraph', 'character', 'table') or stype is None:
+                rpr = style_elm.find(qn('w:rPr'))
+                if rpr is None:
+                    rpr = OxmlElement('w:rPr')
+                    style_elm.append(rpr)
+                rfonts = rpr.find(qn('w:rFonts'))
+                if rfonts is None:
+                    rfonts = OxmlElement('w:rFonts')
+                    rpr.append(rfonts)
+                rfonts.set(qn('w:ascii'), 'Times New Roman')
+                rfonts.set(qn('w:hAnsi'), 'Times New Roman')
+                rfonts.set(qn('w:cs'), 'Times New Roman')
+                rfonts.set(qn('w:eastAsia'), 'Times New Roman')
+                for theme_attr in [qn('w:asciiTheme'), qn('w:hAnsiTheme'), qn('w:eastAsiaTheme'), qn('w:cstheme')]:
+                    if theme_attr in rfonts.attrib:
+                        del rfonts.attrib[theme_attr]
+                sz = rpr.find(qn('w:sz'))
+                if sz is None:
+                    sz = OxmlElement('w:sz')
+                    rpr.append(sz)
+                sz.set(qn('w:val'), '24')
+                sz_cs = rpr.find(qn('w:szCs'))
+                if sz_cs is None:
+                    sz_cs = OxmlElement('w:szCs')
+                    rpr.append(sz_cs)
+                sz_cs.set(qn('w:val'), '24')
+    except Exception as e:
+        logger.warning(f"Could not standardize styles font/size: {e}")
 
     for para in doc.paragraphs:
         style_name = para.style.name if para.style else "Normal"
