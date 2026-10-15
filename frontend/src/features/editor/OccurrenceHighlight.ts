@@ -220,28 +220,22 @@ export const OccurrenceHighlight = Extension.create({
             const pluginState = occurrenceHighlightKey.getState(state);
             return pluginState?.decorations ?? DecorationSet.empty;
           },
-          handleClick(view, pos) {
+          handleClick(_view, _pos, event) {
+            // NOTE: can't read the occ index from `deco.spec` — Decoration.inline
+            // stores its 3rd argument in `type.attrs` (DOM attrs), and the real
+            // `spec` object is empty unless an explicit 4th argument is passed.
+            // Walk up the clicked DOM target to find the data-occ-index attribute.
             const cb = extension.storage.onOccurrenceClick;
             if (!cb) return false;
-
-            const pluginState = occurrenceHighlightKey.getState(view.state);
-            const decos = pluginState?.decorations;
-            if (decos) {
-              const found = decos.find(pos, pos);
-              if (found && found.length > 0) {
-                for (const deco of found) {
-                  const occIdxStr = (deco.spec as any)?.["data-occ-index"];
-                  if (occIdxStr !== undefined) {
-                    const idx = parseInt(occIdxStr, 10);
-                    if (Number.isFinite(idx)) {
-                      cb(idx);
-                      return true;
-                    }
-                  }
-                }
-              }
-            }
-            return false;
+            const target = event?.target as HTMLElement | null;
+            const el = target?.closest?.("[data-occ-index]") as HTMLElement | null;
+            if (!el) return false;
+            const idxStr = el.getAttribute("data-occ-index");
+            if (idxStr == null) return false;
+            const idx = parseInt(idxStr, 10);
+            if (!Number.isFinite(idx)) return false;
+            cb(idx);
+            return true;
           },
         },
       }),

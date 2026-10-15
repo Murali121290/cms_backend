@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, BarChart3,
-  Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2, BookOpen, BookMarked
-  Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2, BookOpen, BookText, FileText
+  Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2,
+  BookOpen, BookMarked, BookText, FileText,
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useAuthStore } from '@/store/useAuthStore'

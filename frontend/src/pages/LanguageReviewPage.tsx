@@ -62,6 +62,24 @@ interface Finding {
   edited_text?: string
   reviewer?: string
   decided_at?: string
+  source?: 'rule' | 'term'
+  term_list_id?: number | null
+}
+
+// "Term from list: <name>" or "Term from list: <name> (also in: <names>)"
+const TERM_MESSAGE_RE = /^Term from list:\s*([^(]+?)(?:\s*\(also in:\s*(.+)\))?\s*$/
+function parseTermMeta(message: string): { listName: string | null; alsoIn: string[] } {
+  const m = TERM_MESSAGE_RE.exec(message || '')
+  if (!m) return { listName: null, alsoIn: [] }
+  const listName = m[1]?.trim() || null
+  const alsoIn = m[2] ? m[2].split(',').map(s => s.trim()).filter(Boolean) : []
+  return { listName, alsoIn }
+}
+
+// Title Case: capitalize each word's first letter, lowercase the rest.
+// Doesn't apply English small-word rules (and/of/the), which varies by house style.
+function toTitleCase(s: string): string {
+  return s.replace(/\p{L}[\p{L}\p{M}']*/gu, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
 }
 
 interface JobData {
@@ -93,7 +111,7 @@ export function LanguageReviewPage() {
   // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
   const journal = useJournalReviewMode()
 
-  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'bias' | 'comments' | 'rules'>('all')
+  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'bias' | 'term' | 'comments' | 'rules'>('all')
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [job, setJob] = useState<JobData | null>(null)
@@ -101,6 +119,16 @@ export function LanguageReviewPage() {
   const [fileName, setFileName] = useState<string>('manuscript.docx')
   const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null)
   const [editingFindingId, setEditingFindingId] = useState<number | null>(null)
+
+  // Inline context-menu popover anchored to a clicked occurrence span.
+  interface InlinePopover {
+    findingId: number
+    originalText: string
+    anchor: { top: number; left: number; width: number; height: number }
+  }
+  const [inlinePopover, setInlinePopover] = useState<InlinePopover | null>(null)
+  const [inlineInput, setInlineInput] = useState('')
+  const inlinePopoverRef = useRef<HTMLDivElement | null>(null)
 
   // Comments / Author Queries (AQ) state
   const [comments, setComments] = useState<CommentRecord[]>([])
@@ -447,16 +475,128 @@ export function LanguageReviewPage() {
     return findings.findIndex((f) => f.id === selectedFindingId)
   }, [findings, selectedFindingId])
 
-  // Bi-directional click: when user clicks an occurrence in WysiwygEditor canvas
-  const handleOccurrenceClick = (idx: number) => {
+  // Direct scroll-to-span via the OccurrenceHighlight decoration's data-occ-index
+  // attribute. This bypasses the WysiwygEditor useEffect roundtrip (which can
+  // miss when selectedFindingId doesn't change value or when the found block
+  // isn't a <p>/<h*>), so clicking any finding card reliably focuses its span.
+  const focusOccurrenceInEditor = useCallback((findingId: number) => {
+    const occIdx = findings.findIndex(ff => ff.id === findingId)
+    if (occIdx < 0) return
+    const tryScroll = () => {
+      const editorDom = (editorRef.current?.editor as any)?.view?.dom as HTMLElement | undefined
+      if (!editorDom) return false
+      const el = editorDom.querySelector<HTMLElement>(`[data-occ-index="${occIdx}"]`)
+      if (!el) return false
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return true
+    }
+    // Two RAFs: first lets React commit, second lets ProseMirror re-render decorations.
+    requestAnimationFrame(() => {
+      if (tryScroll()) return
+      requestAnimationFrame(() => { tryScroll() })
+    })
+  }, [findings])
+
+  // Close inline popover: clear state + input.
+  const closeInlinePopover = useCallback(() => {
+    setInlinePopover(null)
+    setInlineInput('')
+  }, [])
+
+  // Apply the user's replacement text to the exact occurrence span in the editor.
+  // Mutates the editor state (dirties it) but does NOT persist to DOCX — the user
+  // must still click "Save Edits to DOCX".
+  const applyInlineReplace = useCallback((rawText: string) => {
+    if (!inlinePopover) return
+    const target = findings.find(f => f.id === inlinePopover.findingId)
+    if (!target) { closeInlinePopover(); return }
+    const newText = rawText
+    if (!newText || newText === target.original_text) { closeInlinePopover(); return }
+
+    const occ: Occurrence = {
+      para_index: target.para_index,
+      match_start: target.start_offset,
+      match_end: target.end_offset,
+      surface: target.original_text,
+      category: target.category,
+    }
+    // Plain text replace — preserves surrounding marks, no track-changes marks,
+    // no persistent <mark> highlights. Dirties the editor via setIsDirty inside.
+    const ok = editorRef.current?.replaceOccurrence(occ, newText)
+    if (!ok) {
+      toast.error('Could not locate the exact text to replace. The document may have changed.')
+      closeInlinePopover()
+      return
+    }
+
+    // Persist decision — non-blocking.
+    apiClient.post(`/language-edit/findings/${target.id}/decide`, {
+      status: 'edited',
+      edited_text: newText,
+      reviewer: 'editor',
+    }).catch(err => console.warn('Failed to persist edit decision:', err))
+
+    // Drop the finding from local state so its decoration disappears and the
+    // card updates to the "edited" look. (OccurrenceHighlight would otherwise
+    // try to re-mount a decoration whose surface no longer exists at that
+    // offset, which gets dicey for repeated words.)
+    setFindings(prev => prev.map(f => f.id === target.id
+      ? { ...f, status: 'edited', edited_text: newText }
+      : f
+    ))
+
+    toast.success('Replaced')
+    closeInlinePopover()
+  }, [inlinePopover, findings, closeInlinePopover])
+
+  // Bi-directional click: when user clicks an occurrence in WysiwygEditor canvas,
+  // (a) select the matching sidebar card, (b) open the inline edit popover.
+  const handleOccurrenceClick = useCallback((idx: number) => {
     const target = findings[idx]
-    if (target) {
-      setSelectedFindingId(target.id)
-      if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'compounds', 'bias'].includes(target.category)) {
-        setActiveRightTab(target.category as any)
+    if (!target) return
+    setSelectedFindingId(target.id)
+    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'compounds', 'bias', 'term'].includes(target.category)) {
+      setActiveRightTab(target.category as any)
+    }
+
+    // Anchor the popover to the clicked span's rect. Two RAFs so ProseMirror
+    // has finished its decoration render before we read the DOM.
+    requestAnimationFrame(() => {
+      const dom = (editorRef.current?.editor as any)?.view?.dom as HTMLElement | undefined
+      const el = dom?.querySelector<HTMLElement>(`[data-occ-index="${idx}"]`)
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      setInlinePopover({
+        findingId: target.id,
+        originalText: target.original_text,
+        anchor: { top: r.top, left: r.left, width: r.width, height: r.height },
+      })
+      const initial = target.edited_text || target.suggestion || target.original_text
+      setInlineInput(initial)
+    })
+  }, [findings, activeRightTab])
+
+  // Esc closes popover; click outside the popover also closes.
+  useEffect(() => {
+    if (!inlinePopover) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); closeInlinePopover() }
+    }
+    const onPointerDown = (e: MouseEvent) => {
+      const el = inlinePopoverRef.current
+      if (el && !el.contains(e.target as Node)) {
+        // Clicking another occurrence span will immediately re-open the popover
+        // via handleOccurrenceClick, so this close + reopen is harmless.
+        closeInlinePopover()
       }
     }
-  }
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('mousedown', onPointerDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('mousedown', onPointerDown, true)
+    }
+  }, [inlinePopover, closeInlinePopover])
 
   // Category counts & filtered findings
   const grammarFindings = useMemo(() => findings.filter(f => f.category === 'grammar'), [findings])
@@ -464,6 +604,7 @@ export function LanguageReviewPage() {
   const sentenceFindings = useMemo(() => findings.filter(f => f.category === 'sentence'), [findings])
   const compoundsFindings = useMemo(() => findings.filter(f => f.category === 'compounds' || f.category === 'compound'), [findings])
   const biasFindings = useMemo(() => findings.filter(f => f.category === 'bias' || f.category === 'article'), [findings])
+  const termFindings = useMemo(() => findings.filter(f => f.category === 'term' || f.source === 'term'), [findings])
 
   const activeCategoryFindings = useMemo(() => {
     let list: Finding[] = []
@@ -473,6 +614,7 @@ export function LanguageReviewPage() {
     else if (activeRightTab === 'sentence') list = sentenceFindings
     else if (activeRightTab === 'compounds') list = compoundsFindings
     else if (activeRightTab === 'bias') list = biasFindings
+    else if (activeRightTab === 'term') list = termFindings
 
     if (!searchQuery.trim()) return list
     const q = searchQuery.toLowerCase()
@@ -482,7 +624,7 @@ export function LanguageReviewPage() {
         f.message.toLowerCase().includes(q) ||
         f.rule_id.toLowerCase().includes(q),
     )
-  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, compoundsFindings, biasFindings, searchQuery])
+  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, compoundsFindings, biasFindings, termFindings, searchQuery])
 
   // Realtime progress statistics
   const totalFindingsCount = job?.total_findings || findings.length || 0
@@ -502,13 +644,59 @@ export function LanguageReviewPage() {
         @keyframes cardIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
         .occurrence-highlight { border-radius: 3px; padding: 0 2px; cursor: pointer; transition: all 0.15s ease; box-decoration-break: clone; }
-        .occurrence-highlight:hover { filter: brightness(0.95); }
-        .occurrence-grammar { background-color: #fef3c7; box-shadow: inset 0 -2px 0 0 #f59e0b; }
-        .occurrence-spelling { background-color: #e0f2fe; box-shadow: inset 0 -2px 0 0 #0ea5e9; }
-        .occurrence-sentence { background-color: #f3e8ff; box-shadow: inset 0 -2px 0 0 #a855f7; }
-        .occurrence-compounds { background-color: #d1fae5; box-shadow: inset 0 -2px 0 0 #10b981; }
-        .occurrence-bias { background-color: #ffe4e6; box-shadow: inset 0 -2px 0 0 #f43f5e; }
-        .occurrence-highlight-selected { outline: 2px solid #8b5cf6; box-shadow: 0 0 10px rgba(139, 92, 246, 0.4); }
+        .occurrence-highlight:hover { filter: brightness(0.92); }
+        /* Category palette per spec (consistent with sidebar legend/chips):
+             Sentence   = soft yellow        #fef9c3
+             Term       = light lavender     #ede9fe
+             Grammar    = soft orange        #ffedd5
+             Spelling   = light blue         #e0f2fe
+             Compounds  = soft green         #d1fae5
+             Inclusive  = soft pink          #ffe4e6
+           All opaque pastels so when decorations overlap (ProseMirror nests
+           spans by range), the inner (more specific / later) decoration shows
+           its own distinct color instead of blending into mud with the outer.
+           Higher-specificity selector (.ProseMirror .occurrence-*) + !important
+           beats the WysiwygEditor base .occurrence-highlight !important rule,
+           preventing the base orange from ever leaking through — this is the
+           "generic rule overriding category colors" case from req #5. */
+        .ProseMirror .occurrence-grammar    { background-color: #ffedd5 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        .ProseMirror .occurrence-spelling   { background-color: #e0f2fe !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        .ProseMirror .occurrence-sentence   { background-color: #fef9c3 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        .ProseMirror .occurrence-compounds  { background-color: #d1fae5 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        .ProseMirror .occurrence-bias       { background-color: #ffe4e6 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        .ProseMirror .occurrence-term       { background-color: #ede9fe !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        .ProseMirror .occurrence-grammar:hover   { background-color: #fed7aa !important; }
+        .ProseMirror .occurrence-spelling:hover  { background-color: #bae6fd !important; }
+        .ProseMirror .occurrence-sentence:hover  { background-color: #fef08a !important; }
+        .ProseMirror .occurrence-compounds:hover { background-color: #a7f3d0 !important; }
+        .ProseMirror .occurrence-bias:hover      { background-color: #fecdd3 !important; }
+        .ProseMirror .occurrence-term:hover      { background-color: #ddd6fe !important; }
+        /* Selected (click-to-edit focus) — distinct green, no underline, no
+           pulsing animation. The decoration only wraps the finding's exact
+           range (never the paragraph node), so even for a long sentence
+           finding this colors exactly its surface — not the paragraph. Higher
+           specificity (.ProseMirror + 2 attrs) beats the WysiwygEditor base
+           [class*=][class*=] rule that would otherwise force a thick green
+           border-bottom underline. */
+        .ProseMirror .occurrence-highlight-selected,
+        .ProseMirror [class*="occurrence-"][class*="-selected"] {
+          background-color: #bbf7d0 !important;
+          border-bottom: 0 !important;
+          box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.6) !important;
+          color: #052e16 !important;
+          font-weight: 600 !important;
+          text-decoration: none !important;
+          outline: 2px solid #16a34a !important;
+          outline-offset: 1px !important;
+          border-radius: 4px !important;
+          animation: none !important;
+        }
+        /* Keep DOCX-origin yellow highlights (TipTap <mark>) distinguishable
+           from the finding overlays: use a warmer saturated yellow with a
+           subtle shadow outline, so <mark> reads as "manually highlighted
+           by Word" vs the finding palette's pastels. Scoped to editor root
+           to avoid touching mark badges elsewhere. */
+        .ProseMirror mark { background-color: #fde047 !important; color: #713f12 !important; box-shadow: inset 0 0 0 1px rgba(161, 98, 7, 0.35) !important; }
       `}</style>
 
       {/* ══ HEADER BAR (CLARITY DESIGN) ════════════════════════════════════════ */}
@@ -601,19 +789,22 @@ export function LanguageReviewPage() {
                 <span className="font-semibold text-slate-700">Document Manuscript Canvas</span>
                 <div className="flex items-center gap-3 text-[11px]">
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Grammar
+                    <span className="w-2.5 h-2.5 rounded-full bg-orange-300"></span> Grammar
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span> Spelling
+                    <span className="w-2.5 h-2.5 rounded-full bg-sky-300"></span> Spelling
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-purple-400"></span> Sentence
+                    <span className="w-2.5 h-2.5 rounded-full bg-yellow-300"></span> Sentence
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span> Compounds
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-300"></span> Compounds
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-400"></span> Inclusive
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-300"></span> Inclusive
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-full bg-violet-300"></span> Terms
                   </span>
                 </div>
               </div>
@@ -700,8 +891,8 @@ export function LanguageReviewPage() {
                   onClick={() => setActiveRightTab('grammar')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
                     activeRightTab === 'grammar'
-                      ? 'bg-amber-500 text-white shadow-sm'
-                      : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                      ? 'bg-orange-500 text-white shadow-sm'
+                      : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
                   }`}
                 >
                   Grammar {grammarFindings.length}
@@ -722,8 +913,8 @@ export function LanguageReviewPage() {
                   onClick={() => setActiveRightTab('sentence')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
                     activeRightTab === 'sentence'
-                      ? 'bg-purple-500 text-white shadow-sm'
-                      : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                      ? 'bg-yellow-500 text-white shadow-sm'
+                      : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
                   }`}
                 >
                   Sentence {sentenceFindings.length}
@@ -749,6 +940,17 @@ export function LanguageReviewPage() {
                   }`}
                 >
                   Inclusive {biasFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('term')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'term'
+                      ? 'bg-violet-600 text-white shadow-sm'
+                      : 'bg-violet-50 text-violet-700 hover:bg-violet-100'
+                  }`}
+                >
+                  Terms {termFindings.length}
                 </button>
 
                 <button
@@ -955,24 +1157,76 @@ export function LanguageReviewPage() {
                     const isAccepted = f.status === 'accepted'
                     const isEdited = f.status === 'edited'
                     const isRejected = f.status === 'rejected'
+                    const isTerm = f.category === 'term' || f.source === 'term'
 
                     const catColorMap: Record<string, { border: string; text: string; bg: string }> = {
-                      grammar: { border: 'border-l-amber-400', text: 'text-amber-600', bg: 'bg-amber-50' },
+                      grammar: { border: 'border-l-orange-400', text: 'text-orange-600', bg: 'bg-orange-50' },
                       spelling: { border: 'border-l-sky-400', text: 'text-sky-600', bg: 'bg-sky-50' },
-                      sentence: { border: 'border-l-purple-400', text: 'text-purple-600', bg: 'bg-purple-50' },
+                      sentence: { border: 'border-l-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
                       compounds: { border: 'border-l-emerald-400', text: 'text-emerald-600', bg: 'bg-emerald-50' },
                       compound: { border: 'border-l-emerald-400', text: 'text-emerald-600', bg: 'bg-emerald-50' },
                       bias: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
                       article: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
+                      term: { border: 'border-l-violet-400', text: 'text-violet-700', bg: 'bg-violet-50' },
                     }
 
                     const catStyle = catColorMap[f.category] || { border: 'border-l-violet-400', text: 'text-violet-600', bg: 'bg-violet-50' }
+
+                    if (isTerm) {
+                      const { listName, alsoIn } = parseTermMeta(f.message)
+                      return (
+                        <div
+                          key={f.id}
+                          ref={(el) => (cardRefs.current[f.id] = el)}
+                          onClick={() => {
+                            setSelectedFindingId(f.id)
+                            focusOccurrenceInEditor(f.id)
+                          }}
+                          className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${catStyle.border} ${
+                            isSelected ? 'ring-2 ring-violet-400 border-violet-400 shadow-md' : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
+                              Term
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              Para {f.para_index + 1}
+                            </span>
+                          </div>
+
+                          <div className="mt-2 flex items-center gap-2 flex-wrap">
+                            <span className="inline-flex items-center px-2 py-1 rounded-lg bg-violet-100 text-violet-800 text-sm font-semibold">
+                              {f.original_text}
+                            </span>
+                            {listName && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-violet-200 bg-white text-violet-700 text-[11px] font-medium">
+                                {listName}
+                              </span>
+                            )}
+                          </div>
+
+                          {alsoIn.length > 0 && (
+                            <p className="text-[11px] text-slate-500 mt-2">
+                              Also in: {alsoIn.join(', ')}
+                            </p>
+                          )}
+
+                          {!listName && (
+                            <p className="text-xs text-slate-500 mt-2 leading-snug">{f.message}</p>
+                          )}
+                        </div>
+                      )
+                    }
 
                     return (
                       <div
                         key={f.id}
                         ref={(el) => (cardRefs.current[f.id] = el)}
-                        onClick={() => setSelectedFindingId(f.id)}
+                        onClick={() => {
+                          setSelectedFindingId(f.id)
+                          focusOccurrenceInEditor(f.id)
+                        }}
                         className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${catStyle.border} ${
                           isSelected
                             ? 'ring-2 ring-violet-400 border-violet-400 shadow-md'
@@ -1108,6 +1362,112 @@ export function LanguageReviewPage() {
 
         </div>
       )}
+
+      {/* ══ INLINE EDIT CONTEXT POPOVER ═══════════════════════════════════════ */}
+      {inlinePopover && (() => {
+        const target = findings.find(f => f.id === inlinePopover.findingId)
+        const dict: Record<string, string> = activeRulesConfig?.variant_to_canonical || {}
+        const expansion = dict[inlinePopover.originalText] || dict[inlinePopover.originalText.toLowerCase()] || null
+        const ruleSuggestion = target?.suggestion && target.suggestion !== target.original_text ? target.suggestion : null
+        // Position below the span, clamp to viewport.
+        const POPOVER_W = 320
+        const top = inlinePopover.anchor.top + inlinePopover.anchor.height + 6
+        const left = Math.max(8, Math.min(window.innerWidth - POPOVER_W - 8, inlinePopover.anchor.left))
+        return (
+          <div
+            ref={inlinePopoverRef}
+            style={{ position: 'fixed', top, left, width: POPOVER_W, zIndex: 100 }}
+            className="bg-white border border-slate-200 shadow-2xl rounded-2xl p-3 text-slate-800"
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-violet-600">Edit occurrence</span>
+              <button
+                onClick={closeInlinePopover}
+                className="text-slate-400 hover:text-slate-700 text-xs leading-none"
+                title="Close (Esc)"
+                aria-label="Close"
+              >✕</button>
+            </div>
+
+            <div className="text-[11px] text-slate-500 mb-1">Original</div>
+            <div className="text-xs font-mono bg-slate-50 border border-slate-200 rounded-md px-2 py-1 mb-2 break-words">
+              {inlinePopover.originalText}
+            </div>
+
+            {(expansion || ruleSuggestion) && (
+              <div className="mb-2 flex flex-wrap gap-1">
+                {expansion && (
+                  <button
+                    type="button"
+                    onClick={() => setInlineInput(expansion)}
+                    className="px-2 py-1 rounded-full text-[11px] font-medium bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100"
+                    title="From project dictionary"
+                  >
+                    Expand: {expansion}
+                  </button>
+                )}
+                {ruleSuggestion && (
+                  <button
+                    type="button"
+                    onClick={() => setInlineInput(ruleSuggestion)}
+                    className="px-2 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                    title="Rule suggestion"
+                  >
+                    Suggestion: {ruleSuggestion}
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="text-[11px] text-slate-500 mb-1">Replace with</div>
+            <input
+              autoFocus
+              type="text"
+              value={inlineInput}
+              onChange={e => setInlineInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { e.preventDefault(); applyInlineReplace(inlineInput) }
+                else if (e.key === 'Escape') { e.preventDefault(); closeInlinePopover() }
+              }}
+              className="w-full text-sm px-2.5 py-1.5 bg-white border border-violet-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-200"
+              placeholder="Type replacement…"
+            />
+
+            <div className="flex flex-wrap gap-1 mt-2">
+              <button
+                type="button"
+                onClick={() => setInlineInput(inlineInput.toUpperCase())}
+                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+              >UPPERCASE</button>
+              <button
+                type="button"
+                onClick={() => setInlineInput(inlineInput.toLowerCase())}
+                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+              >lowercase</button>
+              <button
+                type="button"
+                onClick={() => setInlineInput(toTitleCase(inlineInput))}
+                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+              >Title Case</button>
+            </div>
+
+            <div className="flex gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => applyInlineReplace(inlineInput)}
+                disabled={!inlineInput || inlineInput === inlinePopover.originalText}
+                className="flex-1 py-1.5 rounded-full bg-violet-600 text-white text-xs font-semibold hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              >Replace</button>
+              <button
+                type="button"
+                onClick={closeInlinePopover}
+                className="px-3 py-1.5 rounded-full border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >Cancel</button>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
