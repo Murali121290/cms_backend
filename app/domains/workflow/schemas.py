@@ -219,6 +219,11 @@ class ChapterInfoBase(BaseModel):
     priority: str = "Normal"
     delayed_stages: Optional[Dict[str, int]] = None
 
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def coerce_due_date(cls, v: Any) -> Optional[date]:
+        return _coerce_due_date(v)
+
     @field_validator("delayed_stages", mode="before")
     @classmethod
     def coerce_delayed_stages(cls, v: Any) -> Optional[Dict[str, int]]:
@@ -232,6 +237,29 @@ class ChapterInfoBase(BaseModel):
             return {s: 0 for s in v if isinstance(s, str)}
         return v
 
+
+def _coerce_due_date(v: Any) -> Optional[date]:
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            return None
+        if len(v) >= 10 and v[4] == "-" and v[7] == "-":
+            try:
+                return date.fromisoformat(v[:10])
+            except ValueError:
+                pass
+        try:
+            cleaned = v.replace("Z", "+00:00")
+            return datetime.fromisoformat(cleaned).date()
+        except Exception:
+            return None
+    return v
 
 
 class ChapterInfoCreate(ChapterInfoBase):
@@ -256,6 +284,24 @@ class ChapterInfoUpdate(BaseModel):
     manuscript_pages: Optional[int] = None
     priority: Optional[str] = None
     delayed_stages: Optional[Dict[str, int]] = None
+
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def coerce_due_date(cls, v: Any) -> Optional[date]:
+        return _coerce_due_date(v)
+
+    @field_validator("delayed_stages", mode="before")
+    @classmethod
+    def coerce_delayed_stages(cls, v: Any) -> Optional[Dict[str, int]]:
+        if isinstance(v, str):
+            import json
+            try:
+                v = json.loads(v)
+            except Exception:
+                return {}
+        if isinstance(v, list):
+            return {s: 0 for s in v if isinstance(s, str)}
+        return v
 
 
 class ChapterInfoResponse(ChapterInfoBase):
