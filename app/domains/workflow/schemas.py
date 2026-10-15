@@ -41,6 +41,9 @@ class StageMasterBase(BaseModel):
     sla_level1: Optional[int] = None
     sla_level2: Optional[int] = None
     sla_level3: Optional[int] = None
+    pages_level1: Optional[int] = None
+    pages_level2: Optional[int] = None
+    pages_level3: Optional[int] = None
     roles: List[str] = []
     processing_actions: List[str] = []
     active_status: bool = True
@@ -56,6 +59,9 @@ class StageMasterUpdate(BaseModel):
     sla_level1: Optional[int] = None
     sla_level2: Optional[int] = None
     sla_level3: Optional[int] = None
+    pages_level1: Optional[int] = None
+    pages_level2: Optional[int] = None
+    pages_level3: Optional[int] = None
     roles: Optional[List[str]] = None
     processing_actions: Optional[List[str]] = None
     active_status: Optional[bool] = None

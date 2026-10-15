@@ -83,11 +83,18 @@ function pickSla(stage: Stage, composition: string | null): number | null {
   return stage.sla_level2
 }
 
+function pickPages(stage: Stage, composition: string | null): number | null {
+  if (composition === 'Low') return stage.pages_level1 ?? null
+  if (composition === 'High') return stage.pages_level3 ?? null
+  return stage.pages_level2 ?? null
+}
+
 interface StageSchedule {
   stageName: string
   start: Date
   due: Date
   slaDays: number | null
+  pageNorm?: number | null
 }
 
 function validDate(s: string | null | undefined): Date {
@@ -118,10 +125,11 @@ function buildBaseSchedule(
   for (const ws of orderedStages) {
     const master = masterMap.get(ws.stage_name)
     const slaDays = master ? pickSla(master, composition) : null
+    const pageNorm = master ? pickPages(master, composition) : null
     const start = new Date(cursor)
     const due = new Date(start)
     if (slaDays) due.setDate(due.getDate() + slaDays)
-    result.push({ stageName: ws.stage_name, start, due, slaDays })
+    result.push({ stageName: ws.stage_name, start, due, slaDays, pageNorm })
     // Next stage starts the day after this one is due, not on the same day.
     cursor.setTime(due.getTime())
     cursor.setDate(cursor.getDate() + 1)
@@ -189,9 +197,10 @@ function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: Sta
             <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
               <div className="flex flex-col gap-0.5">
                 <span>{s.stageName}</span>
-                {s.slaDays != null && (
-                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
-                    Default: {s.slaDays}d
+                {(s.slaDays != null || s.pageNorm != null) && (
+                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70 flex items-center gap-1">
+                    {s.slaDays != null && <span>Default: {s.slaDays}d</span>}
+                    {s.pageNorm != null && <span>({s.pageNorm} pgs)</span>}
                   </span>
                 )}
               </div>
@@ -216,9 +225,10 @@ function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: Sta
             <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
               <div className="flex flex-col gap-0.5">
                 <span>{s.stageName}</span>
-                {s.slaDays != null && (
-                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
-                    Default: {s.slaDays}d
+                {(s.slaDays != null || s.pageNorm != null) && (
+                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70 flex items-center gap-1">
+                    {s.slaDays != null && <span>Default: {s.slaDays}d</span>}
+                    {s.pageNorm != null && <span>({s.pageNorm} pgs)</span>}
                   </span>
                 )}
               </div>
@@ -248,9 +258,10 @@ function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: Sta
           <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
             <div className="flex flex-col gap-0.5">
               <span>{s.stageName}</span>
-              {s.slaDays != null && (
-                <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
-                  Default: {s.slaDays}d
+              {(s.slaDays != null || s.pageNorm != null) && (
+                <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70 flex items-center gap-1">
+                  {s.slaDays != null && <span>Default: {s.slaDays}d</span>}
+                  {s.pageNorm != null && <span>({s.pageNorm} pgs)</span>}
                 </span>
               )}
             </div>

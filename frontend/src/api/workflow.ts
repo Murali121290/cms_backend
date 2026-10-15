@@ -76,6 +76,9 @@ export interface StageMaster {
   sla_level1?: number;
   sla_level2?: number;
   sla_level3?: number;
+  pages_level1?: number;
+  pages_level2?: number;
+  pages_level3?: number;
   roles: string[];
   active_status: boolean;
   created_at: string;

@@ -7,6 +7,9 @@ export interface Stage {
   sla_level1: number | null
   sla_level2: number | null
   sla_level3: number | null
+  pages_level1: number | null
+  pages_level2: number | null
+  pages_level3: number | null
   roles: string[]
   processing_actions: string[]
   active_status: boolean
@@ -16,9 +19,12 @@ export interface Stage {
 export interface StagePayload {
   stage_name: string
   description?: string
-  sla_level1?: number
-  sla_level2?: number
-  sla_level3?: number
+  sla_level1?: number | null
+  sla_level2?: number | null
+  sla_level3?: number | null
+  pages_level1?: number | null
+  pages_level2?: number | null
+  pages_level3?: number | null
   roles?: string[]
   processing_actions?: string[]
   active_status?: boolean

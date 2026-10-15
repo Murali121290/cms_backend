@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Plus, Pencil, RefreshCw,
   ChevronDown, ChevronRight, Search,
-  Layers, Clock, X, AlertCircle, Sliders, Check, Sparkles, Filter
+  Layers, Clock, FileText, X, AlertCircle, Sliders, Check, Sparkles, Filter
 } from 'lucide-react'
 import { stagesApi } from '@/api/stages'
 import type { Stage, StagePayload, ProcessingActionDefinition } from '@/api/stages'
@@ -46,7 +46,7 @@ interface StageModalProps {
   isOpen: boolean
   onClose: () => void
   onSaved: () => void
-  initial?: Stage | null
+  initial: Stage | null
   allRoles: RolesMaster[]
   definitions: ProcessingActionDefinition[]
 }
@@ -56,6 +56,9 @@ interface StageForm {
   sla_level1: string
   sla_level2: string
   sla_level3: string
+  pages_level1: string
+  pages_level2: string
+  pages_level3: string
   description: string
   active_status: boolean
   role_names: string[]
@@ -64,6 +67,7 @@ interface StageForm {
 
 const EMPTY_FORM: StageForm = {
   stage_name: '', sla_level1: '', sla_level2: '', sla_level3: '',
+  pages_level1: '', pages_level2: '', pages_level3: '',
   description: '', active_status: true, role_names: [], processing_actions: [],
 }
 
@@ -80,13 +84,16 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
     if (!isOpen) return
     if (initial) {
       setForm({
-        stage_name:  initial.stage_name,
-        sla_level1:  initial.sla_level1 != null ? String(initial.sla_level1) : '',
-        sla_level2:  initial.sla_level2 != null ? String(initial.sla_level2) : '',
-        sla_level3:  initial.sla_level3 != null ? String(initial.sla_level3) : '',
-        description: initial.description ?? '',
+        stage_name:   initial.stage_name,
+        sla_level1:   initial.sla_level1 != null ? String(initial.sla_level1) : '',
+        sla_level2:   initial.sla_level2 != null ? String(initial.sla_level2) : '',
+        sla_level3:   initial.sla_level3 != null ? String(initial.sla_level3) : '',
+        pages_level1: initial.pages_level1 != null ? String(initial.pages_level1) : '',
+        pages_level2: initial.pages_level2 != null ? String(initial.pages_level2) : '',
+        pages_level3: initial.pages_level3 != null ? String(initial.pages_level3) : '',
+        description:  initial.description ?? '',
         active_status: initial.active_status,
-        role_names: initial.roles ?? [],
+        role_names:   initial.roles ?? [],
         processing_actions: initial.processing_actions ?? [],
       })
     } else {
@@ -113,6 +120,9 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
     if (form.sla_level1 && Number(form.sla_level1) < 0) e.sla_level1 = 'Cannot be negative'
     if (form.sla_level2 && Number(form.sla_level2) < 0) e.sla_level2 = 'Cannot be negative'
     if (form.sla_level3 && Number(form.sla_level3) < 0) e.sla_level3 = 'Cannot be negative'
+    if (form.pages_level1 && Number(form.pages_level1) < 0) e.pages_level1 = 'Cannot be negative'
+    if (form.pages_level2 && Number(form.pages_level2) < 0) e.pages_level2 = 'Cannot be negative'
+    if (form.pages_level3 && Number(form.pages_level3) < 0) e.pages_level3 = 'Cannot be negative'
     return e
   }
 
@@ -123,11 +133,14 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
     setSaving(true)
     try {
       const payload: StagePayload = {
-        stage_name:  form.stage_name.trim(),
-        sla_level1:  form.sla_level1 ? Number(form.sla_level1) : undefined,
-        sla_level2:  form.sla_level2 ? Number(form.sla_level2) : undefined,
-        sla_level3:  form.sla_level3 ? Number(form.sla_level3) : undefined,
-        description: form.description.trim() || undefined,
+        stage_name:   form.stage_name.trim(),
+        sla_level1:   form.sla_level1 ? Number(form.sla_level1) : (initial ? null : undefined),
+        sla_level2:   form.sla_level2 ? Number(form.sla_level2) : (initial ? null : undefined),
+        sla_level3:   form.sla_level3 ? Number(form.sla_level3) : (initial ? null : undefined),
+        pages_level1: form.pages_level1 ? Number(form.pages_level1) : (initial ? null : undefined),
+        pages_level2: form.pages_level2 ? Number(form.pages_level2) : (initial ? null : undefined),
+        pages_level3: form.pages_level3 ? Number(form.pages_level3) : (initial ? null : undefined),
+        description:  form.description.trim() || undefined,
         active_status: form.active_status,
         roles: form.role_names,
         processing_actions: form.processing_actions,
@@ -281,6 +294,61 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
                     className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   />
                   {errors.sla_level3 && <p className="text-xs text-red-500 mt-0.5">{errors.sla_level3}</p>}
+                </div>
+              </div>
+            </div>
+
+            {/* Pages by Level */}
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1 uppercase tracking-wider">
+                Pages by Level (Throughput / Norm)
+              </label>
+              <p className="text-[11px] text-muted mb-2">Target or capacity page volume per level (e.g. Pre-editing: 120 L1, 100 L2, 80 L3)</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                    <span className="text-xs font-medium text-text">Level 1 (Pages)</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.pages_level1}
+                    onChange={e => setForm(f => ({ ...f, pages_level1: e.target.value }))}
+                    placeholder="e.g. 120"
+                    className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  {errors.pages_level1 && <p className="text-xs text-red-500 mt-0.5">{errors.pages_level1}</p>}
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                    <span className="text-xs font-medium text-text">Level 2 (Pages)</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.pages_level2}
+                    onChange={e => setForm(f => ({ ...f, pages_level2: e.target.value }))}
+                    placeholder="e.g. 100"
+                    className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  {errors.pages_level2 && <p className="text-xs text-red-500 mt-0.5">{errors.pages_level2}</p>}
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-red-500" />
+                    <span className="text-xs font-medium text-text">Level 3 (Pages)</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.pages_level3}
+                    onChange={e => setForm(f => ({ ...f, pages_level3: e.target.value }))}
+                    placeholder="e.g. 80"
+                    className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  {errors.pages_level3 && <p className="text-xs text-red-500 mt-0.5">{errors.pages_level3}</p>}
                 </div>
               </div>
             </div>
@@ -493,6 +561,21 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
                     <Clock size={8} /> L3: {form.sla_level3}d
                   </span>
                 )}
+                {form.pages_level1 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium flex items-center gap-0.5">
+                    <FileText size={8} /> L1: {form.pages_level1}p
+                  </span>
+                )}
+                {form.pages_level2 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium flex items-center gap-0.5">
+                    <FileText size={8} /> L2: {form.pages_level2}p
+                  </span>
+                )}
+                {form.pages_level3 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium flex items-center gap-0.5">
+                    <FileText size={8} /> L3: {form.pages_level3}p
+                  </span>
+                )}
                 <StatusPill active={form.active_status} />
               </div>
 
@@ -541,6 +624,7 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
 
 function ExpandedStageRow({ stage, definitions }: { stage: Stage; definitions: ProcessingActionDefinition[] }) {
   const hasLevels = stage.sla_level1 != null || stage.sla_level2 != null || stage.sla_level3 != null
+  const hasPageLevels = stage.pages_level1 != null || stage.pages_level2 != null || stage.pages_level3 != null
   const stageActions = stage.processing_actions || []
 
   return (
@@ -554,22 +638,45 @@ function ExpandedStageRow({ stage, definitions }: { stage: Stage; definitions: P
             </div>
           )}
 
-          {hasLevels && (
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 flex items-center gap-1">
-                <Clock size={10} /> SLA by Level
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {stage.sla_level1 != null && (
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">Level 1: {stage.sla_level1} days</span>
-                )}
-                {stage.sla_level2 != null && (
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">Level 2: {stage.sla_level2} days</span>
-                )}
-                {stage.sla_level3 != null && (
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">Level 3: {stage.sla_level3} days</span>
-                )}
-              </div>
+          {(hasLevels || hasPageLevels) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {hasLevels && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 flex items-center gap-1">
+                    <Clock size={10} /> SLA by Level (Turnaround)
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {stage.sla_level1 != null && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">Level 1: {stage.sla_level1} days</span>
+                    )}
+                    {stage.sla_level2 != null && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">Level 2: {stage.sla_level2} days</span>
+                    )}
+                    {stage.sla_level3 != null && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">Level 3: {stage.sla_level3} days</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {hasPageLevels && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1.5 flex items-center gap-1">
+                    <FileText size={10} /> Target Pages by Level (Norms)
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {stage.pages_level1 != null && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">Level 1: {stage.pages_level1} pages</span>
+                    )}
+                    {stage.pages_level2 != null && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">Level 2: {stage.pages_level2} pages</span>
+                    )}
+                    {stage.pages_level3 != null && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">Level 3: {stage.pages_level3} pages</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -769,7 +876,7 @@ export function StageManagement() {
                 <tr className="border-b border-border">
                   <th className="w-8"></th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Stage Name</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">SLA Levels</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">SLA & Page Norms</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Roles</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Allowed Actions</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Status</th>
@@ -812,16 +919,39 @@ export function StageManagement() {
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            {(stage.sla_level1 != null || stage.sla_level2 != null || stage.sla_level3 != null) ? (
-                              <div className="flex flex-wrap gap-1">
-                                {stage.sla_level1 != null && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">L1: {stage.sla_level1}d</span>
+                            {(stage.sla_level1 != null || stage.sla_level2 != null || stage.sla_level3 != null || stage.pages_level1 != null || stage.pages_level2 != null || stage.pages_level3 != null) ? (
+                              <div className="space-y-1.5">
+                                {(stage.sla_level1 != null || stage.sla_level2 != null || stage.sla_level3 != null) && (
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <span className="text-[9px] uppercase font-bold text-muted/70 tracking-wider flex items-center gap-0.5">
+                                      <Clock size={8} /> Days:
+                                    </span>
+                                    {stage.sla_level1 != null && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">L1: {stage.sla_level1}d</span>
+                                    )}
+                                    {stage.sla_level2 != null && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">L2: {stage.sla_level2}d</span>
+                                    )}
+                                    {stage.sla_level3 != null && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">L3: {stage.sla_level3}d</span>
+                                    )}
+                                  </div>
                                 )}
-                                {stage.sla_level2 != null && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">L2: {stage.sla_level2}d</span>
-                                )}
-                                {stage.sla_level3 != null && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">L3: {stage.sla_level3}d</span>
+                                {(stage.pages_level1 != null || stage.pages_level2 != null || stage.pages_level3 != null) && (
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <span className="text-[9px] uppercase font-bold text-muted/70 tracking-wider flex items-center gap-0.5">
+                                      <FileText size={8} /> Pages:
+                                    </span>
+                                    {stage.pages_level1 != null && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium">L1: {stage.pages_level1}p</span>
+                                    )}
+                                    {stage.pages_level2 != null && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">L2: {stage.pages_level2}p</span>
+                                    )}
+                                    {stage.pages_level3 != null && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-medium">L3: {stage.pages_level3}p</span>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             ) : (
