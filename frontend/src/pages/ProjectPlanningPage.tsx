@@ -1163,176 +1163,191 @@ export function ProjectPlanningPage() {
   return (
     <div className="flex flex-col min-h-full">
 
-      {/* Header */}
-      <div className="px-6 py-3.5 border-b border-border bg-card/50 backdrop-blur-sm flex items-center justify-between gap-4 flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={handleBack}
-            className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors flex-shrink-0"
-            title="Back"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div className="min-w-0">
-            <h1
-              className="text-base sm:text-lg font-bold text-text truncate max-w-[240px] sm:max-w-xs md:max-w-sm lg:max-w-md xl:max-w-xl"
-              title={project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
+      {/* Header (2 Rows) */}
+      <div className="border-b border-border bg-card/60 backdrop-blur-sm flex-shrink-0">
+        {/* Row 1: Back Navigation, Project Title & Action Buttons */}
+        <div className="px-6 py-3 border-b border-border/60 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              onClick={handleBack}
+              className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors flex-shrink-0"
+              title="Back"
             >
-              {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
-            </h1>
-            <p className="text-xs text-muted flex items-center gap-1.5 mt-0.5 whitespace-nowrap">
-              <Layers size={11} className="flex-shrink-0" />
-              <span className="truncate">{project.workflow_name || 'No workflow'} · Project Planning</span>
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2.5 flex-shrink-0">
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <label className="text-xs text-muted font-medium whitespace-nowrap">Composition:</label>
-            <select
-              value={previewComposition ?? 'Medium'}
-              onChange={e => setPreviewComposition(e.target.value)}
-              disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
-              className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              <option value="Low">Low (Level 1)</option>
-              <option value="Medium">Medium (Level 2)</option>
-              <option value="High">High (Level 3)</option>
-            </select>
-            {previewComposition !== (project.composition ?? 'Medium') && (
-              <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded whitespace-nowrap">
-                Preview only
-              </span>
-            )}
-          </div>
-
-          {/* Plan From Selector */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <label className="text-xs text-muted font-medium whitespace-nowrap">Plan from:</label>
-            <select
-              value={planFromToday ? 'today' : 'created'}
-              onChange={e => setPlanFromToday(e.target.value === 'today')}
-              disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
-              className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              <option value="today">Today ({fmt(new Date())})</option>
-              <option value="created">Project Start ({fmt(validDate(project.created_at))})</option>
-            </select>
-          </div>
-
-          {/* Pre-editing Staff / Resource Selector */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <label className="text-xs text-muted font-medium whitespace-nowrap">
-              {activePageNormStage ? `${activePageNormStage.stageName} Staff:` : 'Staffing:'}
-            </label>
-            <select
-              value={staffCount}
-              onChange={e => setStaffCount(e.target.value === 'parallel' ? 'parallel' : parseInt(e.target.value, 10))}
-              disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
-              className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              <option value="1">1 Person (Sequential)</option>
-              <option value="2">2 Persons</option>
-              <option value="3">3 Persons</option>
-              <option value="4">4 Persons</option>
-              <option value="parallel">Parallel (Full Team)</option>
-            </select>
-          </div>
-
-          {/* Project Due Date Badge */}
-          {projectDueDate && (
-            <div
-              className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 h-8 rounded-lg border whitespace-nowrap flex-shrink-0 ${isExceedingDueDate
-                ? 'text-red-700 bg-red-50 border-red-300 font-semibold'
-                : 'text-text bg-surface/80 border-border'
-                }`}
-              title={`Project Due Date: ${fmt(projectDueDate)}`}
-            >
-              <Calendar size={13} className={isExceedingDueDate ? 'text-red-600 flex-shrink-0' : 'text-muted flex-shrink-0'} />
-              <span>Due: <span className="font-semibold text-text">{fmt(projectDueDate)}</span></span>
-            </div>
-          )}
-
-          {activeTabFinalDue && (
-            <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-              <div
-                className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 h-8 rounded-lg border whitespace-nowrap ${isExceedingDueDate
-                  ? 'text-red-700 bg-red-50 border-red-300 font-semibold'
-                  : alreadyApproved
-                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                    : 'text-primary bg-primary/10 border-primary/20'
-                  }`}
-                title={`${activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Final Deliverable: ${fmt(activeTabFinalDue)}`}
+              <ArrowLeft size={18} />
+            </button>
+            <div className="min-w-0">
+              <h1
+                className="text-base sm:text-lg font-bold text-text truncate max-w-md lg:max-w-xl xl:max-w-2xl"
+                title={project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
               >
-                <Flag size={12} className="flex-shrink-0" />
-                <span>
-                  {activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Target: <span className="font-semibold">{fmt(activeTabFinalDue)}</span>
+                {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
+              </h1>
+              <p className="text-xs text-muted flex items-center gap-1.5 mt-0.5 whitespace-nowrap">
+                <Layers size={11} className="flex-shrink-0" />
+                <span className="truncate">{project.workflow_name || 'No workflow'} · Project Planning</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            {alreadyApproved && !isAdjusting ? (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 h-8 px-2.5 rounded-lg whitespace-nowrap flex-shrink-0">
+                  <CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /> Planning Approved
                 </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsAdjusting(true)}
+                  leftIcon={<Edit3 size={13} />}
+                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
+                >
+                  Adjust Planning
+                </Button>
               </div>
-              {alreadyApproved && actualFinalDue && finalDue && actualFinalDue > finalDue && (
-                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md whitespace-nowrap">
-                  <Flag size={9} className="flex-shrink-0" /> Updated: {fmt(actualFinalDue)} due to delays
-                </div>
-              )}
-            </div>
-          )}
-
-          {alreadyApproved && !isAdjusting ? (
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 h-8 px-2.5 rounded-lg whitespace-nowrap flex-shrink-0">
-                <CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /> Planning Approved
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsAdjusting(true)}
-                leftIcon={<Edit3 size={13} />}
-                className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
-              >
-                Adjust Planning
-              </Button>
-            </div>
-          ) : alreadyApproved && isAdjusting ? (
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setIsAdjusting(false)
-                  loadPlanningData({ silent: true })
-                }}
-                leftIcon={<X size={13} />}
-                className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 text-muted hover:text-text font-medium"
-              >
-                Cancel
-              </Button>
+            ) : alreadyApproved && isAdjusting ? (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setIsAdjusting(false)
+                    loadPlanningData({ silent: true })
+                  }}
+                  leftIcon={<X size={13} />}
+                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 text-muted hover:text-text font-medium"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleApprove}
+                  disabled={isExceedingDueDate || approving || !finalDue}
+                  isLoading={approving}
+                  size="sm"
+                  leftIcon={<CheckCircle2 size={14} />}
+                  variant={isExceedingDueDate ? "outline" : "primary"}
+                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
+                  title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
+                >
+                  {approving ? "Re-approving…" : "Re-approve Planning"}
+                </Button>
+              </div>
+            ) : (
               <Button
                 onClick={handleApprove}
-                disabled={isExceedingDueDate || approving || !finalDue}
+                disabled={isExceedingDueDate || approving || !finalDue || chapters.length === 0}
                 isLoading={approving}
                 size="sm"
                 leftIcon={<CheckCircle2 size={14} />}
-                variant={isExceedingDueDate ? "outline" : "primary"}
                 className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
                 title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
               >
-                {approving ? "Re-approving…" : "Re-approve Planning"}
+                {approving ? "Approving…" : "Approve Planning"}
               </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Planning Controls (Composition, Plan From, Staffing) & Schedule Target Badges */}
+        <div className="px-6 py-2.5 flex items-center justify-between gap-4 flex-wrap bg-surface/30">
+          <div className="flex items-center gap-3.5 flex-wrap">
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <label className="text-xs text-muted font-medium whitespace-nowrap">Composition:</label>
+              <select
+                value={previewComposition ?? 'Medium'}
+                onChange={e => setPreviewComposition(e.target.value)}
+                disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
+                className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <option value="Low">Low (Level 1)</option>
+                <option value="Medium">Medium (Level 2)</option>
+                <option value="High">High (Level 3)</option>
+              </select>
+              {previewComposition !== (project.composition ?? 'Medium') && (
+                <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                  Preview only
+                </span>
+              )}
             </div>
-          ) : (
-            <Button
-              onClick={handleApprove}
-              disabled={isExceedingDueDate || approving || !finalDue || chapters.length === 0}
-              isLoading={approving}
-              size="sm"
-              leftIcon={<CheckCircle2 size={14} />}
-              className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
-              title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
-            >
-              {approving ? "Approving…" : "Approve Planning"}
-            </Button>
-          )}
+
+            <div className="h-4 w-px bg-border/80 hidden sm:block" />
+
+            {/* Plan From Selector */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <label className="text-xs text-muted font-medium whitespace-nowrap">Plan from:</label>
+              <select
+                value={planFromToday ? 'today' : 'created'}
+                onChange={e => setPlanFromToday(e.target.value === 'today')}
+                disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
+                className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <option value="today">Today ({fmt(new Date())})</option>
+                <option value="created">Project Start ({fmt(validDate(project.created_at))})</option>
+              </select>
+            </div>
+
+            <div className="h-4 w-px bg-border/80 hidden sm:block" />
+
+            {/* Staff / Resource Selector */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <label className="text-xs text-muted font-medium whitespace-nowrap">
+                {activePageNormStage ? `${activePageNormStage.stageName} Staff:` : 'Staffing:'}
+              </label>
+              <select
+                value={staffCount}
+                onChange={e => setStaffCount(e.target.value === 'parallel' ? 'parallel' : parseInt(e.target.value, 10))}
+                disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
+                className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <option value="1">1 Person (Sequential)</option>
+                <option value="2">2 Persons</option>
+                <option value="3">3 Persons</option>
+                <option value="4">4 Persons</option>
+                <option value="parallel">Parallel (Full Team)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 flex-shrink-0">
+            {/* Project Due Date Badge */}
+            {projectDueDate && (
+              <div
+                className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 h-8 rounded-lg border whitespace-nowrap flex-shrink-0 ${isExceedingDueDate
+                  ? 'text-red-700 bg-red-50 border-red-300 font-semibold'
+                  : 'text-text bg-surface/80 border-border'
+                  }`}
+                title={`Project Due Date: ${fmt(projectDueDate)}`}
+              >
+                <Calendar size={13} className={isExceedingDueDate ? 'text-red-600 flex-shrink-0' : 'text-muted flex-shrink-0'} />
+                <span>Due: <span className="font-semibold text-text">{fmt(projectDueDate)}</span></span>
+              </div>
+            )}
+
+            {/* Target Deliverable Badge */}
+            {activeTabFinalDue && (
+              <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                <div
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 h-8 rounded-lg border whitespace-nowrap ${isExceedingDueDate
+                    ? 'text-red-700 bg-red-50 border-red-300 font-semibold'
+                    : alreadyApproved
+                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                      : 'text-primary bg-primary/10 border-primary/20'
+                    }`}
+                  title={`${activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Final Deliverable: ${fmt(activeTabFinalDue)}`}
+                >
+                  <Flag size={12} className="flex-shrink-0" />
+                  <span>
+                    {activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Target: <span className="font-semibold">{fmt(activeTabFinalDue)}</span>
+                  </span>
+                </div>
+                {alreadyApproved && actualFinalDue && finalDue && actualFinalDue > finalDue && (
+                  <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md whitespace-nowrap">
+                    <Flag size={9} className="flex-shrink-0" /> Updated: {fmt(actualFinalDue)} due to delays
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
