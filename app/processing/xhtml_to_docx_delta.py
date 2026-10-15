@@ -148,11 +148,14 @@ def _ensure_paragraph_style(doc, style_name: str) -> None:
 
     try:
         from docx.enum.style import WD_STYLE_TYPE
+        from docx.shared import Pt
         new_style = doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
         try:
             new_style.base_style = doc.styles['Normal']
         except Exception:
             pass
+        new_style.font.name = 'Times New Roman'
+        new_style.font.size = Pt(12)
     except Exception as e:
         logger.warning(f"Could not create paragraph style '{style_name}': {e}")
 
@@ -538,6 +541,25 @@ def _build_bookmark_para_index(doc) -> dict:
     return index
 
 
+def _normalize_match_text(t: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9]", "", t or "").lower()
+
+
+def _is_paragraph_text_match(t1: str, t2: str) -> bool:
+    n1 = _normalize_match_text(t1)
+    n2 = _normalize_match_text(t2)
+    if not n1 and not n2:
+        return True
+    if not n1 or not n2:
+        return False
+    if n1 == n2:
+        return True
+    if len(n1) >= 6 and len(n2) >= 6:
+        if n1[:30] in n2 or n2[:30] in n1:
+            return True
+    return False
+
+
 # ─── Core Delta Saving Engine ────────────────────────────────────────────────
 
 class XhtmlToDocxDeltaEngine:
@@ -582,17 +604,42 @@ class XhtmlToDocxDeltaEngine:
         # Build bookmark paragraph index for O(1) lookups
         para_index = _build_bookmark_para_index(doc)
 
+        # Collect all table cell w:p elements so non-table matching never targets a table cell
+        claimed_target_paras = set()
+        for tbl in doc.tables:
+            for row in tbl.rows:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        claimed_target_paras.add(p._p)
+
+        # 1. Structural table patching: matches HTML tables to DOCX tables,
+        # aligns cells via grid coordinates, and updates paragraphs directly inside each w:tc.
+        tbl_patched, tbl_claimed_paras = self._patch_tables(root, doc, username)
+        patched += tbl_patched
+        claimed_target_paras.update(tbl_claimed_paras)
+
         # Build positional paragraph list matching docx_to_xhtml_runs body_p_map (includes body, table cell, and SDT paragraphs)
         import docx.text.paragraph
         all_body_paras = [docx.text.paragraph.Paragraph(p, doc) for p in doc.element.body.iter(qn("w:p"))]
 
-        # Find all HTML paragraphs, headings, list items, cell paragraphs, and page breaks
+        # Collect non-table body paragraphs in document order for sequential alignment
+        doc_body_paras = []
+        for el in doc.element.body:
+            tag = el.tag.split("}")[-1]
+            if tag == "p":
+                doc_body_paras.append(docx.text.paragraph.Paragraph(el, doc))
+            elif tag == "sdt":
+                for p in el.iter(qn("w:p")):
+                    doc_body_paras.append(docx.text.paragraph.Paragraph(p, doc))
+
+        # 2. Find all HTML paragraphs, headings, list items, and page breaks OUTSIDE tables
         all_elements = root.xpath("//p | //h1 | //h2 | //h3 | //h4 | //h5 | //h6 | //li | //div[contains(@class, 'page-break')] | //hr[contains(@class, 'page-break')]")
         
-        # Filter out li elements that contain p, h1, h2, h3, h4, h5, or h6 descendants
-        # to prevent parent-child double matching when list items contain styled paragraphs.
+        # Filter out table elements and nested li elements to prevent parent-child double matching
         html_blocks = []
         for el in all_elements:
+            if any(parent.tag == "table" for parent in el.iterancestors()):
+                continue
             if el.tag == "li":
                 has_nested_block = any(child.tag in ("p", "h1", "h2", "h3", "h4", "h5", "h6") for child in el.iterdescendants())
                 if has_nested_block:
@@ -600,7 +647,8 @@ class XhtmlToDocxDeltaEngine:
             html_blocks.append(el)
 
         last_target_para = None
-        claimed_target_paras = set()
+        last_doc_body_idx = -1
+
         for idx, block_el in enumerate(html_blocks):
             is_page_break = block_el.tag in ("div", "hr") and "page-break" in (block_el.get("class") or "")
             if is_page_break:
@@ -623,13 +671,17 @@ class XhtmlToDocxDeltaEngine:
                         logger.warning(f"Failed to insert page break in delta: {e}")
                 continue
 
+            b_txt = block_el.text_content().strip()
             bm_name = block_el.get("data-bookmark")
             target_para = None
+
+            # 1. Bookmark match
             if bm_name:
                 cand = para_index.get(bm_name) or _find_note_para_by_bookmark(doc, bm_name)
-                if cand and id(cand._p) not in claimed_target_paras:
+                if cand and cand._p not in claimed_target_paras:
                     target_para = cand
 
+            # 2. Position match with text verification
             if target_para is None:
                 para_idx_str = block_el.get("data-para-idx")
                 if para_idx_str is not None:
@@ -637,27 +689,79 @@ class XhtmlToDocxDeltaEngine:
                         p_i = int(para_idx_str)
                         if 0 <= p_i < len(all_body_paras):
                             cand = all_body_paras[p_i]
-                            if cand and id(cand._p) not in claimed_target_paras:
+                            if cand._p not in claimed_target_paras and _is_paragraph_text_match(cand.text, b_txt):
                                 target_para = cand
                     except ValueError:
                         pass
 
+            # 3. Search in doc_body_paras around last_doc_body_idx with text match
             if target_para is None:
-                # Handle newly added or duplicated paragraph in the editor (has no unique bookmark or data-para-idx)
+                best_cand = None
+                best_dist = 999999
+                best_idx = -1
+                start_search = max(0, last_doc_body_idx + 1)
+                for d_idx in range(start_search, len(doc_body_paras)):
+                    cand = doc_body_paras[d_idx]
+                    if cand._p in claimed_target_paras:
+                        continue
+                    if _is_paragraph_text_match(cand.text, b_txt):
+                        dist = abs(d_idx - (last_doc_body_idx + 1))
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_cand = cand
+                            best_idx = d_idx
+                            if dist == 0:
+                                break
+                if best_cand is None and last_doc_body_idx > 0:
+                    for d_idx in range(max(0, last_doc_body_idx - 5), last_doc_body_idx + 1):
+                        cand = doc_body_paras[d_idx]
+                        if cand._p in claimed_target_paras:
+                            continue
+                        if _is_paragraph_text_match(cand.text, b_txt):
+                            best_cand = cand
+                            best_idx = d_idx
+                            break
+
+                if best_cand is not None:
+                    target_para = best_cand
+                    last_doc_body_idx = best_idx
+
+            # 4. In-place edit fallback: if text was modified in the editor,
+            # verify if the next unclaimed doc_body_para was modified in-place
+            if target_para is None:
+                cand_idx = last_doc_body_idx + 1
+                if cand_idx < len(doc_body_paras):
+                    cand = doc_body_paras[cand_idx]
+                    if cand._p not in claimed_target_paras:
+                        future_match = False
+                        for f_idx in range(idx + 1, min(len(html_blocks), idx + 8)):
+                            if _is_paragraph_text_match(cand.text, html_blocks[f_idx].text_content().strip()):
+                                future_match = True
+                                break
+                        if not future_match:
+                            target_para = cand
+                            last_doc_body_idx = cand_idx
+
+            # 5. Truly newly added paragraph by the user in the editor
+            if target_para is None:
                 if last_target_para is not None:
                     try:
                         new_p_el = OxmlElement("w:p")
                         last_target_para._p.addnext(new_p_el)
                         target_para = Paragraph(new_p_el, doc)
-                        logger.info(f"Inserted new DOCX paragraph after last_target_para for: '{block_el.text_content()[:30]}'")
+                        logger.info(f"Inserted new DOCX paragraph after last_target_para for: '{b_txt[:30]}'")
                     except Exception as ins_err:
                         logger.warning(f"Failed to insert new DOCX paragraph: {ins_err}")
 
             if not target_para:
                 continue
 
-            claimed_target_paras.add(id(target_para._p))
+            claimed_target_paras.add(target_para._p)
             last_target_para = target_para
+            for d_idx, dp in enumerate(doc_body_paras):
+                if dp._p == target_para._p:
+                    last_doc_body_idx = d_idx
+                    break
 
             if block_el.tag == "li":
                 new_style = _determine_list_style(block_el)
@@ -739,12 +843,6 @@ class XhtmlToDocxDeltaEngine:
         except Exception as id_err:
             logger.warning(f"Failed to renumber drawing IDs: {id_err}", exc_info=True)
 
-        # Apply final manuscript formatting (Times New Roman, 12pt, double spacing)
-        try:
-            apply_final_docx_formatting(doc)
-        except Exception as fmt_err:
-            logger.warning(f"Failed to apply final document formatting in delta: {fmt_err}")
-
         # Guarantee every citation/bibliography character style referenced by
         # the just-rebuilt runs has a highlight fill in styles.xml. Without
         # this, spans authored in the editor (e.g. class="cite_bib") emit a
@@ -757,6 +855,13 @@ class XhtmlToDocxDeltaEngine:
             ensure_reference_char_style_highlights(doc)
         except Exception as ref_err:
             logger.warning(f"Failed to ensure reference char style highlights: {ref_err}")
+
+        # Apply final manuscript formatting (Times New Roman, 12pt, double spacing)
+        # to all styles (paragraph, character, table) and docDefaults.
+        try:
+            apply_final_docx_formatting(doc)
+        except Exception as fmt_err:
+            logger.warning(f"Failed to apply final document formatting in delta: {fmt_err}")
 
         # Save atomically
         tmp_path = out_docx_path + ".delta.tmp"
@@ -785,6 +890,233 @@ class XhtmlToDocxDeltaEngine:
         os.replace(tmp_path, out_docx_path)
         logger.info(f"Lossless Delta-patched DOCX saved: {out_docx_path}")
         return out_docx_path
+
+    def _patch_tables(self, root, doc, username: str) -> tuple[int, set]:
+        """Dedicated structural table patching: matches HTML tables to DOCX tables,
+        aligns cells via grid coordinates, and updates paragraphs directly inside each w:tc."""
+        patched_count = 0
+        claimed_para_elements = set()
+        html_tables = root.xpath("//table")
+        if not html_tables or not doc.tables:
+            return 0, claimed_para_elements
+
+        # Build table index by bookmark if present
+        tbl_bm_index = {}
+        for tbl in doc.tables:
+            tbl_elem = tbl._element
+            parent = tbl_elem.getparent()
+            parent_children = list(parent) if parent is not None else []
+            try:
+                t_idx = parent_children.index(tbl_elem)
+                for idx in range(t_idx - 1, -1, -1):
+                    elem = parent_children[idx]
+                    if elem.tag == qn("w:bookmarkStart"):
+                        name = elem.get(qn("w:name"), "")
+                        if name.startswith("tbl_bm_"):
+                            tbl_bm_index[name] = tbl
+                            break
+                    elif elem.tag in (qn("w:tbl"), qn("w:p")):
+                        break
+            except (ValueError, TypeError):
+                pass
+
+        for t_idx, html_tbl in enumerate(html_tables):
+            # Match docx table: by bookmark first, fallback to positional index
+            docx_tbl = None
+            tbl_bm = html_tbl.get("data-bookmark")
+            if tbl_bm and tbl_bm in tbl_bm_index:
+                docx_tbl = tbl_bm_index[tbl_bm]
+            elif t_idx < len(doc.tables):
+                docx_tbl = doc.tables[t_idx]
+
+            if docx_tbl is None:
+                continue
+
+            docx_tr_elements = docx_tbl._tbl.findall(qn("w:tr"))
+            html_rows = html_tbl.xpath(".//tr")
+
+            # Grid mapping for docx table to locate non-continuation w:tc elements per row
+            active_vmerges = {}
+            row_non_continue_tcs = []
+
+            for r_idx, tr in enumerate(docx_tr_elements):
+                tcs = tr.findall(qn("w:tc"))
+                col_ptr = 0
+                non_cont = []
+
+                for tc in tcs:
+                    tcPr = tc.find(qn("w:tcPr"))
+                    grid_span = 1
+                    if tcPr is not None:
+                        gs_elem = tcPr.find(qn("w:gridSpan"))
+                        if gs_elem is not None:
+                            try:
+                                grid_span = int(gs_elem.get(qn("w:val"), 1))
+                            except (ValueError, TypeError):
+                                grid_span = 1
+
+                    vmerge_val = None
+                    if tcPr is not None:
+                        vm_elem = tcPr.find(qn("w:vMerge"))
+                        if vm_elem is not None:
+                            vmerge_val = vm_elem.get(qn("w:val"), "continue")
+                            if vmerge_val is None:
+                                vmerge_val = "continue"
+
+                    if vmerge_val == "continue" and col_ptr in active_vmerges:
+                        # continuation of vertical merge
+                        pass
+                    elif vmerge_val == "restart":
+                        for c in range(col_ptr, col_ptr + grid_span):
+                            active_vmerges[c] = True
+                        non_cont.append(tc)
+                    else:
+                        for c in range(col_ptr, col_ptr + grid_span):
+                            active_vmerges.pop(c, None)
+                        non_cont.append(tc)
+
+                    col_ptr += grid_span
+
+                row_non_continue_tcs.append(non_cont)
+
+            # Handle user added rows in editor
+            for new_r_idx in range(len(docx_tr_elements), len(html_rows)):
+                tr_html = html_rows[new_r_idx]
+                new_tr = OxmlElement("w:tr")
+                docx_tbl._tbl.append(new_tr)
+                new_non_cont = []
+                for cell_html in tr_html.xpath("./td | ./th"):
+                    new_tc = OxmlElement("w:tc")
+                    new_tr.append(new_tc)
+                    new_tcPr = OxmlElement("w:tcPr")
+                    new_tc.append(new_tcPr)
+                    cs = 1
+                    try:
+                        cs = int(cell_html.get("colspan", "1"))
+                    except (ValueError, TypeError):
+                        cs = 1
+                    if cs > 1:
+                        gs = OxmlElement("w:gridSpan")
+                        gs.set(qn("w:val"), str(cs))
+                        new_tcPr.append(gs)
+                    new_p = OxmlElement("w:p")
+                    new_tc.append(new_p)
+                    new_non_cont.append(new_tc)
+                row_non_continue_tcs.append(new_non_cont)
+                docx_tr_elements.append(new_tr)
+
+            # Handle user deleted rows in editor
+            if len(html_rows) < len(docx_tr_elements):
+                for excess_tr in docx_tr_elements[len(html_rows):]:
+                    docx_tbl._tbl.remove(excess_tr)
+                docx_tr_elements = docx_tr_elements[:len(html_rows)]
+                row_non_continue_tcs = row_non_continue_tcs[:len(html_rows)]
+
+            # Patch each cell
+            import docx.text.paragraph
+            for r_idx, tr_html in enumerate(html_rows):
+                if r_idx >= len(row_non_continue_tcs):
+                    break
+                docx_tcs = row_non_continue_tcs[r_idx]
+                html_cells = tr_html.xpath("./td | ./th")
+
+                for c_idx, cell_html in enumerate(html_cells):
+                    if c_idx >= len(docx_tcs):
+                        new_tc = OxmlElement("w:tc")
+                        docx_tr_elements[r_idx].append(new_tc)
+                        new_tcPr = OxmlElement("w:tcPr")
+                        new_tc.append(new_tcPr)
+                        new_p = OxmlElement("w:p")
+                        new_tc.append(new_p)
+                        docx_tcs.append(new_tc)
+
+                    tc = docx_tcs[c_idx]
+
+                    # Extract block elements inside cell
+                    cell_blocks = cell_html.xpath("./p | ./h1 | ./h2 | ./h3 | ./h4 | ./h5 | ./h6 | ./li")
+                    if not cell_blocks:
+                        cell_blocks = [cell_html]
+
+                    tc_p_elements = tc.findall(qn("w:p"))
+                    if not tc_p_elements:
+                        new_p = OxmlElement("w:p")
+                        tc.append(new_p)
+                        tc_p_elements = [new_p]
+
+                    tc_paras = [docx.text.paragraph.Paragraph(p, doc) for p in tc_p_elements]
+
+                    for p_i, block_el in enumerate(cell_blocks):
+                        if p_i < len(tc_paras):
+                            target_para = tc_paras[p_i]
+                        else:
+                            new_p = OxmlElement("w:p")
+                            tc_paras[-1]._p.addnext(new_p)
+                            target_para = docx.text.paragraph.Paragraph(new_p, doc)
+                            tc_paras.append(target_para)
+
+                        claimed_para_elements.add(target_para._p)
+
+                        # Sync style label
+                        p_label = (block_el.get("data-style-label") or "").strip()
+                        if not p_label:
+                            classes = (block_el.get("class") or "").split()
+                            p_label = classes[0] if classes else "Normal"
+                        if p_label in ("Normal", "MsoNormal", ""):
+                            p_label = "Normal"
+                        p_label = normalize_structural_tag_case(p_label)
+
+                        try:
+                            pPr = target_para._p.get_or_add_pPr()
+                            pStyle = OxmlElement("w:pStyle")
+                            pStyle.set(qn("w:val"), p_label)
+                            for existing in pPr.findall(qn("w:pStyle")):
+                                pPr.remove(existing)
+                            pPr.insert(0, pStyle)
+                        except Exception:
+                            pass
+
+                        # Sync alignment
+                        inline_style = (block_el.get("style") or "").lower()
+                        align_match = re.search(r"text-align\s*:\s*(left|center|right|justify)", inline_style)
+                        try:
+                            pPr = target_para._p.get_or_add_pPr()
+                            for existing in pPr.findall(qn("w:jc")):
+                                pPr.remove(existing)
+                            if align_match:
+                                val = align_match.group(1)
+                                jc_val = "both" if val == "justify" else val
+                                jc = OxmlElement("w:jc")
+                                jc.set(qn("w:val"), jc_val)
+                                pPr.append(jc)
+                        except Exception:
+                            pass
+
+                        # Patch runs in-place
+                        try:
+                            self._patch_paragraph_runs(target_para, block_el, doc, username)
+                            patched_count += 1
+                        except Exception as p_err:
+                            logger.warning(f"Failed to patch runs in table cell paragraph: {p_err}")
+
+                    # Remove excess paragraphs in tc if user deleted them
+                    if len(cell_blocks) < len(tc_paras):
+                        for excess_p in tc_paras[len(cell_blocks):]:
+                            tc.remove(excess_p._p)
+
+                    # Sync cell vertical-align if set
+                    cell_style = (cell_html.get("style") or "").lower()
+                    valign_match = re.search(r"vertical-align\s*:\s*(top|middle|bottom)", cell_style)
+                    if valign_match:
+                        v_val = valign_match.group(1)
+                        v_docx = "center" if v_val == "middle" else v_val
+                        tcPr = tc.get_or_add_tcPr()
+                        for existing in tcPr.findall(qn("w:vAlign")):
+                            tcPr.remove(existing)
+                        vAlign_el = OxmlElement("w:vAlign")
+                        vAlign_el.set(qn("w:val"), v_docx)
+                        tcPr.append(vAlign_el)
+
+        return patched_count, claimed_para_elements
 
     def _insert_new_images(self, root, doc, para_index: dict) -> None:
         """Insert images that were pasted into the editor into the DOCX.
@@ -1658,9 +1990,10 @@ def _determine_list_style(li_el) -> str:
 
 def apply_final_docx_formatting(doc):
     from docx.shared import Pt
-    # Update Normal style so unstyled runs inherit Times New Roman 12pt double-spaced.
-    # Run-level rFonts/sz (from user font-family / font-size choices in the editor) are
-    # left untouched so they survive the round-trip.
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    # 1. Update Normal style so unstyled runs inherit Times New Roman 12pt double-spaced.
     try:
         normal_style = doc.styles['Normal']
         normal_style.font.name = 'Times New Roman'
@@ -1668,6 +2001,76 @@ def apply_final_docx_formatting(doc):
         normal_style.paragraph_format.line_spacing = 2.0
     except Exception as e:
         logger.warning(f"Could not set Normal style: {e}")
+
+    # 2. Standardize all style definitions (and docDefaults) to Times New Roman 12pt.
+    # This ensures every style name (H1, TN, T1, TXT, BIB, etc.) defined in styles.xml
+    # inherits or specifies Times New Roman 12pt at the style definition level without
+    # applying direct paragraph run overrides.
+    try:
+        styles_elm = doc.styles._element
+
+        # Standardize docDefaults
+        doc_defaults = styles_elm.find(qn('w:docDefaults'))
+        if doc_defaults is not None:
+            rpr_default = doc_defaults.find(qn('w:rPrDefault'))
+            if rpr_default is not None:
+                rpr = rpr_default.find(qn('w:rPr'))
+                if rpr is None:
+                    rpr = OxmlElement('w:rPr')
+                    rpr_default.append(rpr)
+                rfonts = rpr.find(qn('w:rFonts'))
+                if rfonts is None:
+                    rfonts = OxmlElement('w:rFonts')
+                    rpr.append(rfonts)
+                rfonts.set(qn('w:ascii'), 'Times New Roman')
+                rfonts.set(qn('w:hAnsi'), 'Times New Roman')
+                rfonts.set(qn('w:cs'), 'Times New Roman')
+                rfonts.set(qn('w:eastAsia'), 'Times New Roman')
+                for theme_attr in [qn('w:asciiTheme'), qn('w:hAnsiTheme'), qn('w:eastAsiaTheme'), qn('w:cstheme')]:
+                    if theme_attr in rfonts.attrib:
+                        del rfonts.attrib[theme_attr]
+                sz = rpr.find(qn('w:sz'))
+                if sz is None:
+                    sz = OxmlElement('w:sz')
+                    rpr.append(sz)
+                sz.set(qn('w:val'), '24')
+                sz_cs = rpr.find(qn('w:szCs'))
+                if sz_cs is None:
+                    sz_cs = OxmlElement('w:szCs')
+                    rpr.append(sz_cs)
+                sz_cs.set(qn('w:val'), '24')
+
+        # Standardize every style defined in styles.xml
+        for style_elm in styles_elm.findall(qn('w:style')):
+            stype = style_elm.get(qn('w:type'))
+            if stype in ('paragraph', 'character', 'table') or stype is None:
+                rpr = style_elm.find(qn('w:rPr'))
+                if rpr is None:
+                    rpr = OxmlElement('w:rPr')
+                    style_elm.append(rpr)
+                rfonts = rpr.find(qn('w:rFonts'))
+                if rfonts is None:
+                    rfonts = OxmlElement('w:rFonts')
+                    rpr.append(rfonts)
+                rfonts.set(qn('w:ascii'), 'Times New Roman')
+                rfonts.set(qn('w:hAnsi'), 'Times New Roman')
+                rfonts.set(qn('w:cs'), 'Times New Roman')
+                rfonts.set(qn('w:eastAsia'), 'Times New Roman')
+                for theme_attr in [qn('w:asciiTheme'), qn('w:hAnsiTheme'), qn('w:eastAsiaTheme'), qn('w:cstheme')]:
+                    if theme_attr in rfonts.attrib:
+                        del rfonts.attrib[theme_attr]
+                sz = rpr.find(qn('w:sz'))
+                if sz is None:
+                    sz = OxmlElement('w:sz')
+                    rpr.append(sz)
+                sz.set(qn('w:val'), '24')
+                sz_cs = rpr.find(qn('w:szCs'))
+                if sz_cs is None:
+                    sz_cs = OxmlElement('w:szCs')
+                    rpr.append(sz_cs)
+                sz_cs.set(qn('w:val'), '24')
+    except Exception as e:
+        logger.warning(f"Could not standardize styles font/size: {e}")
 
     for para in doc.paragraphs:
         style_name = para.style.name if para.style else "Normal"

@@ -1062,6 +1062,18 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
         try:
             with open(xhtml_path, "r", encoding="utf-8") as f:
                 content = f.read()
+            # Ensure docx-styles block is present so style colors and formatting persist across reloads
+            if '<style class="docx-styles"' not in content:
+                try:
+                    from app.processing.docx_to_xhtml_runs import _extract_docx_styles_css
+                    from docx import Document
+                    doc_obj = Document(source_path)
+                    styles_css = _extract_docx_styles_css(doc_obj)
+                    if styles_css:
+                        style_block = f'<style class="docx-styles">\n{styles_css}\n</style>\n'
+                        content = f"{style_block}{content}"
+                except Exception as se:
+                    logger.warning(f"Could not inject missing docx-styles into cached XHTML: {se}")
             content = _augment_with_word_comments(
                 db=db, file_id=file_id, docx_path=source_path,
                 xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
@@ -1161,8 +1173,22 @@ def save_xhtml_delta_and_convert(
 
     try:
         os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+        # Ensure docx-styles block is preserved in cached XHTML so style colors are never lost across saves
+        cached_html = html_content
+        if '<style class="docx-styles"' not in cached_html:
+            try:
+                from app.processing.docx_to_xhtml_runs import _extract_docx_styles_css
+                from docx import Document
+                doc_obj = Document(source_path)
+                styles_css = _extract_docx_styles_css(doc_obj)
+                if styles_css:
+                    style_block = f'<style class="docx-styles">\n{styles_css}\n</style>\n'
+                    cached_html = f"{style_block}{cached_html}"
+            except Exception as se:
+                logger.warning(f"Could not inject docx-styles into saved XHTML cache: {se}")
+
         with open(xhtml_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
+            f.write(cached_html)
 
         # Load AQ / editor comments keyed by uuid so the delta engine can
         # emit matching <w:comment> bodies for every <span data-comment-id>

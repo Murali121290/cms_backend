@@ -1,6 +1,6 @@
 """Add history column to stages_details table.
 
-Revision ID: 0048_add_history_to_stage_details
+Revision ID: 0048_stage_details_history
 Revises: 0047_project_language_rules
 Create Date: 2026-10-14 13:17:00.000000
 
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0048_add_history_to_stage_details'
+revision: str = '0048_stage_details_history'
 down_revision: Union[str, Sequence[str], None] = '0047_project_language_rules'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

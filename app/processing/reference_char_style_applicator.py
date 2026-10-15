@@ -169,7 +169,10 @@ def _ensure_char_style(doc: Document, style_name: str, fill_hex: Optional[str] =
     style_obj = None
     if style_name not in doc.styles:
         try:
+            from docx.shared import Pt
             style_obj = doc.styles.add_style(style_name, WD_STYLE_TYPE.CHARACTER)
+            style_obj.font.name = "Times New Roman"
+            style_obj.font.size = Pt(12)
             logger.debug(f"Created character style: {style_name}")
         except Exception as e:
             logger.warning(f"Failed to create character style '{style_name}': {e}")

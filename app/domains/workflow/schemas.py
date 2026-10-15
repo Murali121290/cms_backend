@@ -276,6 +276,29 @@ class ChapterInfoBase(BaseModel):
         return v
 
 
+def _coerce_due_date(v: Any) -> Optional[date]:
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            return None
+        if len(v) >= 10 and v[4] == "-" and v[7] == "-":
+            try:
+                return date.fromisoformat(v[:10])
+            except ValueError:
+                pass
+        try:
+            cleaned = v.replace("Z", "+00:00")
+            return datetime.fromisoformat(cleaned).date()
+        except Exception:
+            return None
+    return v
+
 
 class ChapterInfoCreate(ChapterInfoBase):
     pass
