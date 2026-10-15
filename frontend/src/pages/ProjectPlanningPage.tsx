@@ -1036,7 +1036,7 @@ export function ProjectPlanningPage() {
           const isCellEditable = editable && !isCompleted
           const stageHist = stageHistoryMap.get(dbKey)
 
-          const displayStart = dbDates[dbKey] ? dbDates[dbKey].start : s.start
+          const displayStart = dbDates[dbKey] && (!editable || isCompleted) ? dbDates[dbKey].start : s.start
           const displayDue = dbDates[dbKey] && (!editable || isCompleted) ? dbDates[dbKey].due : s.due
           const dueStr = toLocalDateStr(displayDue)
           const cellExceedsDue = projectDueDateStr ? dueStr > projectDueDateStr : false
