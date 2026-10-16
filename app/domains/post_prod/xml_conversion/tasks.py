@@ -49,7 +49,7 @@ def run_xml_conversion_pipeline(history_id: int):
         s4c_xml = response.text
         
         # 2. Map to target format
-        target_format = history.project.target_format or "JATS"
+        target_format = history.project.target_format or "XML"
         final_xml = convert_s4c_to_target(s4c_xml, target_format)
         
         # Save output XML to disk

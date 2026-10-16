@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { journalReviewPath, type BookReviewKind } from '@/features/journals/useJournalReviewMode'
-import { ArrowLeft, Check, Crosshair, Play, Search, FileText, Loader2 } from 'lucide-react'
+import { ArrowLeft, Check, Crosshair, Play, Search, FileText, Loader2, Download } from 'lucide-react'
 import { journalsApi, type ArticleWorkspace, type JournalIssue, type JournalCheckModule, type PreEditingStepKey } from '@/api/journals'
 import { WysiwygEditor, type WysiwygEditorHandle } from '@/features/editor'
 import { TinyMceEditor } from '@/features/editor/TinyMceEditor'
@@ -19,6 +19,7 @@ import { STAGE, advanceError, shortStage } from './journals/journalUi'
 import { ArticleFilesPanel } from './journals/ArticleFilesPanel'
 import { JatsXmlEditor } from '@/features/journals/JatsXmlEditor'
 import { PreEditingSteps } from '@/features/journals/PreEditingSteps'
+import { Stage1MsAnalysisWorkspace } from '@/features/journals/Stage1MsAnalysisWorkspace'
 import { SourceEditor } from '@/components/epub_validator/SourceEditor'
 import { useAuthStore } from '@/store/useAuthStore'
 
@@ -91,6 +92,7 @@ export function JournalArticleEditorPage() {
   const [leftViewMode, setLeftViewMode] = useState<'pdf' | 'xml'>('pdf')
   const [isConvertingXml, setIsConvertingXml] = useState(false)
   const [updatedXmlContent, setUpdatedXmlContent] = useState<string | null>(null)
+  const [elogModalOpen, setElogModalOpen] = useState(false)
 
   const handleShowUpdatedXml = async () => {
     setLeftViewMode('xml')
@@ -552,6 +554,34 @@ export function JournalArticleEditorPage() {
     toast.success('Downloading delivery package ZIP...')
   }
 
+  const [isAnalyzingMs, setIsAnalyzingMs] = useState(false)
+
+  const handleRunMsAnalysis = async () => {
+    setIsAnalyzingMs(true)
+    try {
+      await journalsApi.runMsAnalysis(id)
+      toast.success('Manuscript analysis complete! 7-step checklist and ELOG updated.')
+      await load()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to run manuscript analysis'))
+    } finally {
+      setIsAnalyzingMs(false)
+    }
+  }
+
+  const handleCompleteMsAnalysis = async () => {
+    setAdvancing(true)
+    try {
+      await journalsApi.completeMsAnalysis(id)
+      toast.success('Stage 1 MS Analysis & ELOG completed! Advanced to Stage 2 (Pre-Editing).')
+      await load()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to complete MS Analysis'))
+    } finally {
+      setAdvancing(false)
+    }
+  }
+
   // Keep the selected card in view when a highlight is clicked in the editor.
   useEffect(() => {
     if (selectedId !== null) document.getElementById(`finding-${selectedId}`)?.scrollIntoView({ block: 'nearest' })
@@ -640,10 +670,49 @@ export function JournalArticleEditorPage() {
           aria-label="Back to the article files" title="Back to the article files">
           <ArrowLeft className="size-4" />
         </Link>
-        <div className="min-w-0 mr-auto">
-          <p className="text-[11px] text-muted">{journal?.journal_code} / Article #{article.id}</p>
-          <h1 className="text-sm font-semibold truncate max-w-[640px]">{article.article_title}</h1>
+        <div className="min-w-0 mr-auto flex items-center gap-2.5">
+          <div>
+            <p className="text-[11px] text-muted">{journal?.journal_code} / Article #{article.id}</p>
+            <h1 className="text-sm font-semibold truncate max-w-[480px]">{article.article_title}</h1>
+          </div>
+          {(article.le_level || ws.ms_analysis?.le_chosen_level) && (
+            <span
+              className={cn(
+                'px-2 py-0.5 rounded-full text-[11px] font-bold border tracking-tight',
+                (article.le_level || ws.ms_analysis?.le_chosen_level || '').includes('Light') || (article.le_level || ws.ms_analysis?.le_chosen_level || '').includes('1')
+                  ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                  : (article.le_level || ws.ms_analysis?.le_chosen_level || '').includes('Heavy') || (article.le_level || ws.ms_analysis?.le_chosen_level || '').includes('3')
+                  ? 'bg-rose-500/10 text-rose-600 border-rose-500/30'
+                  : 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+              )}
+              title="Advisory Language Editing (LE) Level"
+            >
+              {article.le_level || ws.ms_analysis?.le_chosen_level}
+            </span>
+          )}
         </div>
+        {stageNo === STAGE.MS_ANALYSIS && !done && (
+          <>
+            <Button variant="secondary" size="sm" onClick={handleRunMsAnalysis} isLoading={isAnalyzingMs}>
+              Re-run MS Analysis
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setElogModalOpen(true)}>
+              📄 View ELOG Report
+            </Button>
+            <a
+              href={journalsApi.elogDownloadUrl(id)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-surface hover:bg-muted/30 text-text border border-border transition-colors"
+            >
+              <Download className="size-3.5 text-muted" />
+              <span>Download ELOG (.html)</span>
+            </a>
+            <Button variant="primary" size="sm" onClick={handleCompleteMsAnalysis} isLoading={advancing}>
+              Complete Stage 1 & Advance ➔
+            </Button>
+          </>
+        )}
         {ws.xhtml && (
           <div className="flex items-center gap-1 rounded-md border border-border px-1 py-0.5" role="group" aria-label="Open in book review pages">
             <span className="text-[11px] text-muted px-1">Book review:</span>
@@ -698,7 +767,7 @@ export function JournalArticleEditorPage() {
             ↩ Move Back Stage
           </Button>
         )}
-        {!done && (
+        {!done && stageNo !== STAGE.MS_ANALYSIS && (
           <Button size="sm" onClick={advance} isLoading={advancing}
             disabled={stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && !ws.pre_editing.all_finished}
             title={stageNo === STAGE.PRE_EDITING && !ws.pre_editing.all_finished ? 'Finish all 4 Pre-Editing steps first' : undefined}>
@@ -755,7 +824,7 @@ export function JournalArticleEditorPage() {
 
       <div className="flex-1 flex min-h-0">
         {/* Findings checklist */}
-        {stageNo < STAGE.PROOF && (
+        {stageNo < STAGE.PROOF && stageNo > STAGE.MS_ANALYSIS && (
           <aside className="w-[340px] shrink-0 bg-card border-r border-border flex flex-col min-h-0 overflow-y-auto">
             {stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && selectedStep && (
               <PreEditingSteps state={ws.pre_editing} selected={selectedStep} busy={stepBusy}
@@ -861,13 +930,22 @@ export function JournalArticleEditorPage() {
 
         {/* Editor / Main View Area */}
         <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-          {stageNo === STAGE.PROOF ? (
-            /* Stage 6: Split-Screen Dual Editor View */
+          {stageNo === STAGE.MS_ANALYSIS ? (
+            <Stage1MsAnalysisWorkspace
+              workspace={ws}
+              onRunAnalysis={handleRunMsAnalysis}
+              onCompleteStage={handleCompleteMsAnalysis}
+              onReload={load}
+              onViewElog={() => setElogModalOpen(true)}
+              isBusy={isAnalyzingMs || advancing}
+            />
+          ) : stageNo === STAGE.PROOF ? (
+            /* Stage 7: Split-Screen Dual Editor View */
             <div className="flex-1 flex flex-col min-h-0 bg-slate-900">
               <div className="flex items-center justify-between px-4 py-2 bg-slate-800 text-white text-xs border-b border-slate-700">
                 <div className="flex items-center gap-2 font-semibold">
                   <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
-                  <span>Stage 6: View Proof & Proofing Corrections</span>
+                  <span>Stage 7: View Proof & Proofing Corrections</span>
                   <span className="text-slate-400 text-[11px] font-normal">
                     (Left: {leftViewMode === 'pdf' ? 'Proof PDF' : 'Updated Manuscript XML'} | Right: TinyMCE XHTML Editor)
                   </span>
@@ -887,7 +965,7 @@ export function JournalArticleEditorPage() {
                     Re-run InDesign PDF
                   </Button>
                   <Button size="sm" variant="primary" onClick={handleCompleteProof} isLoading={stageBusy}>
-                    Complete Proof & Advance to Stage 7
+                    Complete Proof & Advance to Stage 8
                   </Button>
                 </div>
               </div>
@@ -928,7 +1006,7 @@ export function JournalArticleEditorPage() {
                       </div>
                     ) : (
                       <SourceEditor
-                        value={updatedXmlContent ?? ws?.xml?.content ?? '<!-- Converted XML will appear here -->'}
+                        value={updatedXmlContent ?? (ws as any)?.xml?.content ?? '<!-- Converted XML will appear here -->'}
                         onChange={() => {}}
                         readOnly={true}
                         className="flex-1 min-h-0 h-full"
@@ -961,7 +1039,7 @@ export function JournalArticleEditorPage() {
               </div>
             </div>
           ) : stageNo === STAGE.DELIVERY ? (
-            /* Stage 7: Final Delivery Package Dashboard */
+            /* Stage 8: Final Delivery Package Dashboard */
             <div className="flex-1 p-8 bg-slate-900 text-white overflow-y-auto flex flex-col items-center justify-center">
               <div className="max-w-2xl w-full bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl space-y-6">
                 <div className="flex items-center gap-4 border-b border-slate-700 pb-4">
@@ -969,7 +1047,7 @@ export function JournalArticleEditorPage() {
                     📦
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-white">Stage 7: Final Delivery Package</h2>
+                    <h2 className="text-xl font-bold text-white">Stage 8: Final Delivery Package</h2>
                     <p className="text-xs text-slate-400">All publication outputs have been generated, validated, and placed in the delivery folder.</p>
                   </div>
                 </div>
@@ -1131,6 +1209,41 @@ export function JournalArticleEditorPage() {
               <Button variant="secondary" size="sm" onClick={() => revertTarget && handleRevertStage(revertTarget)} isLoading={reverting}>
                 Confirm & Move Back
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ELOG Report Modal */}
+      {elogModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-5xl w-full h-[85vh] shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-3.5 bg-slate-50 border-b border-slate-200">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Editorial Log (ELOG) Dossier</h3>
+                <p className="text-xs text-slate-500 truncate max-w-xl">{article.article_title}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={journalsApi.elogDownloadUrl(id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-primary/90 flex items-center gap-1.5 shadow-xs"
+                >
+                  <Download className="size-3.5" />
+                  <span>Download HTML</span>
+                </a>
+                <Button size="sm" variant="ghost" onClick={() => setElogModalOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 bg-white p-2 overflow-hidden">
+              <iframe
+                srcDoc={ws?.ms_analysis?.elog_html || '<html><body>No ELOG generated</body></html>'}
+                title="ELOG Document"
+                className="w-full h-full border-0"
+              />
             </div>
           </div>
         </div>

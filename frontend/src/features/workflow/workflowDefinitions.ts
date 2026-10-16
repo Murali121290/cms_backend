@@ -39,7 +39,7 @@ export type WorkflowRole = readonly [name: string, description: string];
 const ART_KEYWORDS = ["art processing", "art processing (sample)"];
 const TMPL_KEYWORDS = ["template processing", "template validation"];
 const PRE_KEYWORDS = ["pre-editing"];
-const XML_KEYWORDS = ["xml conversion"];
+const XML_KEYWORDS = ["xml conversion", "word 2 indesign", "word to indesign"];
 
 /** Classify a stage by its name, mirroring the source `stype()` function. */
 export function stageType(stageName: string): StageType {

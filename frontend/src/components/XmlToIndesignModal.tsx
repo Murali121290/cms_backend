@@ -20,6 +20,7 @@ interface XmlToIndesignModalProps {
   fileName: string;
   projectId: number;
   onComplete: () => void;
+  processType?: "xml_to_indesign" | "word_to_indesign";
 }
 
 export function XmlToIndesignModal({
@@ -29,6 +30,7 @@ export function XmlToIndesignModal({
   fileName,
   projectId,
   onComplete,
+  processType = "xml_to_indesign",
 }: XmlToIndesignModalProps) {
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -46,6 +48,9 @@ export function XmlToIndesignModal({
     enabled: isOpen && !!projectId,
   });
 
+  const isWord = processType === "word_to_indesign";
+  const actionLabel = isWord ? "Word to InDesign" : "XML to InDesign";
+
   const handleSubmit = async () => {
     if (!selectedTemplateId) {
       toast.error("Please select a template.");
@@ -60,7 +65,7 @@ export function XmlToIndesignModal({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          process_type: "xml_to_indesign",
+          process_type: processType,
           mode: "style",
           options: {
             template_file_id: selectedTemplateId,
@@ -70,14 +75,14 @@ export function XmlToIndesignModal({
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(errorText || "Failed to start conversion.");
+        throw new Error(errorText || `Failed to start ${actionLabel} conversion.`);
       }
 
-      toast.success("XML to InDesign conversion job started in the background!");
+      toast.success(`${actionLabel} conversion job started in the background!`);
       onComplete();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || "Failed to start XML to InDesign conversion.");
+      toast.error(err.message || `Failed to start ${actionLabel} conversion.`);
     } finally {
       setSubmitting(false);
     }
@@ -87,7 +92,7 @@ export function XmlToIndesignModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Generate InDesign from XML"
+      title={isWord ? "Generate InDesign from Word" : "Generate InDesign from XML"}
       size="md"
     >
       <div className="space-y-4 py-2 relative">
@@ -99,7 +104,9 @@ export function XmlToIndesignModal({
         )}
 
         <div>
-          <label className="text-xs font-semibold text-muted block mb-1">XML File</label>
+          <label className="text-xs font-semibold text-muted block mb-1">
+            {isWord ? "Word Manuscript File" : "XML File"}
+          </label>
           <div className="p-2.5 bg-surface/50 border border-border rounded-lg text-xs font-mono text-text truncate">
             {fileName}
           </div>

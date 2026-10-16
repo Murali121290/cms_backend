@@ -164,18 +164,32 @@ export type ProcessingActionKey =
   | 'structuring' | 'structuringQa' | 'referenceValidation' | 'referenceReview'
   | 'languageEdit' | 'technicalEdit' | 'unifiedReview'
   | 'manuscriptAnalysis'
-  | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
+  | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml' | 'wordToIndesign'
   | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'styleValidation' | 'artValidation'
 
-const PRODUCTION_STAGES = ['XML Conversion', 'Typesetting', 'Proofreading']
+const PRODUCTION_STAGES = [
+  'XML Conversion',
+  'Typesetting',
+  'Typesetting / Layout',
+  'Typesetting (Revised)',
+  'Non-XML Conversion',
+  'Non-XML Processing',
+  'Proofreading'
+]
+
+const WORD_TO_INDESIGN_STAGES = [
+  ...PRODUCTION_STAGES,
+  'Word 2 Indesign Converstion',
+  'Word 2 Indesign Conversion'
+]
 
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
   structuring:          ['Pre-editing','Pre-editing QA'],
   structuringQa:        ['Pre-editing','Pre-editing QA'],
   referenceValidation:  ['Pre-editing','Pre-editing QA'],
   referenceReview:      ['Pre-editing','Pre-editing QA'],
-  styleValidation:      ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
-  artValidation:        ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
+  styleValidation:      ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Word 2 Indesign Converstion', 'Word 2 Indesign Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
+  artValidation:        ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Word 2 Indesign Converstion', 'Word 2 Indesign Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
   languageEdit:         ['Pre-editing', 'Copyediting', 'Language Editing', 'Language Editing QA'],
   technicalEdit:        ['Language Editing','Language Editing QA'],
   unifiedReview:        ['Pre-editing','Pre-editing QA','Language Editing','Language Editing QA'],
@@ -184,16 +198,35 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   aiCreditExtraction:   ['Digital Processing'],
   biasScan:             ['Digital Processing'],
   wordToXml:            PRODUCTION_STAGES,
-  xmlToIndesign:        PRODUCTION_STAGES,
-  indesignToXml:        PRODUCTION_STAGES,
-  viewProof:            PRODUCTION_STAGES
+  wordToIndesign:       WORD_TO_INDESIGN_STAGES,
+  xmlToIndesign:        WORD_TO_INDESIGN_STAGES,
+  indesignToXml:        WORD_TO_INDESIGN_STAGES,
+  viewProof:            WORD_TO_INDESIGN_STAGES
+}
+
+let _dynamicStageActionsMap: Record<string, string[]> | null = null
+
+export function setDynamicStageActionsMap(map: Record<string, string[]>) {
+  _dynamicStageActionsMap = map
+}
+
+export function getDynamicStageActionsMap(): Record<string, string[]> | null {
+  return _dynamicStageActionsMap
 }
 
 export function isProcessingActionVisibleForStage(action: ProcessingActionKey, stageName: string): boolean {
+  const key = stageName.trim().toLowerCase()
+  // Check dynamically loaded mapping if available
+  if (_dynamicStageActionsMap && Object.prototype.hasOwnProperty.call(_dynamicStageActionsMap, action)) {
+    const list = _dynamicStageActionsMap[action]
+    if (Array.isArray(list)) {
+      return list.some(stage => stage.trim().toLowerCase() === key)
+    }
+  }
+  // Fallback to static defaults
   const rule = PROCESSING_ACTION_STAGE_MAP[action]
   if (rule === '*') return true
-  const key = stageName.trim().toLowerCase()
-  return rule.some(stage => stage.toLowerCase() === key)
+  return rule ? rule.some(stage => stage.toLowerCase() === key) : false
 }
 
 export interface FileTypeIcon { icon: string; color: string }

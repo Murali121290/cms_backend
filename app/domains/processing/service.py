@@ -94,6 +94,7 @@ PROCESS_PERMISSIONS = {
     "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
+    "word_to_indesign": ["Admin", "Compositor", "Senior Compositor", "Production Manager", "Non-XML Manager", "Non-XML Operator", "XML Manager", "XML Operator", "Senior XML Operator"],
     "xml_to_indesign": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "indesign_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Compositor", "Senior Compositor", "Production Manager"],
     "extract_design_css": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
@@ -138,7 +139,7 @@ def update_job_status(
         return
     try:
         from app.models import ProcessingJob
-        from datetime import datetime
+        from datetime import datetime, timezone
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job:
             job.status = status
@@ -149,7 +150,7 @@ def update_job_status(
             if error is not None:
                 job.error_message = error
             if status in ("completed", "failed"):
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
             db.commit()
     except Exception:
         pass
@@ -523,6 +524,24 @@ def background_processing_task(
                     job_id=job_id
                 )
                 success_msg = "XML to InDesign conversion completed"
+
+            elif process_type == "word_to_indesign":
+                update_job_status(db, job_id, "processing", "Processing Word to InDesign conversion using d2id...", 30)
+                template_file_id = options.get("template_file_id") if options else None
+
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.word_to_indesign_engine import WordToInDesignEngine
+                generated_files = WordToInDesignEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    template_file_id=template_file_id,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                success_msg = "Word to InDesign conversion completed"
 
             elif process_type == "indesign_to_xml":
                 update_job_status(db, job_id, "processing", "Processing InDesign to XML conversion...", 30)
@@ -1090,8 +1109,10 @@ def background_processing_task(
                             if process_type == "indesign_to_xml"
                             else "Misc" if (process_type == "extract_design_css" or is_misc_delivery_file)
                             else "Manuscript" if (process_type in ("style_validation", "style_match_design", "ppd") or processed_filename.lower().endswith(("_dashboard.html", "_style_match_report.html", "_style_match_report.json")))
-                            else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
-                            else "InDesign" if process_type == "xml_to_indesign"
+                            else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html")) and process_type != "word_to_indesign"
+                            else "InDesign" if process_type in ("xml_to_indesign", "word_to_indesign") and processed_filename.lower().endswith((".indd", ".idml"))
+                            else "Proof" if process_type == "word_to_indesign" and processed_filename.lower().endswith(".pdf")
+                            else "Manuscript" if process_type == "word_to_indesign" and processed_filename.lower().endswith(".html")
                             else "XML" if process_type == "word_to_xml"
                             else file_record.category
                         )

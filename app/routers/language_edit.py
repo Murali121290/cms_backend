@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import get_db
-from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie, get_user_full_name
 from app.domains.processing.language_edit_models import LanguageEditJob, LanguageEditFinding
 from app.domains.processing.service import check_permission
 from app.models import User
@@ -343,7 +343,7 @@ def start_language_edit_analysis(
         logger.error("Failed to read DOCX at %s: %s", file_record.path, exc)
         raise HTTPException(status_code=500, detail="Failed to read target DOCX file.")
 
-    job_uuid = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S_") + str(uuid.uuid4())[:8]
+    job_uuid = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S_") + str(uuid.uuid4())[:8]
     job = LanguageEditJob(
         job_id=job_uuid,
         file_id=file_record.id,
@@ -476,6 +476,7 @@ def get_job_findings(
                 "decided_at": f.decided_at.isoformat() if f.decided_at else None,
                 "source": getattr(f, "source", "rule"),
                 "term_list_id": getattr(f, "term_list_id", None),
+                "decided_at": (f.decided_at.replace(tzinfo=datetime.timezone.utc).isoformat() if f.decided_at.tzinfo is None else f.decided_at.isoformat()) if f.decided_at else None,
             }
             for f in findings
         ]
@@ -501,8 +502,8 @@ def decide_finding(
     old_status = finding.status
     finding.status = body.status
     finding.edited_text = body.edited_text if body.status == "edited" else None
-    finding.reviewer = body.reviewer or "editor"
-    finding.decided_at = datetime.datetime.utcnow()
+    finding.reviewer = (get_user_full_name(current_user) if current_user else None) or body.reviewer or "editor"
+    finding.decided_at = datetime.datetime.now(datetime.timezone.utc)
 
     # Update counters on parent job
     job = db.query(LanguageEditJob).filter(LanguageEditJob.job_id == finding.job_id).first()
@@ -591,7 +592,7 @@ def export_redlined_docx(
 
     # 3. Increment file record version and update timestamp
     file_record.version = (file_record.version or 1) + 1
-    file_record.updated_at = datetime.datetime.utcnow()
+    file_record.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
     # Save export copy for download response
     out_dir = os.path.join(base_path, "jobs")

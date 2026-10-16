@@ -20,12 +20,22 @@ def watch_ftp_for_new_pdfs():
     os.makedirs(bod_upload_dir, exist_ok=True)
     
     try:
+        if not getattr(settings, "BOD_FTP_WATCH_ENABLED", True):
+            logger.info("BOD FTP watch is disabled via BOD_FTP_WATCH_ENABLED. Skipping.")
+            return
+
         if not settings.BOD_FTP_HOST:
             logger.error("BOD_FTP_HOST is not set. Skipping FTP watch.")
             return
 
         try:
-            with BodFtpService(settings.BOD_FTP_HOST, settings.BOD_FTP_USERNAME, settings.BOD_FTP_PASSWORD) as ftp:
+            with BodFtpService(
+                settings.BOD_FTP_HOST,
+                settings.BOD_FTP_USERNAME,
+                settings.BOD_FTP_PASSWORD,
+                port=getattr(settings, "BOD_FTP_PORT", 21),
+                timeout=getattr(settings, "BOD_FTP_TIMEOUT", 15)
+            ) as ftp:
                 target_dir = settings.BOD_FTP_BASE_PATH if settings.BOD_FTP_BASE_PATH else "BOD"
                 try:
                     ftp.ftp.cwd(target_dir)
@@ -84,7 +94,7 @@ def watch_ftp_for_new_pdfs():
                         stages = [s.strip() for s in stages_str.split(",")]
                         initial_stage_name = stages[0]
                         now_iso = datetime.now(timezone.utc).isoformat()
-                        now_utc = datetime.utcnow()
+                        now_utc = datetime.now(timezone.utc)
                         from datetime import timedelta
                         
                         initial_history = {

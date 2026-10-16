@@ -56,6 +56,8 @@ app.include_router(webdav_router.router, prefix="/webdav", tags=["WebDAV"])
 
 # Workflow & Clients Routers (WMS Integration)
 app.include_router(workflow.router, tags=["Workflow"])
+from app.domains.workflow.transition_settings_api import router as transition_settings_router
+app.include_router(transition_settings_router)
 
 # Document Conversion Router
 from app.routers import conversion
@@ -92,6 +94,7 @@ app.include_router(xml_conversion_router, prefix="/api/v2/post-prod", tags=["XML
 # Journal Production Router
 from app.domains.journals.router import router as journals_router
 app.include_router(journals_router, prefix="/api/v2", tags=["Journal Production"])
+app.include_router(journals_router, prefix="/api", tags=["Journal Production Fallback"], include_in_schema=False)
 
 # Books on Demand Router
 from app.domains.books_on_demand.router import router as bod_router

@@ -1,7 +1,7 @@
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum, TypeDecorator, BigInteger, Text, func, true as sa_true
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB
 from sqlalchemy.orm import relationship, synonym
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import Base
 import enum
 
@@ -35,7 +35,7 @@ class File(Base):
     # instead of showing them as siblings.
     source_file_id = Column(Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True)
     path = Column(String)
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     version = Column(Integer, default=1)
     # True when this row represents an actually-uploaded file; False when the
     # row was produced by a conversion, processing pipeline, or edit-derived
@@ -67,7 +67,7 @@ class FileVersion(Base):
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), index=True)
     version_num = Column(Integer)
     path = Column(String)
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     # Free-text audit trail for why a file was replaced. Populated by the Image
     # Review & Editor's Replace dialog (which requires a reason); nullable
@@ -90,8 +90,8 @@ class Comment(Base):
     author_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     # Snapshot at creation time so the display name survives author deletion / rename.
     author_name = Column(String(150), nullable=False, default="")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     resolved = Column(Boolean, default=False, nullable=False)
 
     file = relationship("File")
@@ -140,8 +140,8 @@ class ProcessingJob(Base):
     current_step = Column(String, nullable=True)
     progress_pct = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     priority = Column(Integer, default=0, nullable=False)

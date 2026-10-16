@@ -162,6 +162,15 @@
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
+  "Word 2 Indesign Converstion": {
+    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "to": [
+      "{next_stage_team_email}"
+    ],
+    "cc": [],
+    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+  },
   "Digital Processing": {
     "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [

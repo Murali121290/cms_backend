@@ -254,12 +254,13 @@ export function StylesPanel({
   }, [editorRef]);
 
   // Group char styles from API into logical categories, or fall back to defaults
+  const CAPTION_STYLES = new Set(["FigureCitation", "TableCitation", "FIG-NUM", "TN"]);
   const charStyleGroups = charStyles && charStyles.length > 0
     ? [
-        { group: "Formatting", styles: charStyles.filter(s => /^[a-z]+$/.test(s)) },
+        { group: "Formatting", styles: charStyles.filter(s => !s.startsWith("bib_") && !s.startsWith("cite_") && !CAPTION_STYLES.has(s)) },
         { group: "Bibliography", styles: charStyles.filter(s => s.startsWith("bib_")) },
         { group: "Citation", styles: charStyles.filter(s => s.startsWith("cite_")) },
-        { group: "Caption", styles: charStyles.filter(s => !/^[a-z]+$/.test(s) && !s.startsWith("bib_") && !s.startsWith("cite_")) },
+        { group: "Caption", styles: charStyles.filter(s => CAPTION_STYLES.has(s)) },
       ].filter(g => g.styles.length > 0)
     : DEFAULT_CHAR_STYLES;
 

@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import Base
 
 class BodJob(Base):
@@ -24,8 +24,8 @@ class BodJob(Base):
     stage_history = Column(JSON, nullable=False, default=dict) # e.g. {"Production": {"assignee": "user", "start_time": "...", "end_time": "..."}}
     status = Column(String(50), default="Active") # "Active", "Completed", "Failed"
     is_deleted = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     due_date = Column(DateTime, nullable=True)
     due_date_history = Column(JSON, nullable=False, default=list) # [{"date": "...", "reason": "...", "changed_by": "...", "timestamp": "..."}]
 

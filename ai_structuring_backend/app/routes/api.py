@@ -10,7 +10,7 @@ import zipfile
 import io
 
 from ..services.queue import queue_service
-from ..models.database import db, Job, Batch, JobStatus
+from ..models.database import db, Job, Batch, JobStatus, get_ist_now
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -349,7 +349,7 @@ def daily_stats():
     
     results = []
     for i in range(days):
-        date = datetime.utcnow().date() - timedelta(days=i)
+        date = get_ist_now().date() - timedelta(days=i)
         
         day_stats = db.session.query(
             func.sum(Job.input_tokens).label('input'),

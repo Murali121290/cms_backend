@@ -74,7 +74,7 @@ import {
   History as HistoryIcon,
 } from "lucide-react";
 import { diffWords, diffArrays } from "diff";
-import { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useImperativeHandle, forwardRef, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/Button";
 import { useSidebarStore } from "@/store/useSidebarStore";
 import Paragraph from "@tiptap/extension-paragraph";
@@ -568,6 +568,19 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     useEffect(() => {
       setTcEnabled(trackChangesEnabled);
     }, [trackChangesEnabled]);
+
+    // Extract dynamic CSS rules embedded from docx styles.xml
+    const lastDocxStylesRef = useRef<string>("");
+    const extractedDocxStyles = useMemo(() => {
+      if (!initialContent) return lastDocxStylesRef.current;
+      const match = initialContent.match(/<style[^>]*class="docx-styles"[^>]*>([\s\S]*?)<\/style>/i);
+      if (match && match[1]) {
+        lastDocxStylesRef.current = match[1];
+        return match[1];
+      }
+      return lastDocxStylesRef.current;
+    }, [initialContent]);
+
     const [activeGutter, setActiveGutter] = useState<{
       pos: number;
       element: HTMLElement;
@@ -1948,10 +1961,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               disabled={isSaving}
               title={`Save edits to DOCX (${kbd("Ctrl+S")})`}
               className={`px-3 py-1 text-xs font-bold rounded-md transition-all duration-150 shrink-0 inline-flex items-center gap-1.5 cursor-pointer shadow-sm ${isSaving
-                  ? "bg-blue-900/60 text-blue-300 border border-blue-700/50 opacity-75 cursor-not-allowed"
-                  : isDirty
-                    ? "bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 shadow-amber-900/30"
-                    : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500 shadow-blue-900/30"
+                ? "bg-blue-900/60 text-blue-300 border border-blue-700/50 opacity-75 cursor-not-allowed"
+                : isDirty
+                  ? "bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 shadow-amber-900/30"
+                  : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500 shadow-blue-900/30"
                 }`}
             >
               <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
@@ -2560,6 +2573,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .sdt-inline + .sdt-inline::before { display: none; }
         /* Suppress repeat pill — Case 2: each sdt-inline is nested inside a run span */
         [data-run] + [data-run] > .sdt-inline::before { display: none; }
+
+        /* ── Dynamic Word Styles (extracted from docx styles.xml) ────────── */
+        ${extractedDocxStyles}
 
         /* ── Character Styles Color & Typographic Treatments ──────────────── */
 

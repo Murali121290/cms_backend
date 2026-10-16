@@ -244,7 +244,8 @@ def apply_local_reference_styles(docx_path: str, citation_form: str = "auto") ->
 
 
 def _stage1(db: Session, article_id: int) -> Optional[JournalStageDetail]:
-    return _stage(db, article_id, 1)
+    from app.domains.journals.service import PRE_EDITING
+    return _stage(db, article_id, PRE_EDITING)
 
 
 def run_reference_job(article_id: int, user_id: Optional[int] = None) -> None:

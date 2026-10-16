@@ -5,7 +5,7 @@ import tempfile
 import zipfile
 import uuid
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, List, Optional
 
@@ -22,7 +22,7 @@ from app import database, models, schemas_v2
 from app.domains.projects.models import Project, ProjectStylesheet
 from app.domains.workflow.models import StageMaster, WorkflowMaster
 from app.domains.projects.po_intake import service as po_intake_service
-from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie, get_user_full_name
 from app.domains.files import image_preview_service
 from app.core.config import get_settings
 from app.core.paths import UPLOADS_DIR
@@ -244,11 +244,10 @@ def _get_filtered_projects_query(db: Session, user: models.User):
 
 
 def _serialize_project_summary(project: Project):
-    from datetime import datetime as _dt
     due = project.due_date.isoformat() if getattr(project, "due_date", None) else None
     # Fall back to today for projects created before the created_at column was added
     _cat_raw = getattr(project, "created_at", None)
-    cat = _cat_raw.isoformat() if _cat_raw else _dt.utcnow().date().isoformat()
+    cat = _cat_raw.isoformat() if _cat_raw else datetime.now(timezone.utc).date().isoformat()
     uat = project.updated_at.isoformat() if getattr(project, "updated_at", None) else None
 
     is_delayed = False
@@ -256,9 +255,9 @@ def _serialize_project_summary(project: Project):
         if ch.status != "complete" and ch.due_date:
             due_dt = ch.due_date
             if due_dt.tzinfo is not None:
-                now = _dt.now(due_dt.tzinfo)
+                now = datetime.now(due_dt.tzinfo)
             else:
-                now = _dt.now()
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
             if due_dt < now:
                 is_delayed = True
                 break
@@ -1124,6 +1123,245 @@ def api_v2_project_chapters(
     )
 
 
+def _format_project_doc_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def _get_project_candidate_dirs(project: Project, db: Session) -> list[str]:
+    candidates = []
+    code = project.project_code or project.code or ""
+    client_name = project.client_name or ""
+    if not code:
+        return []
+
+    upload_root = file_service.UPLOAD_DIR
+
+    if client_name:
+        candidates.append(os.path.join(upload_root, client_name, code))
+        candidates.append(os.path.join(upload_root, "uploads", client_name, code))
+
+    if project.client_id:
+        from app.domains.clients.models import Client as _Client
+        c = db.query(_Client).filter(_Client.id == project.client_id).first()
+        if c and c.company and c.company != client_name:
+            candidates.append(os.path.join(upload_root, c.company, code))
+            candidates.append(os.path.join(upload_root, "uploads", c.company, code))
+
+    candidates.append(os.path.join(upload_root, "unknown", code))
+    candidates.append(os.path.join(upload_root, code))
+    candidates.append(os.path.join(upload_root, "uploads", code))
+
+    seen = set()
+    valid_dirs = []
+    for d in candidates:
+        if d not in seen and os.path.isdir(d):
+            seen.add(d)
+            valid_dirs.append(d)
+    return valid_dirs
+
+
+def _scan_project_documents(project: Project, db: Session) -> list[dict]:
+    dirs = _get_project_candidate_dirs(project, db)
+    seen_filenames = set()
+    documents = []
+
+    for c_dir in dirs:
+        # 1. Scan po/ folder
+        po_dir = os.path.join(c_dir, "po")
+        if os.path.isdir(po_dir):
+            for fname in sorted(os.listdir(po_dir)):
+                fpath = os.path.join(po_dir, fname)
+                if os.path.isfile(fpath) and not fname.startswith("."):
+                    if fname not in seen_filenames:
+                        seen_filenames.add(fname)
+                        sz = os.path.getsize(fpath)
+                        mtime = datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat()
+                        rel_path = f"po/{fname}"
+                        cat = "Extracted PO Data" if fname.endswith("_extracted.json") else "PO Document"
+                        documents.append({
+                            "filename": fname,
+                            "relative_path": rel_path,
+                            "category": cat,
+                            "size_bytes": sz,
+                            "size_formatted": _format_project_doc_size(sz),
+                            "updated_at": mtime,
+                        })
+
+        # 2. Scan CE support/ folder
+        ce_dir = os.path.join(c_dir, "CE support")
+        if os.path.isdir(ce_dir):
+            for fname in sorted(os.listdir(ce_dir)):
+                fpath = os.path.join(ce_dir, fname)
+                if os.path.isfile(fpath) and not fname.startswith("."):
+                    if fname not in seen_filenames:
+                        seen_filenames.add(fname)
+                        sz = os.path.getsize(fpath)
+                        mtime = datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat()
+                        rel_path = f"CE support/{fname}"
+                        cat = "Extracted PO Data" if fname.endswith("_extracted.json") else ("PO Document" if fname.lower().endswith((".pdf", ".xlsx", ".docx")) else "CE Support")
+                        documents.append({
+                            "filename": fname,
+                            "relative_path": rel_path,
+                            "category": cat,
+                            "size_bytes": sz,
+                            "size_formatted": _format_project_doc_size(sz),
+                            "updated_at": mtime,
+                        })
+
+        # 3. Root files of the project directory (e.g. mapping zip, archive)
+        for fname in sorted(os.listdir(c_dir)):
+            fpath = os.path.join(c_dir, fname)
+            if os.path.isfile(fpath) and not fname.startswith("."):
+                if fname not in seen_filenames:
+                    seen_filenames.add(fname)
+                    sz = os.path.getsize(fpath)
+                    mtime = datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat()
+                    rel_path = fname
+                    documents.append({
+                        "filename": fname,
+                        "relative_path": rel_path,
+                        "category": "Input file",
+                        "size_bytes": sz,
+                        "size_formatted": _format_project_doc_size(sz),
+                        "updated_at": mtime,
+                    })
+
+    return documents
+
+
+def _resolve_project_document_path(project: Project, rel_path: str, db: Session) -> str | None:
+    rel_path = rel_path.strip().lstrip("/\\")
+    dirs = _get_project_candidate_dirs(project, db)
+    upload_root_abs = os.path.abspath(file_service.UPLOAD_DIR)
+
+    for c_dir in dirs:
+        candidate_path = os.path.abspath(os.path.join(c_dir, rel_path))
+        if candidate_path.startswith(upload_root_abs) and os.path.isfile(candidate_path):
+            return candidate_path
+
+    target_base = os.path.basename(rel_path)
+    for c_dir in dirs:
+        for sub in ("po", "CE support", ""):
+            cand = os.path.abspath(os.path.join(c_dir, sub, target_base) if sub else os.path.join(c_dir, target_base))
+            if cand.startswith(upload_root_abs) and os.path.isfile(cand):
+                return cand
+
+    return None
+
+
+@router.get("/projects/{project_id}/documents")
+def api_v2_get_project_documents(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    docs = _scan_project_documents(project, db)
+    return {"documents": docs}
+
+
+@router.get("/projects/{project_id}/documents/download")
+def api_v2_download_project_document(
+    project_id: int,
+    path: str = Query(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    file_path = _resolve_project_document_path(project, path, db)
+    if not file_path or not os.path.isfile(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="DOCUMENT_NOT_FOUND",
+            message="Document not found.",
+        )
+
+    import mimetypes
+    mime, _ = mimetypes.guess_type(file_path)
+    return FileResponse(
+        path=file_path,
+        filename=os.path.basename(file_path),
+        media_type=mime or "application/octet-stream",
+        content_disposition_type="attachment",
+    )
+
+
+@router.get("/projects/{project_id}/documents/view")
+def api_v2_view_project_document(
+    project_id: int,
+    path: str = Query(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    file_path = _resolve_project_document_path(project, path, db)
+    if not file_path or not os.path.isfile(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="DOCUMENT_NOT_FOUND",
+            message="Document not found.",
+        )
+
+    import mimetypes
+    mime, _ = mimetypes.guess_type(file_path)
+    return FileResponse(
+        path=file_path,
+        filename=os.path.basename(file_path),
+        media_type=mime or "application/octet-stream",
+        content_disposition_type="inline",
+    )
+
+
 @router.get("/projects/{project_id}/indesign-templates")
 def api_v2_project_indesign_templates(
     project_id: int,
@@ -1655,6 +1893,7 @@ def api_v2_project_bootstrap(
         .order_by(models.Chapter.chapters.asc())
         .all()
     )
+
     ingested_files = (
         db.query(models.File)
         .filter(models.File.project_id == project.id)
@@ -1708,24 +1947,29 @@ def api_v2_project_bootstrap(
         track_wfs["art"] = art_workflow_name
     parsed_po_data["track_workflows"] = track_wfs
 
+    if po_file is not None and po_file.filename:
+        parsed_po_data["po_filename"] = po_file.filename
+
     project.file_details = parsed_po_data
 
     if po_file is not None and po_file.filename:
         try:
-            client_folder = client_name or "unknown"
-            ce_support_dir = os.path.join(file_service.UPLOAD_DIR, client_folder, code, "CE support")
-            os.makedirs(ce_support_dir, exist_ok=True)
+            client_folder = project.client_name or client_name or "unknown"
+            target_code = project.project_code or project.code or code
+            po_dir = os.path.join(file_service.UPLOAD_DIR, client_folder, target_code, "po")
+            os.makedirs(po_dir, exist_ok=True)
 
-            po_dest_path = os.path.join(ce_support_dir, po_file.filename)
+            po_dest_path = os.path.join(po_dir, po_file.filename)
+            po_file.file.seek(0)
             with open(po_dest_path, "wb") as po_dest:
                 shutil.copyfileobj(po_file.file, po_dest)
 
             json_stem = Path(po_file.filename).stem
-            json_dest_path = os.path.join(ce_support_dir, f"{json_stem}_extracted.json")
+            json_dest_path = os.path.join(po_dir, f"{json_stem}_extracted.json")
             with open(json_dest_path, "w", encoding="utf-8") as json_dest:
                 json.dump(parsed_po_data or {}, json_dest, indent=2, ensure_ascii=False)
         except OSError as exc:
-            logging.error("Failed to save PO file/JSON to CE support for project %s: %s", code, exc)
+            logging.error("Failed to save PO file/JSON to po directory for project %s: %s", code, exc)
 
     db.commit()
     db.refresh(project)
@@ -4449,7 +4693,7 @@ def api_v2_start_batch_jobs(
     
     # Resolve batch options dictionary
     batch_options = payload.options or {}
-    if payload.process_type == "xml_to_indesign" and "template_file_id" not in batch_options:
+    if payload.process_type in ("xml_to_indesign", "word_to_indesign") and "template_file_id" not in batch_options:
         try:
             from app.services import stylesheet_service
             active_ss = stylesheet_service.get_active_stylesheet_for_project(db, project_id=project.id)
@@ -4457,7 +4701,7 @@ def api_v2_start_batch_jobs(
                 file_ids = stylesheet_service._deserialize_file_ids(active_ss.analyzed_file_ids)
                 if file_ids:
                     batch_options["template_file_id"] = file_ids[0]
-                    logger.info(f"Resolved default template_file_id={file_ids[0]} from active stylesheet for batch XML to InDesign.")
+                    logger.info(f"Resolved default template_file_id={file_ids[0]} from active stylesheet for batch {payload.process_type}.")
         except Exception as ss_err:
             logger.warning(f"Failed to resolve stylesheet template: {ss_err}")
             
@@ -4484,6 +4728,9 @@ def api_v2_start_batch_jobs(
     target_extensions = []
     
     if payload.process_type == "word_to_xml":
+        target_category = "Manuscript"
+        target_extensions = [".docx"]
+    elif payload.process_type == "word_to_indesign":
         target_category = "Manuscript"
         target_extensions = [".docx"]
     elif payload.process_type == "xml_to_indesign":
@@ -4781,7 +5028,7 @@ def api_v2_combine_project_book(
                     version_service.archive_existing_file(db, existing_file)
                     shutil.copy2(src_file_path, dest_file_path)
                     existing_file.version += 1
-                    existing_file.uploaded_at = datetime.utcnow()
+                    existing_file.uploaded_at = datetime.now(timezone.utc)
                     existing_file.uploaded_by_id = viewer.id
                     db.commit()
                     logger.info(f"Bumped version for {fname} in 'Final files' chapter.")
@@ -4925,6 +5172,7 @@ def api_v2_processing_status(
         "bias_scan",
         "credit_extractor_ai",
         "word_to_xml",
+        "word_to_indesign",
         "indesign_to_xml",
         "xml_to_indesign",
         "style_validation",
@@ -5311,7 +5559,7 @@ def api_v2_cancel_processing_job(
 
     job.status = "cancelled"
     job.error_message = "Cancelled by user"
-    job.completed_at = datetime.utcnow()
+    job.completed_at = datetime.now(timezone.utc)
     db.commit()
 
     # Force release InDesign Redis lock
@@ -6152,8 +6400,8 @@ def _serialize_comment(c: "models.Comment") -> dict:
         "text": c.text or "",
         "author_id": c.author_id,
         "author_name": c.author_name or "",
-        "created_at": (c.created_at.isoformat() if c.created_at else ""),
-        "updated_at": (c.updated_at.isoformat() if c.updated_at else ""),
+        "created_at": ((c.created_at.replace(tzinfo=timezone.utc).isoformat() if c.created_at.tzinfo is None else c.created_at.isoformat()) if c.created_at else ""),
+        "updated_at": ((c.updated_at.replace(tzinfo=timezone.utc).isoformat() if c.updated_at.tzinfo is None else c.updated_at.isoformat()) if c.updated_at else ""),
         "resolved": bool(c.resolved),
     }
 
@@ -6211,7 +6459,7 @@ def api_v2_create_file_comment(
         comment_uuid=payload.comment_uuid,
         text=payload.text or "",
         author_id=getattr(viewer, "id", None),
-        author_name=getattr(viewer, "username", "") or "",
+        author_name=get_user_full_name(viewer) or getattr(viewer, "username", "") or "",
     )
     db.add(row)
     db.commit()
@@ -6801,7 +7049,7 @@ def api_v2_reference_edit(
             resolved["processed_path"],
             ref_number=ref_number,
             new_text=payload.new_text,
-            author=viewer.username or "reviewer",
+            author=get_user_full_name(viewer) or viewer.username or "reviewer",
             track_changes=payload.track_changes,
         )
     except ValueError as exc:
@@ -6887,7 +7135,7 @@ def api_v2_reference_manual_links_upsert(
             ref_number=payload.ref_number,
             ref_text=payload.ref_text,
             citation_text=payload.citation_text,
-            linked_by=viewer.username,
+            linked_by=get_user_full_name(viewer) or viewer.username,
             logger=logger,
         )
     except Exception as exc:
@@ -7151,7 +7399,7 @@ def api_v2_link_citation(
             ref_text=ref_text,
             match_type=match_type,
             confidence=confidence,
-            linked_by=viewer.username if viewer else None,
+            linked_by=(get_user_full_name(viewer) or viewer.username) if viewer else None,
             link_flags=link_flags,
         )
 
@@ -7164,7 +7412,7 @@ def api_v2_link_citation(
             citation_key=citation_key,
             para_idx=para_idx,
             ref_idx=ref_idx,
-            created_by=viewer.username if viewer else None,
+            created_by=(get_user_full_name(viewer) or viewer.username) if viewer else None,
             flags=["auto_linked"],
         )
 
@@ -7292,14 +7540,14 @@ def api_v2_add_citation_comment(
             citation_key=citation_key,
             para_idx=para_idx,
             ref_idx=ref_idx,
-            created_by=viewer.username if viewer else None,
+            created_by=(get_user_full_name(viewer) or viewer.username) if viewer else None,
             flags=flags,
         )
 
         return {
             "status": "ok",
             "comment_id": comment_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
     except HTTPException as exc:
         return _error_response(
@@ -8650,9 +8898,15 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
             try:
                 with open(client_config_path, "r") as f:
                     data = json.load(f)
-                stage_cfg = data.get(stage_name)
-                if stage_cfg:
+                if stage_name in data:
+                    stage_cfg = data.get(stage_name)
+                    # If explicitly disabled for this client, do NOT send email and do NOT fall back to default
+                    if stage_cfg and stage_cfg.get("enabled", True) is False:
+                        return None
                     return stage_cfg
+                else:
+                    # Client has custom config file and this stage was deleted/removed from it
+                    return None
             except Exception as e:
                 print(f"Error loading stage notification config for client {client_name}: {e}")
                 
@@ -8662,7 +8916,10 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
         try:
             with open(default_config_path, "r") as f:
                 data = json.load(f)
-            return data.get(stage_name)
+            stage_cfg = data.get(stage_name)
+            if stage_cfg and stage_cfg.get("enabled", True) is False:
+                return None
+            return stage_cfg
         except Exception as e:
             print(f"Error loading default stage notification config: {e}")
             

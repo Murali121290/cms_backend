@@ -197,23 +197,44 @@ class ArtValidationEngine:
         # 1. Match Numbered Figures
         for ref in numbered_refs:
             fig_num = ref["fig_num"]
-            matched_file = cls._find_matching_numbered_art(fig_num, physical_files)
+            matching_files = cls._find_all_matching_numbered_art(fig_num, physical_files)
 
-            if matched_file:
-                matched_files_set.add(matched_file["name"].lower())
+            if matching_files:
+                # Prefer color / CDC version as primary if multiple variants exist
+                primary = next((f for f in matching_files if any(k in f["name"].lower() for k in ['_cdc', 'color', 'cmyk'])), matching_files[0])
+                matched_files_set.add(primary["name"].lower())
                 matched_items.append({
                     "type": "Numbered Figure",
                     "fig_num": f"Figure {fig_num}",
                     "docx_ref": ref["text"],
                     "docx_style": ref["style"],
-                    "filename": matched_file["name"],
+                    "filename": primary["name"],
                     "status": "MATCHED",
                     "status_badge": "matched",
-                    "width_picas": matched_file["width_picas"],
-                    "height_picas": matched_file["height_picas"],
-                    "resolution_dpi": matched_file["dpi"],
-                    "file_path": matched_file["path"]
+                    "width_picas": primary["width_picas"],
+                    "height_picas": primary["height_picas"],
+                    "resolution_dpi": primary["dpi"],
+                    "file_path": primary["path"]
                 })
+
+                # Register sibling variants (e.g., _BDC black-and-white / print versions)
+                for vf in matching_files:
+                    if vf["name"].lower() != primary["name"].lower():
+                        matched_files_set.add(vf["name"].lower())
+                        variant_label = "Print/B&W Variant" if any(k in vf["name"].lower() for k in ['_bdc', 'bw', 'grayscale', 'mono']) else "Variant"
+                        matched_items.append({
+                            "type": "Variant Art File",
+                            "fig_num": f"Figure {fig_num} ({variant_label})",
+                            "docx_ref": f"{variant_label} for Figure {fig_num}",
+                            "docx_style": ref["style"],
+                            "filename": vf["name"],
+                            "status": "MATCHED",
+                            "status_badge": "matched",
+                            "width_picas": vf["width_picas"],
+                            "height_picas": vf["height_picas"],
+                            "resolution_dpi": vf["dpi"],
+                            "file_path": vf["path"]
+                        })
             else:
                 # Check if there is an extension mismatch or partial match
                 ext_match = cls._find_extension_mismatch(fig_num, physical_files)
@@ -250,23 +271,42 @@ class ArtValidationEngine:
         # 2. Match Unnumbered Figures
         for ref in unnumbered_refs:
             ph = ref["placeholder"]
-            matched_file = cls._find_matching_unnumbered_art(ph, physical_files, matched_files_set)
+            matching_files = cls._find_all_matching_unnumbered_art(ph, physical_files, matched_files_set)
 
-            if matched_file:
-                matched_files_set.add(matched_file["name"].lower())
+            if matching_files:
+                primary = next((f for f in matching_files if any(k in f["name"].lower() for k in ['_cdc', 'color', 'cmyk'])), matching_files[0])
+                matched_files_set.add(primary["name"].lower())
                 matched_items.append({
                     "type": "Unnumbered Figure",
                     "fig_num": ph,
                     "docx_ref": ref["text"],
                     "docx_style": ref["style"],
-                    "filename": matched_file["name"],
+                    "filename": primary["name"],
                     "status": "MATCHED",
                     "status_badge": "matched",
-                    "width_picas": matched_file["width_picas"],
-                    "height_picas": matched_file["height_picas"],
-                    "resolution_dpi": matched_file["dpi"],
-                    "file_path": matched_file["path"]
+                    "width_picas": primary["width_picas"],
+                    "height_picas": primary["height_picas"],
+                    "resolution_dpi": primary["dpi"],
+                    "file_path": primary["path"]
                 })
+
+                for vf in matching_files:
+                    if vf["name"].lower() != primary["name"].lower():
+                        matched_files_set.add(vf["name"].lower())
+                        variant_label = "Print/B&W Variant" if any(k in vf["name"].lower() for k in ['_bdc', 'bw', 'grayscale', 'mono']) else "Variant"
+                        matched_items.append({
+                            "type": "Variant Art File",
+                            "fig_num": f"{ph} ({variant_label})",
+                            "docx_ref": f"{variant_label} for unnumbered figure",
+                            "docx_style": ref["style"],
+                            "filename": vf["name"],
+                            "status": "MATCHED",
+                            "status_badge": "matched",
+                            "width_picas": vf["width_picas"],
+                            "height_picas": vf["height_picas"],
+                            "resolution_dpi": vf["dpi"],
+                            "file_path": vf["path"]
+                        })
             else:
                 missing_items.append({
                     "type": "Unnumbered Figure",
@@ -305,7 +345,7 @@ class ArtValidationEngine:
         summary = {
             "total_docx_figures": len(numbered_refs) + len(unnumbered_refs),
             "total_art_files": len(physical_files),
-            "matched_count": len([i for i in matched_items if i["status"] == "MATCHED"]),
+            "matched_count": len([i for i in matched_items if i["status"] == "MATCHED" and i["type"] != "Variant Art File"]),
             "missing_count": len(missing_items),
             "unreferenced_count": len(unreferenced_items),
             "warning_count": len([i for i in matched_items if i["status"] != "MATCHED"])
@@ -339,38 +379,45 @@ class ArtValidationEngine:
         return fig_str
 
     @classmethod
-    def _find_matching_numbered_art(cls, fig_num: str, physical_files: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Matches figure number (e.g. '12.1') against physical art filenames."""
+    def _find_all_matching_numbered_art(cls, fig_num: str, physical_files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Matches figure number (e.g. '5.1' or '12.1') against physical art filenames."""
         parts = fig_num.split('.')
-        if len(parts) != 2:
-            ch_str, fg_str = "", fig_num
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            ch_int, fg_int = int(parts[0]), int(parts[1])
+            patterns = [
+                rf'fig(?:ure)?[_\-\.\s]*0*{ch_int}[_\-\.]0*{fg_int}(?!\d)',
+                rf'\bf(?:ig)?(?:f)?[_\-\.\s]*0*{ch_int}[_\-\.]0*{fg_int}(?!\d)',
+                rf'\bfg[_\-\.\s]*0*{ch_int}[_\-\.]0*{fg_int}(?!\d)',
+                rf'ch(?:apter)?[_\-\.\s]*0*{ch_int}.*?fig(?:ure)?[_\-\.\s]*0*{fg_int}(?!\d)',
+                rf'\bf(?:ig)?[_\-\.\s]*{ch_int:02d}{fg_int:02d}(?!\d)',
+                rf'(?:^|[_\-\s])0*{ch_int}[_\-\.]0*{fg_int}(?!\d)',
+            ]
+        elif len(parts) == 1 and parts[0].isdigit():
+            fg_int = int(parts[0])
+            patterns = [
+                rf'fig(?:ure)?[_\-\.\s]*0*{fg_int}(?!\d)',
+                rf'\bf(?:ig)?(?:f)?[_\-\.\s]*0*{fg_int}(?!\d)',
+                rf'\bfg[_\-\.\s]*0*{fg_int}(?!\d)',
+                rf'(?:^|[_\-\s])0*{fg_int}(?!\d)',
+            ]
         else:
-            ch_str, fg_str = parts[0], parts[1]
+            return []
 
-        fg_int = int(fg_str) if fg_str.isdigit() else 0
-        ch_int = int(ch_str) if ch_str.isdigit() else 0
-
+        matches = []
         for pf in physical_files:
             fname = pf["name"].lower()
             # Ignore unnumbered art files
             if re.search(r'\bun[_\-\s]*f', fname, re.IGNORECASE) or re.search(r'\bun[0-9]', fname, re.IGNORECASE):
                 continue
+            if any(re.search(pat, fname, re.IGNORECASE) for pat in patterns):
+                matches.append(pf)
 
-            patterns = [
-                rf'f(?:ig)?(?:f)?{ch_int:02d}[\-_.]0*{fg_int}\b',
-                rf'f(?:ig)?(?:f)?{ch_int}[\-_.]0*{fg_int}\b',
-                rf'fg{ch_int:02d}[\-_.]0*{fg_int}\b',
-                rf'fg{ch_int}[\-_.]0*{fg_int}\b',
-                rf'ch0*{ch_int}.*fig(?:f)?0*{fg_int}\b',
-                rf'fig(?:ure)?[_\-\s]*0*{ch_int}[\-_.]0*{fg_int}\b',
-                rf'image0*{fg_int}\b' if ch_int == 19 or not ch_int else r'impossible_pattern'
-            ]
+        return matches
 
-            for pat in patterns:
-                if re.search(pat, fname, re.IGNORECASE):
-                    return pf
-
-        return None
+    @classmethod
+    def _find_matching_numbered_art(cls, fig_num: str, physical_files: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        matches = cls._find_all_matching_numbered_art(fig_num, physical_files)
+        return matches[0] if matches else None
 
     @classmethod
     def _find_extension_mismatch(cls, fig_num: str, physical_files: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -378,53 +425,64 @@ class ArtValidationEngine:
         parts = fig_num.split('.')
         if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
             ch_int, fg_int = int(parts[0]), int(parts[1])
+            patterns = [
+                rf'fig(?:ure)?[_\-\.\s]*0*{ch_int}[_\-\.]0*{fg_int}(?!\d)',
+                rf'\bf(?:ig)?(?:f)?[_\-\.\s]*0*{ch_int}[_\-\.]0*{fg_int}(?!\d)',
+                rf'\bfg[_\-\.\s]*0*{ch_int}[_\-\.]0*{fg_int}(?!\d)',
+            ]
             for pf in physical_files:
                 fname = pf["name"].lower()
                 # Ignore unnumbered art files
                 if re.search(r'\bun[_\-\s]*f', fname, re.IGNORECASE) or re.search(r'\bun[0-9]', fname, re.IGNORECASE):
                     continue
-
-                patterns = [
-                    rf'f(?:ig)?(?:f)?{ch_int:02d}[\-_.]0*{fg_int}\b',
-                    rf'f(?:ig)?(?:f)?{ch_int}[\-_.]0*{fg_int}\b',
-                    rf'fg{ch_int:02d}[\-_.]0*{fg_int}\b',
-                    rf'fg{ch_int}[\-_.]0*{fg_int}\b',
-                ]
-
-                for pat in patterns:
-                    if re.search(pat, fname, re.IGNORECASE):
-                        return pf
+                if any(re.search(pat, fname, re.IGNORECASE) for pat in patterns):
+                    return pf
         return None
+
+    @staticmethod
+    def _strip_variant_suffix(name: str) -> str:
+        base = name.rsplit('.', 1)[0].lower()
+        return re.sub(r'[_\-\s]+(bdc|cdc|bw|color|web|print|orig|cmyk|rgb|rev\d*|v\d+)$', '', base, flags=re.I).strip()
+
+    @classmethod
+    def _find_all_matching_unnumbered_art(cls, placeholder: str, physical_files: List[Dict[str, Any]], matched_set: set) -> List[Dict[str, Any]]:
+        """Matches unnumbered figure placeholders (<<Giardino_ Un_F12.1.tif>>, <<Un04_001.eps>>, Author Photo, etc.)."""
+        ph_clean = placeholder.strip('<> ').lower()
+        ph_base = os.path.splitext(ph_clean)[0]
+        ph_stripped = cls._strip_variant_suffix(ph_clean)
+
+        matches = []
+        for pf in physical_files:
+            pf_name = pf["name"].lower()
+            if pf_name in matched_set:
+                continue
+            pf_base = os.path.splitext(pf_name)[0]
+            pf_stripped = cls._strip_variant_suffix(pf_name)
+
+            # 1. Exact or base match
+            if pf_name == ph_clean or pf_base == ph_base:
+                matches.append(pf)
+                continue
+
+            # 2. Variant match (e.g. Author Photo_BDC vs Author Photo_CDC)
+            if ph_stripped and pf_stripped and ph_stripped == pf_stripped:
+                matches.append(pf)
+                continue
+
+            # 3. Match by specific unnumbered figure number/id (e.g. un_f12.1 or un04_001)
+            un_num_match = re.search(r'un[_\-\s]*f?(\d+(?:[\.\-_]\d+)?)', ph_clean, re.IGNORECASE)
+            if un_num_match:
+                un_target = un_num_match.group(1).replace('-', '.')
+                pf_un_match = re.search(r'un[_\-\s]*f?(\d+(?:[\.\-_]\d+)?)', pf_name, re.IGNORECASE)
+                if pf_un_match and pf_un_match.group(1).replace('-', '.') == un_target:
+                    matches.append(pf)
+
+        return matches
 
     @classmethod
     def _find_matching_unnumbered_art(cls, placeholder: str, physical_files: List[Dict[str, Any]], matched_set: set) -> Optional[Dict[str, Any]]:
-        """Matches unnumbered figure placeholders (<<Giardino_ Un_F12.1.tif>>, <<Un04_001.eps>>, etc.)."""
-        ph_clean = placeholder.strip('<> ').lower()
-        ph_base = os.path.splitext(ph_clean)[0]
-
-        # 1. Exact filename match
-        for pf in physical_files:
-            if pf["name"].lower() == ph_clean:
-                return pf
-
-        # 2. Base filename match
-        for pf in physical_files:
-            pf_base = os.path.splitext(pf["name"].lower())[0]
-            if pf_base == ph_base:
-                return pf
-
-        # 3. Match by specific unnumbered figure number/id (e.g. un_f12.1 or un04_001)
-        un_num_match = re.search(r'un[_\-\s]*f?(\d+(?:[\.\-_]\d+)?)', ph_clean, re.IGNORECASE)
-        if un_num_match:
-            un_target = un_num_match.group(1).replace('-', '.')
-            for pf in physical_files:
-                if pf["name"].lower() in matched_set:
-                    continue
-                pf_un_match = re.search(r'un[_\-\s]*f?(\d+(?:[\.\-_]\d+)?)', pf["name"].lower(), re.IGNORECASE)
-                if pf_un_match and pf_un_match.group(1).replace('-', '.') == un_target:
-                    return pf
-
-        return None
+        matches = cls._find_all_matching_unnumbered_art(placeholder, physical_files, matched_set)
+        return matches[0] if matches else None
 
     @classmethod
     def _get_image_metadata(cls, file_path: str, filename: str) -> Dict[str, Any]:

@@ -7,6 +7,8 @@ import { usersApi } from '@/api/users'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/store/useToastStore'
 import api from '@/api/client'
+import { formatDateTime as fmtUtcDateTime } from '@/utils/dateUtils'
+import { useUsersStore } from '@/stores/usersStore'
 
 export function BodInternalJobPage() {
   const { jobId } = useParams()
@@ -33,17 +35,7 @@ export function BodInternalJobPage() {
   })
 
   const formatDateTime = (dateStr: string | null) => {
-    if (!dateStr) return ''
-    try {
-      // Check if it already has a timezone indicator (+00:00, -05:00, or Z)
-      const hasTz = dateStr.endsWith('Z') || dateStr.includes('+') || !!dateStr.match(/-\d{2}:\d{2}$/)
-      const validStr = hasTz ? dateStr : `${dateStr}Z`
-      const d = new Date(validStr)
-      if (isNaN(d.getTime())) return 'Invalid Date'
-      return d.toLocaleString('en-IN')
-    } catch {
-      return 'Invalid Date'
-    }
+    return fmtUtcDateTime(dateStr)
   }
 
   const fetchJob = async () => {
@@ -180,12 +172,7 @@ export function BodInternalJobPage() {
 
   const getUserDisplayName = (username: string | null | undefined) => {
     if (!username) return ''
-    if (!users || users.length === 0) return username
-    const u = users.find(user => user.user_name === username)
-    if (u && u.first_name) {
-      return `${u.first_name} ${u.last_name || ''}`.trim()
-    }
-    return username
+    return useUsersStore.getState().getUserDisplayNameByUsername(username)
   }
 
   return (

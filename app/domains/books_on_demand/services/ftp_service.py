@@ -22,22 +22,23 @@ class PatchedFTP_TLS(FTP_TLS):
         return conn, size
 
 class BodFtpService:
-    def __init__(self, host: str, username: str, password: str, timeout: int = 30):
+    def __init__(self, host: str, username: str, password: str, port: int = 21, timeout: int = 30):
         self.host = host
         self.username = username
         self.password = password
+        self.port = port
         self.timeout = timeout
         self.ftp = None
 
     def connect(self):
         try:
             self.ftp = PatchedFTP_TLS(timeout=self.timeout)
-            self.ftp.connect(self.host)
+            self.ftp.connect(self.host, port=self.port)
             self.ftp.login(self.username, self.password)
             self.ftp.prot_p()  # Switch to secure data connection
-            logger.info(f"Successfully connected to FTP server {self.host} over TLS")
+            logger.info(f"Successfully connected to FTP server {self.host}:{self.port} over TLS")
         except Exception as e:
-            logger.error(f"Failed to connect to FTP {self.host}: {str(e)}")
+            logger.error(f"Failed to connect to FTP {self.host}:{self.port}: {str(e)}")
             raise
 
     def disconnect(self):
@@ -89,6 +90,8 @@ class BodFtpService:
             with open(local_path, 'rb') as f:
                 self.ftp.storbinary(f"STOR {remote_filename}", f)
             logger.info(f"Uploaded {local_path} to {remote_filename}")
+        except ssl.SSLEOFError:
+            logger.info(f"Uploaded {local_path} to {remote_filename} (suppressed SSLEOFError)")
         except Exception as e:
             logger.error(f"Failed to upload {local_path}: {str(e)}")
             raise

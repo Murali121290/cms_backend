@@ -2,7 +2,7 @@ import os
 import zipfile
 import shutil
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -45,7 +45,7 @@ def run_conversion_background(chapter_id: int, session_factory, job_id: int | No
         
         chapter.status = "In-Progress"
         chapter.conversion_status = "Converting"
-        chapter.conversion_started_at = datetime.utcnow()
+        chapter.conversion_started_at = datetime.now(timezone.utc)
         chapter.attempts += 1
         db.commit()
 
@@ -198,17 +198,17 @@ def run_conversion_background(chapter_id: int, session_factory, job_id: int | No
                 logger.warning(f"DOCX post-processor failed for {dest_path}: {post_err}")
                 
             chapter.conversion_status = "Completed"
-            chapter.conversion_completed_at = datetime.utcnow()
+            chapter.conversion_completed_at = datetime.now(timezone.utc)
             chapter.converted_file_path = dest_path
             
             if chapter.qc_status == "Completed":
                 chapter.status = "Completed"
-                chapter.completed_at = datetime.utcnow()
+                chapter.completed_at = datetime.now(timezone.utc)
 
             if job:
                 job.status = "completed"
                 job.progress_pct = 100
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
         else:
             chapter.status = "Failed"
             chapter.conversion_status = "Failed"
@@ -218,7 +218,7 @@ def run_conversion_background(chapter_id: int, session_factory, job_id: int | No
                 job.status = "failed"
                 job.progress_pct = 100
                 job.error_message = error_msg or "Unknown error"
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
         
         db.commit()
         try:
@@ -239,7 +239,7 @@ def run_conversion_background(chapter_id: int, session_factory, job_id: int | No
                 job.status = "failed"
                 job.progress_pct = 100
                 job.error_message = str(e)
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
                 db.commit()
         except:
             pass
@@ -705,7 +705,7 @@ def api_post_prod_open_in_word(
 
     if chapter.qc_status == "YTS":
         chapter.qc_status = "In-Progress"
-        chapter.qc_last_started_at = datetime.utcnow()
+        chapter.qc_last_started_at = datetime.now(timezone.utc)
         db.commit()
 
     from datetime import timedelta
@@ -744,10 +744,10 @@ def update_chapter_qc_status(
         raise HTTPException(status_code=400, detail="Invalid status")
 
     if payload.status == "In-Progress" and chapter.qc_status != "In-Progress":
-        chapter.qc_last_started_at = datetime.utcnow()
+        chapter.qc_last_started_at = datetime.now(timezone.utc)
     elif payload.status == "Paused" and chapter.qc_status == "In-Progress":
         if chapter.qc_last_started_at:
-            delta = datetime.utcnow() - chapter.qc_last_started_at
+            delta = datetime.now(timezone.utc) - chapter.qc_last_started_at
             chapter.qc_active_seconds = (chapter.qc_active_seconds or 0) + int(delta.total_seconds())
         chapter.qc_last_started_at = None
 
@@ -768,16 +768,16 @@ def complete_chapter_qc(
 
     if chapter.qc_status == "In-Progress":
         if chapter.qc_last_started_at:
-            delta = datetime.utcnow() - chapter.qc_last_started_at
+            delta = datetime.now(timezone.utc) - chapter.qc_last_started_at
             chapter.qc_active_seconds = (chapter.qc_active_seconds or 0) + int(delta.total_seconds())
 
     chapter.qc_status = "Completed"
     chapter.qc_last_started_at = None
-    chapter.qc_completed_at = datetime.utcnow()
+    chapter.qc_completed_at = datetime.now(timezone.utc)
 
     if chapter.conversion_status == "Completed":
         chapter.status = "Completed"
-        chapter.completed_at = datetime.utcnow()
+        chapter.completed_at = datetime.now(timezone.utc)
 
     db.commit()
 

@@ -880,7 +880,7 @@ export function ProjectWorkflow() {
   const [executingGroupProceed, setExecutingGroupProceed] = useState(false)
   const [sendEmailToggle, setSendEmailToggle] = useState(true)
 
-  const [batchModalType, setBatchModalType] = useState<'word_to_xml' | 'style_validation' | 'structuring' | 'xml_to_indesign' | 'indesign_to_xml' | null>(null)
+  const [batchModalType, setBatchModalType] = useState<'word_to_xml' | 'word_to_indesign' | 'style_validation' | 'structuring' | 'xml_to_indesign' | 'indesign_to_xml' | null>(null)
   const [batchSelectedChapterIds, setBatchSelectedChapterIds] = useState<Set<number>>(new Set())
   const [batchTemplateId, setBatchTemplateId] = useState<number | ''>('')
 
@@ -902,7 +902,7 @@ export function ProjectWorkflow() {
   }, [groupProceedModalOpen, groupProceedStage, selectedGroupProceedChapterIds])
 
   useEffect(() => {
-    if (batchModalType === 'xml_to_indesign' && !batchTemplateId) {
+    if ((batchModalType === 'xml_to_indesign' || batchModalType === 'word_to_indesign') && !batchTemplateId) {
       const templates = templatesQuery.data ?? []
       if (templates.length > 0) {
         setBatchTemplateId(templates[0].id)
@@ -1261,7 +1261,12 @@ export function ProjectWorkflow() {
           process_type: processType,
           chapter_ids: selectedBulkChapters.map(c => c.id),
           mode: 'style',
-          options: processType === 'structuring' ? { structuring_method: 'manual' } : undefined
+          options: processType === 'structuring'
+            ? {
+                structuring_method: 'manual',
+                tag_set: (project?.client_name && (project.client_name.toLowerCase().includes('springer') || project.client_name.toLowerCase() === 'spr')) ? 'springer' : 'lww'
+              }
+            : undefined
         })
       })
       const result = await response.json()
@@ -1269,6 +1274,7 @@ export function ProjectWorkflow() {
         let label = 'Word to XML'
         if (processType === 'style_validation') label = 'Style Validation'
         else if (processType === 'structuring') label = 'Word Structuring'
+        else if (processType === 'word_to_indesign') label = 'Word to InDesign'
         else if (processType === 'xml_to_indesign') label = 'XML to InDesign'
         else if (processType === 'indesign_to_xml') label = 'InDesign to Final'
         toast.success(`Triggered ${label} for ${result.triggered_count} chapters.`)
@@ -1296,7 +1302,7 @@ export function ProjectWorkflow() {
     const selectedIds = Array.from(batchSelectedChapterIds)
 
     let templateFileId: number | undefined = undefined
-    if (batchModalType === 'xml_to_indesign' && batchTemplateId) {
+    if ((batchModalType === 'xml_to_indesign' || batchModalType === 'word_to_indesign') && batchTemplateId) {
       const stylesheets = stylesheetsQuery.data?.stylesheets ?? []
       const selectedSs = stylesheets.find(s => s.id === batchTemplateId)
       if (selectedSs && selectedSs.analyzed_file_ids && selectedSs.analyzed_file_ids.length > 0) {
@@ -1309,7 +1315,8 @@ export function ProjectWorkflow() {
       if (templateFileId) {
         batchOptions = { template_file_id: templateFileId }
       } else if (batchModalType === 'structuring') {
-        batchOptions = { structuring_method: 'manual' }
+        const isSpringer = Boolean(project?.client_name && (project.client_name.toLowerCase().includes('springer') || project.client_name.toLowerCase() === 'spr'))
+        batchOptions = { structuring_method: 'manual', tag_set: isSpringer ? 'springer' : 'lww' }
       }
 
       const response = await fetch(`/api/v2/projects/${project.id}/batch-jobs`, {
@@ -1327,6 +1334,7 @@ export function ProjectWorkflow() {
       const result = await response.json()
       if (response.ok && result.success) {
         let processLabel = 'Word to XML'
+        if (batchModalType === 'word_to_indesign') processLabel = 'Word to InDesign'
         if (batchModalType === 'xml_to_indesign') processLabel = 'XML to InDesign'
         if (batchModalType === 'indesign_to_xml') processLabel = 'InDesign to Final'
         if (batchModalType === 'style_validation') processLabel = 'Style Validation'
@@ -1840,6 +1848,73 @@ export function ProjectWorkflow() {
                   <button
                     onClick={() => {
                       setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      const templates = templatesQuery.data ?? []
+                      if (templates.length > 0) {
+                        setBatchTemplateId(templates[0].id)
+                      } else {
+                        setBatchTemplateId('')
+                      }
+                      setBatchModalType('word_to_indesign')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                  >
+                    Batch Word to InDesign
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      setBatchModalType('indesign_to_xml')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors"
+                  >
+                    Batch InDesign to Final
+                  </button>
+                </>
+              )}
+              {(filterStage?.toLowerCase() === 'word 2 indesign converstion' || filterStage?.toLowerCase() === 'word 2 indesign conversion') && (
+                <>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      setBatchModalType('style_validation')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                  >
+                    Batch Style Validation
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      const templates = templatesQuery.data ?? []
+                      if (templates.length > 0) {
+                        setBatchTemplateId(templates[0].id)
+                      } else {
+                        setBatchTemplateId('')
+                      }
+                      setBatchModalType('word_to_indesign')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                  >
+                    Batch Word to InDesign
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      const templates = templatesQuery.data ?? []
+                      if (templates.length > 0) {
+                        setBatchTemplateId(templates[0].id)
+                      } else {
+                        setBatchTemplateId('')
+                      }
+                      setBatchModalType('xml_to_indesign')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                  >
+                    Batch XML to InDesign
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
                       setBatchModalType('indesign_to_xml')
                     }}
                     className="text-xs font-medium px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors"
@@ -2084,6 +2159,26 @@ export function ProjectWorkflow() {
                 {batchProcessing && <Spinner size="sm" />}
                 Batch InDesign to Word
               </button>
+            )}
+            {bulkStage && (bulkStage.toLowerCase().includes('word 2 indesign') || bulkStage.toLowerCase().includes('word to indesign')) && (
+              <>
+                <button
+                  onClick={() => handleBatchProcess('style_validation')}
+                  disabled={batchProcessing || selectedBulkChapters.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {batchProcessing && <Spinner size="sm" />}
+                  Batch Style Validation
+                </button>
+                <button
+                  onClick={() => handleBatchProcess('word_to_indesign')}
+                  disabled={batchProcessing || selectedBulkChapters.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {batchProcessing && <Spinner size="sm" />}
+                  Batch Word to InDesign
+                </button>
+              </>
             )}
             <button
               onClick={() => setBulkAssignModalOpen(false)}
@@ -2336,24 +2431,28 @@ export function ProjectWorkflow() {
         title={
           batchModalType === 'word_to_xml'
             ? 'Batch Word to XML'
-            : batchModalType === 'style_validation'
-              ? 'Batch Style Validation'
-              : batchModalType === 'structuring'
-                ? 'Batch Word Structuring'
-                : batchModalType === 'xml_to_indesign'
-                  ? 'Batch XML to InDesign'
-                  : 'Batch InDesign to Final'
+            : batchModalType === 'word_to_indesign'
+              ? 'Batch Word to InDesign'
+              : batchModalType === 'style_validation'
+                ? 'Batch Style Validation'
+                : batchModalType === 'structuring'
+                  ? 'Batch Word Structuring'
+                  : batchModalType === 'xml_to_indesign'
+                    ? 'Batch XML to InDesign'
+                    : 'Batch InDesign to Final'
         }
         description={
           batchModalType === 'word_to_xml'
             ? 'Select the chapters you want to run Word-to-XML conversion for in bulk. This will convert the docx manuscripts into JATS XML files.'
-            : batchModalType === 'style_validation'
-              ? 'Select the chapters you want to run Style Validation for in bulk. This will validate the docx manuscripts against project style guidelines.'
-              : batchModalType === 'structuring'
-                ? 'Select the chapters you want to run Word Structuring for in bulk. This will apply standard styles to the docx manuscripts using the rules-based structuring library.'
-                : batchModalType === 'xml_to_indesign'
-                  ? 'Select the chapters you want to generate InDesign layouts for in bulk. This will dispatch layout generation tasks to the Windows InDesign Server.'
-                  : 'Select the chapters you want to convert from InDesign to final XML outputs. This will extract final packages (XML + Logs) from the InDesign layouts.'
+            : batchModalType === 'word_to_indesign'
+              ? 'Select the chapters you want to run Word-to-InDesign layout generation for in bulk using the d2id Python tool.'
+              : batchModalType === 'style_validation'
+                ? 'Select the chapters you want to run Style Validation for in bulk. This will validate the docx manuscripts against project style guidelines.'
+                : batchModalType === 'structuring'
+                  ? 'Select the chapters you want to run Word Structuring for in bulk. This will apply standard styles to the docx manuscripts using the rules-based structuring library.'
+                  : batchModalType === 'xml_to_indesign'
+                    ? 'Select the chapters you want to generate InDesign layouts for in bulk. This will dispatch layout generation tasks to the Windows InDesign Server.'
+                    : 'Select the chapters you want to convert from InDesign to final XML outputs. This will extract final packages (XML + Logs) from the InDesign layouts.'
         }
         footer={
           <div className="flex gap-3 justify-end items-center">
@@ -2376,7 +2475,7 @@ export function ProjectWorkflow() {
         }
       >
         <div className="space-y-4">
-          {batchModalType === 'xml_to_indesign' && (
+          {(batchModalType === 'xml_to_indesign' || batchModalType === 'word_to_indesign') && (
             <div className="bg-surface/50 border border-border/80 rounded-xl p-3.5 space-y-2">
               <label className="block text-xs font-semibold text-text uppercase tracking-wider">
                 Select InDesign Template

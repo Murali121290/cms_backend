@@ -83,6 +83,9 @@ export const startBiasScan = (fileId: number) =>
 export const startWordToXml = (fileId: number) =>
   startProcessingJob(fileId, "word_to_xml", "style");
 
+export const startWordToIndesign = (fileId: number, options?: { template_file_id?: number }) =>
+  startProcessingJob(fileId, "word_to_indesign", "style", options || {});
+
 export const startIndesignToXml = (fileId: number) =>
   startProcessingJob(fileId, "indesign_to_xml", "style");
 

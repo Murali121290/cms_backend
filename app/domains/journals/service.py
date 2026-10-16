@@ -1,36 +1,91 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Union
 from sqlalchemy.orm import Session
 from app.domains.journals.models import Journal, JournalArticle, JournalStageDetail, JournalWorkflow
 
 # Pre-Editing covers structuring, references, IA rules and technical checks as four gated steps
 # (see pre_editing.py); the separate Technical Editing stage was merged into it (migration 0037).
+# 8-Stage Journal Production Pipeline with Stage 1: MS Analysis & ELOG
 STAGE_PIPELINE = [
-    "1. Pre-Editing",
-    "2. Language Editing",
-    "3. XML Conversion",
-    "4. Generate InDesign",
-    "5. InDesign Final QC",
-    "6. View Proof",
-    "7. Final Delivery"
+    "1. MS Analysis & ELOG",
+    "2. Pre-Editing",
+    "3. Language Editing",
+    "4. XML Conversion",
+    "5. Generate InDesign",
+    "6. InDesign Final QC",
+    "7. View Proof",
+    "8. Final Delivery"
 ]
 
 # Stage numbers used by the pipeline code, so the numbering lives in one place.
-PRE_EDITING, LANGUAGE, XML_CONVERSION, INDESIGN, INDESIGN_QC, PROOF, DELIVERY = range(1, 8)
+MS_ANALYSIS, PRE_EDITING, LANGUAGE, XML_CONVERSION, INDESIGN, INDESIGN_QC, PROOF, DELIVERY = range(1, 9)
 
 # Seeded when the workflow table is empty (also by migration 0034).
 DEFAULT_WORKFLOWS = [
-    {"name": "Full production", "stage_numbers": [1, 2, 3, 4, 5, 6, 7], "is_default": True,
-     "description": "Pre-editing (structuring, references, IA rules, technical), language editing, JATS XML, InDesign typesetting, QC, proof and delivery."},
-    {"name": "XML only (no typesetting)", "stage_numbers": [1, 3, 6, 7], "is_default": False,
-     "description": "Edited and delivered as JATS XML; the publisher typesets."},
-    {"name": "Fast track (no language edit)", "stage_numbers": [1, 3, 4, 5, 6, 7], "is_default": False,
-     "description": "Skips language editing for articles that arrive copy-edited."},
+    {"name": "Full production", "stage_numbers": [1, 2, 3, 4, 5, 6, 7, 8], "is_default": True,
+     "description": "MS Analysis & ELOG, pre-editing (structuring, references, IA rules, technical), language editing, JATS XML, InDesign typesetting, QC, proof and delivery."},
+    {"name": "XML only (no typesetting)", "stage_numbers": [1, 2, 4, 7, 8], "is_default": False,
+     "description": "MS Analysis, pre-editing, edited and delivered as JATS XML; the publisher typesets."},
+    {"name": "Fast track (no language edit)", "stage_numbers": [1, 2, 4, 5, 6, 7, 8], "is_default": False,
+     "description": "MS Analysis, pre-editing; skips language editing for articles that arrive copy-edited."},
 ]
 
 
 def stage_names(stage_numbers: List[int]) -> List[str]:
     return [STAGE_PIPELINE[n - 1] for n in sorted(set(stage_numbers)) if 1 <= n <= len(STAGE_PIPELINE)]
+
+
+def ensure_pa_editorial_client(db: Session) -> None:
+    from app.domains.journals.models import JournalClient, JournalGrammarsheet
+    import json
+    import os
+
+    pa_client = db.query(JournalClient).filter(JournalClient.client_code == "PA-01").first()
+    if not pa_client:
+        pa_client = JournalClient(
+            client_code="PA-01",
+            publisher_name="PA Editorial Ltd., UK",
+            jats_version="1.3",
+            contact_email="production@paeditorial.co.uk",
+            website="https://www.paeditorial.co.uk",
+            active_status=True
+        )
+        db.add(pa_client)
+        db.flush()
+
+    pa_journal = db.query(Journal).filter(Journal.journal_code == "PAJ-01").first()
+    default_wf = db.query(JournalWorkflow).filter(JournalWorkflow.is_default == True).first()
+    if not pa_journal:
+        pa_journal = Journal(
+            client_id=pa_client.id,
+            journal_code="PAJ-01",
+            journal_title="PA Journal of Applied Sciences & Medicine",
+            issn_online="2976-884X",
+            workflow_id=default_wf.id if default_wf else None,
+            status="Active"
+        )
+        db.add(pa_journal)
+        db.flush()
+
+        uk_profile_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "processing", "language_editing", "config", "profiles", "uk.json"
+        )
+        rules = {}
+        if os.path.exists(uk_profile_path):
+            try:
+                with open(uk_profile_path, "r", encoding="utf-8") as f:
+                    rules = json.load(f)
+            except Exception:
+                rules = {}
+        db.add(JournalGrammarsheet(
+            journal_id=pa_journal.id,
+            name="PA UK House Style Grammar Sheet",
+            language_variant="UK_English",
+            grammar_rules=rules,
+            is_active=True
+        ))
+        db.commit()
 
 
 def ensure_default_workflows(db: Session) -> None:
@@ -44,6 +99,10 @@ def ensure_default_workflows(db: Session) -> None:
             wf.description = dw["description"]
             wf.is_default = dw["is_default"]
     db.commit()
+    try:
+        ensure_pa_editorial_client(db)
+    except Exception:
+        db.rollback()
 
 
 def default_workflow(db: Session) -> JournalWorkflow:
@@ -67,7 +126,7 @@ def initialize_article_stages(db: Session, article: JournalArticle):
             stage_number=number,
             stage_name=STAGE_PIPELINE[number - 1],
             stage_status="In-progress" if pos == 0 else "Pending",
-            actual_start_date=datetime.utcnow() if pos == 0 else None,
+            actual_start_date=datetime.now(timezone.utc) if pos == 0 else None,
         ))
     article.current_stage = STAGE_PIPELINE[numbers[0] - 1]
     db.commit()
@@ -90,7 +149,7 @@ def advance_article_stage(db: Session, article_id: int, remarks: Optional[str] =
     if stages:
         curr = stages[idx]
         curr.stage_status = "Completed"
-        curr.actual_end_date = datetime.utcnow()
+        curr.actual_end_date = datetime.now(timezone.utc)
         if remarks:
             curr.remarks = remarks
 
@@ -98,7 +157,7 @@ def advance_article_stage(db: Session, article_id: int, remarks: Optional[str] =
         nxt = stages[idx + 1]
         article.current_stage = nxt.stage_name
         nxt.stage_status = "In-progress"
-        nxt.actual_start_date = datetime.utcnow()
+        nxt.actual_start_date = datetime.now(timezone.utc)
         article.current_assignee_id = nxt.assignee_id
         db.commit()
         return {"status": "success", "previous_stage": current_stage, "new_stage": nxt.stage_name}

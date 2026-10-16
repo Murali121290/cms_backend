@@ -30,24 +30,25 @@ def validate_xml(xml_path: str, format: str) -> List[Dict]:
         # 2. DTD Validation
         import os
         base_dir = os.path.dirname(__file__)
+        dtd_path = None
         if format.upper() == "BITS":
             dtd_path = os.path.join(base_dir, "..", "dtd", "BITS-book2-2", "BITS-book2-2.dtd")
-        else:
+        elif format.upper() == "JATS":
             dtd_path = os.path.join(base_dir, "..", "dtd", "JATS-Archiving-1-4-MathML3-DTD", "JATS-archivearticle1-4-mathml3.dtd")
             
-        dtd_path = os.path.abspath(dtd_path)
-        
-        if os.path.exists(dtd_path):
-            dtd = etree.DTD(file=dtd_path)
-            if not dtd.validate(doc):
-                for error in dtd.error_log:
-                    errors.append({
-                        "line_number": error.line,
-                        "error_type": "DTD",
-                        "message": error.message
-                    })
-        else:
-            errors.append({"line_number": 0, "error_type": "System", "message": f"DTD file not found at {dtd_path}"})
+        if dtd_path:
+            dtd_path = os.path.abspath(dtd_path)
+            if os.path.exists(dtd_path):
+                dtd = etree.DTD(file=dtd_path)
+                if not dtd.validate(doc):
+                    for error in dtd.error_log:
+                        errors.append({
+                            "line_number": error.line,
+                            "error_type": "DTD",
+                            "message": error.message
+                        })
+            else:
+                errors.append({"line_number": 0, "error_type": "System", "message": f"DTD file not found at {dtd_path}"})
             
     except Exception as e:
         logger.error(f"Failed to run DTD validation: {traceback.format_exc()}")

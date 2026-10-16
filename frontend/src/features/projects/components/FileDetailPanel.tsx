@@ -3,6 +3,8 @@ import { X, Download, Loader2, AlertCircle, Clock } from 'lucide-react'
 import type { FileRow } from '@/pages/ChapterFilePage'
 import { getFileVersions, downloadFileVersion } from '@/api/files'
 import type { VersionRecord } from '@/types/api'
+import { formatDateTime } from '@/utils/dateUtils'
+import { useUsersStore } from '@/stores/usersStore'
 
 interface FileDetailPanelProps {
   file: FileRow
@@ -11,9 +13,10 @@ interface FileDetailPanelProps {
 
 function fmtDate(iso: string) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString('en-GB', {
+  return formatDateTime(iso, 'en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
+    second: undefined,
   })
 }
 
@@ -92,7 +95,9 @@ export function FileDetailPanel({ file, onClose }: FileDetailPanelProps) {
             <MetaRow label="File Name">{file.file_name}</MetaRow>
             <MetaRow label="Folder">{file.subfolder}</MetaRow>
             <MetaRow label="Size">{file.file_size || '—'}</MetaRow>
-            <MetaRow label="Uploaded By">{file.uploaded_by || '—'}</MetaRow>
+            <MetaRow label="Uploaded By">
+              {file.uploaded_by ? (useUsersStore.getState().getUserDisplayNameByUsername(file.uploaded_by) || file.uploaded_by) : '—'}
+            </MetaRow>
             <MetaRow label="Uploaded On">
               {file.uploaded_on ? fmtDate(file.uploaded_on) : '—'}
             </MetaRow>

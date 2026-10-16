@@ -28,18 +28,20 @@ import {
 import { FOLDER_CONFIG, COLUMN_DEFINITIONS, fileTypeIcon, isProcessingActionVisibleForStage, getFolderConfigForChapter } from '@/config/fileManagerConfig'
 import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
 import { BulkUploadModal } from '@/components/BulkUploadModal'
+import { formatDateTime } from '@/utils/dateUtils'
 import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
-import { TagSetSelectModal } from '@/features/projects/components/TagSetSelectModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import { ArtValidationModal } from '@/components/ArtValidationModal'
 import { LanguageEditReviewModal } from '@/features/language_edit/LanguageEditReviewModal'
+import { useStageActionsStore } from '@/store/useStageActionsStore'
 
 import {
   startProcessingJob,
+  startStructuring,
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
+  startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -185,9 +187,10 @@ function fileToFolderKey(
 
 function fmtDate(iso: string) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString('en-GB', {
+  return formatDateTime(iso, 'en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
+    second: undefined,
   })
 }
 
@@ -280,28 +283,34 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId,
+  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId, clientName,
 }: {
   row: FileRow | null
   onOpenReferenceCheck: (file: FileRecord) => void
   onOpenXmlToIndesign: (fileId: number, fileName: string) => void
+  onOpenWordToIndesign?: (fileId: number, fileName: string) => void
   onOpenArtValidation: (fileId: number, fileName: string) => void
   onOpenLanguageEdit?: (fileId: number, fileName: string) => void
   stageName: string
   isAssigned: boolean
   projectId: number
   chapterId: number
+  clientName?: string
 }) {
 
   const navigate = useNavigate()
   const [confirmStep, setConfirmStep] = useState<ConfirmStep | null>(null)
-  const [tagSetModalOpen, setTagSetModalOpen] = useState(false)
   const queryClient = useQueryClient()
   const invalidateFiles = () =>
     queryClient.invalidateQueries({ queryKey: ['chapter-files', projectId, chapterId] })
 
   const fid = row?.db_id
   const fname = row?.file_name.toLowerCase() ?? ''
+
+  const isSpringer = Boolean(
+    clientName && (clientName.toLowerCase().includes('springer') || clientName.toLowerCase() === 'spr')
+  )
+  const tagSet = isSpringer ? 'springer' : 'lww'
 
   // Gate stage-specific processing actions to the stage they actually belong to.
   // The stage-to-action mapping lives in fileManagerConfig.ts (PROCESSING_ACTION_STAGE_MAP) —
@@ -311,9 +320,10 @@ function ProcessingActionsMenu({
   const btnCls = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-primary/30 text-primary hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap transition-colors'
 
   async function fire(label: string, fn: () => Promise<unknown>, pollFileId?: number, pollProcessType?: string) {
+    const fileName = row?.file_name || 'file'
     try {
       await fn()
-      toast.success(`${label} started for ${row?.file_name}`)
+      toast.success(`${label} started for ${fileName}`)
       // Refetch immediately so the row flips to "Processing…" without a manual refresh.
       void invalidateFiles()
     } catch {
@@ -327,7 +337,7 @@ function ProcessingActionsMenu({
     const interval = setInterval(async () => {
       if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
         clearInterval(interval)
-        toast.error(`${label} timed out for ${row?.file_name}`)
+        toast.error(`${label} timed out for ${fileName}`)
         void invalidateFiles()
         return
       }
@@ -335,11 +345,11 @@ function ProcessingActionsMenu({
         const result = await getProcessingStatus(pollFileId, pollProcessType)
         if (result.status === 'failed') {
           clearInterval(interval)
-          toast.error(`${label} failed for ${row?.file_name}: ${result.error ?? 'Unknown error'}`)
+          toast.error(`${label} failed for ${fileName}: ${result.error ?? 'Unknown error'}`)
           void invalidateFiles()
         } else if (result.status === 'completed') {
           clearInterval(interval)
-          toast.success(`${label} completed for ${row?.file_name}`)
+          toast.success(`${label} completed for ${fileName}`)
           void invalidateFiles()
         }
       } catch {
@@ -371,7 +381,14 @@ function ProcessingActionsMenu({
     <>
       <div className="flex items-center gap-1.5 flex-wrap">
         {showAction('structuring') && (
-          <button disabled={!fid || !fname.endsWith('.docx')} className={btnCls} onClick={() => setTagSetModalOpen(true)}>
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={() => {
+              if (!fid) return
+              void fire('Structuring', () => startStructuring(fid, tagSet), fid, 'structuring')
+            }}
+          >
             <Layers size={12} className="text-amber-500" /> Structuring
           </button>
         )}
@@ -497,45 +514,20 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+        {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
             disabled={!fid || !fname.endsWith('.docx')}
+            type="button"
             className={btnCls}
-            onClick={() => fid && setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' })}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Style Match Design',
+              jobFn: () => startStyleMatchDesign(fid),
+              pollFileId: fid,
+              pollProcessType: 'style_match_design'
+            })}
           >
-            <FileCode size={12} /> Word to XML
+            <ShieldCheck size={12} /> Style Match Design
           </button>
-        )}
-
-        {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
-          <>
-            <button
-              disabled={!fid || !fname.endsWith('.docx')}
-              type="button"
-              className={btnCls}
-              onClick={() => fid && setConfirmStep({
-                actionName: 'Style Match Design',
-                jobFn: () => startStyleMatchDesign(fid),
-                pollFileId: fid,
-                pollProcessType: 'style_match_design'
-              })}
-            >
-              <ShieldCheck size={12} /> Style Match Design
-            </button>
-            <button
-              disabled={!fid || !fname.endsWith('.docx')}
-              type="button"
-              className={btnCls}
-              onClick={() => fid && setConfirmStep({
-                actionName: 'Style Validation',
-                jobFn: () => startStyleValidation(fid),
-                pollFileId: fid,
-                pollProcessType: 'style_validation'
-              })}
-            >
-              <ShieldCheck size={12} /> Style Validation
-            </button>
-          </>
         )}
 
         {showAction('artValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
@@ -546,6 +538,46 @@ function ProcessingActionsMenu({
             onClick={() => fid && onOpenArtValidation(fid, row?.file_name || '')}
           >
             <Image size={12} /> Art Validation
+          </button>
+        )}
+
+        {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            type="button"
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Style Validation',
+              jobFn: () => startStyleValidation(fid),
+              pollFileId: fid,
+              pollProcessType: 'style_validation'
+            })}
+          >
+            <ShieldCheck size={12} /> Style Validation
+          </button>
+        )}
+
+        {showAction('wordToIndesign') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={() => {
+              if (fid) {
+                onOpenWordToIndesign?.(fid, row?.file_name || '')
+              }
+            }}
+          >
+            <Layers size={12} /> Word to InDesign
+          </button>
+        )}
+
+        {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' })}
+          >
+            <FileCode size={12} /> Word to XML
           </button>
         )}
 
@@ -645,15 +677,6 @@ function ProcessingActionsMenu({
           </div>
         </div>
       )}
-
-      {fid && row && (
-        <TagSetSelectModal
-          fileId={fid}
-          fileName={row.file_name}
-          isOpen={tagSetModalOpen}
-          onClose={() => setTagSetModalOpen(false)}
-        />
-      )}
     </>
   )
 }
@@ -688,6 +711,11 @@ export function ChapterFilePage({
   const cid = routeChapterId ? Number(routeChapterId) : (propChapterId ?? 0)
   const cliId = routeClientId ?? propClientId
 
+  const fetchStageActions = useStageActionsStore(s => s.fetchMapping)
+  useEffect(() => {
+    void fetchStageActions()
+  }, [fetchStageActions])
+
   // ── Fetch chapter files from API ─────────────────────────────────────────
   const filesQuery = useChapterFilesQuery(pid || null, cid || null)
 
@@ -697,7 +725,7 @@ export function ChapterFilePage({
   const resolvedChapterTitle = propChapterTitle ?? chapterMeta?.title ?? null
   const resolvedStageName = propStageName ?? ''
   const resolvedIsAssigned = propIsAssigned ?? true
-  const resolvedClientName = propClientName ?? ''
+  const resolvedClientName = propClientName || filesQuery.data?.project?.client_name || ''
   const resolvedProjectName = propProjectName ?? filesQuery.data?.project?.title ?? ''
   const resolvedChapterLabel = filesQuery.data?.chapter?.number ?? String(cid)
 
@@ -735,7 +763,7 @@ export function ChapterFilePage({
   const [batchBusy, setBatchBusy] = useState<string | null>(null)
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
   const queryClient = useQueryClient()
-  const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string } | null>(null)
+  const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string; processType?: 'xml_to_indesign' | 'word_to_indesign' } | null>(null)
   const [artValidationFile, setArtValidationFile] = useState<{ id: number; name: string } | null>(null)
   const [langEditFile, setLangEditFile] = useState<{ id: number; name: string } | null>(null)
 
@@ -1287,18 +1315,23 @@ export function ChapterFilePage({
     }
   }
 
-  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation') {
+  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation' | 'word_to_indesign') {
     if (selectedCount === 0 || batchBusy) return
     setBatchBusy(processType)
     try {
-      const apiFn = processType === 'word_to_xml' ? startWordToXml : startStyleValidation
+      const apiFn = processType === 'word_to_xml'
+        ? startWordToXml
+        : processType === 'word_to_indesign'
+          ? startWordToIndesign
+          : startStyleValidation
       await Promise.all(
         selectedRows
           .filter(r => r.db_id)
           .map(r => apiFn(r.db_id!))
       )
+      const label = processType === 'word_to_xml' ? 'Word to XML' : processType === 'word_to_indesign' ? 'Word to InDesign' : 'Style Validation'
       toast.success(
-        `Successfully started ${processType === 'word_to_xml' ? 'Word to XML' : 'Style Validation'} for ${selectedCount} file(s)`
+        `Successfully started ${label} for ${selectedCount} file(s)`
       )
       void filesQuery.refetch()
     } catch (e: any) {
@@ -1408,7 +1441,7 @@ export function ChapterFilePage({
         )}
 
         {/* Batch Word to XML - Manuscript folder only */}
-        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && (
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && isProcessingActionVisibleForStage('wordToXml', resolvedStageName) && (
           <button
             onClick={() => void handleBatchProcess('word_to_xml')}
             disabled={!!batchBusy}
@@ -1419,6 +1452,21 @@ export function ChapterFilePage({
           >
             {batchBusy === 'word_to_xml' ? <Loader2 size={12} className="animate-spin" /> : <FileCode size={12} />}
             {batchBusy === 'word_to_xml' ? 'Processing…' : 'Batch Word to XML'}
+          </button>
+        )}
+
+        {/* Batch Word to InDesign - Manuscript folder only */}
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && isProcessingActionVisibleForStage('wordToIndesign', resolvedStageName) && (
+          <button
+            onClick={() => void handleBatchProcess('word_to_indesign')}
+            disabled={!!batchBusy}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+              ${!batchBusy
+                ? 'border-primary text-primary hover:bg-accent'
+                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+          >
+            {batchBusy === 'word_to_indesign' ? <Loader2 size={12} className="animate-spin" /> : <Layers size={12} />}
+            {batchBusy === 'word_to_indesign' ? 'Processing…' : 'Batch Word to InDesign'}
           </button>
         )}
 
@@ -1582,13 +1630,15 @@ export function ChapterFilePage({
                 <ProcessingActionsMenu
                   row={selectedCount === 1 ? selectedRows[0] : null}
                   onOpenReferenceCheck={setRefCheckFile}
-                  onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName })}
+                  onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'xml_to_indesign' })}
+                  onOpenWordToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'word_to_indesign' })}
                   onOpenArtValidation={(fileId, fileName) => setArtValidationFile({ id: fileId, name: fileName })}
                   onOpenLanguageEdit={(fileId, fileName) => setLangEditFile({ id: fileId, name: fileName })}
                   stageName={resolvedStageName}
                   isAssigned={resolvedIsAssigned}
                   projectId={pid}
                   chapterId={cid}
+                  clientName={resolvedClientName}
                 />
 
               )}
@@ -1750,13 +1800,14 @@ export function ChapterFilePage({
         </div>
       )}
 
-      {/* ── XML to InDesign Conversion Modal ────────────────────────────── */}
+      {/* ── XML / Word to InDesign Conversion Modal ────────────────────────────── */}
       {xmlToIndesignFile && (
         <XmlToIndesignModal
           isOpen={xmlToIndesignFile !== null}
           onClose={() => setXmlToIndesignFile(null)}
           fileId={xmlToIndesignFile.id}
           fileName={xmlToIndesignFile.name}
+          processType={xmlToIndesignFile.processType || 'xml_to_indesign'}
           projectId={pid}
           onComplete={invalidateFiles}
         />

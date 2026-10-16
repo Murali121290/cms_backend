@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, BigInteger, String, ForeignKey, Text, JSON, DateTime, Date, Boolean, func
 from sqlalchemy.orm import relationship, synonym
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import Base
 
 class Project(Base):
@@ -61,11 +61,11 @@ class ProjectStylesheet(Base):
     selected_ia_rows = Column(String, nullable=False, default="[]")
     analyzed_file_ids = Column(String, nullable=True, default="[]")  # JSON list of file IDs used to build this stylesheet
     is_active = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)

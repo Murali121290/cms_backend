@@ -774,8 +774,84 @@ def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_id
     return "".join(parts)
 
 
+def _get_paragraph_alignment(para) -> str:
+    """Extract alignment from paragraph XML (w:jc)."""
+    pPr = para._p.find(qn("w:pPr"))
+    if pPr is not None:
+        jc = pPr.find(qn("w:jc"))
+        if jc is not None:
+            val = (jc.get(qn("w:val")) or "").lower()
+            if val in ("center", "right", "left"):
+                return val
+            elif val in ("both", "justify"):
+                return "justify"
+    try:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
+            return "center"
+        elif para.alignment == WD_ALIGN_PARAGRAPH.RIGHT:
+            return "right"
+        elif para.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY:
+            return "justify"
+        elif para.alignment == WD_ALIGN_PARAGRAPH.LEFT:
+            return "left"
+    except Exception:
+        pass
+    return ""
+
+
+def _get_cell_vertical_align(tc) -> str:
+    """Extract cell vertical alignment (w:vAlign) mapped to CSS vertical-align."""
+    tcPr = tc.find(qn("w:tcPr"))
+    if tcPr is not None:
+        vAlign = tcPr.find(qn("w:vAlign"))
+        if vAlign is not None:
+            val = (vAlign.get(qn("w:val")) or "").lower()
+            if val in ("center", "middle"):
+                return "middle"
+            elif val in ("top", "bottom"):
+                return val
+    return ""
+
+
+def _get_cell_shading(tc) -> str:
+    """Extract cell background color (w:shd)."""
+    tcPr = tc.find(qn("w:tcPr"))
+    if tcPr is not None:
+        shd = tcPr.find(qn("w:shd"))
+        if shd is not None:
+            fill = (shd.get(qn("w:fill")) or "").strip().lower()
+            if fill and fill not in ("auto", "none", "ffffff", "fff"):
+                if re.match(r"^[0-9a-f]{6}$", fill):
+                    return f"#{fill}"
+    return ""
+
+
+def _get_cell_width(tc) -> str:
+    """Extract cell width (w:tcW) as percentage or pt."""
+    tcPr = tc.find(qn("w:tcPr"))
+    if tcPr is not None:
+        tcW = tcPr.find(qn("w:tcW"))
+        if tcW is not None:
+            w_type = tcW.get(qn("w:type"), "")
+            w_val = tcW.get(qn("w:val"), "")
+            if w_type == "pct" and w_val:
+                try:
+                    pct = float(w_val) / 50.0
+                    return f"{pct:.1f}%"
+                except Exception:
+                    pass
+            elif w_type == "dxa" and w_val:
+                try:
+                    pt = float(w_val) / 20.0
+                    return f"{pt:.1f}pt"
+                except Exception:
+                    pass
+    return ""
+
+
 def _paragraph_to_html(para, para_idx: int, doc, findings_by_para=None) -> str:
-    """Render a standard body paragraph to HTML."""
+    """Render a standard body paragraph to HTML preserving alignment."""
     style_name = para.style.name if para.style else "Normal"
     tag = "p"
     if style_name.lower().startswith("heading "):
@@ -785,46 +861,188 @@ def _paragraph_to_html(para, para_idx: int, doc, findings_by_para=None) -> str:
 
     runs_html = _paragraph_content_to_html(para._p, para, doc, findings_by_para, para_idx)
     if not runs_html:
-        runs_html = "<br>"
+        runs_html = "<br/>"
 
     label = html.escape(style_name, quote=True)
     bm_name = _get_or_create_para_bookmark(para, doc)
 
+    # Preserve paragraph alignment
+    p_styles = []
+    align = _get_paragraph_alignment(para)
+    if align:
+        p_styles.append(f"text-align: {align};")
+    style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ""
+
     return (
-        f'<{tag} class="{label}" data-style-label="{label}" data-para-idx="{para_idx}" data-bookmark="{bm_name}">'
+        f'<{tag} class="{label}" data-style-label="{label}" data-para-idx="{para_idx}" data-bookmark="{bm_name}"{style_attr}>'
         f"{runs_html}</{tag}>"
     )
 
 
 def _table_to_html(table, doc, body_p_map=None, findings_by_para=None) -> str:
-    """Render a table and its cells to HTML with matching table and cell bookmarks."""
+    """Render a table and its cells to HTML with grid-aware colspan, rowspan, and cell formatting."""
     tbl_bm = _get_or_create_table_bookmark(table, doc)
+    style_name = table.style.name if table.style else "TableGrid"
+    tbl_class = html.escape(style_name, quote=True)
+
+    tblPr = table._tbl.find(qn("w:tblPr"))
+    tbl_styles = []
+    if tblPr is not None:
+        jc = tblPr.find(qn("w:jc"))
+        if jc is not None:
+            val = (jc.get(qn("w:val")) or "").lower()
+            if val == "center":
+                tbl_styles.append("margin-left: auto; margin-right: auto;")
+            elif val == "right":
+                tbl_styles.append("margin-left: auto; margin-right: 0;")
+    tbl_style_attr = f' style="{" ".join(tbl_styles)}"' if tbl_styles else ""
+
+    tr_elements = table._tbl.findall(qn("w:tr"))
+    if not tr_elements:
+        return f'<table class="{tbl_class}" data-bookmark="{tbl_bm}"><tbody></tbody></table>'
+
+    # Pass 1: Build 2D grid matrix tracking horizontal and vertical merges
+    active_vmerges = {}
+    row_entries = []
+
+    for r_idx, tr in enumerate(tr_elements):
+        tcs = tr.findall(qn("w:tc"))
+        col_ptr = 0
+        row_cells = []
+
+        for tc in tcs:
+            tcPr = tc.find(qn("w:tcPr"))
+            grid_span = 1
+            if tcPr is not None:
+                gs_elem = tcPr.find(qn("w:gridSpan"))
+                if gs_elem is not None:
+                    try:
+                        grid_span = int(gs_elem.get(qn("w:val"), 1))
+                    except (ValueError, TypeError):
+                        grid_span = 1
+
+            vmerge_val = None
+            if tcPr is not None:
+                vm_elem = tcPr.find(qn("w:vMerge"))
+                if vm_elem is not None:
+                    vmerge_val = vm_elem.get(qn("w:val"), "continue")
+                    if vmerge_val is None:
+                        vmerge_val = "continue"
+
+            # Check if this cell is continuing a vertical merge from above
+            if vmerge_val == "continue" and col_ptr in active_vmerges:
+                parent_cell = active_vmerges[col_ptr]
+                parent_cell["rowspan"] += 1
+                cell_info = {
+                    "tc": tc,
+                    "r": r_idx,
+                    "c": col_ptr,
+                    "colspan": grid_span,
+                    "rowspan": 1,
+                    "is_continue": True,
+                    "parent": parent_cell,
+                }
+            elif vmerge_val == "restart":
+                cell_info = {
+                    "tc": tc,
+                    "r": r_idx,
+                    "c": col_ptr,
+                    "colspan": grid_span,
+                    "rowspan": 1,
+                    "is_continue": False,
+                    "parent": None,
+                }
+                for c in range(col_ptr, col_ptr + grid_span):
+                    active_vmerges[c] = cell_info
+            else:
+                cell_info = {
+                    "tc": tc,
+                    "r": r_idx,
+                    "c": col_ptr,
+                    "colspan": grid_span,
+                    "rowspan": 1,
+                    "is_continue": False,
+                    "parent": None,
+                }
+                for c in range(col_ptr, col_ptr + grid_span):
+                    active_vmerges.pop(c, None)
+
+            row_cells.append(cell_info)
+            col_ptr += grid_span
+
+        row_entries.append(row_cells)
+
+    # Pass 2: Render rows and cells to HTML
     rows_html = []
-    
-    for row in table.rows:
+    for r_idx, (tr, r_cells) in enumerate(zip(tr_elements, row_entries)):
+        trPr = tr.find(qn("w:trPr"))
+        is_header = trPr is not None and trPr.find(qn("w:tblHeader")) is not None
+        cell_tag = "th" if is_header else "td"
+
         cells_html = []
-        for cell in row.cells:
-            # We uniquely identify the cell by bookmarking its first paragraph
+        for c_info in r_cells:
+            if c_info["is_continue"]:
+                continue
+
+            tc = c_info["tc"]
+            col_span = c_info["colspan"]
+            row_span = c_info["rowspan"]
+
+            p_elements = tc.findall(qn("w:p"))
+            cell_paras = [docx.text.paragraph.Paragraph(p_el, doc) for p_el in p_elements]
+
             cell_bm = ""
-            if cell.paragraphs:
-                cell_bm = _get_or_create_para_bookmark(cell.paragraphs[0], doc, prefix="cell_bm_")
-            
+            if cell_paras:
+                cell_bm = _get_or_create_para_bookmark(cell_paras[0], doc, prefix="cell_bm_")
+
             cell_inner = ""
-            for p in cell.paragraphs:
-                # Format each paragraph in the cell
+            for p in cell_paras:
                 p_style = p.style.name if p.style else "Normal"
+                p_label = html.escape(p_style, quote=True)
                 para_idx = body_p_map.get(p._element, 0) if body_p_map else 0
                 runs = _paragraph_content_to_html(p._p, p, doc, findings_by_para, para_idx)
                 if not runs:
-                    runs = "<br>"
+                    runs = "<br/>"
                 p_bm = _get_or_create_para_bookmark(p, doc)
-                cell_inner += f'<p class="{p_style}" data-style-label="{p_style}" data-para-idx="{para_idx}" data-bookmark="{p_bm}">{runs}</p>'
 
-            attrs = f' data-bookmark="{cell_bm}"' if cell_bm else ""
-            cells_html.append(f"<td{attrs}>{cell_inner}</td>")
+                p_styles = []
+                p_align = _get_paragraph_alignment(p)
+                if p_align:
+                    p_styles.append(f"text-align: {p_align};")
+                p_style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ""
+
+                cell_inner += f'<p class="{p_label}" data-style-label="{p_label}" data-para-idx="{para_idx}" data-bookmark="{p_bm}"{p_style_attr}>{runs}</p>'
+
+            if not cell_inner:
+                cell_inner = "<p><br/></p>"
+
+            cell_attrs = []
+            if col_span > 1:
+                cell_attrs.append(f'colspan="{col_span}"')
+            if row_span > 1:
+                cell_attrs.append(f'rowspan="{row_span}"')
+            if cell_bm:
+                cell_attrs.append(f'data-bookmark="{cell_bm}"')
+
+            c_styles = []
+            valign = _get_cell_vertical_align(tc)
+            if valign:
+                c_styles.append(f"vertical-align: {valign};")
+            shd = _get_cell_shading(tc)
+            if shd:
+                c_styles.append(f"background-color: {shd};")
+            width = _get_cell_width(tc)
+            if width:
+                c_styles.append(f"width: {width};")
+            if c_styles:
+                cell_attrs.append(f'style="{" ".join(c_styles)}"')
+
+            attr_str = f" {' '.join(cell_attrs)}" if cell_attrs else ""
+            cells_html.append(f"<{cell_tag}{attr_str}>{cell_inner}</{cell_tag}>")
+
         rows_html.append(f"<tr>{''.join(cells_html)}</tr>")
-    
-    return f'<table class="TableGrid" data-bookmark="{tbl_bm}"><tbody>{"".join(rows_html)}</tbody></table>'
+
+    return f'<table class="{tbl_class}" data-bookmark="{tbl_bm}"{tbl_style_attr}><tbody>{"".join(rows_html)}</tbody></table>'
 
 
 def _footnote_endnote_to_html(doc, findings_by_para=None) -> str:
@@ -1098,11 +1316,17 @@ def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
         all_items = _get_all_paragraph_runs(para)
         runs_html = _render_runs_with_sdt(all_items, para, doc, findings_by_para, para_idx)
         if not runs_html:
-            runs_html = "<br>"
+            runs_html = "<br/>"
+
+        p_styles = []
+        align = _get_paragraph_alignment(para)
+        if align:
+            p_styles.append(f"text-align: {align};")
+        style_attr = f' style="{" ".join(p_styles)}"' if p_styles else ""
 
         html_parts.append(
             f'<li>'
-            f'<p class="{label}" data-style-label="{label}" data-para-idx="{para_idx}" data-bookmark="{bm_name}">'
+            f'<p class="{label}" data-style-label="{label}" data-para-idx="{para_idx}" data-bookmark="{bm_name}"{style_attr}>'
             f'{runs_html}'
             f'</p>'
         )
@@ -1113,6 +1337,69 @@ def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
         html_parts.append(f"</li></{closed_tag}>")
         
     return "\n".join(html_parts)
+
+
+def _extract_docx_styles_css(doc) -> str:
+    """Extract font styling (bold, italic, size, color) from docx styles.xml as CSS rules."""
+    from docx.enum.style import WD_STYLE_TYPE
+    rules = []
+    for s in doc.styles:
+        if not hasattr(s, "type") or s.type not in (WD_STYLE_TYPE.CHARACTER, WD_STYLE_TYPE.PARAGRAPH):
+            continue
+        props = []
+        try:
+            font = getattr(s, "font", None)
+            if font is not None:
+                if font.bold:
+                    props.append("font-weight: bold;")
+                elif font.bold is False:
+                    props.append("font-weight: normal;")
+                if font.italic:
+                    props.append("font-style: italic;")
+                elif font.italic is False:
+                    props.append("font-style: normal;")
+                if font.underline:
+                    props.append("text-decoration: underline;")
+                if font.size:
+                    pt_size = font.size.pt
+                    if s.type == WD_STYLE_TYPE.PARAGRAPH:
+                        pt_size = min(pt_size, 26.0)
+                    props.append(f"font-size: {pt_size:.1f}pt;")
+                if font.color and font.color.rgb and str(font.color.rgb).upper() not in ("FFFFFF", "FFF"):
+                    props.append(f"color: #{font.color.rgb};")
+        except Exception:
+            continue
+
+        if props:
+            p_str = " ".join(props)
+            name = s.name.strip()
+            safe_name = name.replace(" ", "_").replace(".", "_")
+            style_id = getattr(s, "style_id", None) or ""
+            safe_id = style_id.strip().replace(" ", "_").replace(".", "_") if style_id else ""
+            if s.type == WD_STYLE_TYPE.CHARACTER:
+                char_selectors = [f".ProseMirror span.{name}", f".ProseMirror span.{safe_name}"]
+                if safe_id and safe_id not in (name, safe_name):
+                    char_selectors.append(f".ProseMirror span.{safe_id}")
+                rules.append(f"{', '.join(char_selectors)} {{ {p_str} }}")
+            elif s.type == WD_STYLE_TYPE.PARAGRAPH:
+                p_selectors = [
+                    f".ProseMirror p.{name}",
+                    f".ProseMirror p.{safe_name}",
+                    f'.ProseMirror p[data-style-label="{name}"]',
+                    f'.ProseMirror [data-style-label="{name}"]',
+                    f".ProseMirror h1.{name}",
+                    f".ProseMirror h2.{name}",
+                    f".ProseMirror h3.{name}",
+                ]
+                if safe_id and safe_id not in (name, safe_name):
+                    p_selectors.extend([
+                        f".ProseMirror p.{safe_id}",
+                        f'.ProseMirror p[data-style-label="{safe_id}"]',
+                        f'.ProseMirror [data-style-label="{safe_id}"]',
+                    ])
+                rules.append(f"{', '.join(p_selectors)} {{ {p_str} }}")
+
+    return "\n".join(rules)
 
 
 # ─── Core Converter Engine ───────────────────────────────────────────────────
@@ -1194,6 +1481,10 @@ class DocxToXhtmlRunsEngine:
         # Read-only XHTML export complete. Zero mutations saved to source DOCX.
         logger.info(f"Read-only XHTML export completed for DOCX: {docx_path}")
 
+        # Extract styles CSS from doc.styles
+        styles_css = _extract_docx_styles_css(doc)
+        style_block = f'<style class="docx-styles">\n{styles_css}\n</style>\n' if styles_css else ""
+
         body = "\n".join(blocks)
-        return f"<!DOCTYPE html>\n<html><body>{body}</body></html>"
+        return f"<!DOCTYPE html>\n<html><head>{style_block}</head><body>{style_block}{body}</body></html>"
 

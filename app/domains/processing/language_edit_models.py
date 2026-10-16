@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -18,8 +18,8 @@ class LanguageEditJob(Base):
     accepted_count = Column(Integer, default=0)
     edited_count = Column(Integer, default=0)
     rejected_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     file = relationship("File", foreign_keys=[file_id])
     project = relationship("Project", foreign_keys=[project_id])
@@ -71,8 +71,8 @@ class ProjectLanguageRules(Base):
     description = Column(Text, nullable=True)
     updated_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"),
                            nullable=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc),
                         nullable=False)
 
     project = relationship("Project", foreign_keys=[project_id])
@@ -91,7 +91,7 @@ class ProjectLanguageRulesHistory(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True, nullable=False)
     changed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True)
-    changed_at = Column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    changed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True, nullable=False)
     profile_key = Column(String(64), nullable=True)
     enabled_rule_ids = Column(JSON, nullable=True)
     disabled_rule_ids = Column(JSON, nullable=True)

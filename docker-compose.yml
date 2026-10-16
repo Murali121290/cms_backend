@@ -36,6 +36,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cms_password}
       POSTGRES_DB: ${POSTGRES_DB:-cms_db}
       POSTGRES_HOST_AUTH_METHOD: md5
+      TZ: ${TZ:-Asia/Kolkata}
+      PGTZ: ${PGTZ:-Asia/Kolkata}
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cms_user} -d ${POSTGRES_DB:-cms_db}" ]
       interval: 10s
@@ -91,6 +93,7 @@ services:
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "ftp.s4carlisle.org:10.1.1.100"
 
   # ── Celery Worker ─────────────────────────────────────────────────────────
   celery_worker:
@@ -122,6 +125,7 @@ services:
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "ftp.s4carlisle.org:10.1.1.100"
 
   # ── Collabora Online (LibreOffice) ────────────────────────────────────────
   # HOST_DOMAIN and HOST_PORT are read from .env.

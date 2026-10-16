@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ def run_check(db: Session, article: JournalArticle, key: str, user_id: Optional[
     except Exception as exc:
         run.status = "Failed"
         run.error_message = str(exc)
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(timezone.utc)
         db.commit()
         raise
 
@@ -90,7 +90,7 @@ def run_check(db: Session, article: JournalArticle, key: str, user_id: Optional[
     run.rules_total = result.rules_total
     run.rules_passed = result.rules_passed
     run.rule_set_version = result.rule_set_version
-    run.finished_at = datetime.utcnow()
+    run.finished_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(run)
     return run
@@ -98,10 +98,10 @@ def run_check(db: Session, article: JournalArticle, key: str, user_id: Optional[
 
 # Output a stage must have produced before the article can leave it.
 STAGE_OUTPUTS = {
-    1: ("xhtml_path", "Run pre-editing to convert the manuscript to XHTML"),
-    3: ("jats_xml_path", "Convert the article to JATS XML"),
-    4: ("indesign_path", "Generate the InDesign layout"),
-    6: ("proof_pdf_path", "Generate a proof PDF"),
+    2: ("xhtml_path", "Run pre-editing to convert the manuscript to XHTML"),
+    4: ("jats_xml_path", "Convert the article to JATS XML"),
+    5: ("indesign_path", "Generate the InDesign layout"),
+    7: ("proof_pdf_path", "Generate a proof PDF"),
 }
 
 

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from lxml import etree
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app import database
 from app.domains.auth.security import get_current_user_from_cookie
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/xml-conversion", tags=["XML Conversion"], dependenci
 async def create_xml_conversion_project(
     client_code: str = Form(...),
     project_name: str = Form(...),
-    target_format: str = Form("JATS"),
+    target_format: str = Form("XML"),
     file: UploadFile = File(...),
     db: Session = Depends(database.get_db),
     current_user: dict = Depends(get_current_user_from_cookie)
@@ -52,7 +52,7 @@ async def create_xml_conversion_project(
     project = PostProdXMLConversionProject(
         client_code=client_code,
         project_name=project_name,
-        target_format=target_format,
+        target_format=target_format or "XML",
         status="Active",
         filename=file.filename,
         filepath=filepath,
@@ -96,15 +96,22 @@ async def update_project(project_id: int, project_data: dict, db: Session = Depe
         if project.assignee and project.conversion_status == "YTS":
             project.conversion_status = "In-progress"
             
+        fn = (getattr(current_user, "first_name", None) or "").strip()
+        ln = (getattr(current_user, "last_name", None) or "").strip()
+        if fn and ln:
+            assigned_by = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
+        else:
+            assigned_by = fn or ln or getattr(current_user, "username", "System")
+
         history = PostProdXMLConversionHistory(
             project_id=project.id,
             action="Assignee Changed",
             details={
                 "user_id": current_user.id if current_user else None,
-                "assigned_by": current_user.username if current_user else "System",
+                "assigned_by": assigned_by,
                 "old_assignee": old_assignee,
                 "new_assignee": project.assignee,
-                "time": datetime.utcnow().isoformat()
+                "time": datetime.now(timezone.utc).isoformat()
             }
         )
         db.add(history)
@@ -205,10 +212,11 @@ def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(
     url = os.environ.get("PDF2XML_API_URL")
     if not url:
         raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
+    return_xml_val = "rawxml" if format.upper() == "XML" else format.lower()
     params = {
         "engine": "docling",
         "targets": "json,xml,jats,bits",
-        "return_xml": format.lower()
+        "return_xml": return_xml_val
     }
     
     try:
@@ -439,7 +447,7 @@ def validate_xml_endpoint(project_id: int, req: ValidateRequest, db: Session = D
     # DTD Validation only for final XML for now
     if is_well_formed and req.xmlType == "final":
         from app.domains.post_prod.xml_conversion.validators.dtd_validator import validate_xml
-        v_errors = validate_xml(xml_filepath, project.target_format or "JATS")
+        v_errors = validate_xml(xml_filepath, project.target_format or "XML")
         for err in v_errors:
             if err["error_type"] == "DTD":
                 is_dtd_valid = False
@@ -466,7 +474,7 @@ def complete_project(project_id: int, db: Session = Depends(database.get_db)):
         
     project.conversion_status = "Completed"
     project.qc_status = "Completed"
-    project.completed_at = datetime.utcnow()
+    project.completed_at = datetime.now(timezone.utc)
     db.commit()
     return {"message": "Project marked as Completed"}
 

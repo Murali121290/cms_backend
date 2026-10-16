@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
@@ -18,6 +19,22 @@ import bcrypt
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 
 from werkzeug.security import check_password_hash as check_werkzeug_hash
+
+def get_user_full_name(u: Any) -> Optional[str]:
+    """
+    Format a user object or dict into a displayable full name.
+    Avoids duplicate names if first_name already contains last_name (e.g. 'Gopi S' + 'S').
+    Falls back to username if names are absent.
+    """
+    if not u:
+        return None
+    fn = (getattr(u, "first_name", None) or (u.get("first_name") if isinstance(u, dict) else None) or "").strip()
+    ln = (getattr(u, "last_name", None) or (u.get("last_name") if isinstance(u, dict) else None) or "").strip()
+    if fn and ln:
+        if fn.endswith(f" {ln}") or fn.endswith(ln):
+            return fn
+        return f"{fn} {ln}"
+    return fn or ln or getattr(u, "username", None) or (u.get("username") if isinstance(u, dict) else None)
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -51,9 +68,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt

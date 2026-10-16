@@ -15,6 +15,7 @@ import { useProjectChaptersQuery } from "@/features/projects/useProjectChaptersQ
 import { getChapterFiles } from "@/api/projects";
 import { StylesheetFormDrawer } from "@/features/stylesheets/StylesheetFormDrawer";
 import type { StylesheetSummary, TriggeredIARule, FileRecord } from "@/types/api";
+import { formatDateTime as formatUtcDateTime } from "@/utils/dateUtils";
 
 type ActiveTab = "manage" | "create";
 type WorkflowStep = "select-files" | "analyzing" | "review-rules" | "saving";
@@ -603,16 +604,7 @@ function MetaField({ label, value }: { label: string; value: string }) {
 }
 
 function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatUtcDateTime(value);
 }
 
 interface SelectFilesStepProps {

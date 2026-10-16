@@ -206,11 +206,18 @@ def update_due_date(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format")
 
+    fn = (getattr(current_user, "first_name", None) or "").strip()
+    ln = (getattr(current_user, "last_name", None) or "").strip()
+    if fn and ln:
+        full_name = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
+    else:
+        full_name = fn or ln or getattr(current_user, "username", getattr(current_user, "user_name", "Unknown"))
+
     history_entry = {
         "date": payload.due_date,
         "reason": payload.reason,
-        "changed_by": current_user.username if hasattr(current_user, 'username') else (current_user.user_name if hasattr(current_user, 'user_name') else "Unknown"),
-        "timestamp": datetime.utcnow().isoformat()
+        "changed_by": full_name,
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
     history = list(job.due_date_history) if job.due_date_history else []
@@ -374,7 +381,12 @@ def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str, ace_path: s
             zip_filename = pdf_filename.replace('.pdf', '.zip')
         else:
             zip_filename = remote_epub_name.replace('.epub', '.zip')
-        local_dir = os.path.dirname(local_epub_path)
+        if local_epub_path:
+            local_dir = os.path.dirname(local_epub_path)
+        else:
+            upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+            local_dir = os.path.join(upload_dir, "bod")
+        os.makedirs(local_dir, exist_ok=True)
         zip_filepath = os.path.join(local_dir, zip_filename)
         
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -385,7 +397,13 @@ def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str, ace_path: s
             if epubcheck_path and os.path.exists(epubcheck_path):
                 zipf.write(epubcheck_path, os.path.basename(epubcheck_path))
                 
-        with BodFtpService(settings.BOD_FTP_HOST, settings.BOD_FTP_USERNAME, settings.BOD_FTP_PASSWORD) as ftp:
+        with BodFtpService(
+            settings.BOD_FTP_HOST,
+            settings.BOD_FTP_USERNAME,
+            settings.BOD_FTP_PASSWORD,
+            port=getattr(settings, "BOD_FTP_PORT", 21),
+            timeout=getattr(settings, "BOD_FTP_TIMEOUT", 30)
+        ) as ftp:
             ftp.ensure_dir(delivery_dir)
             ftp.upload_file(zip_filepath, zip_filename)
     except Exception as e:
@@ -555,7 +573,7 @@ def create_job(
     first_stage = stages[0]
     
     now_iso = datetime.now(timezone.utc).isoformat()
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc)
     from datetime import timedelta
     
     initial_history = {

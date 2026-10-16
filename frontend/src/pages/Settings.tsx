@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Users, Building2, Shield, Sliders, Layers, Workflow, ChevronRight, Activity } from 'lucide-react'
+import { Users, Building2, Shield, Sliders, Layers, Workflow, ChevronRight, Activity, Mail } from 'lucide-react'
 
 const settingsCards = [
   {
@@ -25,6 +25,14 @@ const settingsCards = [
     description: 'Define and configure workflow stages and activities',
     color: 'bg-violet-50',
     iconColor: 'text-violet-600',
+  },
+  {
+    to: '/settings/transition-notifications',
+    icon: Mail,
+    title: 'Stage Transition Notifications',
+    description: 'Configure customer and stage-based email templates and routing',
+    color: 'bg-indigo-50',
+    iconColor: 'text-indigo-600',
   },
   {
     to: '/settings/workflow',

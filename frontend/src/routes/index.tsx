@@ -15,6 +15,7 @@ import { StageManagement } from '@/pages/settings/StageManagement'
 import { RolesManagement } from '@/pages/settings/RolesManagement'
 import { WorkflowManagement } from '@/pages/settings/WorkflowManagement'
 import { QueueManagement } from '@/pages/settings/QueueManagement'
+import { StageTransitionNotifications } from '@/pages/settings/StageTransitionNotifications'
 import { Clients } from '@/pages/Clients'
 import { ClientProjects } from '@/pages/ClientProjects'
 import { CreateProjectPage } from '@/pages/CreateProjectPage'
@@ -236,6 +237,7 @@ const router = createBrowserRouter([
       { path: 'settings/users', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><UserManagement /></RoleGuard> },
       { path: 'settings/customers', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><CustomerManagement /></RoleGuard> },
       { path: 'settings/stages', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><StageManagement /></RoleGuard> },
+      { path: 'settings/transition-notifications', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><StageTransitionNotifications /></RoleGuard> },
       { path: 'settings/roles', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><RolesManagement /></RoleGuard> },
       { path: 'settings/workflow', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><WorkflowManagement /></RoleGuard> },
       { path: 'settings/system', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Placeholder title="System Settings" /></RoleGuard> },

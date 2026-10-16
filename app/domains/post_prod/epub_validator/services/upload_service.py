@@ -19,7 +19,10 @@ UPLOAD_DIR: str = os.environ.get(
 )
 EXTRACT_DIR = "extract"
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+try:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+except Exception:
+    pass
 
 
 async def process_upload(

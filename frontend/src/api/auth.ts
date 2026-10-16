@@ -4,6 +4,8 @@ export interface AuthUser {
   id:       number
   username: string
   email:    string
+  first_name?: string | null
+  last_name?:  string | null
   roles:    Array<{ name: string } | string>
 }
 
