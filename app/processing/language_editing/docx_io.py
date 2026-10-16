@@ -30,18 +30,22 @@ def is_markup_tag_paragraph(text: str) -> bool:
 
 def is_heading_style(style_name: str, text: str) -> bool:
     s = (style_name or "").strip().lower()
+    # Normalize space/hyphen/underscore variants so "ChapterNumber", "chapter_number",
+    # "Chapter-Number" and "Chapter Number" all collapse to the same key.
+    s_norm = re.sub(r"[\s\-_]+", "", s)
     t = (text or "").strip()
-    
+
     # Check style name
-    if s.startswith(("heading", "head", "h1", "h2", "h3", "h4", "h5", "h6")) or s in {
-        "pt", "cn", "ct", "obj", "obj1", "part title", "chapter number", "chapter title", "title"
+    if s.startswith(("heading", "head", "h1", "h2", "h3", "h4", "h5", "h6")) or s_norm in {
+        "pt", "cn", "ct", "obj", "obj1",
+        "parttitle", "chapternumber", "chaptertitle", "chapterauthor", "title",
     }:
         return True
-        
+
     # Check text tag prefix patterns e.g. <H1-INTRO>, <H2-SUB>, <PT>, <CN>, <CT>, <OBJ1>, <FM-TITLE>
     if re.match(r"^<(H[1-6](-[A-Z0-9]+)?|PT|CN|CT|OBJ[0-9]*|TITLE|PART|CHAPTER|FM-[A-Z0-9]+)[^>]*>", t, re.IGNORECASE):
         return True
-        
+
     return False
 
 

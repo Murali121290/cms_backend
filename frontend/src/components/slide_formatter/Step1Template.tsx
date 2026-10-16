@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useStore } from '@/store/useSlideFormatterStore';
+import { useStore, BASE_URL } from '@/store/useSlideFormatterStore';
 import { Upload, ChevronDown, Check, Layout, FileText, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -84,8 +84,10 @@ export const Step1Template: React.FC = () => {
     }
   };
 
+  // Extract layout colors or compute statistics
   const layoutsCount = templateStyles?.slideLayouts ? templateStyles.slideLayouts.length : 0;
   
+  // Calculate average shapes per layout
   let placeholderCount = 0;
   if (templateStyles?.slideLayouts) {
     templateStyles.slideLayouts.forEach((layout: any) => {
@@ -94,6 +96,8 @@ export const Step1Template: React.FC = () => {
       }
     });
   }
+
+
 
   return (
     <div className="space-y-3 max-w-7xl mx-auto">
@@ -115,7 +119,7 @@ export const Step1Template: React.FC = () => {
               <select
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full px-3 py-2 bg-[var(--color-cream)] border border-[var(--color-border)] rounded-[var(--radius-custom)] focus:outline-none focus:ring-2 focus:ring-[var(--color-amber)] text-xs font-semibold cursor-pointer text-text"
+                className="w-full px-3 py-2 bg-[var(--color-cream)] border border-[var(--color-border)] rounded-[var(--radius-custom)] focus:outline-none focus:ring-2 focus:ring-[var(--color-amber)] text-xs font-semibold cursor-pointer"
               >
                 <option value="">Select Customer...</option>
                 {customers.map((c) => (
@@ -135,22 +139,22 @@ export const Step1Template: React.FC = () => {
                 placeholder="Enter Project Name..."
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
-                className="w-full px-3 py-2 bg-[var(--color-cream)] border border-[var(--color-border)] rounded-[var(--radius-custom)] focus:outline-none focus:ring-2 focus:ring-[var(--color-amber)] text-xs font-semibold text-text"
+                className="w-full px-3 py-2 bg-[var(--color-cream)] border border-[var(--color-border)] rounded-[var(--radius-custom)] focus:outline-none focus:ring-2 focus:ring-[var(--color-amber)] text-xs font-semibold"
               />
             </div>
           </div>
 
           <div className="space-y-4 flex-shrink-0">
-            <label className="block text-sm font-semibold text-[var(--color-navy)] text-left">
+            <label className="block text-sm font-semibold text-[var(--color-navy)]">
               Choose from Saved Templates
             </label>
             
-            <div className="relative text-left">
+            <div className="relative">
               <div className="relative flex items-center">
                 <button
                   type="button"
                   onClick={() => setDropdownOpen(!dropdownOpen)}
-                  className="w-full flex items-center justify-between pl-4 pr-10 py-3 bg-[var(--color-cream)] border border-[var(--color-border)] rounded-[var(--radius-custom)] focus:outline-none focus:ring-2 focus:ring-[var(--color-amber)] text-sm font-medium transition-all cursor-pointer text-left text-text"
+                  className="w-full flex items-center justify-between pl-4 pr-10 py-3 bg-[var(--color-cream)] border border-[var(--color-border)] rounded-[var(--radius-custom)] focus:outline-none focus:ring-2 focus:ring-[var(--color-amber)] text-sm font-medium transition-all cursor-pointer text-left"
                 >
                   <span className="truncate">{selectedTemplate ? selectedTemplate.name : "Select a template..."}</span>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-muted)] pointer-events-none" />
@@ -160,6 +164,7 @@ export const Step1Template: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
+                      // Clear template selection in store
                       useStore.setState({ selectedTemplate: null, templateStyles: null });
                     }}
                     className="absolute right-8 top-1/2 -translate-y-1/2 text-[var(--color-muted)] hover:text-rose-500 transition-colors p-1 cursor-pointer flex items-center justify-center"
@@ -185,7 +190,7 @@ export const Step1Template: React.FC = () => {
                           setDropdownOpen(false);
                           toast.success(`Selected template: ${tpl.name}`);
                         }}
-                        className="w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--color-cream)] text-left text-sm transition-all cursor-pointer"
+                        className="w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--color-cream)] text-left text-sm transition-all"
                       >
                         <span className="font-medium text-[var(--color-navy)]">{tpl.name}</span>
                         {selectedTemplate?.filename === tpl.filename && (
@@ -235,7 +240,7 @@ export const Step1Template: React.FC = () => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="w-12 h-12 bg-[var(--color-cream)] rounded-full flex items-center justify-center mx-auto text-[var(--color-navy)]">
+                    <div className="w-12 h-12 bg-cream rounded-full flex items-center justify-center mx-auto text-[var(--color-navy)]">
                       <Upload className="w-6 h-6" />
                     </div>
                     <div>
@@ -305,14 +310,14 @@ export const Step1Template: React.FC = () => {
                   <div className="grid grid-cols-2 gap-3 flex-shrink-0">
                     <div className="p-2.5 bg-white border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-2.5 shadow-xs">
                       <Layout className="w-4 h-4 text-[var(--color-navy)] flex-shrink-0" />
-                      <div className="text-left">
+                      <div>
                         <div className="text-[9px] text-[var(--color-muted)] font-semibold uppercase">Layouts</div>
                         <div className="text-sm font-black text-[var(--color-navy)]">{layoutsCount}</div>
                       </div>
                     </div>
                     <div className="p-2.5 bg-white border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-2.5 shadow-xs">
                       <FileText className="w-4 h-4 text-[var(--color-amber)] flex-shrink-0" />
-                      <div className="text-left">
+                      <div>
                         <div className="text-[9px] text-[var(--color-muted)] font-semibold uppercase">Placeholders</div>
                         <div className="text-sm font-black text-[var(--color-navy)]">{placeholderCount}</div>
                       </div>
@@ -321,7 +326,7 @@ export const Step1Template: React.FC = () => {
 
                   {/* Layout Selection Buttons */}
                   <div className="flex-shrink-0 space-y-1">
-                    <div className="text-[9px] font-black uppercase tracking-wider text-[var(--color-navy)] mb-1 text-left">
+                    <div className="text-[9px] font-black uppercase tracking-wider text-[var(--color-navy)] mb-1">
                       Choose Master Layout to Inspect
                     </div>
                     <div className="flex flex-wrap gap-1.5 max-h-[85px] overflow-y-auto pb-1 pr-1">
@@ -350,7 +355,7 @@ export const Step1Template: React.FC = () => {
 
                   {/* Visual micro-preview canvas */}
                   <div className="flex-shrink-0">
-                    <div className="text-[9px] font-black uppercase tracking-wider text-[var(--color-navy)] mb-1 text-left">
+                    <div className="text-[9px] font-black uppercase tracking-wider text-[var(--color-navy)] mb-1">
                       Visual Micro-Canvas Layout
                     </div>
                     <div 
@@ -391,7 +396,7 @@ export const Step1Template: React.FC = () => {
 
                   {/* Placeholder details list */}
                   <div className="space-y-1.5 pr-1 flex-shrink-0">
-                    <div className="text-[9px] font-black uppercase tracking-wider text-[var(--color-navy)] mb-1 text-left">
+                    <div className="text-[9px] font-black uppercase tracking-wider text-[var(--color-navy)] mb-1">
                       Placeholder Elements Detail
                     </div>
                     <div className="space-y-1.5">

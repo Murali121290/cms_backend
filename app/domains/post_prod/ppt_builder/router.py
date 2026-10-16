@@ -18,10 +18,13 @@ from app.domains.auth.security import get_current_user_from_cookie
 from app.domains.auth.rbac_config import has_post_prod_access
 
 from .services.main import extract_template
-from .services.convert import convert
+from .services.convert import convert, insert_figure_placeholders
 from .services.excel_report import create_excel_report
 from .services.report import collect_changes, collect_figure_diagnostics
 from .services.accessibility import check_ppt_accessibility
+from .services.master_swap import apply_template as master_swap_apply
+from .services.template_repair import repair_template
+from .services.alt_text_excel import parse_alttext_excel as parse_alttext_excel_helper
 
 def check_post_prod_access(user = Depends(get_current_user_from_cookie)):
     if not user or not has_post_prod_access(user):
@@ -219,18 +222,34 @@ async def upload_template(file: UploadFile = File(...), session_id: str = Depend
         path = os.path.join(TEMPLATES_DIR, filename)
         with open(path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
+
+        # Auto-repair the template on upload so downstream extraction /
+        # conversion / master-swap see a clean file (missing <p:ph> idx/type,
+        # creationId GUIDs, etc.). Failure is non-fatal.
+        repair_summary = None
+        try:
+            repair_report = repair_template(path)
+            repair_summary = {
+                "count": repair_report.count,
+                "fixes": repair_report.fixes,
+            }
+        except Exception:
+            repair_summary = None
+
         state = get_session_state(session_id)
         state["template_pptx"] = path
-        
+
         styles = extract_template(path)
         style_json_filename = os.path.splitext(filename)[0] + "_styles.json"
         style_json_path = os.path.join(TEMPLATES_DIR, style_json_filename)
         with open(style_json_path, "w") as f:
             json.dump(styles, f, indent=2)
-            
+
         state["template_style_json"] = style_json_path
-        return {"ok": True, "styles": styles, "filename": filename}
+        response = {"ok": True, "styles": styles, "filename": filename}
+        if repair_summary is not None:
+            response["repair"] = repair_summary
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -319,11 +338,43 @@ async def process_ppt(payload: dict = None, session_id: str = Depends(get_sessio
                     shutil.copy(src_path, os.path.join(extracts_dir, dest_name))
 
         output_path = os.path.join(session_upload_dir, "styled_output.pptx")
-        used_figs = convert(
-            state["content_pptx"], state["template_style_json"], output_path,
-            apply_geometry=True, cover_image_path=None, figures_metadata=figures,
-            include_figure_captions=include_figure_captions, include_table_captions=include_table_captions
-        )
+
+        # Mode selection: "master_swap" rebuilds the input deck inside a
+        # fresh copy of the template so the output inherits the template's
+        # master, layouts, and theme, then runs the same figure-insertion
+        # pass restyle uses. Default remains "restyle" which applies the
+        # template style JSON on top of the source deck.
+        mode = (payload or {}).get("mode", "restyle")
+        if mode == "master_swap":
+            if not state.get("template_pptx"):
+                raise HTTPException(status_code=400, detail="Missing template pptx for master_swap")
+            try:
+                master_swap_apply(
+                    state["content_pptx"], state["template_pptx"], output_path
+                )
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"master_swap failed: {e}")
+
+            used_figs = []
+            if figures:
+                try:
+                    prs = Presentation(output_path)
+                    used_figs = insert_figure_placeholders(
+                        prs, session_upload_dir,
+                        figures_metadata=figures,
+                        template=state["template_style_json"],
+                        include_figure_captions=include_figure_captions,
+                        include_table_captions=include_table_captions,
+                    )
+                    prs.save(output_path)
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"figure insertion failed: {e}")
+        else:
+            used_figs = convert(
+                state["content_pptx"], state["template_style_json"], output_path,
+                apply_geometry=True, cover_image_path=None, figures_metadata=figures,
+                include_figure_captions=include_figure_captions, include_table_captions=include_table_captions
+            )
         state["styled_pptx"] = output_path
 
         auto_inserted_list = []
@@ -406,56 +457,29 @@ async def upload_pdf(file: UploadFile = File(...), session_id: str = Depends(get
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/parse-alttext-excel")
-async def parse_alttext_excel(file: UploadFile = File(...)):
-    try:
-        import openpyxl
-        wb = openpyxl.load_workbook(file.file, data_only=True)
-        sheet = wb.active
-        
-        entries = []
-        headers = {}
-        # Scan first row for columns
-        for col_idx in range(1, 15):
-            val = sheet.cell(row=1, column=col_idx).value
-            if val:
-                headers[str(val).strip().lower()] = col_idx
-                
-        def get_col_val(row_cells, names, default_idx):
-            for name in names:
-                if name in headers:
-                    return row_cells[headers[name] - 1].value
-            if len(row_cells) >= default_idx:
-                return row_cells[default_idx - 1].value
-            return None
+async def parse_alttext_excel(file: UploadFile = File(...), session_id: str = Depends(get_session_id)):
+    """Parse a client-supplied alt-text Excel and return normalized entries.
 
-        # Process data rows
-        for r_idx in range(2, sheet.max_row + 1):
-            row_cells = [sheet.cell(row=r_idx, column=c) for c in range(1, 10)]
-            if not any(cell.value for cell in row_cells):
-                continue
-            
-            fig_key = get_col_val(row_cells, ["figure key", "figure_key", "figure number", "figure no", "figure", "id"], 1)
-            element = get_col_val(row_cells, ["element", "element number", "element no"], 2)
-            chapter = get_col_val(row_cells, ["chapter"], 3)
-            deco_val = get_col_val(row_cells, ["decorative", "is_decorative"], 4)
-            alt_short = get_col_val(row_cells, ["alt text short", "alt_text_short", "short alt text", "alt text", "alttext", "description"], 5)
-            alt_long = get_col_val(row_cells, ["alt text long", "alt_text_long", "long alt text", "caption"], 6)
-            
-            if not fig_key:
-                continue
-                
-            entries.append({
-                "figure_key": str(fig_key).strip().lower(),
-                "element": str(element or ""),
-                "chapter": str(chapter or ""),
-                "decorative": bool(deco_val),
-                "alt_text_short": str(alt_short or ""),
-                "alt_text_long": str(alt_long or "")
-            })
-            
-        return {"ok": True, "entries": entries}
+    Delegates to the tolerant parser in `services.alt_text_excel`, which
+    locates columns by header name and picks the correct sheet
+    automatically. Works across customer workbook layouts.
+    """
+    session_upload_dir = get_session_upload_dir(session_id)
+    path = os.path.join(session_upload_dir, "alt_text.xlsx")
+    try:
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse alt-text excel: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to save upload: {e}")
+
+    try:
+        entries = parse_alttext_excel_helper(path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"failed to parse workbook: {e}")
+
+    state = get_session_state(session_id)
+    state["alt_text_entries"] = entries
+    return {"ok": True, "entries": entries, "count": len(entries)}
 
 @router.get("/pdf/captions")
 async def get_pdf_captions(session_id: str = Depends(get_session_id)):

@@ -12,6 +12,9 @@ from .accessibility import check_ppt_accessibility
 def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, project_name, output_excel_path):
     wb = Workbook()
     
+    # -------------------------------------------------------------
+    # Styling Constants
+    # -------------------------------------------------------------
     navy_fill = PatternFill(start_color="1B365D", end_color="1B365D", fill_type="solid")
     cream_fill = PatternFill(start_color="F5F2EB", end_color="F5F2EB", fill_type="solid")
     green_fill = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid")
@@ -29,9 +32,13 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
     thick_bottom_side = Side(border_style="medium", color="1B365D")
     header_border = Border(left=thin_border_side, right=thin_border_side, top=thin_border_side, bottom=thick_bottom_side)
 
+    # -------------------------------------------------------------
+    # Data Gathering
+    # -------------------------------------------------------------
     prs = Presentation(output_pptx) if os.path.exists(output_pptx) else Presentation(input_pptx)
     total_slides = len(prs.slides)
     
+    # Compute Validation Checklist
     validation_checklist = []
     total_img_placeholders = 0
     empty_img_placeholders = 0
@@ -45,6 +52,7 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
                 ph_type = str(shape.placeholder_format.type)
                 if "PICTURE" in ph_type or "BITMAP" in ph_type:
                     total_img_placeholders += 1
+                    # If it has not been replaced by MSO_SHAPE_TYPE.PICTURE, it is empty
                     if shape.shape_type != MSO_SHAPE_TYPE.PICTURE:
                         empty_img_placeholders += 1
                         missing_items.append("Picture Box")
@@ -66,6 +74,7 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
             "details": details
         })
         
+    # Style changes
     style_changes = []
     try:
         raw_changes = collect_changes(input_pptx, output_pptx)
@@ -89,6 +98,7 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
     except Exception as e:
         print("Excel Gen: Failed to collect style changes:", e)
 
+    # Figure diagnostics
     missing_figs = []
     unplaced_figs = []
     try:
@@ -96,16 +106,21 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
     except Exception as e:
         print("Excel Gen: Failed to collect figure diagnostics:", e)
         
+    # Accessibility Issues
     accessibility_issues = []
     try:
         accessibility_issues = check_ppt_accessibility(output_pptx)
     except Exception as e:
         print("Excel Gen: Failed to collect accessibility report:", e)
 
+    # -------------------------------------------------------------
+    # 1. Summary Page Tab
+    # -------------------------------------------------------------
     ws_summary = wb.active
     ws_summary.title = "Summary Page"
     ws_summary.views.sheetView[0].showGridLines = True
     
+    # Title Block
     ws_summary["A1"] = "DECKFORGE COMPILATION SUMMARY REPORT"
     ws_summary["A1"].font = font_title
     ws_summary.row_dimensions[1].height = 30
@@ -138,6 +153,7 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
         c2.border = thin_border
         c1.fill = cream_fill
         
+        # Color highlighting for summary status
         if metric == "Insert Placeholders (Empty)":
             if val > 0:
                 c2.fill = red_fill
@@ -146,6 +162,9 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
                 c2.fill = green_fill
                 c2.font = Font(name="Calibri", size=11, color="006100", bold=True)
 
+    # -------------------------------------------------------------
+    # 2. Slide Validation Check Tab
+    # -------------------------------------------------------------
     ws_val = wb.create_sheet(title="Slide Validation Check")
     ws_val.views.sheetView[0].showGridLines = True
     headers_val = ["Slide Number", "Status", "Missing Items / Details"]
@@ -175,6 +194,9 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
             c2.fill = red_fill
             c2.font = Font(name="Calibri", size=11, color="9C0006", bold=True)
 
+    # -------------------------------------------------------------
+    # 3. Style Change Report Tab
+    # -------------------------------------------------------------
     ws_style = wb.create_sheet(title="Style Change Report")
     ws_style.views.sheetView[0].showGridLines = True
     headers_style = ["Slide Number", "Placeholder Name", "Paragraph Index", "Text Sample", "Property Changed", "Template Value (Target)", "Output Value (Result)"]
@@ -201,6 +223,9 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
         c1.alignment = Alignment(horizontal="center")
         c3.alignment = Alignment(horizontal="center")
 
+    # -------------------------------------------------------------
+    # 4. Figure Diagnostics Tab
+    # -------------------------------------------------------------
     ws_fig = wb.create_sheet(title="Figure Diagnostics")
     ws_fig.views.sheetView[0].showGridLines = True
     headers_fig = ["Category", "Figure/Crop Name", "Description"]
@@ -233,6 +258,9 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
             c1.fill = cream_fill
             c1.font = Font(name="Calibri", size=11, color="595959", bold=True)
 
+    # -------------------------------------------------------------
+    # 5. Accessibility Report Tab
+    # -------------------------------------------------------------
     ws_acc = wb.create_sheet(title="Accessibility Report")
     ws_acc.views.sheetView[0].showGridLines = True
     headers_acc = ["Slide Number", "Category", "Severity", "Detail Description"]
@@ -265,6 +293,7 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
             c3.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
             c3.font = Font(name="Calibri", size=11, color="7F6000", bold=True)
 
+    # Auto-adjust column widths across all sheets
     for ws in wb.worksheets:
         for col in ws.columns:
             max_len = 0
@@ -275,6 +304,8 @@ def create_excel_report(input_pptx, output_pptx, extracts_dir, customer_name, pr
                 if len(val) > max_len:
                     max_len = len(val)
             col_letter = get_column_letter(col[0].column)
+            # Add padding
             ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 65)
 
     wb.save(output_excel_path)
+    print(f"Excel report generated successfully at: {output_excel_path}")

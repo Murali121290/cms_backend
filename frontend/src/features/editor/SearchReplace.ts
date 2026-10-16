@@ -10,6 +10,7 @@ declare module '@tiptap/core' {
       findPrev: () => ReturnType;
       replaceCurrent: (text: string) => ReturnType;
       replaceAll: (text: string) => ReturnType;
+      setWholeWord: (enabled: boolean) => ReturnType;
     }
   }
 }
@@ -37,6 +38,7 @@ export const SearchReplace = Extension.create({
       results: [] as { from: number; to: number }[],
       activeIndex: -1,
       caseSensitive: false,
+      wholeWord: false,
     };
   },
 
@@ -50,12 +52,16 @@ export const SearchReplace = Extension.create({
 
         if (term) {
           const results: { from: number; to: number }[] = [];
-          const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+          const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const pattern = storage.wholeWord ? `\\b${escaped}\\b` : escaped;
+          const regex = new RegExp(pattern, "gi");
 
           state.doc.descendants((node, pos) => {
             if (node.isText && node.text) {
               let match;
               while ((match = regex.exec(node.text)) !== null) {
+                // Guard against zero-width matches (e.g. wholeWord with punctuation).
+                if (match[0].length === 0) { regex.lastIndex++; continue; }
                 results.push({
                   from: pos + match.index,
                   to: pos + match.index + match[0].length,
@@ -85,6 +91,19 @@ export const SearchReplace = Extension.create({
           }
         }
 
+        return true;
+      },
+
+      setWholeWord: (enabled: boolean) => ({ dispatch }) => {
+        const storage = this.storage;
+        storage.wholeWord = !!enabled;
+        // Re-run current search so results reflect the new mode.
+        if (storage.searchTerm) {
+          this.editor.commands.setSearchTerm(storage.searchTerm);
+        } else if (dispatch) {
+          // No active search; still notify so UI can re-render the toggle state.
+          dispatch(this.editor.state.tr.setMeta("searchReplaceUpdate", true));
+        }
         return true;
       },
 

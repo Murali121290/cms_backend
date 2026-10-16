@@ -34,6 +34,8 @@ app.include_router(routers_web.router, tags=["Web UI"])
 # API Routers
 from app.routers import language_edit
 app.include_router(language_edit.router)
+from app.routers import term_lists
+app.include_router(term_lists.router)
 app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])
 
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["Users"])

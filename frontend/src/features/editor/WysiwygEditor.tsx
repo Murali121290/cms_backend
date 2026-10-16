@@ -1044,6 +1044,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     const activeSearchIndex = (editor?.storage as any)?.searchReplace?.activeIndex ?? -1;
     const searchMatchCount = searchResults.length;
     const currentSearchMatch = searchMatchCount > 0 ? activeSearchIndex + 1 : 0;
+    const wholeWord = (editor?.storage as any)?.searchReplace?.wholeWord ?? false;
 
     // Open the comment-creation dialog from whatever is selected in the
     // editor. Used by both the in-toolbar button and the page-level
@@ -1995,11 +1996,24 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                 placeholder="Search in document..."
                 className="flex-1 min-w-0 px-2.5 py-1 bg-slate-800 border border-slate-600 rounded-md text-xs text-slate-200 focus:outline-none focus:border-amber-500"
               />
-              {searchMatchCount > 0 && (
+              {findTerm && (
                 <span className="text-[10px] text-slate-400 shrink-0 font-mono">
-                  {currentSearchMatch}/{searchMatchCount}
+                  {searchMatchCount > 0 ? `${currentSearchMatch} of ${searchMatchCount}` : "No matches"}
                 </span>
               )}
+              <button
+                type="button"
+                onClick={() => editor?.commands.setWholeWord(!wholeWord)}
+                title="Match whole words only"
+                aria-pressed={wholeWord}
+                className={`shrink-0 px-2 py-1 text-[10px] font-bold rounded-md border transition-colors cursor-pointer ${
+                  wholeWord
+                    ? "bg-amber-500 text-slate-900 border-amber-400"
+                    : "bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700"
+                }`}
+              >
+                Whole word
+              </button>
             </div>
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <span className="text-slate-400 text-xs font-semibold uppercase tracking-wide shrink-0">Replace</span>

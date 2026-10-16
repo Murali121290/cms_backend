@@ -45,6 +45,11 @@ class LanguageEditFinding(Base):
     edited_text = Column(Text, nullable=True)
     reviewer = Column(String, nullable=True)
     decided_at = Column(DateTime, nullable=True)
+    # Added by migration 0047_term_lists. 'rule' = grammar/spelling/sentence
+    # rule finding; 'term' = highlight from a project-assigned term list.
+    source = Column(String(16), nullable=False, default="rule", server_default="rule", index=True)
+    term_list_id = Column(Integer, ForeignKey("term_lists.id", ondelete="SET NULL"),
+                          nullable=True, index=True)
 
 
 class ProjectLanguageRules(Base):

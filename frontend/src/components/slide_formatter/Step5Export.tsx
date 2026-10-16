@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useStore } from '@/store/useSlideFormatterStore';
+import { useStore, BASE_URL } from '@/store/useSlideFormatterStore';
 import { Download, RefreshCw, AlertTriangle, FileJson, Check, LayoutGrid, BarChart2, ImageOff, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
-
-const BASE_URL = '/api/v2/post-prod/ppt-builder';
 
 const getNormalizedRefName = (text: string) => {
   const match = text.match(/\binsert\s+(figure|fig\.?|f\.?)\s*([\d.-]+)/i);
@@ -68,9 +66,11 @@ export const Step5Export: React.FC = () => {
 
   const totalSlides = slides?.length || 0;
   
+  // Calculate mapped figures and unmapped figures
   const mappedCount = figures.filter((f) => f.mappedTo !== null).length;
   const unmappedCount = figures.length - mappedCount;
 
+  // Calculate missing placeholders count
   let emptyPlaceholdersCount = 0;
   slides?.forEach((slide) => {
     slide.shapes.forEach((shape) => {
@@ -163,14 +163,14 @@ export const Step5Export: React.FC = () => {
         {/* Left Side: Summary & Actions (2 Cols) */}
         <div className="lg:col-span-2 space-y-6">
           <div className="surface-card p-6 space-y-4 shadow-sm border border-[var(--color-border)]">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-[var(--color-navy)] flex items-center space-x-2 text-left">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-[var(--color-navy)] flex items-center space-x-2">
               <Check className="w-4 h-4 text-emerald-500" />
               <span>Compilation Validation Summary</span>
             </h3>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Card 1: Total Slides */}
-              <div className="p-4 bg-[var(--color-cream)]/30 border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-3.5 text-left">
+              <div className="p-4 bg-[var(--color-cream)]/30 border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-3.5">
                 <div className="w-10 h-10 rounded-lg bg-[var(--color-navy)]/10 text-[var(--color-navy)] flex items-center justify-center flex-shrink-0">
                   <FileJson className="w-5 h-5" />
                 </div>
@@ -181,7 +181,7 @@ export const Step5Export: React.FC = () => {
               </div>
 
               {/* Card 2: Figures Mapped */}
-              <div className="p-4 bg-[var(--color-cream)]/30 border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-3.5 text-left">
+              <div className="p-4 bg-[var(--color-cream)]/30 border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-3.5">
                 <div className="w-10 h-10 rounded-lg bg-emerald-50 text-[var(--color-success)] flex items-center justify-center flex-shrink-0">
                   <Check className="w-5 h-5" />
                 </div>
@@ -192,7 +192,7 @@ export const Step5Export: React.FC = () => {
               </div>
 
               {/* Card 3: Empty Boxes */}
-              <div className="p-4 bg-[var(--color-cream)]/30 border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-3.5 text-left">
+              <div className="p-4 bg-[var(--color-cream)]/30 border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-3.5">
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${emptyPlaceholdersCount > 0 ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
                   <AlertTriangle className="w-5 h-5" />
                 </div>
@@ -203,7 +203,7 @@ export const Step5Export: React.FC = () => {
               </div>
 
               {/* Card 4: Unused crops */}
-              <div className="p-4 bg-[var(--color-cream)]/30 border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-3.5 text-left">
+              <div className="p-4 bg-[var(--color-cream)]/30 border border-[var(--color-border)] rounded-[var(--radius-custom)] flex items-center space-x-3.5">
                 <div className="w-10 h-10 rounded-lg bg-zinc-100 text-zinc-500 flex items-center justify-center flex-shrink-0">
                   <Download className="w-5 h-5" />
                 </div>
@@ -219,7 +219,7 @@ export const Step5Export: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <button
               onClick={handleExportPpt}
-              className="py-4 px-4 bg-[var(--color-navy)] hover:bg-[var(--color-navy-light)] text-white font-bold rounded-[var(--radius-custom)] transition-all cursor-pointer shadow-md flex items-center justify-center space-x-2 active:scale-[0.99] text-xs border-none"
+              className="py-4 px-4 bg-[var(--color-navy)] hover:bg-[var(--color-navy-light)] text-white font-bold rounded-[var(--radius-custom)] transition-all cursor-pointer shadow-md flex items-center justify-center space-x-2 active:scale-[0.99] text-xs"
             >
               <Download className="w-4 h-4" />
               <span>Download Presentation</span>
@@ -227,7 +227,7 @@ export const Step5Export: React.FC = () => {
 
             <button
               onClick={handleDownloadExcel}
-              className="py-4 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-[var(--radius-custom)] transition-all cursor-pointer shadow-md flex items-center justify-center space-x-2 active:scale-[0.99] text-xs border-none"
+              className="py-4 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-[var(--radius-custom)] transition-all cursor-pointer shadow-md flex items-center justify-center space-x-2 active:scale-[0.99] text-xs"
             >
               <Download className="w-4 h-4" />
               <span>Download Excel Report</span>
@@ -254,11 +254,11 @@ export const Step5Export: React.FC = () => {
           </button>
         </div>
 
-        {/* Right Side: Slide Checklist */}
+        {/* Right Side: Slide Checklist (1 Col) */}
         <div className="lg:col-span-1 surface-card p-6 flex flex-col h-full max-h-[380px] border border-[var(--color-border)] shadow-sm">
-          <h3 className="text-xs font-black uppercase tracking-wider text-[var(--color-navy)] pb-2 border-b border-[var(--color-border)] mb-3 flex items-center space-x-2 text-left">
+          <h3 className="text-xs font-black uppercase tracking-wider text-[var(--color-navy)] pb-2 border-b border-[var(--color-border)] mb-3 flex items-center space-x-2">
             <LayoutGrid className="w-4 h-4 text-[var(--color-amber)]" />
-            <span>Slide Checklist</span>
+            <span>Slide Validation Checklist</span>
           </h3>
           <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
             {slides?.map((slide, idx) => {
@@ -296,7 +296,7 @@ export const Step5Export: React.FC = () => {
                   onClick={() => handleNavigateToSlide(idx)}
                   className="flex items-center justify-between p-2 border border-[var(--color-border)] rounded-[var(--radius-custom)] bg-white hover:border-amber-400 hover:bg-amber-50/10 cursor-pointer transition-all gap-2"
                 >
-                  <span className="text-xs font-semibold text-[var(--color-navy)] flex-shrink-0 text-left">
+                  <span className="text-xs font-semibold text-[var(--color-navy)] flex-shrink-0">
                     Slide {idx + 1}
                   </span>
                   {missingRefs.length > 0 ? (
@@ -328,16 +328,16 @@ export const Step5Export: React.FC = () => {
         </div>
       </div>
 
-      {/* Style & Diagnostics Report */}
+      {/* Style & Diagnostics Report — tabbed */}
       <div className="surface-card border border-[var(--color-border)] shadow-sm overflow-hidden">
         {/* Tab Bar */}
         <div className="flex border-b border-[var(--color-border)] bg-zinc-50">
           <button
             onClick={() => setReportTab('style')}
-            className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer ${
+            className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
               reportTab === 'style'
                 ? 'border-[var(--color-amber)] text-[var(--color-navy)] bg-white'
-                : 'border-transparent text-zinc-400 hover:text-zinc-650 hover:bg-zinc-100'
+                : 'border-transparent text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100'
             }`}
           >
             <BarChart2 className="w-3.5 h-3.5" />
@@ -345,10 +345,10 @@ export const Step5Export: React.FC = () => {
           </button>
           <button
             onClick={() => setReportTab('figures')}
-            className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 relative cursor-pointer ${
+            className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 relative ${
               reportTab === 'figures'
                 ? 'border-[var(--color-amber)] text-[var(--color-navy)] bg-white'
-                : 'border-transparent text-zinc-400 hover:text-zinc-650 hover:bg-zinc-100'
+                : 'border-transparent text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100'
             }`}
           >
             <ImageOff className="w-3.5 h-3.5" />
@@ -361,10 +361,10 @@ export const Step5Export: React.FC = () => {
           </button>
           <button
             onClick={() => setReportTab('accessibility')}
-            className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 relative cursor-pointer ${
+            className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 relative ${
               reportTab === 'accessibility'
                 ? 'border-[var(--color-amber)] text-[var(--color-navy)] bg-white'
-                : 'border-transparent text-zinc-400 hover:text-zinc-655 hover:bg-zinc-100'
+                : 'border-transparent text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100'
             }`}
           >
             <Activity className="w-3.5 h-3.5" />
@@ -407,6 +407,7 @@ export const Step5Export: React.FC = () => {
             return t;
           };
 
+          // Calculate stats
           let totalChanges = 0;
           const propertiesChanged = new Set<string>();
           reportData.forEach((s: any) =>
@@ -418,6 +419,7 @@ export const Step5Export: React.FC = () => {
             )
           );
 
+          // Filter data
           const filtered = reportData.map((slide: any) => {
             if (!activeFilter) return slide;
             const allowedProps = FILTER_MAP[activeFilter];
@@ -446,9 +448,9 @@ export const Step5Export: React.FC = () => {
           return (
             <div className="flex flex-col h-[620px] bg-white">
               {/* Header Stats */}
-              <div className="flex items-center justify-between px-6 py-4 bg-zinc-900 text-white rounded-t-sm shadow-sm text-left">
+              <div className="flex items-center justify-between px-6 py-4 bg-zinc-900 text-white rounded-t-sm shadow-sm">
                 <div>
-                  <h3 className="text-sm font-bold tracking-wide uppercase m-0">Style & Layout Differences</h3>
+                  <h3 className="text-sm font-bold tracking-wide uppercase">Style & Layout Differences</h3>
                   <div className="text-[10px] text-zinc-400 mt-0.5">Comparing template cascades to content outputs</div>
                 </div>
                 <div className="flex gap-6 text-center">
@@ -470,7 +472,7 @@ export const Step5Export: React.FC = () => {
               </div>
 
               {/* Filter Bar */}
-              <div className="flex items-center gap-2 px-6 py-3 border-b border-zinc-200 bg-zinc-50 overflow-x-auto text-xs text-left">
+              <div className="flex items-center gap-2 px-6 py-3 border-b border-zinc-200 bg-zinc-50 overflow-x-auto text-xs">
                 <span className="font-bold text-zinc-500 uppercase tracking-wider text-[10px] mr-1">Filter changes:</span>
                 {['Font', 'Size', 'Color', 'Bold', 'Alignment', 'Spacing'].map((filterName) => {
                   const isActive = activeFilter === filterName;
@@ -478,7 +480,7 @@ export const Step5Export: React.FC = () => {
                     <button
                       key={filterName}
                       onClick={() => setActiveFilter(isActive ? null : filterName)}
-                      className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
                         isActive
                           ? 'bg-zinc-900 text-white shadow-sm'
                           : 'bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-100'
@@ -491,7 +493,7 @@ export const Step5Export: React.FC = () => {
                 {activeFilter && (
                   <button
                     onClick={() => setActiveFilter(null)}
-                    className="ml-auto text-[10px] font-bold text-zinc-400 hover:text-zinc-650 uppercase cursor-pointer"
+                    className="ml-auto text-[10px] font-bold text-zinc-400 hover:text-zinc-600 uppercase"
                   >
                     Clear Filter
                   </button>
@@ -514,7 +516,7 @@ export const Step5Export: React.FC = () => {
                     return (
                       <div key={slide.slide} className="bg-white border border-zinc-200 rounded-md shadow-sm overflow-hidden">
                         {/* Slide Header */}
-                        <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 text-white text-left">
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 text-white">
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] font-bold uppercase tracking-wider border border-white/20 rounded px-1.5 py-0.5">
                               Slide {slide.slide}
@@ -529,7 +531,7 @@ export const Step5Export: React.FC = () => {
                         {/* Slide Placeholders */}
                         {slide.placeholders.map((ph: any, phIdx: number) => (
                           <div key={phIdx} className="border-t border-zinc-100 first:border-t-0">
-                            <div className="flex items-center gap-2 px-4 py-2 bg-zinc-50/70 border-b border-zinc-100 text-left">
+                            <div className="flex items-center gap-2 px-4 py-2 bg-zinc-50/70 border-b border-zinc-100">
                               <span className="text-[10px] font-extrabold uppercase tracking-wide text-amber-600 bg-amber-50 border border-amber-200/60 rounded px-1.5 py-0.5">
                                 {phLabel(ph.type)}
                               </span>
@@ -538,28 +540,28 @@ export const Step5Export: React.FC = () => {
 
                             {/* Paragraphs */}
                             {ph.paras.map((para: any, paraIdx: number) => (
-                              <div key={paraIdx} className="p-4 border-b border-zinc-50 last:border-b-0 text-left">
-                                <div className="text-xs text-zinc-400 italic mb-2 relative pl-3 border-l-2 border-zinc-200 text-left">
+                              <div key={paraIdx} className="p-4 border-b border-zinc-50 last:border-b-0">
+                                <div className="text-xs text-zinc-400 italic mb-2 relative pl-3 border-l-2 border-zinc-200">
                                   {para.text ? `"${para.text}${para.text.length >= 55 ? '...' : ''}"` : '(empty paragraph)'}
                                 </div>
                                 <div className="space-y-1.5">
                                   {para.changes.map((c: any, cIdx: number) => {
-                                    const tagInfo = TAG_MAP[c.prop] || { cls: 'bg-zinc-50 text-zinc-650 border border-zinc-200', label: c.prop };
+                                    const tagInfo = TAG_MAP[c.prop] || { cls: 'bg-zinc-50 text-zinc-600 border border-zinc-200', label: c.prop };
                                     const isColor = c.is_color && c.after && c.after.startsWith('#');
 
                                     return (
-                                      <div key={cIdx} className="grid grid-cols-[70px_1fr_12px_1fr] gap-2 items-center text-xs text-left">
+                                      <div key={cIdx} className="grid grid-cols-[70px_1fr_12px_1fr] gap-2 items-center text-xs">
                                         <span className={`text-[9px] font-bold uppercase tracking-wider text-center py-0.5 rounded truncate ${tagInfo.cls}`}>
                                           {tagInfo.label}
                                         </span>
-                                        <span className="text-zinc-400 line-through truncate flex items-center gap-1 text-left">
+                                        <span className="text-zinc-400 line-through truncate flex items-center gap-1">
                                           {c.is_color && c.before && c.before.startsWith('#') && (
                                             <span className="w-2.5 h-2.5 rounded-full border border-black/10 flex-shrink-0" style={{ backgroundColor: c.before }} />
                                           )}
                                           {c.before || '—'}
                                         </span>
                                         <span className="text-zinc-300 font-bold text-center">→</span>
-                                        <span className="text-emerald-600 font-semibold truncate flex items-center gap-1 text-left">
+                                        <span className="text-emerald-600 font-semibold truncate flex items-center gap-1">
                                           {isColor && (
                                             <span className="w-2.5 h-2.5 rounded-full border border-black/10 flex-shrink-0" style={{ backgroundColor: c.after }} />
                                           )}
@@ -584,15 +586,16 @@ export const Step5Export: React.FC = () => {
 
         {/* Figure Diagnostics Tab */}
         {reportTab === 'figures' && (
-          <div className="p-6 space-y-6 text-left">
+          <div className="p-6 space-y-6">
+            {/* Skipped / Missing figures */}
             <div>
-              <h4 className="flex items-center gap-2 text-sm font-black text-rose-600 uppercase tracking-wider mb-3 text-left">
+              <h4 className="flex items-center gap-2 text-sm font-black text-rose-600 uppercase tracking-wider mb-3">
                 <AlertTriangle className="w-4 h-4" />
                 Skipped Requested Figures
                 <span className="text-[10px] font-semibold text-rose-400 normal-case tracking-normal">(placeholder in slide but no crop provided)</span>
               </h4>
               {figureDiag && figureDiag.missing.length > 0 ? (
-                <div className="flex flex-wrap gap-2 text-left">
+                <div className="flex flex-wrap gap-2">
                   {figureDiag.missing.map((name, i) => (
                     <span key={i} className="font-mono text-xs bg-rose-50 border border-rose-200 text-rose-700 px-3 py-1.5 rounded font-bold uppercase">
                       {name}
@@ -600,7 +603,7 @@ export const Step5Export: React.FC = () => {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-emerald-600 font-semibold flex items-center gap-1.5 text-left">
+                <p className="text-xs text-emerald-600 font-semibold flex items-center gap-1.5">
                   <Check className="w-3.5 h-3.5" /> All requested figures were successfully placed.
                 </p>
               )}
@@ -608,35 +611,37 @@ export const Step5Export: React.FC = () => {
 
             <div className="border-t border-[var(--color-border)]" />
 
+            {/* Unused / Unplaced crops */}
             <div>
-              <h4 className="flex items-center gap-2 text-sm font-black text-slate-600 uppercase tracking-wider mb-3 text-left">
+              <h4 className="flex items-center gap-2 text-sm font-black text-slate-600 uppercase tracking-wider mb-3">
                 <FileJson className="w-4 h-4" />
                 Unused Cropped Figures
                 <span className="text-[10px] font-semibold text-slate-400 normal-case tracking-normal">(crop exists but no matching slide placeholder)</span>
               </h4>
               {figureDiag && figureDiag.unplaced.length > 0 ? (
-                <div className="flex flex-wrap gap-2 text-left">
+                <div className="flex flex-wrap gap-2">
                   {figureDiag.unplaced.map((name, i) => (
-                    <span key={i} className="font-mono text-xs bg-slate-50 border border-slate-200 text-slate-650 px-3 py-1.5 rounded font-bold uppercase">
+                    <span key={i} className="font-mono text-xs bg-slate-50 border border-slate-200 text-slate-600 px-3 py-1.5 rounded font-bold uppercase">
                       {name}
                     </span>
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-emerald-600 font-semibold flex items-center gap-1.5 text-left">
+                <p className="text-xs text-emerald-600 font-semibold flex items-center gap-1.5">
                   <Check className="w-3.5 h-3.5" /> No unused cropped figures — every crop was placed.
                 </p>
               )}
             </div>
 
             {!figureDiag && (
-              <p className="text-xs text-zinc-400 italic text-left">Loading figure diagnostics...</p>
+              <p className="text-xs text-zinc-400 italic">Loading figure diagnostics...</p>
             )}
           </div>
         )}
 
         {/* Accessibility Report Tab */}
         {reportTab === 'accessibility' && (() => {
+          // Group by Severity, then Category using nested structured JSON
           const groupedIssues = (accessibilityDiag?.issues || []).reduce((acc: Record<string, Record<string, any[]>>, issue: any) => {
             const severity = issue.severity || 'Warning';
             const category = issue.category || 'General Issues';
@@ -648,6 +653,7 @@ export const Step5Export: React.FC = () => {
 
           const severities = ['Error', 'Warning', 'Tip'];
           
+          // Pre-calculate counts for each severity
           const counts = severities.reduce((acc, sev) => {
             const categories = groupedIssues[sev] || {};
             const totalIssues = Object.values(categories).reduce((sum, list) => sum + list.length, 0);
@@ -696,9 +702,9 @@ export const Step5Export: React.FC = () => {
           };
 
           return (
-            <div className="p-6 space-y-6 max-h-[620px] overflow-y-auto text-left">
+            <div className="p-6 space-y-6 max-h-[620px] overflow-y-auto">
               <div>
-                <h4 className="flex items-center gap-2 text-sm font-black text-amber-600 uppercase tracking-wider mb-4 text-left">
+                <h4 className="flex items-center gap-2 text-sm font-black text-amber-600 uppercase tracking-wider mb-4">
                   <Activity className="w-4 h-4" />
                   Accessibility Issues Found
                 </h4>
@@ -727,7 +733,7 @@ export const Step5Export: React.FC = () => {
                           </span>
                           <AlertTriangle className={`w-4 h-4 ${style.iconColor}`} />
                         </div>
-                        <div className="mt-2 text-left">
+                        <div className="mt-2">
                           <span className="text-xl font-black text-zinc-800 block leading-none">
                             {count.totalIssues}
                           </span>
@@ -740,7 +746,7 @@ export const Step5Export: React.FC = () => {
                   })}
                 </div>
 
-                {/* Subcategories list */}
+                {/* Subcategories list for the selected severity card */}
                 {(() => {
                   const categories = groupedIssues[selectedSeverity] || {};
                   const categoryEntries = Object.entries(categories);
@@ -749,25 +755,25 @@ export const Step5Export: React.FC = () => {
                     return (
                       <div className="text-center py-10 border border-dashed border-zinc-200 rounded-lg bg-zinc-50/50">
                         <Check className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-                        <p className="text-xs text-zinc-550 font-bold m-0">No {selectedSeverity.toLowerCase()}s found! Slide content meets standard requirements.</p>
+                        <p className="text-xs text-zinc-500 font-bold">No {selectedSeverity.toLowerCase()}s found! Slide content meets standard requirements.</p>
                       </div>
                     );
                   }
 
                   return (
-                    <div className="space-y-3 animate-in fade-in duration-200 text-left">
+                    <div className="space-y-3 animate-in fade-in duration-200">
                       {categoryEntries.map(([categoryName, items], cIdx) => {
                         const subKey = `${selectedSeverity}-${categoryName}`;
                         const isSubExpanded = expandedSubCategories[subKey] || false;
 
                         return (
-                          <div key={cIdx} className="border border-zinc-200 rounded-md overflow-hidden bg-white shadow-xs text-left">
+                          <div key={cIdx} className="border border-zinc-200 rounded-md overflow-hidden bg-white shadow-xs">
                             <button 
                               type="button"
                               onClick={() => setExpandedSubCategories(prev => ({ ...prev, [subKey]: !prev[subKey] }))}
                               className="w-full bg-zinc-50/50 px-3.5 py-2.5 border-b border-zinc-100 flex items-center justify-between hover:bg-zinc-100/30 transition-colors cursor-pointer text-left"
                             >
-                              <div className="flex items-center gap-1.5 text-left">
+                              <div className="flex items-center gap-1.5">
                                 {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
                                 <span className="text-[11px] font-bold text-zinc-700 uppercase tracking-wide">{categoryName}</span>
                               </div>
@@ -777,13 +783,13 @@ export const Step5Export: React.FC = () => {
                             </button>
 
                             {isSubExpanded && (
-                              <div className="p-3 bg-white border-t border-zinc-50 text-left">
-                                <ul className="space-y-1.5 list-none pl-0 text-left m-0">
+                              <div className="p-3 bg-white border-t border-zinc-50">
+                                <ul className="space-y-1.5 list-none pl-0">
                                   {items.map((item: any, mIdx: number) => (
                                     <li
                                       key={mIdx}
                                       onClick={() => item.slide && handleNavigateToSlide(item.slide - 1)}
-                                      className={`text-zinc-700 text-[11px] p-1.5 rounded hover:bg-amber-50 hover:text-amber-900 transition-all text-left ${
+                                      className={`text-zinc-650 text-[11px] p-1.5 rounded hover:bg-amber-50 hover:text-amber-900 transition-all ${
                                         item.slide ? 'cursor-pointer' : ''
                                       }`}
                                       title={item.slide ? `Click to inspect Slide ${item.slide}` : undefined}

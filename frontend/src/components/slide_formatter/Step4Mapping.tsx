@@ -1,8 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { useStore } from '@/store/useSlideFormatterStore';
+import { useStore, BASE_URL } from '@/store/useSlideFormatterStore';
 import { LayoutGrid, Play, AlertTriangle } from 'lucide-react';
-
-const BASE_URL = '/api/v2/post-prod/ppt-builder';
 
 const getNormalizedRefName = (text: string) => {
   const match = text.match(/\binsert\s+(figure|fig\.?|f\.?)\s*([\d.-]+)/i);
@@ -91,6 +89,7 @@ export const Step4Mapping: React.FC = () => {
   useEffect(() => {
     if (focusedShapeIndex === null) return;
     setShowModifications(true);
+    // Auto-clear the highlight after 4 seconds so it doesn't distract forever
     const timer = setTimeout(() => {
       setFocusedShapeIndex(null);
     }, 4000);
@@ -182,6 +181,7 @@ export const Step4Mapping: React.FC = () => {
             (shape.placeholder?.type && (shape.placeholder.type.includes('PICTURE') || shape.placeholder.type.includes('BITMAP'))) ||
             shape.imageUrl !== undefined;
 
+          // Determine background fill and borders
           const hasFill = shape.fill && shape.fill !== 'none';
           const bgStyle = hasFill ? { backgroundColor: shape.fill } : {};
 
@@ -195,7 +195,7 @@ export const Step4Mapping: React.FC = () => {
               }}
               className={`absolute transition-all select-none overflow-hidden placeholder-box cursor-pointer ${
                 isFocused
-                  ? "ring-4 ring-amber-400 z-50 scale-[1.03] shadow-[0_0_20px_#f59e0b] border-amber-500"
+                  ? "ring-4 ring-amber-400 z-50 scale-[1.03] shadow-[0_0_20px_#f59e0b] animate-pulse border-amber-500"
                   : isImagePlaceholder
                   ? shape.imageUrl
                     ? "border border-emerald-400 bg-emerald-50/5 z-20 hover:border-emerald-500 hover:bg-emerald-50/10"
@@ -237,8 +237,10 @@ export const Step4Mapping: React.FC = () => {
                         const firstRun = para.runs?.[0];
                         const isTitle = shape.shapeName.includes('Title') || shape.placeholder?.type?.includes('TITLE');
 
+                        // Slightly scale down browser fonts by 15% (0.85 factor) to matches PowerPoint native typography margins
                         const fontScaleFactor = 0.85;
 
+                        // Determine bullet level and prefixing
                         const level = para.level || 0;
                         const isBullet = level > 0 || (shape.shapeName.includes('Content') && !isTitle);
                         const indentPadding = level * 16 + (isBullet ? 12 : 0);
@@ -304,7 +306,7 @@ export const Step4Mapping: React.FC = () => {
         <div className="flex items-center space-x-2.5">
           <button
             onClick={() => setStep(3)}
-            className="px-4 py-2 border border-[var(--color-border)] hover:bg-[var(--color-cream)] text-[var(--color-navy)] text-xs font-bold rounded-[var(--radius-custom)] transition-all cursor-pointer bg-white"
+            className="px-4 py-2 border border-[var(--color-border)] hover:bg-[var(--color-cream)] text-[var(--color-navy)] text-xs font-bold rounded-[var(--radius-custom)] transition-all cursor-pointer"
           >
             ← Back
           </button>
@@ -320,12 +322,12 @@ export const Step4Mapping: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 overflow-hidden">
         {/* Left Pane: Slide Thumbnail List (2 Cols) */}
         <div className="lg:col-span-2 surface-card p-3 flex flex-col overflow-hidden">
-          <h3 className="text-xs font-bold text-[var(--color-navy)] border-b border-[var(--color-border)] pb-2 mb-2 flex items-center space-x-1.5 text-left">
+          <h3 className="text-xs font-bold text-[var(--color-navy)] border-b border-[var(--color-border)] pb-2 mb-2 flex items-center space-x-1.5">
             <LayoutGrid className="w-4 h-4 text-[var(--color-amber)]" />
             <span>Slides ({slides?.length || 0})</span>
           </h3>
 
-          <div className="mb-3 pb-2 border-b border-[var(--color-border)] text-left">
+          <div className="mb-3 pb-2 border-b border-[var(--color-border)]">
             <label className="flex items-center space-x-2 text-[10px] text-[var(--color-navy)] font-bold cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -339,6 +341,7 @@ export const Step4Mapping: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {slides?.map((slide, idx) => {
+              // Check if this slide has any un-mapped figures/tables/charts
               const hasMissingFigures = slide.shapes.some((shape: any) => {
                 if (shape.imageUrl) return false;
                 const text = (shape.textBody?.paragraphs || [])
@@ -358,16 +361,16 @@ export const Step4Mapping: React.FC = () => {
                 <button
                   key={slide.slide_id}
                   onClick={() => setCurrentSlideIndex(idx)}
-                  className={`w-full flex items-center justify-between p-2 border rounded-[var(--radius-custom)] text-left hover:bg-[var(--color-cream)] transition-all cursor-pointer ${active
+                  className={`w-full flex items-center justify-between p-2 border rounded-[var(--radius-custom)] text-left hover:bg-[var(--color-cream)] transition-all ${active
                     ? "border-[var(--color-amber)] bg-[var(--color-cream)] ring-2 ring-[var(--color-amber)]/25"
                     : "border-[var(--color-border)] bg-white"
                     }`}
                 >
-                  <p className="text-[11px] font-semibold text-[var(--color-navy)] truncate flex-1 m-0">
+                  <p className="text-[11px] font-semibold text-[var(--color-navy)] truncate flex-1">
                     Slide {idx + 1}
                   </p>
                   {hasMissingFigures && (
-                    <span title="Unmapped figure or table reference found on this slide" className="flex items-center">
+                    <span title="Unmapped figure or table reference found on this slide">
                       <AlertTriangle className="w-3 h-3 text-red-500 flex-shrink-0 ml-1" />
                     </span>
                   )}
@@ -385,7 +388,7 @@ export const Step4Mapping: React.FC = () => {
         >
           {/* Controls header */}
           <div className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-[var(--color-border)] pb-2 mb-3 gap-2">
-            <span className="text-xs font-bold text-[var(--color-navy)] text-left">
+            <span className="text-xs font-bold text-[var(--color-navy)]">
               Slide {currentSlideIndex + 1} of {slides?.length || 1}
             </span>
 
@@ -427,14 +430,14 @@ export const Step4Mapping: React.FC = () => {
         {/* Right Pane: Formatting Modifications Report (3 Cols) */}
         {showModifications && (
           <div className="lg:col-span-3 surface-card p-4 flex flex-col overflow-hidden border border-[var(--color-border)] shadow-sm bg-[var(--color-cream)]/10 animate-in slide-in-from-right duration-200">
-            <h4 className="text-xs font-black uppercase tracking-wider text-[var(--color-navy)] flex items-center space-x-1.5 border-b border-[var(--color-border)] pb-2 mb-3 text-left">
+            <h4 className="text-xs font-black uppercase tracking-wider text-[var(--color-navy)] flex items-center space-x-1.5 border-b border-[var(--color-border)] pb-2 mb-3">
               <LayoutGrid className="w-3.5 h-3.5 text-[var(--color-amber)]" />
               <span>Slide Modifications</span>
             </h4>
 
             {/* Slide Validation Checklist Panel */}
             {currentSlide && (
-              <div className="bg-white border border-[var(--color-border)] rounded-[var(--radius-custom)] p-3 mb-4 shadow-xs text-left flex-shrink-0">
+              <div className="bg-white border border-[var(--color-border)] rounded-[var(--radius-custom)] p-3 mb-4 shadow-xs text-left">
                 <h5 className="text-[11px] font-bold text-[var(--color-navy)] uppercase tracking-wider mb-2 pb-1 border-b border-zinc-150 flex items-center justify-between">
                   <span>Slide Checklist</span>
                   <span className="text-[9px] font-medium text-[var(--color-muted)]">Validation Status</span>
@@ -444,7 +447,7 @@ export const Step4Mapping: React.FC = () => {
                     const checklist = getChecklistItems(currentSlide);
                     if (checklist.length === 0) {
                       return (
-                        <div className="text-[10px] text-[var(--color-muted)] italic py-1 text-left">
+                        <div className="text-[10px] text-[var(--color-muted)] italic py-1">
                           No figure or table insertions required on this slide.
                         </div>
                       );
@@ -457,7 +460,7 @@ export const Step4Mapping: React.FC = () => {
                           item.shapeIndex !== undefined && focusedShapeIndex === item.shapeIndex ? 'bg-amber-100/50 border-l-2 border-amber-500 pl-1.5 font-semibold' : ''
                         }`}
                       >
-                        <div className="flex-1 min-w-0 pr-2 text-left">
+                        <div className="flex-1 min-w-0 pr-2">
                           <span className="font-semibold text-zinc-700 block truncate">{item.label}</span>
                           {item.detail && <span className="text-[9px] text-zinc-400 block truncate">{item.detail}</span>}
                         </div>
@@ -488,7 +491,7 @@ export const Step4Mapping: React.FC = () => {
               if (missingForActive.length === 0) return null;
 
               return (
-                <div className="space-y-2 mb-3 flex-shrink-0">
+                <div className="space-y-2 mb-3">
                   {missingForActive.map((shape: any) => {
                     const textSnippet = (shape.textBody?.paragraphs || [])
                       .map((para: any) => para.runs ? para.runs.map((r: any) => r.sampleText || '').join('') : '')
@@ -507,9 +510,9 @@ export const Step4Mapping: React.FC = () => {
                           <AlertTriangle className="w-3.5 h-3.5 text-rose-500 flex-shrink-0" />
                           <span className="text-[9px] font-black uppercase tracking-wider">Unmapped Placeholder</span>
                         </div>
-                        <p className="text-[10px] text-rose-700 font-medium leading-relaxed m-0">
+                        <p className="text-[10px] text-rose-700 font-medium leading-relaxed">
                           Slide contains un-replaced reference text:
-                          <strong className="block mt-0.5 bg-rose-100/60 px-1.5 py-0.5 rounded font-mono text-[9px] break-words text-rose-900 leading-tight">
+                          <strong className="block mt-0.5 bg-rose-100/60 px-1.5 py-0.5 rounded font-mono text-[9px] break-words text-rose-900">
                             "{textSnippet.length > 80 ? textSnippet.substring(0, 80) + '...' : textSnippet}"
                           </strong>
                         </p>
@@ -532,7 +535,7 @@ export const Step4Mapping: React.FC = () => {
                         key={ph.idx}
                         onClick={() => matchedShapeIndex !== undefined && setFocusedShapeIndex(matchedShapeIndex)}
                         className={`space-y-1.5 text-left border-b border-[var(--color-border)] last:border-0 pb-3 mb-3 last:pb-0 last:mb-0 cursor-pointer p-1.5 rounded hover:bg-zinc-100/50 transition-all ${
-                          isFocused ? 'bg-amber-50 border-l-2 border-amber-500 pl-2 font-semibold' : ''
+                          isFocused ? 'bg-amber-55/40 border-l-2 border-amber-500 pl-2 font-semibold' : ''
                         }`}
                       >
                         <div className="flex items-center space-x-2">
@@ -543,10 +546,10 @@ export const Step4Mapping: React.FC = () => {
                         </div>
                         {ph.paras.map((p: any, pIdx: number) => (
                           <div key={pIdx} className="pl-2 border-l-2 border-[var(--color-border)] ml-1 space-y-1">
-                            <p className="text-[10px] font-medium text-zinc-500 italic m-0">"{p.text.substring(0, 50)}..."</p>
+                            <p className="text-[10px] font-medium text-zinc-500 italic">"{p.text.substring(0, 50)}..."</p>
                             <div className="flex flex-col gap-1.5 mt-1">
                               {p.changes.map((c: any, cIdx: number) => (
-                                <span key={cIdx} className="text-[9px] bg-white border border-[var(--color-border)] text-zinc-700 px-2 py-0.5 rounded flex flex-wrap items-center font-semibold leading-tight">
+                                <span key={cIdx} className="text-[9px] bg-white border border-[var(--color-border)] text-zinc-700 px-2 py-0.5 rounded flex flex-wrap items-center font-semibold">
                                   <span className="text-[8px] uppercase tracking-wider text-[var(--color-amber)] mr-1">{c.prop}:</span>
                                   <span className="line-through text-zinc-400 mr-1">{c.before}</span>
                                   <span className="text-zinc-300 mr-1">→</span>
@@ -599,20 +602,22 @@ export const Step4Mapping: React.FC = () => {
             <button
               onClick={() => setCurrentSlideIndex(Math.max(0, currentSlideIndex - 1))}
               disabled={currentSlideIndex === 0}
-              className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white disabled:opacity-40 rounded cursor-pointer font-semibold text-sm transition-all border-none"
+              className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white disabled:opacity-40 rounded cursor-pointer font-semibold text-sm transition-all"
             >
               Previous Slide
             </button>
             <button
               onClick={() => setCurrentSlideIndex(Math.min((slides?.length || 1) - 1, currentSlideIndex + 1))}
               disabled={currentSlideIndex === (slides?.length || 1) - 1}
-              className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white disabled:opacity-40 rounded cursor-pointer font-semibold text-sm transition-all border-none"
+              className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white disabled:opacity-40 rounded cursor-pointer font-semibold text-sm transition-all"
             >
               Next Slide
             </button>
           </div>
         </div>
       )}
+
+
     </div>
   );
 };
