@@ -204,11 +204,29 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   viewProof:            WORD_TO_INDESIGN_STAGES
 }
 
+let _dynamicStageActionsMap: Record<string, string[]> | null = null
+
+export function setDynamicStageActionsMap(map: Record<string, string[]>) {
+  _dynamicStageActionsMap = map
+}
+
+export function getDynamicStageActionsMap(): Record<string, string[]> | null {
+  return _dynamicStageActionsMap
+}
+
 export function isProcessingActionVisibleForStage(action: ProcessingActionKey, stageName: string): boolean {
+  const key = stageName.trim().toLowerCase()
+  // Check dynamically loaded mapping if available
+  if (_dynamicStageActionsMap && Object.prototype.hasOwnProperty.call(_dynamicStageActionsMap, action)) {
+    const list = _dynamicStageActionsMap[action]
+    if (Array.isArray(list)) {
+      return list.some(stage => stage.trim().toLowerCase() === key)
+    }
+  }
+  // Fallback to static defaults
   const rule = PROCESSING_ACTION_STAGE_MAP[action]
   if (rule === '*') return true
-  const key = stageName.trim().toLowerCase()
-  return rule.some(stage => stage.toLowerCase() === key)
+  return rule ? rule.some(stage => stage.toLowerCase() === key) : false
 }
 
 export interface FileTypeIcon { icon: string; color: string }

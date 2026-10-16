@@ -34,6 +34,7 @@ import { ReferenceCheckModal } from '@/features/projects/components/ReferenceChe
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import { ArtValidationModal } from '@/components/ArtValidationModal'
 import { LanguageEditReviewModal } from '@/features/language_edit/LanguageEditReviewModal'
+import { useStageActionsStore } from '@/store/useStageActionsStore'
 
 import {
   startProcessingJob,
@@ -709,6 +710,11 @@ export function ChapterFilePage({
   const pid = routeProjectId ? Number(routeProjectId) : (propProjectId ?? 0)
   const cid = routeChapterId ? Number(routeChapterId) : (propChapterId ?? 0)
   const cliId = routeClientId ?? propClientId
+
+  const fetchStageActions = useStageActionsStore(s => s.fetchMapping)
+  useEffect(() => {
+    void fetchStageActions()
+  }, [fetchStageActions])
 
   // ── Fetch chapter files from API ─────────────────────────────────────────
   const filesQuery = useChapterFilesQuery(pid || null, cid || null)

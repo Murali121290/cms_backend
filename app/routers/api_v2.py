@@ -8898,9 +8898,15 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
             try:
                 with open(client_config_path, "r") as f:
                     data = json.load(f)
-                stage_cfg = data.get(stage_name)
-                if stage_cfg:
+                if stage_name in data:
+                    stage_cfg = data.get(stage_name)
+                    # If explicitly disabled for this client, do NOT send email and do NOT fall back to default
+                    if stage_cfg and stage_cfg.get("enabled", True) is False:
+                        return None
                     return stage_cfg
+                else:
+                    # Client has custom config file and this stage was deleted/removed from it
+                    return None
             except Exception as e:
                 print(f"Error loading stage notification config for client {client_name}: {e}")
                 
@@ -8910,7 +8916,10 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
         try:
             with open(default_config_path, "r") as f:
                 data = json.load(f)
-            return data.get(stage_name)
+            stage_cfg = data.get(stage_name)
+            if stage_cfg and stage_cfg.get("enabled", True) is False:
+                return None
+            return stage_cfg
         except Exception as e:
             print(f"Error loading default stage notification config: {e}")
             
