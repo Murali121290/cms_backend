@@ -1,5 +1,5 @@
 import { useState, type RefObject } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, Clock, FileText, Layers, MessageSquare, X, Layout } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Clock, FileText, Layers, MessageSquare, X, Layout, Keyboard, Sparkles } from "lucide-react";
 
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { CommentsPanel } from "./CommentsPanel";
@@ -19,6 +19,9 @@ export interface LeftStructuringSidebarProps {
   isDesignViewActive?: boolean;
   onToggleDesignView?: () => void;
   className?: string;
+  clientKey?: string;
+  onOpenQuickPalette?: () => void;
+  onOpenShortcutsDialog?: () => void;
 }
 
 export function LeftStructuringSidebar({
@@ -32,6 +35,9 @@ export function LeftStructuringSidebar({
   isDesignViewActive = false,
   onToggleDesignView,
   className = "",
+  clientKey = "publisher",
+  onOpenQuickPalette,
+  onOpenShortcutsDialog,
 }: LeftStructuringSidebarProps) {
   const [activeTab, setActiveTab] = useState<StructuringTabId | null>(defaultActiveTab);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
@@ -157,6 +163,30 @@ export function LeftStructuringSidebar({
           <span>Design</span>
         </button>
 
+        {onOpenQuickPalette && (
+          <button
+            type="button"
+            onClick={onOpenQuickPalette}
+            title="Quick Style Palette (Alt+S)"
+            className="w-10 h-10 rounded-lg flex flex-col items-center justify-center gap-0.5 text-[9px] font-bold uppercase transition-all cursor-pointer text-amber-400 hover:bg-slate-800 hover:text-amber-300"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Palette</span>
+          </button>
+        )}
+
+        {onOpenShortcutsDialog && (
+          <button
+            type="button"
+            onClick={onOpenShortcutsDialog}
+            title="Style Shortcuts Manager"
+            className="w-10 h-10 rounded-lg flex flex-col items-center justify-center gap-0.5 text-[9px] font-bold uppercase transition-all cursor-pointer text-blue-400 hover:bg-slate-800 hover:text-blue-300"
+          >
+            <Keyboard className="w-4 h-4" />
+            <span>Keys</span>
+          </button>
+        )}
+
         <div className="mt-auto pt-2 border-t border-slate-800/80 w-full flex justify-center">
           <button
             type="button"
@@ -206,6 +236,9 @@ export function LeftStructuringSidebar({
                   fileId={fileId}
                   charStyles={charStyles}
                   visibleTabs={["paragraph"]}
+                  clientKey={clientKey}
+                  onOpenQuickPalette={onOpenQuickPalette}
+                  onOpenShortcutsDialog={onOpenShortcutsDialog}
                 />
               )}
               {activeTab === "char" && (
@@ -216,6 +249,9 @@ export function LeftStructuringSidebar({
                   fileId={fileId}
                   charStyles={charStyles}
                   visibleTabs={["character"]}
+                  clientKey={clientKey}
+                  onOpenQuickPalette={onOpenQuickPalette}
+                  onOpenShortcutsDialog={onOpenShortcutsDialog}
                 />
               )}
               {activeTab === "group" && (
@@ -226,6 +262,9 @@ export function LeftStructuringSidebar({
                   fileId={fileId}
                   charStyles={charStyles}
                   visibleTabs={["group"]}
+                  clientKey={clientKey}
+                  onOpenQuickPalette={onOpenQuickPalette}
+                  onOpenShortcutsDialog={onOpenShortcutsDialog}
                 />
               )}
               {activeTab === "history" && (

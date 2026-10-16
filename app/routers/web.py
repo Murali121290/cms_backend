@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, Form, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
 from jose import jwt, JWTError
 from datetime import datetime, timezone
@@ -727,26 +728,22 @@ async def convert_xhtml_to_xml_endpoint(
     if file_name.lower().endswith((".xhtml", ".html")):
         base_name = os.path.splitext(file_name)[0]
 
-        # Find all matching XML file records for this chapter
+        # Find all matching XML file records for this chapter strictly under XML category
         matching_xml_records = db.query(models.File).filter(
             models.File.project_id == project_id,
             models.File.chapter_id == chapter.id,
+            func.lower(models.File.category) == "xml",
             models.File.filename.ilike(f"{base_name}.xml")
         ).filter(
             ~models.File.filename.ilike("%_layout.html")
         ).all()
 
-        xml_disk_paths = set()
+        xml_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "XML")
+        primary_target_xml_path = os.path.join(xml_dir, f"{base_name}.xml")
+        xml_disk_paths = {os.path.abspath(primary_target_xml_path)}
         for rec in matching_xml_records:
-            xml_disk_paths.add(os.path.abspath(os.path.join(UPLOAD_DIR, rec.path)))
-
-        for folder in ["XML", "xml", "Manuscript"]:
-            candidate_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, folder)
-            candidate_file = os.path.abspath(os.path.join(candidate_dir, f"{base_name}.xml"))
-            if os.path.exists(candidate_file) or os.path.exists(candidate_dir):
-                xml_disk_paths.add(candidate_file)
-
-        primary_target_xml_path = list(xml_disk_paths)[0] if xml_disk_paths else os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "XML", f"{base_name}.xml")
+            if rec.path:
+                xml_disk_paths.add(os.path.abspath(os.path.join(UPLOAD_DIR, rec.path)))
 
         scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "scripts"))
         converter_script = os.path.join(scripts_dir, "universal_converter.pl")

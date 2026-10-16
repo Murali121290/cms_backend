@@ -802,6 +802,8 @@ class StructuringReviewResponse(BaseModel):
     actions: StructuringReviewActions
     styles: list[str]
     char_styles: list[str] = []
+    client_name: str | None = None
+    tag_set: str | None = None
 
 
 class StructuringSaveRequest(BaseModel):

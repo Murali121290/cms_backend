@@ -41,7 +41,7 @@ import {
   startStructuring,
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
+  startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof, startInddToProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -283,9 +283,11 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId, clientName,
+  row, activeFolder, folderFiles, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId, clientName,
 }: {
   row: FileRow | null
+  activeFolder?: string
+  folderFiles?: FileRow[]
   onOpenReferenceCheck: (file: FileRecord) => void
   onOpenXmlToIndesign: (fileId: number, fileName: string) => void
   onOpenWordToIndesign?: (fileId: number, fileName: string) => void
@@ -306,6 +308,17 @@ function ProcessingActionsMenu({
 
   const fid = row?.db_id
   const fname = row?.file_name.toLowerCase() ?? ''
+
+  const isIndesignFolder = activeFolder === 'indesign' || activeFolder === 'template_indesign' || row?.subfolder?.toLowerCase() === 'indesign'
+
+  // If a specific .indd file is selected, target it. Otherwise, target the first .indd file in the folder.
+  const selectedIsIndd = Boolean(fid && fname.endsWith('.indd'))
+  const folderInddFile = !selectedIsIndd && folderFiles
+    ? folderFiles.find(f => f.file_name.toLowerCase().endsWith('.indd'))
+    : null
+
+  const targetInddFid = selectedIsIndd ? fid : folderInddFile?.db_id
+  const targetInddName = selectedIsIndd ? (row?.file_name || '') : (folderInddFile?.file_name || '')
 
   const isSpringer = Boolean(
     clientName && (clientName.toLowerCase().includes('springer') || clientName.toLowerCase() === 'spr')
@@ -602,6 +615,22 @@ function ProcessingActionsMenu({
             onClick={() => fid && setConfirmStep({ actionName: 'InDesign to Final', jobFn: () => startIndesignToXml(fid), pollFileId: fid, pollProcessType: 'indesign_to_xml' })}
           >
             <FileCode size={12} /> InDesign to Final
+          </button>
+        )}
+
+        {showAction('inddToProof') && isIndesignFolder && (
+          <button
+            disabled={!targetInddFid}
+            title={targetInddFid ? `Run InDesign to Proof (generates PDF, XHTML, CSS) on ${targetInddName}` : "Requires an InDesign (.indd) file in the InDesign folder"}
+            className={btnCls}
+            onClick={() => targetInddFid && setConfirmStep({
+              actionName: 'InDesign to Proof',
+              jobFn: () => startInddToProof(targetInddFid),
+              pollFileId: targetInddFid,
+              pollProcessType: 'indd_to_proof'
+            })}
+          >
+            <FileCode size={12} className="text-pink-500" /> InDesign to Proof
           </button>
         )}
 
@@ -1629,6 +1658,8 @@ export function ChapterFilePage({
               {resolvedIsAssigned && (
                 <ProcessingActionsMenu
                   row={selectedCount === 1 ? selectedRows[0] : null}
+                  activeFolder={activeFolder}
+                  folderFiles={table.getFilteredRowModel().rows.map(r => r.original)}
                   onOpenReferenceCheck={setRefCheckFile}
                   onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'xml_to_indesign' })}
                   onOpenWordToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'word_to_indesign' })}

@@ -405,6 +405,8 @@ export interface StructuringReviewResponse {
   actions: StructuringReviewActions;
   styles: string[];
   char_styles?: string[];
+  client_name?: string | null;
+  tag_set?: string | null;
 }
 
 export interface StructuringSaveResponse {

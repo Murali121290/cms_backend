@@ -86,7 +86,7 @@ def resolve_finding_overlaps(findings: list[Finding]) -> list[Finding]:
     return resolved
 
 
-def _run_all_rules(seg: Segment) -> list[Finding]:
+def _run_all_rules(seg: Segment, include_language: bool = False) -> list[Finding]:
     findings: list[Finding] = []
 
     # Run citation and caption label detection on captions even if they are otherwise excluded
@@ -104,9 +104,14 @@ def _run_all_rules(seg: Segment) -> list[Finding]:
     if seg.excluded:
         return resolve_finding_overlaps(findings)
     findings.extend(run_te_rules(seg))
-    findings.extend(run_spelling_rules(seg))
-    findings.extend(run_compound_rules(seg))
-    findings.extend(run_bias_rules(seg))
+    
+    # Language editing rules (spelling, compounds, bias) belong to Language Editing studio
+    if include_language:
+        findings.extend(run_spelling_rules(seg))
+        findings.extend(run_compound_rules(seg))
+        findings.extend(run_bias_rules(seg))
+
+    # Mechanical editing points (formatting, syntax style, punctuation, articles, jargon)
     findings.extend(run_article_rules(seg))
     findings.extend(run_pronoun_check(seg))
     findings.extend(run_clinical_jargon(seg))
@@ -120,7 +125,7 @@ def _run_all_rules(seg: Segment) -> list[Finding]:
     return resolve_finding_overlaps(findings)
 
 
-def analyze_manuscript(chapters: list[dict]) -> dict[str, Any]:
+def analyze_manuscript(chapters: list[dict], include_language: bool = False) -> dict[str, Any]:
     """chapters is a list of {index, filename, path} dicts.
 
     Returns a dashboard-ready dict with:
@@ -145,7 +150,7 @@ def analyze_manuscript(chapters: list[dict]) -> dict[str, Any]:
 
         ch_findings: list[Finding] = []
         for seg in segments:
-            ch_findings.extend(_run_all_rules(seg))
+            ch_findings.extend(_run_all_rules(seg, include_language=include_language))
 
         all_findings.extend(ch_findings)
 

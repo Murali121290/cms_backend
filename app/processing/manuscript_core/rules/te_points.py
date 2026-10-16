@@ -951,8 +951,15 @@ def detect_latin_terms(seg: Segment) -> Iterable[Finding]:
 # ---------------------------------------------------------------------------
 _HEADING_TAG_RE = re.compile(r'^</?[A-Za-z][A-Za-z0-9._-]*>', re.IGNORECASE)
 def detect_para_ending(seg: Segment) -> Iterable[Finding]:
+    # Skip table cells / rows completely
+    if seg.source == "table" or seg.region == "table":
+        return
+    if any(k in (seg.style or "").lower() for k in ("table", "cell", "tbl")):
+        return
+    if seg.exclude_reason in ("caption", "table"):
+        return
     text = seg.text.rstrip()
-    if not text or seg.exclude_reason == "caption":
+    if not text:
         return
     if _HEADING_TAG_RE.match(text):
         return

@@ -5025,7 +5025,7 @@ def api_v2_combine_project_book(
                 ).first()
                 
                 if existing_file:
-                    version_service.archive_existing_file(db, existing_file)
+                    version_service.archive_existing_file(db, existing_file=existing_file)
                     shutil.copy2(src_file_path, dest_file_path)
                     existing_file.version += 1
                     existing_file.uploaded_at = datetime.now(timezone.utc)
@@ -5181,6 +5181,7 @@ def api_v2_processing_status(
         "extract_design_css",
         "extract_design_style",
         "view_proof",
+        "indd_to_proof",
     )
     if process_type not in supported_types:
         return _error_response(
@@ -6729,6 +6730,8 @@ def api_v2_structuring_review(
         ),
         styles=page_state["styles"],
         char_styles=page_state.get("char_styles", []),
+        client_name=page_state.get("client_name"),
+        tag_set=page_state.get("tag_set"),
     )
 
 

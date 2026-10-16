@@ -240,6 +240,8 @@ def build_review_page_state(
         f"&lang=en"
     )
 
+    tag_set = "springer" if (client_name and ("springer" in str(client_name).lower() or "spr" in str(client_name).lower())) else "publisher"
+
     return {
         "status": "ok",
         "file": resolved["file_record"],
@@ -247,6 +249,8 @@ def build_review_page_state(
         "collabora_url": collabora_url,
         "styles": style_list,
         "char_styles": char_style_list,
+        "client_name": client_name,
+        "tag_set": tag_set,
     }
 
 

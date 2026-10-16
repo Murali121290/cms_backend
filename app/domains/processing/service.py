@@ -103,6 +103,7 @@ PROCESS_PERMISSIONS = {
     "style_match_design": ["XML Manager", "XML Operator", "Senior XML Operator", "Production Manager"] + PRE_EDITOR_ROLES,
     "art_validation": ["XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Production Manager"] + PRE_EDITOR_ROLES,
     "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"] + PRE_EDITOR_ROLES,
+    "indd_to_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"] + PRE_EDITOR_ROLES,
 }
 
 
@@ -573,6 +574,22 @@ def background_processing_task(
                 )
                 generated_files = []
                 success_msg = "View Proof layout regeneration completed"
+
+            elif process_type == "indd_to_proof":
+                update_job_status(db, job_id, "processing", "Converting InDesign layout to Proof XHTML & CSS...", 30)
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.indd_to_proof_engine import InddToProofEngine
+                InddToProofEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                generated_files = []
+                success_msg = "InDesign to Proof conversion completed"
 
             elif process_type == "extract_design_css":
                 update_job_status(db, job_id, "processing", "Extracting CSS from InDesign template...", 30)

@@ -1,7 +1,7 @@
 """Add project_language_rules table — DB-first storage for the per-project Rules Picker selection.
 
 Revision ID: 0047_project_language_rules
-Revises: 0044_language_rules_history
+Revises: 0046_language_rules_history
 Create Date: 2026-10-06 07:40:00.000000
 
 """

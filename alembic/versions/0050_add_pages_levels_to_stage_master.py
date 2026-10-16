@@ -1,7 +1,7 @@
 """Add pages_level1, pages_level2, pages_level3 columns to stage_master and seed Pre-editing norms.
 
-Revision ID: 0050_add_pages_levels_to_stage_master
-Revises: 0049_add_processing_actions_to_stage_master
+Revision ID: 0050_stage_pages_levels
+Revises: 0049_stage_processing_actions
 Create Date: 2026-10-15 10:15:00.000000
 
 """
@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0050_add_pages_levels_to_stage_master'
-down_revision: Union[str, Sequence[str], None] = '0049_add_processing_actions_to_stage_master'
+revision: str = '0050_stage_pages_levels'
+down_revision: Union[str, Sequence[str], None] = '0049_stage_processing_actions'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

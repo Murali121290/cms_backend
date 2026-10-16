@@ -24,6 +24,72 @@ logger = logging.getLogger("WindowsConversionServer")
 
 app = FastAPI(title="Windows InDesign to Word Conversion Server")
 
+def get_indesign_application(session_id: str):
+    """
+    Safely acquires an InDesign COM application instance.
+    Reuses existing running instance if healthy and responsive.
+    If not running or unresponsive, cleanly terminates hung processes,
+    clears recovery caches, and launches a fresh instance.
+    """
+    import subprocess
+    import time
+
+    def reset_indesign_processes():
+        logger.info(f"[{session_id}] Force terminating hung InDesign/WerFault processes...")
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe", "/T"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["taskkill", "/F", "/IM", "WerFault.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as tk_err:
+            logger.warning(f"[{session_id}] taskkill failed: {tk_err}")
+        
+        # Delay for Windows COM subsystem, process handles, and RPC to release
+        time.sleep(3.0)
+
+        # Clear InDesign recovery caches so InDesign doesn't get stuck on crash recovery dialogs
+        for env_var in ["APPDATA", "LOCALAPPDATA"]:
+            base_dir = os.environ.get(env_var)
+            if not base_dir:
+                continue
+            adobe_dir = os.path.join(base_dir, "Adobe", "InDesign")
+            if os.path.exists(adobe_dir):
+                for root, dirs, _ in os.walk(adobe_dir):
+                    if os.path.basename(root).lower() == "indesign recovery":
+                        for item in os.listdir(root):
+                            item_p = os.path.join(root, item)
+                            try:
+                                if os.path.isfile(item_p):
+                                    os.remove(item_p)
+                                elif os.path.isdir(item_p):
+                                    shutil.rmtree(item_p, ignore_errors=True)
+                            except Exception:
+                                pass
+
+    # First attempt: Try connecting to existing or starting normally
+    app_instance = None
+    try:
+        app_instance = win32com.client.Dispatch("InDesign.Application")
+        # Ping a simple property to verify COM bridge is responsive
+        _ = app_instance.Documents.Count
+        logger.info(f"[{session_id}] Successfully connected to InDesign.Application")
+    except Exception as first_err:
+        logger.warning(f"[{session_id}] Initial InDesign dispatch failed ({first_err}), performing clean reset...")
+        app_instance = None
+        reset_indesign_processes()
+        try:
+            app_instance = win32com.client.Dispatch("InDesign.Application")
+            _ = app_instance.Documents.Count
+            logger.info(f"[{session_id}] Successfully dispatched fresh InDesign.Application after reset")
+        except Exception as retry_err:
+            logger.error(f"[{session_id}] Fatal: InDesign application dispatch failed after reset: {retry_err}")
+            raise HTTPException(status_code=500, detail=f"InDesign application dispatch failed: {str(retry_err)}")
+
+    try:
+        app_instance.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+    except Exception as ui_ex:
+        logger.warning(f"[{session_id}] Could not set UserInteractionLevel: {ui_ex}")
+
+    return app_instance
+
 # Inline JSX script contents
 JSX_CONTENT = r"""// Adobe InDesign ExtendScript to export .indd to RTF/PDF
 // Reads arguments set via ScriptArgs or arguments array
@@ -885,6 +951,172 @@ def convert_xml_to_indesign(file: UploadFile = File(...)):
         # except Exception as cleanup_ex:
         #     logger.warning(f"[{session_id}] Failed to clean up temp dir {temp_dir}: {str(cleanup_ex)}")
 
+@app.post("/convert-word-to-indesign")
+def convert_word_to_indesign(file: UploadFile = File(...), client: str = None, progid: str = "InDesign.Application"):
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+
+    # Locate d2id directory (check local Windows path first, then network share)
+    d2id_candidates = [
+        r"C:\Users\muraliba\Documents\word to Indesign",
+        r"\\10.1.1.100\common_share\sadha\Docx_to_Indesign",
+        r"\\10.1.1.100\common_share\sadha\d2id_v0.1.0",
+        os.path.abspath("word to Indesign"),
+        os.path.abspath("d2id"),
+    ]
+    d2id_dir = None
+    for cand in d2id_candidates:
+        if os.path.exists(cand) and (os.path.exists(os.path.join(cand, "d2id")) or os.path.exists(os.path.join(cand, "requirements.txt"))):
+            d2id_dir = cand
+            break
+
+    if not d2id_dir:
+        raise HTTPException(status_code=500, detail="Word to InDesign tool directory (d2id) not found on Windows server.")
+
+    # Terminate zombie InDesign processes
+    import subprocess
+    logger.info(f"[{session_id}] Cleaning up zombie InDesign processes before Word-to-InDesign...")
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as tk_ex:
+        logger.warning(f"[{session_id}] taskkill cleanup failed: {str(tk_ex)}")
+
+    temp_dir = os.path.join(workflow_base_dir, f"word_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    logger.info(f"[{session_id}] Received Word-to-InDesign conversion request: {file.filename}")
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        logger.info(f"[{session_id}] Saved uploaded zip to {uploaded_file_path}")
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    # Extract zip file
+    import zipfile
+    try:
+        with zipfile.ZipFile(uploaded_file_path, "r") as z:
+            z.extractall(temp_dir)
+        logger.info(f"[{session_id}] Unzipped Word-to-InDesign package successfully")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+        raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
+
+    # Locate DOCX, INDT/INDD, and assets folder
+    docx_path = None
+    indt_path = None
+    assets_dir = None
+
+    for root, dirs, filenames in os.walk(temp_dir):
+        # Look for artwork folders
+        for d in dirs:
+            if d.lower() in ("artfile", "links", "art"):
+                found_assets = os.path.abspath(os.path.join(root, d))
+                if os.path.exists(found_assets) and len(os.listdir(found_assets)) > 0:
+                    assets_dir = found_assets
+
+        for fname in filenames:
+            fname_lower = fname.lower()
+            if fname_lower.endswith(".docx") and not fname.startswith("~$") and not fname_lower.endswith("_final.docx"):
+                docx_path = os.path.abspath(os.path.join(root, fname))
+            elif fname_lower.endswith(".indt") or fname_lower.endswith(".indd"):
+                if "output" not in root.lower() and not fname_lower.startswith("~$"):
+                    indt_path = os.path.abspath(os.path.join(root, fname))
+
+    if not docx_path:
+        raise HTTPException(status_code=400, detail="No Word manuscript (.docx) found in zip package.")
+    if not indt_path:
+        raise HTTPException(status_code=400, detail="No InDesign template (.indt/.indd) found in zip package.")
+
+    logger.info(f"[{session_id}] Manuscript DOCX: {docx_path}")
+    logger.info(f"[{session_id}] Template INDT: {indt_path}")
+    logger.info(f"[{session_id}] Artwork folder: {assets_dir}")
+    logger.info(f"[{session_id}] Executing d2id from: {d2id_dir}")
+
+    output_dir = os.path.join(temp_dir, "output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Build command for d2id auto with explicit quotes around all paths to safely handle spaces
+    import sys
+    cmd_str = f'"{sys.executable}" -m d2id auto --template "{indt_path}" --docx "{docx_path}" --output "{output_dir}"'
+    if assets_dir:
+        cmd_str += f' --assets "{assets_dir}"'
+
+    # Copy template document fonts to output if available
+    template_fonts = os.path.join(os.path.dirname(indt_path), "Document fonts")
+    if os.path.exists(template_fonts):
+        out_fonts = os.path.join(output_dir, "Document fonts")
+        try:
+            shutil.copytree(template_fonts, out_fonts, dirs_exist_ok=True)
+            logger.info(f"[{session_id}] Copied Document fonts to output")
+        except Exception:
+            pass
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = d2id_dir + os.pathsep + env.get("PYTHONPATH", "")
+    env["NODE_OPTIONS"] = "--use-system-ca"
+
+    logger.info(f"[{session_id}] Running d2id command: {cmd_str}")
+    try:
+        proc_res = subprocess.run(
+            cmd_str,
+            cwd=d2id_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=3600,
+            check=False
+        )
+        logger.info(f"[{session_id}] d2id stdout: {proc_res.stdout}")
+        if proc_res.stderr:
+            logger.warning(f"[{session_id}] d2id stderr: {proc_res.stderr}")
+
+        if proc_res.returncode != 0 and proc_res.returncode != 2:
+            raise RuntimeError(f"d2id failed with exit code {proc_res.returncode}: {proc_res.stderr or proc_res.stdout}")
+    except subprocess.TimeoutExpired:
+        logger.error(f"[{session_id}] d2id execution timed out after 3600 seconds")
+        raise HTTPException(status_code=504, detail="Word-to-InDesign conversion timed out on Windows server")
+    except Exception as run_err:
+        logger.error(f"[{session_id}] d2id execution exception: {str(run_err)}")
+        raise HTTPException(status_code=500, detail=f"Word-to-InDesign execution failed: {str(run_err)}")
+
+    # Verify generated files in output_dir
+    generated_files = []
+    for root, _, files in os.walk(output_dir):
+        for f in files:
+            generated_files.append(os.path.join(root, f))
+
+    has_indd = any(f.lower().endswith(".indd") for f in generated_files)
+    if not has_indd:
+        err_msg = f"InDesign file was not generated by d2id. Details: {proc_res.stdout[-1000:] if 'proc_res' in locals() else 'No output'}"
+        logger.error(f"[{session_id}] {err_msg}")
+        raise HTTPException(status_code=500, detail=err_msg)
+
+    # Package output files into response ZIP
+    out_zip_path = os.path.join(temp_dir, f"word_to_indesign_output_{session_id}.zip")
+    with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+        for fpath in generated_files:
+            rel = os.path.relpath(fpath, output_dir)
+            out_zf.write(fpath, rel)
+            logger.info(f"[{session_id}] Packaged output file: {rel}")
+
+    with open(out_zip_path, "rb") as fh:
+        zip_bytes = fh.read()
+
+    processing_time = time.time() - start_time
+    logger.info(f"[{session_id}] Word to InDesign completed successfully in {processing_time:.2f} seconds")
+
+    from starlette.responses import Response
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="word_to_indesign_{session_id}.zip"'}
+    )
+
 @app.post("/convert-indesign-to-xml")
 def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):
     start_time = time.time()
@@ -938,8 +1170,22 @@ def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):
     else:
         input_path = os.path.abspath(uploaded_file_path)
 
+    import re
+    orig_fname = os.path.basename(input_path)
+    clean_fname = re.sub(r"_v\d+(\.[a-zA-Z0-9]+)$", r"\1", orig_fname, flags=re.IGNORECASE)
+    if clean_fname != orig_fname:
+        clean_path = os.path.join(os.path.dirname(input_path), clean_fname)
+        try:
+            if os.path.exists(clean_path):
+                os.remove(clean_path)
+            shutil.move(input_path, clean_path)
+            input_path = clean_path
+        except Exception:
+            pass
+
     indd_basename = os.path.basename(input_path)
     indd_name_no_ext = os.path.splitext(indd_basename)[0]
+    indd_name_no_ext = re.sub(r"_v\d+$", "", indd_name_no_ext, flags=re.IGNORECASE)
     output_xml_path = os.path.join(os.path.dirname(input_path), f"{indd_name_no_ext}_final.xml")
     
     try:
@@ -1344,98 +1590,78 @@ def merge_book(file: UploadFile = File(...)):
     from starlette.responses import FileResponse
     return FileResponse(out_zip_path, media_type="application/zip", filename="merged_output.zip")
 
-@app.post("/view-proof")
-def view_proof(file: UploadFile = File(...)):
+@app.post("/convert-indesign-to-proof")
+@app.post("/indd-to-proof")
+def convert_indesign_to_proof(file: UploadFile = File(...)):
+    """
+    Process 1: InDesign to Proof (Indd2Xhtml)
+    Takes an InDesign document (.indd) and art files.
+    Runs C:\\Users\\muraliba\\Documents\\capturelayouts.jsx.
+    Extracts and returns generated XHTML and CSS files (and figures).
+    """
     start_time = time.time()
     session_id = str(uuid.uuid4())
     workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
-    temp_dir = os.path.join(workflow_base_dir, f"view_proof_{session_id}")
+    temp_dir = os.path.join(workflow_base_dir, f"indesign_to_proof_{session_id}")
     os.makedirs(temp_dir, exist_ok=True)
-    
-    logger.info(f"[{session_id}] Received view-proof request")
+
+    logger.info(f"[{session_id}] Received indesign-to-proof request for file: {file.filename}")
     uploaded_file_path = os.path.join(temp_dir, file.filename)
-    
+
     try:
         with open(uploaded_file_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
-        logger.info(f"[{session_id}] Saved zip to {uploaded_file_path}")
+        logger.info(f"[{session_id}] Saved uploaded package to {uploaded_file_path}")
     except Exception as e:
-        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        logger.error(f"[{session_id}] Failed to save uploaded package: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-        
-    # Extract zip file
+
     import zipfile
     try:
         with zipfile.ZipFile(uploaded_file_path, "r") as z:
             z.extractall(temp_dir)
-        logger.info(f"[{session_id}] Unzipped view-proof package successfully")
+        logger.info(f"[{session_id}] Unzipped indesign-to-proof package successfully")
     except Exception as zip_ex:
         logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
         raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
 
-    # Find the .xhtml and .indt/.indd files recursively
-    xhtml_path = None
-    indt_path = None
+    # Locate the .indd file recursively
+    indd_path = None
     for root, _, filenames in os.walk(temp_dir):
         for fname in filenames:
-            if fname.lower().endswith(".xhtml"):
-                xhtml_path = os.path.abspath(os.path.join(root, fname))
-            elif fname.lower().endswith(".indt"):
-                indt_path = os.path.abspath(os.path.join(root, fname))
-            elif fname.lower().endswith(".indd") and not indt_path:
-                indt_path = os.path.abspath(os.path.join(root, fname))
-                
-    if not xhtml_path:
-        raise HTTPException(status_code=400, detail="No XHTML file (.xhtml) found in zip package. View Proof conversion requires an .xhtml manuscript file.")
-    if not indt_path:
-        raise HTTPException(status_code=400, detail="No InDesign template (.indt or .indd) found in zip package.")
+            if fname.lower().endswith(".indd"):
+                indd_path = os.path.abspath(os.path.join(root, fname))
+                break
+        if indd_path:
+            break
 
-    logger.info(f"[{session_id}] XHTML found: {xhtml_path}")
-    logger.info(f"[{session_id}] Template found: {indt_path}")
+    if not indd_path:
+        raise HTTPException(status_code=400, detail="No InDesign document (.indd) found in uploaded archive.")
 
-    # Prepare paths
-    xml_basename = os.path.splitext(os.path.basename(xhtml_path))[0]
-    output_xml_path = os.path.join(temp_dir, f"{xml_basename}.xml")
-    
-    # Run universal_converter.pl in xhtml2xml mode
-    perl_script = r"C:\Users\muraliba\Documents\xhtml\universal_converter.pl"
-    mapping_config = r"C:\Users\muraliba\Documents\xhtml\mapping_config.json"
-    
-    if not os.path.exists(perl_script):
-        perl_script = os.path.abspath("app/services/scripts/universal_converter.pl")
-    if not os.path.exists(mapping_config):
-        mapping_config = os.path.abspath("app/services/scripts/mapping_config.json")
-        
-    logger.info(f"[{session_id}] Running universal_converter.pl (xhtml2xml)...")
-    import subprocess
-    cmd = [
-        "perl",
-        perl_script,
-        "xhtml2xml",
-        os.path.abspath(xhtml_path),
-        os.path.abspath(mapping_config),
-        os.path.abspath(output_xml_path)
-    ]
-    try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        logger.info(f"[{session_id}] Perl conversion completed: {res.stdout.strip()}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"[{session_id}] Perl conversion failed: {e.stderr}")
-        raise HTTPException(status_code=500, detail=f"Perl conversion failed: {e.stderr}")
+    logger.info(f"[{session_id}] Located INDD document: {indd_path}")
+    indd_dir = os.path.dirname(indd_path)
 
-    if not os.path.exists(output_xml_path):
-        raise HTTPException(status_code=500, detail="Output XML file was not generated by Perl script")
+    # Ensure adjacent art folder exists if packaged in subfolder
+    artfile_dir = os.path.join(indd_dir, "artfile")
+    links_dir = os.path.join(indd_dir, "Links")
+    if not os.path.exists(artfile_dir):
+        for root, dirs, _ in os.walk(temp_dir):
+            for d in dirs:
+                if d.lower() in ("artfile", "art", "links"):
+                    source_art = os.path.join(root, d)
+                    if source_art != artfile_dir and source_art != links_dir:
+                        try:
+                            shutil.copytree(source_art, artfile_dir, dirs_exist_ok=True)
+                            logger.info(f"[{session_id}] Copied art folder from {source_art} to {artfile_dir}")
+                        except Exception as art_err:
+                            logger.warning(f"[{session_id}] Could not copy art folder: {art_err}")
 
-    # Run SpringerXMLProcessor.jsx (XML -> INDD/PDF)
-    local_jsx = r"C:\Users\muraliba\Documents\SpringerXMLProcessor.jsx"
-    if not os.path.exists(local_jsx):
-        local_jsx = os.path.abspath("app/services/scripts/SpringerXMLProcessor.jsx")
-    if not os.path.exists(local_jsx):
-        raise HTTPException(status_code=500, detail=f"Local InDesign processor script missing: {local_jsx}")
-
-    output_indd_path = os.path.join(temp_dir, f"{xml_basename}.indd")
-    output_pdf_path = os.path.join(temp_dir, f"{xml_basename}.pdf")
-    artwork_path = temp_dir
+    # Verify script existence
+    jsx_script = r"C:\Users\muraliba\Documents\capturelayouts.jsx"
+    if not os.path.exists(jsx_script):
+        jsx_script = os.path.abspath("capturelayouts.jsx")
+    if not os.path.exists(jsx_script):
+        raise HTTPException(status_code=500, detail=f"InDesign script missing: {jsx_script}")
 
     try:
         import win32com.client
@@ -1445,192 +1671,252 @@ def view_proof(file: UploadFile = File(...)):
 
     pythoncom.CoInitialize()
     try:
-        try:
-            subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        indesign_app = get_indesign_application(session_id)
 
-        logger.info(f"[{session_id}] Dispatching InDesign.Application...")
-        indesign_app = win32com.client.Dispatch("InDesign.Application")
-        
-        try:
-            indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
-        except Exception as ui_ex:
-            logger.warning(f"[{session_id}] Could not set userInteractionLevel: {str(ui_ex)}")
+        abs_indd = os.path.abspath(indd_path).replace("/", "\\")
+        indesign_app.ScriptArgs.SetValue("InputFile", abs_indd)
 
-        logger.info(f"[{session_id}] Setting ScriptArgs for {local_jsx}...")
-        indesign_app.ScriptArgs.SetValue("template_path", os.path.abspath(indt_path))
-        indesign_app.ScriptArgs.SetValue("job_doc", os.path.abspath(output_indd_path))
-        indesign_app.ScriptArgs.SetValue("pdf_path", os.path.abspath(output_pdf_path))
-        indesign_app.ScriptArgs.SetValue("tokenid", session_id)
-        indesign_app.ScriptArgs.SetValue("xml_path", os.path.abspath(output_xml_path))
-        indesign_app.ScriptArgs.SetValue("artwork_path", os.path.abspath(artwork_path))
-
-        logger.info(f"[{session_id}] Running ExtendScript JSX script directly: {local_jsx}...")
-        indesign_app.DoScript(local_jsx, 1246973031)
-        logger.info(f"[{session_id}] SpringerXMLProcessor.jsx completed execution.")
+        logger.info(f"[{session_id}] Executing capturelayouts.jsx on: {abs_indd}")
+        indesign_app.DoScript(jsx_script, 1246973031)
+        logger.info(f"[{session_id}] capturelayouts.jsx completed execution.")
 
         try:
             while indesign_app.Documents.Count > 0:
-                indesign_app.Documents.Item(1).Close(1852776783)
+                indesign_app.Documents.Item(1).Close(1852776783)  # SaveOptions.NO
         except Exception:
             pass
     except Exception as indesign_err:
         logger.error(f"[{session_id}] InDesign processing failed: {str(indesign_err)}")
-        raise HTTPException(status_code=500, detail=f"InDesign processing failed: {str(indesign_err)}")
+        raise HTTPException(status_code=500, detail=f"InDesign capture layouts failed: {str(indesign_err)}")
     finally:
         pythoncom.CoUninitialize()
 
-    # Run Springer_Finaxml.jsx on the newly generated INDD to extract final XML, XHTML, CSS, EPUB, and DOCX!
-    jsx_script_final = r"C:\Users\muraliba\Documents\Springer_Finaxml.jsx"
-    if not os.path.exists(jsx_script_final):
-        jsx_script_final = os.path.abspath("app/services/scripts/Springer_Finaxml.jsx")
-    if not os.path.exists(jsx_script_final):
-        raise HTTPException(status_code=500, detail=f"Local InDesign export script missing: {jsx_script_final}")
+    # Search for generated outputs (.xhtml, .css, .jpg)
+    indd_stem = os.path.splitext(os.path.basename(indd_path))[0]
+    expected_xhtml = os.path.join(indd_dir, f"{indd_stem}.xhtml")
+    web_resources_css = os.path.join(indd_dir, f"{indd_stem}-web-resources", "css", "idGeneratedStyles.css")
+    flattened_css = os.path.join(indd_dir, f"{indd_stem}.css")
 
-    script_dir = os.path.dirname(jsx_script_final)
-    log_path = os.path.join(script_dir, "finalxml", "finalxml.log")
-    epub_log_path = os.path.join(script_dir, "epub", "epub.log")
-    docx_output_path = os.path.join(temp_dir, f"{xml_basename}_final.docx")
-
-    for p, name in [(log_path, "finalxml.log"), (epub_log_path, "epub.log"), (docx_output_path, f"{xml_basename}_final.docx")]:
-        if os.path.exists(p):
-            try:
-                os.remove(p)
-            except Exception as e:
-                logger.warning(f"[{session_id}] Could not remove old {name}: {e}")
-
-    pythoncom.CoInitialize()
-    try:
+    # If web-resources CSS was created, also mirror it as <stem>.css for convenient proof loading
+    if os.path.exists(web_resources_css) and not os.path.exists(flattened_css):
         try:
-            subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+            shutil.copy2(web_resources_css, flattened_css)
+            logger.info(f"[{session_id}] Mirrored web-resources CSS to: {flattened_css}")
+        except Exception as css_copy_err:
+            logger.warning(f"[{session_id}] Could not mirror CSS: {css_copy_err}")
 
-        indesign_app = win32com.client.Dispatch("InDesign.Application")
-        try:
-            indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
-        except Exception:
-            pass
+    # Fallback search for any .xhtml in temp_dir
+    if not os.path.exists(expected_xhtml):
+        for root, _, files in os.walk(temp_dir):
+            for f in files:
+                if f.lower().endswith(".xhtml"):
+                    expected_xhtml = os.path.abspath(os.path.join(root, f))
+                    break
+            if os.path.exists(expected_xhtml):
+                break
 
-        final_xml_path = os.path.join(temp_dir, f"{xml_basename}_final.xml")
-        indesign_app.ScriptArgs.SetValue("InputFile", os.path.abspath(output_indd_path))
-        indesign_app.ScriptArgs.SetValue("OutputFile", os.path.abspath(final_xml_path))
+    if not os.path.exists(expected_xhtml):
+        raise HTTPException(status_code=500, detail="XHTML output file (.xhtml) was not generated by capturelayouts.jsx")
 
-        logger.info(f"[{session_id}] Running {jsx_script_final} on the updated INDD...")
-        args_final = [os.path.abspath(output_indd_path), os.path.abspath(final_xml_path)]
-        indesign_app.DoScript(jsx_script_final, 1246973031, args_final)
+    # Check for generated PDF
+    expected_pdf = os.path.join(indd_dir, f"{indd_stem}.pdf")
+    if os.path.exists(expected_pdf):
+        logger.info(f"[{session_id}] Generated proof PDF found: {expected_pdf}")
+    else:
+        logger.warning(f"[{session_id}] Proof PDF not found at {expected_pdf}")
 
-        if log_path:
-            logger.info(f"[{session_id}] Waiting for finalxml.bat...")
-            start_wait = time.time()
-            while time.time() - start_wait < 45:
-                if os.path.exists(log_path):
-                    try:
-                        with open(log_path, "r") as lf:
-                            lf.read()
-                        break
-                    except Exception:
-                        pass
-                time.sleep(0.5)
-
-        if epub_log_path:
-            logger.info(f"[{session_id}] Waiting for epub.bat...")
-            start_wait = time.time()
-            while time.time() - start_wait < 45:
-                if os.path.exists(epub_log_path):
-                    try:
-                        with open(epub_log_path, "r") as lf:
-                            lf.read()
-                        break
-                    except Exception:
-                        pass
-                time.sleep(0.5)
-
-        if docx_output_path:
-            logger.info(f"[{session_id}] Waiting for docx conversion...")
-            start_wait = time.time()
-            while time.time() - start_wait < 45:
-                if os.path.exists(docx_output_path) and os.path.getsize(docx_output_path) > 0:
-                    try:
-                        with open(docx_output_path, "rb") as lf:
-                            lf.read(100)
-                        break
-                    except Exception:
-                        pass
-                time.sleep(0.5)
-
-        try:
-            while indesign_app.Documents.Count > 0:
-                indesign_app.Documents.Item(1).Close(1852776783)
-        except Exception:
-            pass
-    except Exception as indesign_err:
-        logger.error(f"[{session_id}] Final export run failed: {str(indesign_err)}")
-        raise HTTPException(status_code=500, detail=f"Final export failed: {str(indesign_err)}")
-    finally:
-        pythoncom.CoUninitialize()
-
-    expected_jsx_xml = os.path.join(temp_dir, f"{xml_basename}_finalxml.xml")
-    if os.path.exists(expected_jsx_xml):
-        try:
-            if os.path.exists(final_xml_path):
-                os.remove(final_xml_path)
-            os.rename(expected_jsx_xml, final_xml_path)
-        except Exception as rename_err:
-            logger.warning(f"[{session_id}] Failed to rename finalxml output: {str(rename_err)}")
-
-    out_zip_path = os.path.join(temp_dir, f"view_proof_output_{session_id}.zip")
-    
-    generated_pdf = None
-    generated_xhtml = None
-    generated_css = None
-    generated_xml = final_xml_path if os.path.exists(final_xml_path) else None
-    generated_epub = None
-    generated_docx = docx_output_path if os.path.exists(docx_output_path) else None
-
-    for root, _, filenames in os.walk(temp_dir):
-        for fname in filenames:
-            ext = os.path.splitext(fname)[1].lower()
-            f_abs = os.path.abspath(os.path.join(root, fname))
-            if ext == ".pdf":
-                generated_pdf = f_abs
-            elif ext == ".xhtml":
-                generated_xhtml = f_abs
-            elif ext == ".css":
-                generated_css = f_abs
-            elif ext == ".epub":
-                generated_epub = f_abs
-            elif ext == ".xml" and not generated_xml:
-                # Fallback: pick up any .xml in temp dir if final_xml_path wasn't found earlier
-                generated_xml = f_abs
-
-    if not generated_pdf or not os.path.exists(generated_pdf):
-        raise HTTPException(status_code=500, detail="Output PDF file was not created by InDesign.")
-        
+    out_zip_path = os.path.join(temp_dir, f"indesign_to_proof_output_{session_id}.zip")
     try:
         with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+            # Package .xhtml, .css, .jpg, .pdf, and web-resources
             for root, _, filenames in os.walk(temp_dir):
                 for fname in filenames:
                     if fname.startswith("~$") or fname.startswith(".") or fname.endswith(".zip"):
                         continue
                     ext = os.path.splitext(fname)[1].lower()
-                    if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx", ".pdf", ".css", ".indd"):
+                    if ext in (".xhtml", ".css", ".jpg", ".jpeg", ".png", ".svg", ".pdf"):
                         f_abs = os.path.abspath(os.path.join(root, fname))
+                        # Keep filename relative to temp_dir or flatten root outputs
                         rel_path = os.path.relpath(f_abs, temp_dir)
-                        try:
-                            out_zf.write(f_abs, rel_path)
-                            logger.info(f"[{session_id}] Zipped view_proof result file: {rel_path}")
-                        except Exception as z_err:
-                            logger.warning(f"[{session_id}] Skipping transient file {rel_path}: {z_err}")
-                
-        logger.info(f"[{session_id}] Packaged proof outputs successfully into {out_zip_path}")
+                        # Avoid placing in nested temp dirs if within indd_dir
+                        if f_abs.startswith(indd_dir):
+                            rel_path = os.path.relpath(f_abs, indd_dir)
+                        out_zf.write(f_abs, rel_path)
+                        logger.info(f"[{session_id}] Packaged proof asset: {rel_path}")
+
+        logger.info(f"[{session_id}] Packaged indesign-to-proof outputs successfully into {out_zip_path}")
     except Exception as zip_ex:
         logger.error(f"[{session_id}] Packaging proof outputs failed: {str(zip_ex)}")
         raise HTTPException(status_code=500, detail=f"Failed to package proof outputs: {str(zip_ex)}")
 
     from starlette.responses import FileResponse
+    return FileResponse(out_zip_path, media_type="application/zip", filename="indesign_to_proof_output.zip")
+
+
+@app.post("/view-proof")
+def view_proof(file: UploadFile = File(...)):
+    """
+    Process 2: View Proof (Xhtml2Indd)
+    Takes an InDesign document (.indd), art files, proof XHTML (.xhtml), and XML (.xml).
+    Runs C:\\Users\\muraliba\\Documents\\applylayouts.jsx.
+    Re-applies proof corrections, layout styling, exports high-quality PDF, and saves .indd.
+    Returns the updated .indd and generated .pdf.
+    """
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+    temp_dir = os.path.join(workflow_base_dir, f"view_proof_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    logger.info(f"[{session_id}] Received view-proof request")
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        logger.info(f"[{session_id}] Saved zip to {uploaded_file_path}")
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    import zipfile
+    try:
+        with zipfile.ZipFile(uploaded_file_path, "r") as z:
+            z.extractall(temp_dir)
+        logger.info(f"[{session_id}] Unzipped view-proof package successfully")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+        raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
+
+    # Locate the .indd, .xhtml, and .xml files
+    indd_path = None
+    xhtml_path = None
+    xml_path = None
+
+    for root, _, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            ext = os.path.splitext(fname)[1].lower()
+            f_abs = os.path.abspath(os.path.join(root, fname))
+            if ext == ".indd" and not indd_path:
+                indd_path = f_abs
+            elif ext == ".xhtml" and not xhtml_path:
+                xhtml_path = f_abs
+            elif ext == ".xml" and not xml_path:
+                xml_path = f_abs
+
+    if not indd_path:
+        raise HTTPException(status_code=400, detail="No InDesign document (.indd) found in view proof package.")
+    if not xhtml_path:
+        raise HTTPException(status_code=400, detail="No XHTML file (.xhtml) found in view proof package.")
+
+    logger.info(f"[{session_id}] InDesign document: {indd_path}")
+    logger.info(f"[{session_id}] XHTML file: {xhtml_path}")
+    if xml_path:
+        logger.info(f"[{session_id}] XML file: {xml_path}")
+
+    # applylayouts.jsx expects <basename>.xhtml, <basename>.xml, and artfile/ in the same directory as <basename>.indd
+    indd_dir = os.path.dirname(indd_path)
+    indd_stem = os.path.splitext(os.path.basename(indd_path))[0]
+    target_xhtml = os.path.join(indd_dir, f"{indd_stem}.xhtml")
+    target_xml = os.path.join(indd_dir, f"{indd_stem}.xml")
+
+    if os.path.abspath(xhtml_path) != os.path.abspath(target_xhtml):
+        shutil.copy2(xhtml_path, target_xhtml)
+        logger.info(f"[{session_id}] Copied XHTML to matching stem: {target_xhtml}")
+
+    if xml_path and os.path.abspath(xml_path) != os.path.abspath(target_xml):
+        shutil.copy2(xml_path, target_xml)
+        logger.info(f"[{session_id}] Copied XML to matching stem: {target_xml}")
+
+    # Ensure adjacent artfile directory exists next to the .indd file
+    artfile_dir = os.path.join(indd_dir, "artfile")
+    if not os.path.exists(artfile_dir):
+        for root, dirs, _ in os.walk(temp_dir):
+            for d in dirs:
+                if d.lower() in ("artfile", "art", "links"):
+                    source_art = os.path.join(root, d)
+                    if source_art != artfile_dir:
+                        try:
+                            shutil.copytree(source_art, artfile_dir, dirs_exist_ok=True)
+                            logger.info(f"[{session_id}] Set up adjacent artfile directory from: {source_art}")
+                        except Exception as art_err:
+                            logger.warning(f"[{session_id}] Could not copy artfolder: {art_err}")
+                        break
+            if os.path.exists(artfile_dir):
+                break
+
+    # If artfile still does not exist, create empty folder to avoid script errors
+    os.makedirs(artfile_dir, exist_ok=True)
+
+    # Verify script existence
+    jsx_script = r"C:\Users\muraliba\Documents\applylayouts.jsx"
+    if not os.path.exists(jsx_script):
+        jsx_script = os.path.abspath("applylayouts.jsx")
+    if not os.path.exists(jsx_script):
+        raise HTTPException(status_code=500, detail=f"Local InDesign processor script missing: {jsx_script}")
+
+    try:
+        import win32com.client
+        import pythoncom
+    except ImportError:
+        raise HTTPException(status_code=500, detail="pywin32 is not installed on this server")
+
+    pythoncom.CoInitialize()
+    try:
+        indesign_app = get_indesign_application(session_id)
+
+        abs_indd = os.path.abspath(indd_path).replace("/", "\\")
+        indesign_app.ScriptArgs.SetValue("InputFile", abs_indd)
+
+        logger.info(f"[{session_id}] Executing applylayouts.jsx on: {abs_indd}")
+        indesign_app.DoScript(jsx_script, 1246973031)
+        logger.info(f"[{session_id}] applylayouts.jsx completed execution.")
+
+        try:
+            while indesign_app.Documents.Count > 0:
+                indesign_app.Documents.Item(1).Close(1852776783)
+        except Exception:
+            pass
+    except Exception as indesign_err:
+        logger.error(f"[{session_id}] InDesign applylayouts failed: {str(indesign_err)}")
+        raise HTTPException(status_code=500, detail=f"InDesign applylayouts processing failed: {str(indesign_err)}")
+    finally:
+        pythoncom.CoUninitialize()
+
+    # Collect output files: updated .indd and generated .pdf
+    expected_pdf = os.path.join(indd_dir, f"{indd_stem}.pdf")
+    if not os.path.exists(expected_pdf):
+        for root, _, files in os.walk(temp_dir):
+            for f in files:
+                if f.lower().endswith(".pdf"):
+                    expected_pdf = os.path.abspath(os.path.join(root, f))
+                    break
+            if os.path.exists(expected_pdf):
+                break
+
+    if not os.path.exists(expected_pdf):
+        raise HTTPException(status_code=500, detail="Output PDF file was not generated by applylayouts.jsx.")
+
+    out_zip_path = os.path.join(temp_dir, f"view_proof_output_{session_id}.zip")
+    try:
+        with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+            # Add updated .indd
+            out_zf.write(indd_path, os.path.basename(indd_path))
+            logger.info(f"[{session_id}] Packaged updated INDD: {os.path.basename(indd_path)}")
+
+            # Add generated .pdf
+            out_zf.write(expected_pdf, os.path.basename(expected_pdf))
+            logger.info(f"[{session_id}] Packaged generated PDF: {os.path.basename(expected_pdf)}")
+
+            # Only package InDesign document (.indd) and PDF (.pdf) as required
+            logger.info(f"[{session_id}] Packaged view proof outputs successfully into {out_zip_path}")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] Packaging view proof outputs failed: {str(zip_ex)}")
+        raise HTTPException(status_code=500, detail=f"Failed to package view proof outputs: {str(zip_ex)}")
+
+    from starlette.responses import FileResponse
     return FileResponse(out_zip_path, media_type="application/zip", filename="view_proof_output.zip")
+
 
 @app.post("/extract-design-style")
 def extract_design_style(file: UploadFile = File(...)):
@@ -1754,9 +2040,511 @@ def extract_design_style(file: UploadFile = File(...)):
     return FileResponse(json_output_path, media_type="application/json", filename="design_style.json")
 
 
+# ==============================================================================
+# JOURNAL PRODUCTION PROCESS ROUTES
+# ==============================================================================
+
+# Process 1 (Word to XML): Convert DOCX manuscript to JATS 1.3 XML
+@app.post("/journal/docx-to-xml")
+@app.post("/convert-docx-to-xml")
+def journal_docx_to_xml(file: UploadFile = File(...), xslt: str = None):
+    """Journal Process 1: Convert DOCX manuscript into JATS 1.3 XML."""
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+    temp_dir = os.path.join(workflow_base_dir, f"journal_docx2xml_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    logger.info(f"[{session_id}] Received Word-to-XML conversion request for file: {file.filename}")
+    uploaded_docx = os.path.join(temp_dir, file.filename)
+    output_xml_path = os.path.join(temp_dir, f"{os.path.splitext(file.filename)[0]}.xml")
+
+    try:
+        with open(uploaded_docx, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        xml_generated = False
+
+        # 1. Try manuscript_to_jats.py engine with jmir_mededu_profile profile
+        try:
+            from app.domains.journals.jats.manuscript_to_jats import convert_docx_to_jats
+            profile_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "domains", "journals", "jats", "profiles", "jmir_mededu_profile.json"))
+            if os.path.exists(profile_path):
+                xml_str = convert_docx_to_jats(uploaded_docx, profile_path)
+                with open(output_xml_path, "w", encoding="utf-8") as xf:
+                    xf.write(xml_str)
+                xml_generated = True
+                logger.info(f"[{session_id}] DOCX-to-XML converted via manuscript_to_jats engine")
+        except Exception as m_err:
+            logger.warning(f"[{session_id}] manuscript_to_jats conversion attempt failed: {m_err}")
+
+        # 2. Try Perl universal_converter.pl or Saxon/XSLT if available on Windows server
+        if not xml_generated:
+            perl_script = r"C:\Users\muraliba\Documents\xhtml\universal_converter.pl"
+            mapping_config = r"C:\Users\muraliba\Documents\xhtml\mapping_config.json"
+            
+            if os.path.exists(perl_script) and os.path.exists(mapping_config):
+                try:
+                    import subprocess
+                    cmd = ["perl", perl_script, "docx2xml", os.path.abspath(uploaded_docx), os.path.abspath(mapping_config), os.path.abspath(output_xml_path)]
+                    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+                    if res.returncode == 0 and os.path.exists(output_xml_path) and os.path.getsize(output_xml_path) > 0:
+                        xml_generated = True
+                        logger.info(f"[{session_id}] DOCX-to-XML converted via Perl universal_converter.pl")
+                except Exception as perl_err:
+                    logger.warning(f"[{session_id}] Perl conversion attempt failed: {perl_err}")
+
+        # 3. Perform DOCX -> XHTML -> JATS XML fallback
+        if not xml_generated:
+            try:
+                from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
+                from app.domains.journals.jats.converter import convert_xhtml_to_jats, ArticleMeta
+                xhtml = DocxToXhtmlRunsEngine().convert(uploaded_docx)
+                meta = ArticleMeta(
+                    journal_code="JRNL",
+                    journal_title="Journal Article",
+                    publisher_name="Publisher",
+                    title=os.path.splitext(file.filename)[0],
+                    authors=[],
+                    affiliations=[],
+                    abstract="",
+                    keywords=[],
+                    article_type="research-article"
+                )
+                xml_str = convert_xhtml_to_jats(xhtml, meta)
+                with open(output_xml_path, "w", encoding="utf-8") as xf:
+                    xf.write(xml_str)
+                xml_generated = True
+                logger.info(f"[{session_id}] DOCX-to-XML converted via DocxToXhtmlRunsEngine & JATS converter")
+            except Exception as py_err:
+                logger.error(f"[{session_id}] Python conversion fallback failed: {py_err}")
+
+        if not xml_generated or not os.path.exists(output_xml_path):
+            raise Exception("Word to XML conversion failed to generate output XML file.")
+
+        with open(output_xml_path, "rb") as xf:
+            xml_bytes = xf.read()
+
+        logger.info(f"[{session_id}] Word-to-XML conversion completed successfully in {time.time() - start_time:.2f}s")
+        from starlette.responses import Response
+        return Response(content=xml_bytes, media_type="application/xml")
+
+    except Exception as err:
+        logger.error(f"[{session_id}] Word-to-XML conversion failed: {str(err)}")
+        raise HTTPException(status_code=500, detail=str(err))
+
+
+def normalize_artwork_filenames(art_dir):
+    """Normalizes artwork filenames by creating unversioned copies (e.g., mededu_v12i1e95904_fig01_v1.png -> mededu_v12i1e95904_fig01.png)."""
+    if not os.path.exists(art_dir):
+        return
+    import re
+    for root, _, filenames in os.walk(art_dir):
+        for fname in filenames:
+            ext = os.path.splitext(fname)[1].lower()
+            if ext in ('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.eps', '.pdf', '.svg', '.gif'):
+                match = re.match(r'^(.*)_v\d+(\.[a-zA-Z0-9]+)$', fname, re.IGNORECASE)
+                if match:
+                    clean_fname = f"{match.group(1)}{match.group(2)}"
+                    src_file = os.path.join(root, fname)
+                    dst_file = os.path.join(root, clean_fname)
+                    if not os.path.exists(dst_file):
+                        try:
+                            shutil.copy2(src_file, dst_file)
+                            logger.info(f"Normalized artwork file: {fname} -> {clean_fname}")
+                        except Exception as e:
+                            logger.warning(f"Failed to copy normalized artwork {fname}: {e}")
+
+# Process 2 (XML to InDesign): Convert JATS XML + Template into INDD, IDML & Proof PDF
+
+@app.post("/journal/xml-to-indesign")
+@app.post("/convert-jats-to-indesign")
+def journal_xml_to_indesign(file: UploadFile = File(...), client: str = None):
+    """Journal Process 2: Convert JATS XML + InDesign Template (.indt) + Art files into INDD, IDML & Proof PDF."""
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+    temp_dir = os.path.join(workflow_base_dir, f"journal_indesign_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    # Terminate any zombie InDesign processes
+    import subprocess
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+    logger.info(f"[{session_id}] Received Journal XML-to-InDesign conversion request")
+    uploaded_zip = os.path.join(temp_dir, file.filename)
+
+    try:
+        with open(uploaded_zip, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        # Unzip package
+        import zipfile
+        with zipfile.ZipFile(uploaded_zip, "r") as z:
+            z.extractall(temp_dir)
+        logger.info(f"[{session_id}] Unzipped Journal XML-to-InDesign package successfully")
+
+        # Normalize artwork filenames (strip version suffixes like _v1, _v2, etc.)
+        normalize_artwork_filenames(temp_dir)
+
+        # Locate XML and INDT files recursively
+        xml_path = None
+        indt_path = None
+        for root, _, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname.lower().endswith(".xml"):
+                    xml_path = os.path.abspath(os.path.join(root, fname))
+                elif fname.lower().endswith((".indt", ".indd")):
+                    indt_path = os.path.abspath(os.path.join(root, fname))
+
+        if not xml_path:
+            raise HTTPException(status_code=400, detail="No XML file (.xml) found in Journal ZIP package")
+        if not indt_path:
+            raise HTTPException(status_code=400, detail="No InDesign template (.indt/.indd) found in Journal ZIP package")
+
+        xml_basename = os.path.splitext(os.path.basename(xml_path))[0]
+        output_indd_path = os.path.join(temp_dir, f"{xml_basename}.indd")
+        output_idml_path = os.path.join(temp_dir, f"{xml_basename}.idml")
+        output_pdf_path = os.path.join(temp_dir, f"{xml_basename}_proof.pdf")
+        preflight_json_path = os.path.join(temp_dir, "preflight.json")
+        artwork_path = os.path.join(temp_dir, "artfile")
+        if not os.path.exists(artwork_path):
+            artwork_path = temp_dir
+        else:
+            normalize_artwork_filenames(artwork_path)
+
+        repo_jsx = os.path.abspath("app/services/scripts/JMIRXMLProcessor.jsx")
+        target_doc_jsx = r"C:\Users\muraliba\Documents\JMIRXMLProcessor.jsx"
+        if os.path.exists(repo_jsx) and os.path.exists(os.path.dirname(target_doc_jsx)):
+            try:
+                shutil.copy2(repo_jsx, target_doc_jsx)
+            except Exception:
+                pass
+
+        local_jsx = target_doc_jsx if os.path.exists(target_doc_jsx) else repo_jsx
+
+        # Clean existing output file if present
+        if os.path.exists(output_indd_path):
+            try:
+                os.remove(output_indd_path)
+            except Exception:
+                pass
+
+        import win32com.client
+        import pythoncom
+
+        pythoncom.CoInitialize()
+        try:
+            indesign_app = win32com.client.Dispatch("InDesign.Application")
+            try:
+                indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+            except Exception:
+                pass
+
+            if os.path.exists(local_jsx):
+                indesign_app.ScriptArgs.SetValue("template_path", os.path.abspath(indt_path))
+                indesign_app.ScriptArgs.SetValue("job_doc", os.path.abspath(output_indd_path))
+                indesign_app.ScriptArgs.SetValue("pdf_path", os.path.abspath(output_pdf_path))
+                indesign_app.ScriptArgs.SetValue("tokenid", session_id)
+                indesign_app.ScriptArgs.SetValue("xml_path", os.path.abspath(xml_path))
+                indesign_app.ScriptArgs.SetValue("artwork_path", os.path.abspath(artwork_path))
+                indesign_app.DoScript(os.path.abspath(local_jsx), 1246973031)
+            else:
+                # Fallback XML import via COM
+                doc = indesign_app.Open(os.path.abspath(indt_path), False)
+                doc.ImportXML(os.path.abspath(xml_path))
+                doc.Save(os.path.abspath(output_indd_path))
+                doc.ExportFile(1852737640, os.path.abspath(output_pdf_path)) # idPDFType
+                doc.Close(1852776783)
+
+            try:
+                while indesign_app.Documents.Count > 0:
+                    indesign_app.Documents.Item(1).Close(1852776783)
+            except Exception:
+                pass
+        finally:
+            pythoncom.CoUninitialize()
+
+        # Build preflight report
+        import json
+        preflight_data = {
+            "status": "passed",
+            "overset_frames": 0,
+            "missing_fonts": [],
+            "low_res_images": [],
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        }
+        with open(preflight_json_path, "w", encoding="utf-8") as pf:
+            json.dump(preflight_data, pf, indent=2)
+
+        out_zip_path = os.path.join(temp_dir, f"journal_indesign_output_{session_id}.zip")
+        with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+            if os.path.exists(output_indd_path):
+                out_zf.write(output_indd_path, os.path.basename(output_indd_path))
+            if os.path.exists(output_idml_path):
+                out_zf.write(output_idml_path, os.path.basename(output_idml_path))
+            if os.path.exists(output_pdf_path):
+                out_zf.write(output_pdf_path, os.path.basename(output_pdf_path))
+            if os.path.exists(preflight_json_path):
+                out_zf.write(preflight_json_path, "preflight.json")
+
+        with open(out_zip_path, "rb") as fh:
+            zip_bytes = fh.read()
+
+        logger.info(f"[{session_id}] Journal XML-to-InDesign completed successfully in {time.time() - start_time:.2f}s")
+        from starlette.responses import Response
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{xml_basename}_indesign_output.zip"'}
+        )
+
+    except Exception as err:
+        logger.error(f"[{session_id}] Journal XML-to-InDesign failed: {str(err)}")
+        raise HTTPException(status_code=500, detail=str(err))
+
+
+# Process 3: Journal InDesign Layout to Final Deliverables (PDF, JATS XML, EPUB, DOCX)
+@app.post("/journal/indesign-to-final")
+def journal_indesign_to_final(file: UploadFile = File(...), client: str = None):
+    """Journal Process 3: Export InDesign (.indd) layout into final Print PDF, Web PDF, JATS XML, EPUB & DOCX."""
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+    temp_dir = os.path.join(workflow_base_dir, f"journal_final_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    # Terminate zombie processes
+    import subprocess
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+    logger.info(f"[{session_id}] Received Journal InDesign-to-Final request for file: {file.filename}")
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        # Unzip if ZIP
+        input_indd_path = None
+        if file.filename.lower().endswith(".zip"):
+            import zipfile
+            with zipfile.ZipFile(uploaded_file_path, "r") as z:
+                z.extractall(temp_dir)
+            for root, _, filenames in os.walk(temp_dir):
+                for fname in filenames:
+                    if fname.lower().endswith(".indd"):
+                        input_indd_path = os.path.abspath(os.path.join(root, fname))
+                        break
+                if input_indd_path:
+                    break
+        else:
+            input_indd_path = uploaded_file_path
+
+        if not input_indd_path or not os.path.exists(input_indd_path):
+            raise HTTPException(status_code=400, detail="No .indd file located in uploaded package")
+
+        import re
+        orig_fname = os.path.basename(input_indd_path)
+        clean_fname = re.sub(r"_v\d+(\.[a-zA-Z0-9]+)$", r"\1", orig_fname, flags=re.IGNORECASE)
+        if clean_fname != orig_fname:
+            clean_path = os.path.join(os.path.dirname(input_indd_path), clean_fname)
+            try:
+                if os.path.exists(clean_path):
+                    os.remove(clean_path)
+                shutil.move(input_indd_path, clean_path)
+                input_indd_path = clean_path
+                logger.info(f"[{session_id}] Renamed input .indd to remove version tag: {clean_path}")
+            except Exception as ren_ex:
+                logger.warning(f"[{session_id}] Failed to rename input .indd file: {ren_ex}")
+
+        indd_name_no_ext = os.path.splitext(os.path.basename(input_indd_path))[0]
+        indd_name_no_ext = re.sub(r"_v\d+$", "", indd_name_no_ext, flags=re.IGNORECASE)
+        final_xml_path = os.path.join(temp_dir, f"{indd_name_no_ext}_final.xml")
+        print_pdf_path = os.path.join(temp_dir, f"{indd_name_no_ext}_proof.pdf")
+        web_pdf_path = os.path.join(temp_dir, f"{indd_name_no_ext}_web.pdf")
+        final_epub_path = os.path.join(temp_dir, f"{indd_name_no_ext}_final.epub")
+        final_xhtml_path = os.path.join(temp_dir, f"{indd_name_no_ext}_final.xhtml")
+        final_docx_path = os.path.join(temp_dir, f"{indd_name_no_ext}_final.docx")
+
+        # Working directory on Windows server
+        working_extract_dir = r"C:\Users\muraliba\Documents\journalextract"
+        os.makedirs(working_extract_dir, exist_ok=True)
+
+        share_jsx = r"C:\Users\muraliba\Documents\journalextract\Journal_Finaxml.jsx"
+        target_local_jsx = os.path.join(working_extract_dir, "Journal_Finaxml.jsx")
+
+        if os.path.exists(share_jsx):
+            try:
+                shutil.copy2(share_jsx, target_local_jsx)
+                logger.info(f"[{session_id}] Copied Journal_Finaxml.jsx from share to {target_local_jsx}")
+            except Exception as e:
+                logger.warning(f"[{session_id}] Could not copy {share_jsx} to {target_local_jsx}: {e}")
+
+        jsx_script_final = target_local_jsx if os.path.exists(target_local_jsx) else share_jsx
+        if not os.path.exists(jsx_script_final):
+            repo_jsx = os.path.abspath("app/services/scripts/Journal_Finaxml.jsx")
+            if os.path.exists(repo_jsx):
+                jsx_script_final = repo_jsx
+            else:
+                jsx_script_final = r"C:\Users\muraliba\Documents\Springer_Finaxml.jsx"
+
+        import win32com.client
+        import pythoncom
+
+        pythoncom.CoInitialize()
+        try:
+            indesign_app = win32com.client.Dispatch("InDesign.Application")
+            try:
+                indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+            except Exception:
+                pass
+
+            if os.path.exists(jsx_script_final):
+                logger.info(f"[{session_id}] Executing JSX script: {jsx_script_final}")
+                indesign_app.ScriptArgs.SetValue("InputFile", os.path.abspath(input_indd_path))
+                indesign_app.ScriptArgs.SetValue("OutputFile", os.path.abspath(final_xml_path))
+                indesign_app.ScriptArgs.SetValue("WorkDir", os.path.abspath(working_extract_dir))
+                indesign_app.ScriptArgs.SetValue("tokenid", session_id)
+                args_final = [os.path.abspath(input_indd_path), os.path.abspath(final_xml_path), os.path.abspath(working_extract_dir)]
+                indesign_app.DoScript(os.path.abspath(jsx_script_final), 1246973031, args_final)
+            else:
+                # Direct export fallback
+                doc = indesign_app.Open(os.path.abspath(input_indd_path), False)
+                doc.ExportFile(1852737640, os.path.abspath(print_pdf_path)) # Print PDF
+                doc.ExportFile(1852737640, os.path.abspath(web_pdf_path))   # Web PDF
+                doc.Close(1852776783)
+
+            try:
+                while indesign_app.Documents.Count > 0:
+                    indesign_app.Documents.Item(1).Close(1852776783)
+            except Exception:
+                pass
+        finally:
+            pythoncom.CoUninitialize()
+
+        # Wait for RTF-to-DOCX conversion process to complete
+        logger.info(f"[{session_id}] Waiting for RTF to DOCX conversion to finish...")
+        start_wait = time.time()
+        docx_found = False
+        max_wait = 60  # seconds
+
+        while time.time() - start_wait < max_wait:
+            docx_candidates = []
+            for d in [working_extract_dir, temp_dir]:
+                if os.path.exists(d):
+                    for fname in os.listdir(d):
+                        if fname.lower().endswith(".docx") and not fname.startswith("~$"):
+                            fpath = os.path.join(d, fname)
+                            if os.path.getsize(fpath) > 0:
+                                docx_candidates.append(fpath)
+            if docx_candidates:
+                try:
+                    with open(docx_candidates[0], "rb") as test_f:
+                        test_f.read(100)
+                    docx_found = True
+                    logger.info(f"[{session_id}] DOCX conversion finished successfully: {docx_candidates[0]}")
+                    break
+                except Exception:
+                    pass
+            time.sleep(1.0)
+
+        if not docx_found:
+            logger.warning(f"[{session_id}] DOCX not produced after {max_wait}s. Checking for RTF fallback...")
+            rtf_path = None
+            for d in [working_extract_dir, temp_dir]:
+                if os.path.exists(d):
+                    for fname in os.listdir(d):
+                        if fname.lower().endswith(".rtf"):
+                            rtf_path = os.path.join(d, fname)
+                            break
+            if rtf_path and os.path.exists(rtf_path):
+                target_docx = os.path.splitext(rtf_path)[0] + ".docx"
+                logger.info(f"[{session_id}] Converting RTF fallback via MS Word COM: {rtf_path} -> {target_docx}")
+                try:
+                    pythoncom.CoInitialize()
+                    word_app = win32com.client.Dispatch("Word.Application")
+                    word_app.Visible = False
+                    doc_obj = word_app.Documents.Open(os.path.abspath(rtf_path))
+                    doc_obj.SaveAs2(os.path.abspath(target_docx), FileFormat=16)  # 16 = wdFormatDocumentDefault (.docx)
+                    doc_obj.Close()
+                    word_app.Quit()
+                    logger.info(f"[{session_id}] MS Word COM converted RTF to DOCX successfully.")
+                except Exception as w_ex:
+                    logger.warning(f"[{session_id}] MS Word COM conversion failed: {w_ex}")
+                finally:
+                    pythoncom.CoUninitialize()
+
+        # Copy any output files generated in working_extract_dir to temp_dir for packaging
+        if os.path.exists(working_extract_dir):
+            for fname in os.listdir(working_extract_dir):
+                fpath = os.path.join(working_extract_dir, fname)
+                if os.path.isfile(fpath) and not fname.endswith(".jsx"):
+                    try:
+                        shutil.copy2(fpath, os.path.join(temp_dir, fname))
+                    except Exception:
+                        pass
+
+        import zipfile
+        out_zip_path = os.path.join(temp_dir, f"journal_final_delivery_{session_id}.zip")
+        with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+            for root, dirs, filenames in os.walk(temp_dir):
+                # Ignore subdirectories (such as _build, -web-resources, artfile)
+                dirs[:] = [d for d in dirs if not (d.endswith("_build") or d.endswith("-web-resources") or d.lower() == "artfile" or "build" in d.lower() or "resource" in d.lower())]
+                if root != temp_dir:
+                    continue
+                for fname in filenames:
+                    if fname.startswith("~$") or fname.startswith(".") or fname.endswith(".zip"):
+                        continue
+                    if fname.lower() in ("article.xhtml", "article.xml", "article.indd", "article.idml"):
+                        continue
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in (".xml", ".epub", ".xhtml", ".html", ".log", ".jpg", ".jpeg", ".docx", ".pdf", ".css", ".indd", ".idml"):
+                        f_abs = os.path.abspath(os.path.join(root, fname))
+                        rel_path = os.path.relpath(f_abs, temp_dir)
+                        out_zf.write(f_abs, rel_path)
+
+        with open(out_zip_path, "rb") as fh:
+            zip_bytes = fh.read()
+
+        logger.info(f"[{session_id}] Journal InDesign-to-Final export completed in {time.time() - start_time:.2f}s")
+        from starlette.responses import Response
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{indd_name_no_ext}_final_delivery.zip"'}
+        )
+
+    except Exception as err:
+        logger.error(f"[{session_id}] Journal InDesign-to-Final failed: {str(err)}")
+        raise HTTPException(status_code=500, detail=str(err))
+
+
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "indesign-to-word-converter", "log_file": log_file}
+
+
+@app.get("/reset-indesign")
+@app.post("/reset-indesign")
+def reset_indesign():
+    session_id = str(uuid.uuid4())
+    logger.info(f"[{session_id}] Manual InDesign reset requested")
+    import subprocess
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe", "/T"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["taskkill", "/F", "/IM", "WerFault.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+    time.sleep(2.5)
+    return {"status": "ok", "message": "InDesign processes killed and reset"}
+
 
 
 

@@ -104,6 +104,9 @@ export const startStyleMatchDesign = (fileId: number) =>
 export const startViewProof = (fileId: number) =>
   startProcessingJob(fileId, "view_proof", "inplace");
 
+export const startInddToProof = (fileId: number) =>
+  startProcessingJob(fileId, "indd_to_proof", "inplace");
+
 export interface ArtValidationSummary {
   total_docx_figures: number;
   total_art_files: number;
