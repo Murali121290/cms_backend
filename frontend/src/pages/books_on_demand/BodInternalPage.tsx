@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3 } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -10,7 +10,7 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import { toast } from '@/store/useToastStore'
 import api from '@/api/client'
 import { getUserDisplayName as formatUserDisplayName } from '@/utils/userUtils'
-import { formatDateTime } from '@/utils/dateUtils'
+import { formatDateTime, formatDate, parseUtcDate } from '@/utils/dateUtils'
 
 export function BodInternalPage() {
   useDocumentTitle('Books on Demand — S4Carlisle CMS')
@@ -39,6 +39,21 @@ export function BodInternalPage() {
   const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom'>('all')
   const [customFromDate, setCustomFromDate] = useState('')
   const [customToDate, setCustomToDate] = useState('')
+
+  // Table heading filters & sorting
+  const [colFilters, setColFilters] = useState({
+    name: '',
+    pages: '',
+    type: 'all',
+    language: 'all',
+    assignee: 'all',
+    status: 'all',
+    stage: 'all',
+    created: '',
+    dueDate: '',
+  })
+  const [sortField, setSortField] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
   // Delete Modal states
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null)
@@ -273,6 +288,77 @@ export function BodInternalPage() {
   })
   const assigneeOptions = Array.from(allAssignees).sort()
 
+  const uniqueLanguages = React.useMemo(() => {
+    const langs = new Set<string>()
+    jobs.forEach(j => {
+      if (j.pdf_language && j.pdf_language.trim()) {
+        langs.add(j.pdf_language.trim())
+      }
+    })
+    return Array.from(langs).sort()
+  }, [jobs])
+
+  const uniqueTypes = React.useMemo(() => {
+    const types = new Set<string>(['Text PDF', 'Image PDF', 'Scanned PDF'])
+    jobs.forEach(j => {
+      if (j.pdf_type && j.pdf_type.trim()) {
+        types.add(j.pdf_type.trim())
+      }
+    })
+    return Array.from(types).sort()
+  }, [jobs])
+
+  const hasColFilters = Boolean(
+    colFilters.name ||
+    colFilters.pages ||
+    (colFilters.type && colFilters.type !== 'all') ||
+    (colFilters.language && colFilters.language !== 'all') ||
+    (colFilters.assignee && colFilters.assignee !== 'all') ||
+    (colFilters.status && colFilters.status !== 'all') ||
+    (colFilters.stage && colFilters.stage !== 'all') ||
+    colFilters.created ||
+    colFilters.dueDate
+  )
+
+  const clearColFilters = () => {
+    setColFilters({
+      name: '',
+      pages: '',
+      type: 'all',
+      language: 'all',
+      assignee: 'all',
+      status: 'all',
+      stage: 'all',
+      created: '',
+      dueDate: '',
+    })
+  }
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc')
+      } else {
+        setSortField(null)
+        setSortDirection('asc')
+      }
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <ArrowUpDown size={11} className="opacity-35 group-hover:opacity-100 transition-opacity" />
+    }
+    return sortDirection === 'asc' ? (
+      <ArrowUp size={11} className="text-primary font-bold" />
+    ) : (
+      <ArrowDown size={11} className="text-primary font-bold" />
+    )
+  }
+
   const hasBaseFiltersActive = searchQuery.trim() !== '' || assigneeFilter !== 'all' || isDateFilterActive
 
   // Base jobs filtered by base filters (Search, Assignee, Date)
@@ -457,8 +543,133 @@ export function BodInternalPage() {
       matchesFilter = jobCompleted
     }
 
-    return matchesFilter
+    if (!matchesFilter) return false
+
+    // Column Filters from table heading
+    if (colFilters.name) {
+      const q = colFilters.name.toLowerCase().trim()
+      const matchName = (j.pdf_filename && j.pdf_filename.toLowerCase().includes(q)) ||
+        (j.epub_filename && j.epub_filename.toLowerCase().includes(q))
+      if (!matchName) return false
+    }
+
+    if (colFilters.pages) {
+      const p = colFilters.pages.trim()
+      const pagesStr = String(j.pdf_page_count || '')
+      if (!pagesStr.includes(p)) return false
+    }
+
+    if (colFilters.type && colFilters.type !== 'all') {
+      if ((j.pdf_type || '').toLowerCase() !== colFilters.type.toLowerCase()) return false
+    }
+
+    if (colFilters.language && colFilters.language !== 'all') {
+      if ((j.pdf_language || '').toLowerCase() !== colFilters.language.toLowerCase()) return false
+    }
+
+    if (colFilters.assignee && colFilters.assignee !== 'all') {
+      if (colFilters.assignee === 'unassigned') {
+        if (j.current_assignee) return false
+      } else {
+        if (j.current_assignee !== colFilters.assignee) return false
+      }
+    }
+
+    if (colFilters.status && colFilters.status !== 'all') {
+      const statusInfo = getJobStatusInfo(j)
+      if (colFilters.status === 'completed') {
+        if (!jobCompleted) return false
+      } else if (colFilters.status === 'active') {
+        if (jobCompleted) return false
+      } else if (colFilters.status === 'overdue') {
+        if (!statusInfo.isOverdue || jobCompleted) return false
+      } else if (colFilters.status === 'tomorrow_due') {
+        if (!statusInfo.isTomorrow || jobCompleted) return false
+      } else if (colFilters.status === 'fresh') {
+        if (jobCompleted || j.current_stage_name !== 'Add job') return false
+      } else if (colFilters.status === 'yts') {
+        if (jobCompleted) return false
+        const isYts = (j.current_stage_name === 'Production' && !j.pdf_downloaded && !j.stage_history?.Production?.pdf_downloaded) ||
+                      (j.current_stage_name === 'QC' && !j.current_assignee)
+        if (!isYts) return false
+      } else if (colFilters.status === 'in_progress') {
+        if (jobCompleted) return false
+        const isInProgress = (j.current_stage_name === 'Production' && Boolean(j.pdf_downloaded || j.stage_history?.Production?.pdf_downloaded)) ||
+                             (j.current_stage_name === 'QC' && Boolean(j.current_assignee))
+        if (!isInProgress) return false
+      }
+    }
+
+    if (colFilters.stage && colFilters.stage !== 'all') {
+      if (colFilters.stage === 'Completed') {
+        if (!jobCompleted) return false
+      } else {
+        if (j.current_stage_name !== colFilters.stage || jobCompleted) return false
+      }
+    }
+
+    if (colFilters.created) {
+      if (!j.created_at) return false
+      const d = parseSafeDate(j.created_at)
+      if (!d || isNaN(d.getTime())) return false
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      const dateStr = `${year}-${month}-${day}`
+      if (dateStr !== colFilters.created) return false
+    }
+
+    if (colFilters.dueDate) {
+      if (!j.due_date) return false
+      const d = parseSafeDate(j.due_date)
+      if (!d || isNaN(d.getTime())) return false
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      const dateStr = `${year}-${month}-${day}`
+      if (dateStr !== colFilters.dueDate) return false
+    }
+
+    return true
   }).sort((a, b) => {
+    if (sortField) {
+      let valA: any = ''
+      let valB: any = ''
+
+      if (sortField === 'name') {
+        valA = (a.pdf_filename || '').toLowerCase()
+        valB = (b.pdf_filename || '').toLowerCase()
+      } else if (sortField === 'pages') {
+        valA = Number(a.pdf_page_count) || 0
+        valB = Number(b.pdf_page_count) || 0
+      } else if (sortField === 'type') {
+        valA = (a.pdf_type || '').toLowerCase()
+        valB = (b.pdf_type || '').toLowerCase()
+      } else if (sortField === 'language') {
+        valA = (a.pdf_language || '').toLowerCase()
+        valB = (b.pdf_language || '').toLowerCase()
+      } else if (sortField === 'assignee') {
+        valA = getUserDisplayName(a.current_assignee).toLowerCase()
+        valB = getUserDisplayName(b.current_assignee).toLowerCase()
+      } else if (sortField === 'status') {
+        valA = getStatusText(a).toLowerCase()
+        valB = getStatusText(b).toLowerCase()
+      } else if (sortField === 'progress') {
+        valA = a.status === 'Completed' ? 100 : Math.round((a.current_stage_index / 3) * 100)
+        valB = b.status === 'Completed' ? 100 : Math.round((b.current_stage_index / 3) * 100)
+      } else if (sortField === 'created') {
+        valA = a.created_at ? new Date(a.created_at).getTime() : 0
+        valB = b.created_at ? new Date(b.created_at).getTime() : 0
+      } else if (sortField === 'dueDate') {
+        valA = a.due_date ? new Date(a.due_date).getTime() : 0
+        valB = b.due_date ? new Date(b.due_date).getTime() : 0
+      }
+
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1
+      return 0
+    }
+
     const aIsCompleted = isJobCompleted(a)
     const bIsCompleted = isJobCompleted(b)
     if (aIsCompleted && !bIsCompleted) return 1
@@ -473,7 +684,7 @@ export function BodInternalPage() {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
 
-  const hasActiveFilters = searchQuery.trim() !== '' || cardFilter !== 'all' || assigneeFilter !== 'all' || isDateFilterActive
+  const hasActiveFilters = searchQuery.trim() !== '' || cardFilter !== 'all' || assigneeFilter !== 'all' || isDateFilterActive || hasColFilters || sortField !== null
   const clearFilters = () => {
     setSearchQuery('')
     setCardFilter('all')
@@ -481,6 +692,9 @@ export function BodInternalPage() {
     setDatePreset('all')
     setCustomFromDate('')
     setCustomToDate('')
+    clearColFilters()
+    setSortField(null)
+    setSortDirection('asc')
   }
 
   return (
@@ -507,6 +721,23 @@ export function BodInternalPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex items-center bg-card border border-border rounded-lg p-0.5 shrink-0">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-accent text-primary shadow-sm' : 'text-muted hover:text-text'}`}
+              title="Grid View"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-accent text-primary shadow-sm' : 'text-muted hover:text-text'}`}
+              title="List View"
+            >
+              <List size={15} />
+            </button>
+          </div>
+
           <Button onClick={() => setShowAddJobModal(true)} leftIcon={<Plus size={15} />}>
             Create Job
           </Button>
@@ -876,86 +1107,6 @@ export function BodInternalPage() {
         </div>
       </div>
 
-      {/* Filter bar */}
-      {jobs.length > 0 && (
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by filename or customer…"
-            className="w-full bg-card border border-border rounded-lg pl-8 pr-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/50"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Filter size={13} className="text-muted shrink-0" />
-          <div className="w-[190px]">
-            <Dropdown
-              value={cardFilter}
-              onChange={(val) => setCardFilter(val as QuickFilter)}
-              options={[
-                { value: 'all', label: 'All Jobs' },
-                { value: 'fresh_all', label: 'Fresh (All Add Job)' },
-                { value: 'fresh_today', label: 'Fresh: Added Today' },
-                { value: 'fresh_previous', label: 'Fresh: Previous Days' },
-                { value: 'prod_all', label: 'Production (All)' },
-                { value: 'prod_yts', label: 'Production: YTS (Pending PDF)' },
-                { value: 'prod_in_progress', label: 'Production: In Progress' },
-                { value: 'qc_all', label: 'QC (All)' },
-                { value: 'qc_yts', label: 'QC: YTS (Unassigned)' },
-                { value: 'qc_in_progress', label: 'QC: In Progress (Assigned)' },
-                { value: 'overdue', label: 'Overdue' },
-                { value: 'tomorrow_due', label: 'Tomorrow Due' },
-                { value: 'completed', label: 'Completed' }
-              ]}
-            />
-          </div>
-
-          <div className="w-[150px]">
-            <Dropdown
-              value={assigneeFilter}
-              onChange={setAssigneeFilter}
-              options={[
-                { value: 'all', label: 'All assignees' },
-                { value: 'unassigned', label: 'Unassigned' },
-                ...assigneeOptions.map(a => ({ value: a, label: getUserDisplayName(a) }))
-              ]}
-            />
-          </div>
-
-          {hasActiveFilters && (
-            <button
-              onClick={clearFilters}
-              className="text-xs text-primary hover:underline font-semibold whitespace-nowrap"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-
-        <div className="flex items-center ml-auto bg-card border border-border rounded-lg p-0.5 shrink-0">
-          <button
-            onClick={() => setViewMode('grid')}
-            className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-accent text-primary shadow-sm' : 'text-muted hover:text-text'}`}
-            title="Grid View"
-          >
-            <LayoutGrid size={15} />
-          </button>
-          <button
-            onClick={() => setViewMode('list')}
-            className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-accent text-primary shadow-sm' : 'text-muted hover:text-text'}`}
-            title="List View"
-          >
-            <List size={15} />
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   {/* Grid listing of all active jobs */ }
   {
     jobs.length === 0 ? (
@@ -968,36 +1119,261 @@ export function BodInternalPage() {
           Create first job
         </button>
       </div>
-    ) : filteredJobs.length === 0 ? (
-      <div className="text-center py-16 text-muted border border-dashed border-border rounded-xl bg-card/10">
-        <p className="text-xs font-medium">No jobs match the current filters</p>
-        <button
-          onClick={clearFilters}
-          className="mt-2 text-xs text-primary hover:underline font-bold"
-        >
-          Clear filters
-        </button>
-      </div>
     ) : viewMode === 'list' ? (
       <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-text whitespace-nowrap">
-            <thead className="bg-accent/50 border-b border-border text-xs font-bold text-muted uppercase tracking-wider">
-              <tr>
-                <th className="px-4 py-3">Job Name</th>
-                <th className="px-4 py-3">Pages</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Language</th>
-                <th className="px-4 py-3">Assignee</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 min-w-[150px]">Progress</th>
-                <th className="px-4 py-3">Created</th>
-                <th className="px-4 py-3">Due Date</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+          <table className="w-full text-left text-xs text-text table-fixed">
+            <thead className="bg-accent/50 border-b border-border text-[11px] font-bold text-muted uppercase tracking-wider">
+              <tr className="select-none">
+                <th onClick={() => handleSort('name')} className="px-2 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[19%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Job Name</span>
+                    {renderSortIcon('name')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('pages')} className="px-1 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[5%] text-center overflow-hidden">
+                  <div className="flex items-center justify-center gap-0.5">
+                    <span className="truncate">Pages</span>
+                    {renderSortIcon('pages')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('type')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Type</span>
+                    {renderSortIcon('type')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('language')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Language</span>
+                    {renderSortIcon('language')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[13%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Assignee</span>
+                    {renderSortIcon('assignee')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('status')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[11%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Status</span>
+                    {renderSortIcon('status')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[12%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Progress</span>
+                    {renderSortIcon('progress')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('created')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Created</span>
+                    {renderSortIcon('created')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('dueDate')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Due Date</span>
+                    {renderSortIcon('dueDate')}
+                  </div>
+                </th>
+                <th className="px-1 py-2 text-center w-[4%]"></th>
+              </tr>
+
+              <tr className="border-b border-border bg-accent/20 font-normal normal-case tracking-normal">
+                {/* Job Name */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={colFilters.name}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="Filter..."
+                      className="w-full bg-background border border-border rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                    />
+                    {colFilters.name && (
+                      <button
+                        onClick={() => setColFilters(prev => ({ ...prev, name: '' }))}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                        title="Clear"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                </th>
+
+                {/* Pages */}
+                <th className="px-1 py-1 font-normal overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={colFilters.pages}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
+                      placeholder="Pages"
+                      className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                    />
+                    {colFilters.pages && (
+                      <button
+                        onClick={() => setColFilters(prev => ({ ...prev, pages: '' }))}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                        title="Clear"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                </th>
+
+                {/* Type */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.type}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Types</option>
+                    {uniqueTypes.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </th>
+
+                {/* Language */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.language}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Langs</option>
+                    {uniqueLanguages.map(l => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </select>
+                </th>
+
+                {/* Assignee */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.assignee}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, assignee: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Assignees</option>
+                    <option value="unassigned">Unassigned</option>
+                    {assigneeOptions.map(a => (
+                      <option key={a} value={a}>{getUserDisplayName(a)}</option>
+                    ))}
+                  </select>
+                </th>
+
+                {/* Status */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.status}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, status: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="fresh">Fresh</option>
+                    <option value="yts">YTS</option>
+                    <option value="in_progress">In-Progress</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="tomorrow_due">Due Soon</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </th>
+
+                {/* Progress (Stage) */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.stage}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, stage: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Stages</option>
+                    <option value="Add job">Add job</option>
+                    <option value="Production">Production</option>
+                    <option value="QC">QC</option>
+                    <option value="Completed">Completed</option>
+                  </select>
+                </th>
+
+                {/* Created */}
+                <th className="px-1 py-1 font-normal overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={colFilters.created}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
+                      className="w-full bg-background border border-border rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                    />
+                    {colFilters.created && (
+                      <button
+                        onClick={() => setColFilters(prev => ({ ...prev, created: '' }))}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                        title="Clear date"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                </th>
+
+                {/* Due Date */}
+                <th className="px-1 py-1 font-normal overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={colFilters.dueDate}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
+                      className="w-full bg-background border border-border rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                    />
+                    {colFilters.dueDate && (
+                      <button
+                        onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                        title="Clear date"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                </th>
+
+                {/* Clear action */}
+                <th className="px-1 py-1 font-normal text-center overflow-hidden">
+                  {hasColFilters ? (
+                    <button
+                      onClick={clearColFilters}
+                      className="p-1 text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors inline-flex items-center justify-center"
+                      title="Clear all column filters"
+                    >
+                      <X size={13} />
+                    </button>
+                  ) : null}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {filteredJobs.map((job) => {
+              {filteredJobs.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="text-center py-16 text-muted">
+                    <p className="text-xs font-medium">No jobs match the current filters</p>
+                    <button
+                      onClick={clearFilters}
+                      className="mt-2 text-xs text-primary hover:underline font-bold inline-block"
+                    >
+                      Clear filters
+                    </button>
+                  </td>
+                </tr>
+              ) : (
+                filteredJobs.map((job) => {
                 const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
                 const currentAssignee = job.current_assignee || null
 
@@ -1018,57 +1394,47 @@ export function BodInternalPage() {
                     onClick={() => handleJobClick(job)}
                     className="hover:bg-accent/30 cursor-pointer transition-colors"
                   >
-                    <td className="px-4 py-3 min-w-[200px] max-w-[300px]">
-                      <h3 className="font-semibold text-sm truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
+                    <td className="px-2 py-2 overflow-hidden">
+                      <h3 className="font-semibold text-xs truncate m-0 text-text" title={job.pdf_filename}>{job.pdf_filename}</h3>
                       {job.epub_filename && (
                         <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
                           {job.epub_filename}
                         </p>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted font-mono">
+                    <td className="px-1 py-2 text-center text-xs text-muted font-mono overflow-hidden">
                       {job.pdf_page_count || '-'}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted font-medium">
+                    <td className="px-1.5 py-2 text-xs text-muted font-medium truncate overflow-hidden" title={job.pdf_type || ''}>
                       {job.pdf_type ? job.pdf_type : '-'}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted font-medium">
+                    <td className="px-1.5 py-2 text-xs text-muted font-medium truncate overflow-hidden" title={job.pdf_language || ''}>
                       {job.pdf_language ? job.pdf_language : '-'}
                     </td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1.5 text-muted">
-                        <User size={13} className="text-muted/70" />
-                        <Dropdown
-                          variant="inline"
-                          searchable
-                          value={currentAssignee || ''}
-                          onChange={(val) => assignUser(job.id, val)}
-                          className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[12px]"
-                          options={assigneeOptions}
-                        />
+                    <td className="px-1.5 py-2 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1 text-muted min-w-0">
+                        <User size={12} className="text-muted/70 shrink-0" />
+                        <div className="min-w-0 flex-1 truncate">
+                          <Dropdown
+                            variant="inline"
+                            searchable
+                            value={currentAssignee || ''}
+                            onChange={(val) => assignUser(job.id, val)}
+                            className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px] truncate"
+                            options={assigneeOptions}
+                          />
+                        </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`capitalize font-bold px-2.5 py-1 rounded-md text-[10px] border ${getStatusBadgeClass(job)}`}>
-                          {getStatusText(job)}
-                        </span>
-                        {getJobStatusInfo(job).isOverdue && (
-                          <span className="font-bold px-1.5 py-0.5 rounded text-[9px] bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 inline-flex items-center gap-0.5" title="Crossed due date">
-                            <Clock size={10} /> Overdue
-                          </span>
-                        )}
-                        {getJobStatusInfo(job).isTomorrow && (
-                          <span className="font-bold px-1.5 py-0.5 rounded text-[9px] bg-orange-500/10 border border-orange-500/20 text-orange-600 dark:text-orange-400 inline-flex items-center gap-0.5" title="Due tomorrow">
-                            <Clock size={10} /> Due Soon
-                          </span>
-                        )}
-                      </div>
+                    <td className="px-1.5 py-2 overflow-hidden">
+                      <span className={`capitalize font-bold px-1.5 py-0.5 rounded text-[9px] border truncate inline-block max-w-full ${getStatusBadgeClass(job)}`}>
+                        {getStatusText(job)}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 w-[200px]">
-                      <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1.5">
-                        <span>{job.current_stage_name}</span>
-                        <span>{percent}%</span>
+                    <td className="px-1.5 py-2 overflow-hidden">
+                      <div className="flex items-center justify-between text-[9px] text-muted font-bold mb-1">
+                        <span className="truncate">{job.current_stage_name}</span>
+                        <span className="shrink-0 ml-1">{percent}%</span>
                       </div>
                       <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
                         <div
@@ -1077,11 +1443,14 @@ export function BodInternalPage() {
                         />
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-[11px] text-muted font-medium">
-                      {formatDateTime(job.created_at)}
+                    <td className="px-1.5 py-2 text-[11px] text-muted font-medium overflow-hidden">
+                      <p className="text-[11px] font-medium text-text m-0 truncate">{formatDate(job.created_at)}</p>
+                      <p className="text-[9px] text-muted m-0 truncate">
+                        {parseUtcDate(job.created_at)?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </p>
                     </td>
                     <td
-                      className={`px-4 py-3 text-[11px] font-medium ${isManager ? 'text-primary hover:underline cursor-pointer' : 'text-muted'}`}
+                      className={`px-1.5 py-2 text-[11px] font-medium overflow-hidden ${isManager ? 'text-primary hover:underline cursor-pointer' : 'text-muted'}`}
                       onClick={(e) => {
                         if (isManager) {
                           e.stopPropagation()
@@ -1092,59 +1461,51 @@ export function BodInternalPage() {
                       }}
                     >
                       {job.due_date ? (
-                        <span className={`inline-flex items-center gap-1 ${getJobStatusInfo(job).isOverdue ? 'text-red-600 dark:text-red-400 font-semibold' : getJobStatusInfo(job).isTomorrow ? 'text-orange-600 dark:text-orange-400 font-semibold' : ''}`}>
-                          {getJobStatusInfo(job).isOverdue && <Clock size={11} className="shrink-0" />}
-                          {getJobStatusInfo(job).isTomorrow && <Clock size={11} className="shrink-0" />}
-                          {formatDateTime(job.due_date)}
-                        </span>
+                        <div>
+                          <p className={`text-[11px] font-medium m-0 truncate flex items-center gap-1 ${getJobStatusInfo(job).isOverdue ? 'text-red-600 dark:text-red-400 font-semibold' : getJobStatusInfo(job).isTomorrow ? 'text-orange-600 dark:text-orange-400 font-semibold' : ''}`}>
+                            {getJobStatusInfo(job).isOverdue && <Clock size={10} className="shrink-0" />}
+                            {getJobStatusInfo(job).isTomorrow && <Clock size={10} className="shrink-0" />}
+                            <span className="truncate">{formatDate(job.due_date)}</span>
+                          </p>
+                          <p className="text-[9px] text-muted m-0 truncate">
+                            {parseUtcDate(job.due_date)?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                          </p>
+                        </div>
                       ) : (
-                        isManager ? 'Set Date' : '-'
+                        isManager ? <span className="text-primary text-[11px]">Set Date</span> : '-'
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {job.current_stage_name === 'Add job' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleAdvanceJob(job.id)
-                            }}
-                            className="px-2 py-1 text-[11px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-md border border-primary/20 flex items-center gap-1 transition-colors"
-                            title="Proceed to Production"
-                          >
-                            <span>Proceed</span>
-                            <ArrowRight size={12} />
-                          </button>
-                        )}
+                    <td className="px-1 py-2 text-center overflow-hidden">
+                      <div className="flex items-center justify-center">
                         <button
-                          onClick={(e) => handleDownloadPdf(e, job)}
-                          className="p-1.5 text-muted hover:text-primary hover:bg-primary/10 rounded-md transition-colors"
-                          title="Download PDF (Starts Work in Production)"
+                          onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
+                          className="p-1 text-muted hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors"
+                          title="Delete Job"
                         >
-                          <Download size={15} />
+                          <Trash2 size={15} />
                         </button>
-                        {isAdmin && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
-                            className="p-1.5 text-muted hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
-                            title="Delete Job"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                        <ChevronRight size={18} className="text-muted" />
                       </div>
                     </td>
                   </tr>
                 )
-              })}
+              }))}
             </tbody>
           </table>
         </div>
       </div>
+    ) : filteredJobs.length === 0 ? (
+      <div className="text-center py-16 text-muted border border-dashed border-border rounded-xl bg-card/10">
+        <p className="text-xs font-medium">No jobs match the current filters</p>
+        <button
+          onClick={clearFilters}
+          className="mt-2 text-xs text-primary hover:underline font-bold"
+        >
+          Clear filters
+        </button>
+      </div>
     ) : (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-      {filteredJobs.map((job) => {
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {filteredJobs.map((job) => {
         const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
         const currentAssignee = job.current_assignee || null
 

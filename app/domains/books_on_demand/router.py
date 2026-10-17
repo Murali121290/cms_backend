@@ -197,13 +197,13 @@ def get_customer_report(
 @router.delete("/jobs/{job_id}")
 def delete_job(job_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user_from_cookie)):
     """Delete a job and its associated files. Only Admins can do this."""
-    is_admin = (
-        (current_user.access_level and current_user.access_level.lower() == 'admin') or
-        (current_user.role and current_user.role.lower() == 'admin') or
-        (current_user.designation and current_user.designation.lower() == 'admin')
+    is_authorized = (
+        (current_user.access_level and current_user.access_level.lower() in ('admin', 'manager')) or
+        (current_user.role and any(r in current_user.role.lower() for r in ('admin', 'manager'))) or
+        (current_user.designation and any(d in current_user.designation.lower() for d in ('admin', 'manager')))
     )
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Only Admins can delete jobs")
+    if not is_authorized:
+        raise HTTPException(status_code=403, detail="Only Admins or Managers can delete jobs")
         
     job = db.query(BodJob).filter(BodJob.id == job_id).first()
     if not job:
