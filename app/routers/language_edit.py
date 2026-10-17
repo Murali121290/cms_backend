@@ -19,7 +19,7 @@ from app.domains.processing.language_edit_models import LanguageEditJob, Languag
 from app.domains.processing.service import check_permission
 from app.models import User
 
-from app.processing.language_editing import docx_io, engine, segmenter
+from app.processing.language_editing import docx_io, engine, segmenter, spell_check
 from app.processing.language_editing.rules import load_rules_from_dict, load_house_style_from_dict
 from app.services.language_rule_service import (
     get_available_style_profiles,
@@ -336,6 +336,26 @@ def start_language_edit_analysis(
     from app.processing.language_editing.term_matcher import build_matcher_for_project, find_term_matches
     compiled_term_lists = build_matcher_for_project(db, project_id=file_record.project_id)
 
+    # Build the spell-check whitelist once per analyze run. Terms, house-style
+    # canonical pairs, and UK/US pair words are all considered correct — so
+    # pyspellchecker won't flag them as typos.
+    try:
+        from app.processing.manuscript_core.data.uk_us_pairs import UK_US_PAIRS  # type: ignore
+    except Exception:
+        UK_US_PAIRS = []  # type: ignore
+    term_vocab: list[str] = []
+    for cl in compiled_term_lists:
+        # CompiledTermList.term_lookup is {lowercased_term: term_id}.
+        lookup = getattr(cl, "term_lookup", None)
+        if isinstance(lookup, dict):
+            term_vocab.extend(lookup.keys())
+    spell_whitelist = spell_check.build_whitelist(
+        variant_to_canonical=project_rules_cfg.get("variant_to_canonical", {}),
+        uk_us_pairs=UK_US_PAIRS,
+        term_vocabulary=term_vocab,
+    )
+    spell_checker = spell_check.get_spell_checker()  # None if pyspellchecker missing
+
     # Read paragraphs from DOCX
     try:
         _, paragraphs = docx_io.read_paragraphs(file_record.path)
@@ -356,13 +376,25 @@ def start_language_edit_analysis(
 
     total_findings_count = 0
     term_match_count = 0
+    typo_count = 0
     findings_to_insert = []
+
+    # Only word-level rule categories can dedupe a typo. A sentence-level
+    # finding spans many words and legitimately coexists with a typo inside
+    # it (different issues: sentence rewrite vs word spelling).
+    _TYPO_DEDUP_CATEGORIES = {"spelling", "grammar", "compounds", "bias"}
 
     for para_idx, text in paragraphs:
         sents = segmenter.sentences(text)
         found = engine.analyze(text, rules, dictionary, sents)
+        # Build exact-span dedup set: only (start, end) pairs from word-level
+        # rules — so a Sentence finding covering a whole clause doesn't
+        # suppress real typos inside it.
+        rule_spans: list[tuple[int, int]] = []
         for fd in found:
             total_findings_count += 1
+            if fd.category in _TYPO_DEDUP_CATEGORIES:
+                rule_spans.append((fd.start, fd.end))
             finding_row = LanguageEditFinding(
                 job_id=job_uuid,
                 file_id=file_record.id,
@@ -380,6 +412,31 @@ def start_language_edit_analysis(
                 source="rule",
             )
             findings_to_insert.append(finding_row)
+
+        # Typo scan (pyspellchecker). Skipped automatically if the lib isn't
+        # importable. Category = "typo" so it's a distinct chip in the UI,
+        # never conflated with the existing "spelling" (house-style) findings.
+        for ty in spell_check.spell_check_paragraph(
+            text, spell_checker, whitelist=spell_whitelist, exclude_spans=rule_spans,
+        ):
+            total_findings_count += 1
+            typo_count += 1
+            findings_to_insert.append(LanguageEditFinding(
+                job_id=job_uuid,
+                file_id=file_record.id,
+                para_index=para_idx,
+                start_offset=ty.start,
+                end_offset=ty.end,
+                rule_id=ty.rule_id,
+                category="typo",
+                severity=ty.severity,
+                original_text=ty.original,
+                suggestion=ty.suggestion,
+                message=ty.message,
+                autofixable=False,
+                status="pending",
+                source="typo",
+            ))
 
         # Term-list highlights (separate category, no suggestion, view-only).
         # find_term_matches already dedupes overlapping spans across lists —
@@ -420,8 +477,10 @@ def start_language_edit_analysis(
         "ok": True,
         "job_id": job_uuid,
         "total_findings": total_findings_count,
-        "rule_findings": total_findings_count - term_match_count,
+        "rule_findings": total_findings_count - term_match_count - typo_count,
         "term_matches": term_match_count,
+        "typo_matches": typo_count,
+        "spell_check_available": spell_checker is not None,
         "term_lists_applied": [{"id": cl.list_id, "name": cl.list_name} for cl in compiled_term_lists],
         "file_name": file_record.filename,
     }

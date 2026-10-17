@@ -37,3 +37,4 @@ Pillow
 saxonche
 python-pptx
 langdetect
+pyspellchecker

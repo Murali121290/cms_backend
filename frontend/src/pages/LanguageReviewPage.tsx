@@ -111,7 +111,7 @@ export function LanguageReviewPage() {
   // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
   const journal = useJournalReviewMode()
 
-  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'bias' | 'term' | 'comments' | 'rules'>('all')
+  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'bias' | 'term' | 'typo' | 'comments' | 'rules'>('all')
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [job, setJob] = useState<JobData | null>(null)
@@ -555,7 +555,7 @@ export function LanguageReviewPage() {
     const target = findings[idx]
     if (!target) return
     setSelectedFindingId(target.id)
-    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'compounds', 'bias', 'term'].includes(target.category)) {
+    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'compounds', 'bias', 'term', 'typo'].includes(target.category)) {
       setActiveRightTab(target.category as any)
     }
 
@@ -605,6 +605,7 @@ export function LanguageReviewPage() {
   const compoundsFindings = useMemo(() => findings.filter(f => f.category === 'compounds' || f.category === 'compound'), [findings])
   const biasFindings = useMemo(() => findings.filter(f => f.category === 'bias' || f.category === 'article'), [findings])
   const termFindings = useMemo(() => findings.filter(f => f.category === 'term' || f.source === 'term'), [findings])
+  const typoFindings = useMemo(() => findings.filter(f => f.category === 'typo'), [findings])
 
   const activeCategoryFindings = useMemo(() => {
     let list: Finding[] = []
@@ -615,6 +616,7 @@ export function LanguageReviewPage() {
     else if (activeRightTab === 'compounds') list = compoundsFindings
     else if (activeRightTab === 'bias') list = biasFindings
     else if (activeRightTab === 'term') list = termFindings
+    else if (activeRightTab === 'typo') list = typoFindings
 
     if (!searchQuery.trim()) return list
     const q = searchQuery.toLowerCase()
@@ -624,7 +626,7 @@ export function LanguageReviewPage() {
         f.message.toLowerCase().includes(q) ||
         f.rule_id.toLowerCase().includes(q),
     )
-  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, compoundsFindings, biasFindings, termFindings, searchQuery])
+  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, compoundsFindings, biasFindings, termFindings, typoFindings, searchQuery])
 
   // Realtime progress statistics
   const totalFindingsCount = job?.total_findings || findings.length || 0
@@ -665,12 +667,16 @@ export function LanguageReviewPage() {
         .ProseMirror .occurrence-compounds  { background-color: #d1fae5 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
         .ProseMirror .occurrence-bias       { background-color: #ffe4e6 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
         .ProseMirror .occurrence-term       { background-color: #ede9fe !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        /* Typo (pyspellchecker) — soft red/salmon so it's unmistakable but
+           not alarming. Distinct from the Spelling (house-style) soft blue. */
+        .ProseMirror .occurrence-typo       { background-color: #fecaca !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
         .ProseMirror .occurrence-grammar:hover   { background-color: #fed7aa !important; }
         .ProseMirror .occurrence-spelling:hover  { background-color: #bae6fd !important; }
         .ProseMirror .occurrence-sentence:hover  { background-color: #fef08a !important; }
         .ProseMirror .occurrence-compounds:hover { background-color: #a7f3d0 !important; }
         .ProseMirror .occurrence-bias:hover      { background-color: #fecdd3 !important; }
         .ProseMirror .occurrence-term:hover      { background-color: #ddd6fe !important; }
+        .ProseMirror .occurrence-typo:hover      { background-color: #fca5a5 !important; }
         /* Selected (click-to-edit focus) — distinct green, no underline, no
            pulsing animation. The decoration only wraps the finding's exact
            range (never the paragraph node), so even for a long sentence
@@ -805,6 +811,9 @@ export function LanguageReviewPage() {
                   </span>
                   <span className="flex items-center gap-1">
                     <span className="w-2.5 h-2.5 rounded-full bg-violet-300"></span> Terms
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-300"></span> Spell Check
                   </span>
                 </div>
               </div>
@@ -951,6 +960,18 @@ export function LanguageReviewPage() {
                   }`}
                 >
                   Terms {termFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('typo')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'typo'
+                      ? 'bg-red-500 text-white shadow-sm'
+                      : 'bg-red-50 text-red-700 hover:bg-red-100'
+                  }`}
+                  title="Likely typos detected by the spell checker"
+                >
+                  Spell Check {typoFindings.length}
                 </button>
 
                 <button
@@ -1168,6 +1189,7 @@ export function LanguageReviewPage() {
                       bias: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
                       article: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
                       term: { border: 'border-l-violet-400', text: 'text-violet-700', bg: 'bg-violet-50' },
+                      typo: { border: 'border-l-red-400', text: 'text-red-600', bg: 'bg-red-50' },
                     }
 
                     const catStyle = catColorMap[f.category] || { border: 'border-l-violet-400', text: 'text-violet-600', bg: 'bg-violet-50' }
