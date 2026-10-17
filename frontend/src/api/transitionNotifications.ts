@@ -22,6 +22,7 @@ export interface CustomerSummary {
   client_name: string
   is_custom: boolean
   has_file: boolean
+  is_in_db?: boolean
   stages_count: number
   last_modified?: string | null
 }
@@ -35,6 +36,7 @@ export interface CustomerConfigResponse {
   client_code: string
   client_name: string
   is_custom: boolean
+  is_in_db?: boolean
   stages: Record<string, StageEmailConfig>
   all_system_stages: StageInfo[]
 }
@@ -96,5 +98,10 @@ export const transitionNotificationsApi = {
     api.delete<{ success: boolean; message: string; stage_name: string; disabled: boolean }>(
       `/api/v1/settings/stage-transitions/${encodeURIComponent(clientCode)}/stages/${encodeURIComponent(stageName)}`,
       { params: { disable_only: disableOnly } }
+    ).then(r => r.data),
+
+  syncAllToDb: () =>
+    api.post<{ success: boolean; message: string; synced_clients: string[] }>(
+      '/api/v1/settings/stage-transitions/sync-all-to-db'
     ).then(r => r.data),
 }

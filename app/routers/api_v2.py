@@ -8891,9 +8891,31 @@ class TransitionEmailRequest(BaseModel):
 def _get_stage_notification_config(client_name: str, stage_name: str) -> Optional[dict]:
     import json
     import os
+
+    # 1. Try PostgreSQL database first for client-specific configuration
+    if client_name:
+        try:
+            from app.database import SessionLocal
+            from app.domains.workflow.models import StageTransitionConfig
+            with SessionLocal() as db_session:
+                db_cfg = db_session.query(StageTransitionConfig).filter(
+                    StageTransitionConfig.client_code == client_name.strip()
+                ).first()
+                if db_cfg and db_cfg.stages_config:
+                    data = db_cfg.stages_config
+                    if stage_name in data:
+                        stage_cfg = data.get(stage_name)
+                        if stage_cfg and stage_cfg.get("enabled", True) is False:
+                            return None
+                        return stage_cfg
+                    else:
+                        # Client has custom DB config and this stage was deleted/removed from it
+                        return None
+        except Exception as e:
+            print(f"Error checking DB stage notification config for client {client_name}: {e}")
+
+    # 2. Try client config file on disk (seed / legacy fallback)
     config_dir = os.path.join(os.path.dirname(__file__), "..", "config", "stage_transition")
-    
-    # 1. Try client config file
     if client_name:
         client_file = f"{client_name.strip()}.json"
         client_config_path = os.path.join(config_dir, client_file)
@@ -8912,8 +8934,24 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
                     return None
             except Exception as e:
                 print(f"Error loading stage notification config for client {client_name}: {e}")
-                
-    # 2. Try default config file
+
+    # 3. Try PostgreSQL database for global default template
+    try:
+        from app.database import SessionLocal
+        from app.domains.workflow.models import StageTransitionConfig
+        with SessionLocal() as db_session:
+            db_default = db_session.query(StageTransitionConfig).filter(
+                StageTransitionConfig.client_code == "default"
+            ).first()
+            if db_default and db_default.stages_config:
+                stage_cfg = db_default.stages_config.get(stage_name)
+                if stage_cfg and stage_cfg.get("enabled", True) is False:
+                    return None
+                return stage_cfg
+    except Exception as e:
+        print(f"Error checking DB default stage notification config: {e}")
+
+    # 4. Try default config file on disk (fallback)
     default_config_path = os.path.join(config_dir, "default.json")
     if os.path.exists(default_config_path):
         try:
@@ -8925,7 +8963,7 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
             return stage_cfg
         except Exception as e:
             print(f"Error loading default stage notification config: {e}")
-            
+
     return None
 
 def _resolve_placeholders(text: str, chapter, project, client, current_stage: str, next_stage: str) -> str:

@@ -26,7 +26,8 @@ import {
   SlidersHorizontal,
   Sliders,
   Check,
-  ExternalLink
+  ExternalLink,
+  Database
 } from 'lucide-react'
 import {
   transitionNotificationsApi,
@@ -41,6 +42,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
+import { Dropdown } from '@/components/ui/Dropdown'
 
 export function StageTransitionNotifications() {
   const navigate = useNavigate()
@@ -64,6 +66,29 @@ export function StageTransitionNotifications() {
   const [stageSearchQuery, setStageSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'disabled'>('all')
 
+  // Searchable Customer Dropdown options (Default template first, then customers alphabetically)
+  const customerDropdownOptions = useMemo(() => {
+    const list = [
+      {
+        value: 'default',
+        label: 'Default Template (Global Fallback)',
+      },
+    ]
+
+    const sorted = [...customers]
+      .filter(c => c.client_code !== 'default')
+      .sort((a, b) => a.client_name.localeCompare(b.client_name))
+
+    for (const c of sorted) {
+      list.push({
+        value: c.client_code,
+        label: `${c.client_name} (${c.client_code})`,
+      })
+    }
+
+    return list
+  }, [customers])
+
   // Slide-Out Drawer State
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [selectedStage, setSelectedStage] = useState<string>('')
@@ -83,6 +108,9 @@ export function StageTransitionNotifications() {
   // Revert confirmation state
   const [isRevertConfirmOpen, setIsRevertConfirmOpen] = useState(false)
   const [reverting, setReverting] = useState(false)
+
+  // Sync All JSON to DB state
+  const [syncingAll, setSyncingAll] = useState(false)
 
   // Test Email state
   const [isTestEmailOpen, setIsTestEmailOpen] = useState(false)
@@ -349,6 +377,26 @@ export function StageTransitionNotifications() {
       toast.error(err.response?.data?.detail || 'Failed to save configuration.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // ── Sync All JSON files to PostgreSQL Database ─────────────────────────────
+  const handleSyncAllToDb = async () => {
+    setSyncingAll(true)
+    try {
+      const res = await transitionNotificationsApi.syncAllToDb()
+      toast.success(res.message || 'All JSON templates successfully saved to PostgreSQL database!')
+      const [updatedConfig, updatedCustList] = await Promise.all([
+        transitionNotificationsApi.getCustomerConfig(selectedClientCode),
+        transitionNotificationsApi.listCustomers(),
+      ])
+      setClientConfig(updatedConfig)
+      setCustomers(updatedCustList)
+      setHasUnsavedChanges(false)
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to sync configurations to database.')
+    } finally {
+      setSyncingAll(false)
     }
   }
 
@@ -624,92 +672,86 @@ export function StageTransitionNotifications() {
           </Button>
 
           <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSyncAllToDb}
+            disabled={syncingAll}
+            isLoading={syncingAll}
+            leftIcon={<Database size={14} className="text-indigo-600" />}
+            className="text-xs h-9 px-3.5 bg-indigo-50/50 hover:bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold shadow-xs"
+            title="Import and save all JSON templates from disk directly into PostgreSQL database"
+          >
+            Sync All JSON to DB
+          </Button>
+
+          <Button
             size="sm"
             onClick={handleSave}
-            disabled={saving || !hasUnsavedChanges}
+            disabled={saving}
             isLoading={saving}
             leftIcon={<Save size={14} />}
             className="text-xs h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm"
+            title="Save this customer configuration directly into PostgreSQL database"
           >
-            Save Changes
+            Save
           </Button>
         </div>
       </div>
 
       {/* ── Customer Selector Bar ───────────────────────────────────────────── */}
-      <div className="bg-card rounded-xl border border-border shadow-sm p-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-card rounded-xl border border-border shadow-sm p-3.5 sm:p-4">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 sm:gap-4">
           {/* Customer Dropdown + Indicator */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-muted uppercase tracking-wider whitespace-nowrap">
-                Select Customer:
-              </span>
-            </div>
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+            <span className="text-xs font-bold text-muted uppercase tracking-wider whitespace-nowrap">
+              Select Customer:
+            </span>
 
-            <div className="relative min-w-[320px]">
-              <select
+            <div className="w-64 sm:w-80">
+              <Dropdown
                 value={selectedClientCode}
-                onChange={e => setSelectedClientCode(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 text-xs font-semibold bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-xs cursor-pointer"
-              >
-                <option value="default">🌐 Default Template (Global Fallback)</option>
-                <optgroup label="Custom Client Configurations">
-                  {customers
-                    .filter(c => c.client_code !== 'default' && c.is_custom)
-                    .map(c => (
-                      <option key={c.client_code} value={c.client_code}>
-                        🏢 {c.client_name} ({c.client_code})
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label="Inherited Clients (Using Global Default)">
-                  {customers
-                    .filter(c => c.client_code !== 'default' && !c.is_custom)
-                    .map(c => (
-                      <option key={c.client_code} value={c.client_code}>
-                        📄 {c.client_name} ({c.client_code})
-                      </option>
-                    ))}
-                </optgroup>
-              </select>
-
-              <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-muted">
-                {isDefaultSelected ? <Globe size={15} className="text-indigo-600" /> : <Building2 size={15} />}
-              </div>
+                onChange={setSelectedClientCode}
+                options={customerDropdownOptions}
+                searchable={true}
+                placeholder="Select a customer..."
+                icon={isDefaultSelected ? <Globe size={15} className="text-indigo-600 shrink-0" /> : <Building2 size={15} className="text-primary shrink-0" />}
+                className="h-9 text-xs font-semibold bg-surface border-border shadow-xs"
+                dropdownClassName="w-80 max-h-72 shadow-xl border-border bg-card"
+              />
             </div>
 
             {/* Custom / Inherited Status Badge & Actions */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+
               {isDefaultSelected ? (
-                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60 flex items-center gap-1">
+                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60 inline-flex items-center gap-1 whitespace-nowrap shadow-2xs">
                   <Globe size={12} /> Global Fallback
                 </span>
               ) : isCustomConfig ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60 flex items-center gap-1">
+                <div className="inline-flex items-center gap-2 whitespace-nowrap">
+                  <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 border border-purple-200/60 inline-flex items-center gap-1 whitespace-nowrap shadow-2xs">
                     <CheckCircle2 size={12} /> Custom Configuration
                   </span>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setIsRevertConfirmOpen(true)}
-                    className="text-xs h-7 text-rose-600 hover:text-rose-700 hover:bg-rose-50 flex items-center gap-1 px-2"
+                    className="text-xs h-7 text-rose-600 hover:text-rose-700 hover:bg-rose-50 inline-flex items-center gap-1 px-2 whitespace-nowrap rounded-lg"
                   >
                     <RotateCcw size={12} />
                     Revert to Default
                   </Button>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1">
+                <div className="inline-flex items-center gap-2 whitespace-nowrap">
+                  <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 inline-flex items-center gap-1 whitespace-nowrap shadow-2xs">
                     <Info size={12} /> Inherited from Default
                   </span>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleCreateCustomOverride}
-                    className="text-xs h-7 text-primary hover:bg-primary/5 flex items-center gap-1 px-2.5"
+                    className="text-xs h-7 text-primary hover:bg-primary/5 inline-flex items-center gap-1 px-2.5 whitespace-nowrap rounded-lg"
                   >
                     <Sparkles size={12} />
                     Customize for {selectedClientCode}
@@ -719,17 +761,17 @@ export function StageTransitionNotifications() {
             </div>
           </div>
 
-          {/* Search & Filter Toolbar */}
-          <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Search & Filter Toolbar - Side by side on one line */}
+          <div className="flex items-center gap-2.5 shrink-0 self-start xl:self-auto">
             {/* Search filter */}
-            <div className="relative min-w-[220px]">
+            <div className="relative w-48 sm:w-56">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
               <input
                 type="text"
                 placeholder="Search stages or recipients..."
                 value={stageSearchQuery}
                 onChange={e => setStageSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-7 py-1.5 text-xs bg-surface border border-border rounded-lg text-text placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full pl-8 pr-7 py-1.5 text-xs bg-surface border border-border rounded-lg text-text placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary shadow-2xs"
               />
               {stageSearchQuery && (
                 <button
@@ -742,28 +784,25 @@ export function StageTransitionNotifications() {
             </div>
 
             {/* Filter pills: All, Active, Disabled */}
-            <div className="flex items-center p-0.5 bg-surface rounded-lg border border-border text-xs">
+            <div className="flex items-center p-0.5 bg-surface rounded-lg border border-border text-xs shrink-0 shadow-2xs">
               <button
                 onClick={() => setStatusFilter('all')}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                  statusFilter === 'all' ? 'bg-card text-text shadow-xs font-semibold' : 'text-muted hover:text-text'
-                }`}
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${statusFilter === 'all' ? 'bg-card text-text shadow-xs font-semibold' : 'text-muted hover:text-text'
+                  }`}
               >
                 All ({stageStats.total})
               </button>
               <button
                 onClick={() => setStatusFilter('active')}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                  statusFilter === 'active' ? 'bg-card text-emerald-700 shadow-xs font-semibold' : 'text-muted hover:text-text'
-                }`}
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${statusFilter === 'active' ? 'bg-card text-emerald-700 shadow-xs font-semibold' : 'text-muted hover:text-text'
+                  }`}
               >
                 Active ({stageStats.active})
               </button>
               <button
                 onClick={() => setStatusFilter('disabled')}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                  statusFilter === 'disabled' ? 'bg-card text-amber-700 shadow-xs font-semibold' : 'text-muted hover:text-text'
-                }`}
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${statusFilter === 'disabled' ? 'bg-card text-amber-700 shadow-xs font-semibold' : 'text-muted hover:text-text'
+                  }`}
               >
                 Disabled ({stageStats.disabled})
               </button>
@@ -838,9 +877,8 @@ export function StageTransitionNotifications() {
                     <tr
                       key={stName}
                       onClick={() => handleOpenDrawer(stName)}
-                      className={`hover:bg-muted/5 transition-colors cursor-pointer group ${
-                        !isEnabled ? 'bg-slate-50/40' : ''
-                      }`}
+                      className={`hover:bg-muted/5 transition-colors cursor-pointer group ${!isEnabled ? 'bg-slate-50/40' : ''
+                        }`}
                     >
                       {/* 1. Status Toggle Switch */}
                       <td className="py-3.5 px-4" onClick={e => e.stopPropagation()}>
@@ -848,21 +886,18 @@ export function StageTransitionNotifications() {
                           <button
                             type="button"
                             onClick={e => handleToggleStageEnabled(stName, e)}
-                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                              isEnabled ? 'bg-emerald-600' : 'bg-slate-300'
-                            }`}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                              }`}
                             title={isEnabled ? 'Click to disable email notifications' : 'Click to enable email notifications'}
                           >
                             <span
-                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                                isEnabled ? 'translate-x-4' : 'translate-x-0'
-                              }`}
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${isEnabled ? 'translate-x-4' : 'translate-x-0'
+                                }`}
                             />
                           </button>
                           <span
-                            className={`text-[11px] font-semibold ${
-                              isEnabled ? 'text-emerald-700' : 'text-slate-400'
-                            }`}
+                            className={`text-[11px] font-semibold ${isEnabled ? 'text-emerald-700' : 'text-slate-400'
+                              }`}
                           >
                             {isEnabled ? 'Active' : 'Disabled'}
                           </span>
@@ -1018,20 +1053,17 @@ export function StageTransitionNotifications() {
                   <button
                     type="button"
                     onClick={() => updateCurrentStage('enabled', currentStageConfig.enabled === false)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      currentStageConfig.enabled !== false ? 'bg-emerald-600' : 'bg-slate-300'
-                    }`}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${currentStageConfig.enabled !== false ? 'bg-emerald-600' : 'bg-slate-300'
+                      }`}
                   >
                     <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                        currentStageConfig.enabled !== false ? 'translate-x-4' : 'translate-x-0'
-                      }`}
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${currentStageConfig.enabled !== false ? 'translate-x-4' : 'translate-x-0'
+                        }`}
                     />
                   </button>
                   <span
-                    className={`text-[11px] font-bold ${
-                      currentStageConfig.enabled !== false ? 'text-emerald-700' : 'text-slate-400'
-                    }`}
+                    className={`text-[11px] font-bold ${currentStageConfig.enabled !== false ? 'text-emerald-700' : 'text-slate-400'
+                      }`}
                   >
                     {currentStageConfig.enabled !== false ? 'Active' : 'Disabled'}
                   </span>
@@ -1051,22 +1083,20 @@ export function StageTransitionNotifications() {
             <div className="px-5 border-b border-border flex items-center gap-4 bg-surface/30">
               <button
                 onClick={() => setDrawerTab('editor')}
-                className={`py-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
-                  drawerTab === 'editor'
+                className={`py-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${drawerTab === 'editor'
                     ? 'border-primary text-primary'
                     : 'border-transparent text-muted hover:text-text'
-                }`}
+                  }`}
               >
                 <Sliders size={14} />
                 <span>Email Template & Routing</span>
               </button>
               <button
                 onClick={() => setDrawerTab('preview')}
-                className={`py-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
-                  drawerTab === 'preview'
+                className={`py-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${drawerTab === 'preview'
                     ? 'border-primary text-primary'
                     : 'border-transparent text-muted hover:text-text'
-                }`}
+                  }`}
               >
                 <Eye size={14} />
                 <span>Live Preview & Test Send</span>
@@ -1379,11 +1409,10 @@ export function StageTransitionNotifications() {
 
                     {testResult && (
                       <div
-                        className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${
-                          testResult.success
+                        className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${testResult.success
                             ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                             : 'bg-rose-50 text-rose-800 border border-rose-200'
-                        }`}
+                          }`}
                       >
                         {testResult.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
                         <span>{testResult.message}</span>
@@ -1409,12 +1438,13 @@ export function StageTransitionNotifications() {
                 <Button
                   size="sm"
                   onClick={handleSave}
-                  disabled={saving || !hasUnsavedChanges}
+                  disabled={saving}
                   isLoading={saving}
                   leftIcon={<Save size={14} />}
                   className="h-9 px-4 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                  title="Save configuration directly into PostgreSQL database"
                 >
-                  Save All Changes
+                  Save to DB
                 </Button>
               </div>
             </div>

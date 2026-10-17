@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.database import get_db
 from app.domains.clients.models import Client
-from app.domains.workflow.models import StageMaster
+from app.domains.workflow.models import StageMaster, StageTransitionConfig
 from app.domains.notifications.email_service import send_email
 
 logger = logging.getLogger(__name__)
@@ -58,22 +58,22 @@ AVAILABLE_VARIABLES = [
     {
         "key": "{project_code}",
         "label": "Project Code",
-        "description": "Unique book project code / ID",
-        "sample": "PRJ-AHUS-2026",
+        "description": "The master project or book identifier code",
+        "sample": "PRJ-2026-901",
         "category": "Project"
     },
     {
         "key": "{client_name}",
-        "label": "Customer / Publisher Name",
-        "description": "Client company or organization name",
-        "sample": "Artech House",
+        "label": "Client Name",
+        "description": "Name of the publishing client / imprint",
+        "sample": "Cambridge University Press",
         "category": "Project"
     },
     {
         "key": "{author_email}",
         "label": "Author Email",
-        "description": "Author contact email address",
-        "sample": "author@example.com",
+        "description": "Primary author or corresponding researcher email",
+        "sample": "lead_author@university.edu",
         "category": "Contacts"
     },
     {
@@ -146,6 +146,7 @@ class CustomerSummary(BaseModel):
     client_name: str
     is_custom: bool
     has_file: bool
+    is_in_db: bool = False
     stages_count: int
     last_modified: Optional[str] = None
 
@@ -159,11 +160,12 @@ class CustomerConfigResponse(BaseModel):
     client_code: str
     client_name: str
     is_custom: bool
+    is_in_db: bool = False
     stages: Dict[str, StageEmailConfig]
     all_system_stages: List[StageInfo]
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Database & Seed Helpers ───────────────────────────────────────────────────
 
 def _sanitize_code(code: str) -> str:
     cleaned = code.strip()
@@ -185,34 +187,63 @@ def _read_json_file(file_path: str) -> dict:
             return json.load(f)
     except Exception as e:
         logger.error(f"Error reading JSON from {file_path}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to parse config file: {os.path.basename(file_path)}"
-        )
+        return {}
 
 
-def _write_json_file_atomic(file_path: str, data: dict):
-    tmp_path = f"{file_path}.tmp"
-    bak_path = f"{file_path}.bak"
-
+def _get_raw_config_for_client(db: Session, safe_code: str) -> tuple[Dict[str, Any], bool, bool]:
+    """
+    Returns (stages_data, is_custom, is_in_db).
+    1. Checks PostgreSQL first.
+    2. If not found in DB, falls back to disk JSON files as seed.
+    """
+    # 1. Check DB for client
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-
-        # Create backup if original exists
-        if os.path.exists(file_path):
-            shutil.copy2(file_path, bak_path)
-
-        os.replace(tmp_path, file_path)
+        db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == safe_code).first()
+        if db_rec and db_rec.stages_config:
+            clean = {k: v for k, v in db_rec.stages_config.items() if not k.startswith("_")}
+            return clean, (safe_code != "default"), True
     except Exception as e:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
-        logger.error(f"Failed to write file {file_path}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save configuration: {str(e)}")
+        logger.warning(f"Error querying StageTransitionConfig for {safe_code}: {e}")
+
+    # 2. Check disk for custom file (seed / legacy)
+    if safe_code != "default":
+        custom_path = _get_file_path(safe_code)
+        if os.path.exists(custom_path):
+            raw = _read_json_file(custom_path)
+            if raw:
+                clean = {k: v for k, v in raw.items() if not k.startswith("_")}
+                return clean, True, False
+
+    # 3. Fallback to default in DB
+    if safe_code != "default":
+        try:
+            db_default = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == "default").first()
+            if db_default and db_default.stages_config:
+                clean = {k: v for k, v in db_default.stages_config.items() if not k.startswith("_")}
+                return clean, False, True
+        except Exception:
+            pass
+
+    # 4. Fallback to default.json on disk
+    default_path = _get_file_path("default")
+    default_raw = _read_json_file(default_path)
+    clean = {k: v for k, v in default_raw.items() if not k.startswith("_")}
+    return clean, False, False
+
+
+def _save_raw_config_to_db(db: Session, safe_code: str, stages_dict: Dict[str, Any]):
+    """Save or update transition configuration directly in PostgreSQL."""
+    db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == safe_code).first()
+    if db_rec:
+        db_rec.stages_config = stages_dict
+        db_rec.updated_at = datetime.utcnow()
+    else:
+        db_rec = StageTransitionConfig(
+            client_code=safe_code,
+            stages_config=stages_dict
+        )
+        db.add(db_rec)
+    db.commit()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -223,10 +254,52 @@ def get_template_variables():
     return AVAILABLE_VARIABLES
 
 
+@router.post("/sync-all-to-db")
+def sync_all_json_to_db(db: Session = Depends(get_db)):
+    """
+    Read all JSON files from app/config/stage_transition/*.json and save them directly into
+    the PostgreSQL stage_transition_configs table.
+    """
+    if not os.path.exists(CONFIG_DIR):
+        raise HTTPException(status_code=404, detail="Config directory not found.")
+
+    synced_clients = []
+    for fname in sorted(os.listdir(CONFIG_DIR)):
+        if fname.endswith(".json") and not fname.endswith(".bak") and not fname.endswith(".tmp"):
+            code = fname[:-5]
+            fpath = os.path.join(CONFIG_DIR, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    raw_data = json.load(f)
+                clean_stages = {k: v for k, v in raw_data.items() if not k.startswith("_")}
+
+                db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == code).first()
+                if db_rec:
+                    db_rec.stages_config = clean_stages
+                    db_rec.updated_at = datetime.utcnow()
+                else:
+                    db_rec = StageTransitionConfig(
+                        client_code=code,
+                        stages_config=clean_stages
+                    )
+                    db.add(db_rec)
+                synced_clients.append(code)
+            except Exception as e:
+                logger.error(f"Error syncing {fname} to DB: {e}")
+
+    db.commit()
+    return {
+        "success": True,
+        "message": f"Successfully synced {len(synced_clients)} customer configurations into PostgreSQL database.",
+        "synced_clients": synced_clients
+    }
+
+
 @router.get("", response_model=List[CustomerSummary])
+@router.get("/customers", response_model=List[CustomerSummary])
 def list_transition_customers(db: Session = Depends(get_db)):
     """
-    List all customers from database and disk configs.
+    List all customers from PostgreSQL and disk configs.
     Includes default template and indicators for whether customer has custom overrides.
     """
     # 1. Fetch DB clients
@@ -243,7 +316,18 @@ def list_transition_customers(db: Session = Depends(get_db)):
         if code:
             client_map[code] = name
 
-    # 2. Inspect disk configs
+    # 2. Inspect DB configs
+    db_configs: Dict[str, dict] = {}
+    try:
+        all_db_cfgs = db.query(StageTransitionConfig).all()
+        for cfg in all_db_cfgs:
+            mtime_str = cfg.updated_at.strftime("%Y-%m-%d %H:%M") if cfg.updated_at else None
+            stg_cnt = len([k for k in cfg.stages_config.keys() if not k.startswith("_")]) if cfg.stages_config else 0
+            db_configs[cfg.client_code] = {"mtime": mtime_str, "stages_count": stg_cnt}
+    except Exception as e:
+        logger.warning(f"Could not fetch StageTransitionConfig from DB: {e}")
+
+    # 3. Inspect disk configs (seed / fallback files)
     disk_files = {}
     if os.path.exists(CONFIG_DIR):
         for fname in os.listdir(CONFIG_DIR):
@@ -260,7 +344,7 @@ def list_transition_customers(db: Session = Depends(get_db)):
                     stages_cnt = 0
                 disk_files[code] = {"mtime": mtime_str, "stages_count": stages_cnt}
 
-    default_info = disk_files.get("default", {"mtime": None, "stages_count": 0})
+    default_info = db_configs.get("default") or disk_files.get("default", {"mtime": None, "stages_count": 0})
 
     results: List[CustomerSummary] = []
 
@@ -271,6 +355,7 @@ def list_transition_customers(db: Session = Depends(get_db)):
             client_name="Default Template (Global Fallback)",
             is_custom=False,
             has_file=True,
+            is_in_db="default" in db_configs,
             stages_count=default_info["stages_count"],
             last_modified=default_info["mtime"]
         )
@@ -281,30 +366,42 @@ def list_transition_customers(db: Session = Depends(get_db)):
     # Add DB clients
     for code, name in sorted(client_map.items(), key=lambda x: x[1].lower()):
         seen_codes.add(code)
-        has_file = code in disk_files
-        stages_cnt = disk_files[code]["stages_count"] if has_file else default_info["stages_count"]
-        mtime = disk_files[code]["mtime"] if has_file else None
+        has_custom = (code in db_configs) or (code in disk_files)
+        is_in_db = code in db_configs
+        if code in db_configs:
+            stages_cnt = db_configs[code]["stages_count"]
+            mtime = db_configs[code]["mtime"]
+        elif code in disk_files:
+            stages_cnt = disk_files[code]["stages_count"]
+            mtime = disk_files[code]["mtime"]
+        else:
+            stages_cnt = default_info["stages_count"]
+            mtime = None
 
         results.append(
             CustomerSummary(
                 client_code=code,
                 client_name=name,
-                is_custom=has_file,
-                has_file=has_file,
+                is_custom=has_custom,
+                has_file=has_custom,
+                is_in_db=is_in_db,
                 stages_count=stages_cnt,
                 last_modified=mtime
             )
         )
 
-    # Add disk files not matching any DB client (e.g. historical codes)
-    for code, info in sorted(disk_files.items(), key=lambda x: x[0].lower()):
+    # Add disk/db codes not matching any DB client (historical / custom codes)
+    all_extra = set(disk_files.keys()).union(set(db_configs.keys()))
+    for code in sorted(all_extra, key=lambda x: x.lower()):
         if code not in seen_codes:
+            info = db_configs.get(code) or disk_files.get(code, {"stages_count": 0, "mtime": None})
             results.append(
                 CustomerSummary(
                     client_code=code,
-                    client_name=f"{code} (Custom File)",
+                    client_name=f"{code} (Custom)",
                     is_custom=True,
                     has_file=True,
+                    is_in_db=code in db_configs,
                     stages_count=info["stages_count"],
                     last_modified=info["mtime"]
                 )
@@ -317,12 +414,9 @@ def list_transition_customers(db: Session = Depends(get_db)):
 def get_customer_transition_config(client_code: str, db: Session = Depends(get_db)):
     """
     Get stage transition notification settings for a specific client (or 'default').
-    If the client does not have a custom config, falls back to the default configuration.
+    Reads from PostgreSQL first; if not found, falls back to disk seed.
     """
     safe_code = _sanitize_code(client_code)
-
-    default_path = _get_file_path("default")
-    default_data = _read_json_file(default_path)
 
     # Get system stages
     all_stages: List[StageInfo] = []
@@ -340,8 +434,10 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
     except Exception as e:
         logger.warning(f"Could not fetch StageMaster from DB: {e}")
 
-    # Fallback to stages from default_data if DB stages unavailable
+    # Fallback to stages from disk default if DB stages unavailable
     if not all_stages:
+        default_path = _get_file_path("default")
+        default_data = _read_json_file(default_path)
         all_stages = [
             StageInfo(stage_name=k)
             for k in default_data.keys()
@@ -360,24 +456,8 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
         except Exception:
             client_name = safe_code
 
-    is_custom = False
-    stages_data: Dict[str, Any] = {}
+    stages_data, is_custom, is_in_db = _get_raw_config_for_client(db, safe_code)
 
-    if safe_code == "default":
-        stages_data = {k: v for k, v in default_data.items() if not k.startswith("_")}
-        is_custom = False
-    else:
-        custom_path = _get_file_path(safe_code)
-        if os.path.exists(custom_path):
-            raw_data = _read_json_file(custom_path)
-            stages_data = {k: v for k, v in raw_data.items() if not k.startswith("_")}
-            is_custom = True
-        else:
-            # Fall back to default template
-            stages_data = {k: v for k, v in default_data.items() if not k.startswith("_")}
-            is_custom = False
-
-    # Normalize into StageEmailConfig objects
     parsed_stages: Dict[str, StageEmailConfig] = {}
     for stage_name, cfg in stages_data.items():
         if isinstance(cfg, dict):
@@ -394,6 +474,7 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
         client_code=safe_code,
         client_name=client_name,
         is_custom=is_custom,
+        is_in_db=is_in_db,
         stages=parsed_stages,
         all_system_stages=all_stages
     )
@@ -407,28 +488,13 @@ def save_customer_transition_config(
 ):
     """
     Save or update notification settings for a customer or the default template.
-    Creates an atomic save with a .bak backup.
+    Persists directly into PostgreSQL (stage_transition_configs table).
     """
     safe_code = _sanitize_code(client_code)
-    file_path = _get_file_path(safe_code)
-
-    # If preserving default README header
-    file_dict: Dict[str, Any] = {}
-    if safe_code == "default":
-        existing = _read_json_file(file_path)
-        if "_README" in existing:
-            file_dict["_README"] = existing["_README"]
-        else:
-            file_dict["_README"] = (
-                "How to add configurations: Create a separate file named '{Customer Name}.json' "
-                "in this folder. Define the configuration per stage. "
-                "Allowed placeholders: {chapter_name}, {chapter_title}, {current_stage}, "
-                "{next_stage}, {project_code}, {author_email}, {client_email}, "
-                "{languageediting_team_email}, {pre_editing_team_email}, {next_stage_team_email}."
-            )
+    stages_dict: Dict[str, Any] = {}
 
     for stage_name, stage_cfg in payload.stages.items():
-        file_dict[stage_name] = {
+        stages_dict[stage_name] = {
             "enabled": stage_cfg.enabled,
             "custom_message": stage_cfg.custom_message or "",
             "to": [t.strip() for t in stage_cfg.to if t and t.strip()],
@@ -437,11 +503,11 @@ def save_customer_transition_config(
             "body": stage_cfg.body or ""
         }
 
-    _write_json_file_atomic(file_path, file_dict)
+    _save_raw_config_to_db(db, safe_code, stages_dict)
 
     return {
         "success": True,
-        "message": f"Settings for '{safe_code}' saved successfully.",
+        "message": f"Settings for '{safe_code}' saved successfully in database.",
         "client_code": safe_code,
         "is_custom": safe_code != "default"
     }
@@ -456,6 +522,7 @@ def add_stage_to_config(
     """
     Add a new stage template to a customer's configuration or default template.
     Optionally registers the stage in StageMaster if requested.
+    Persists into PostgreSQL.
     """
     safe_code = _sanitize_code(client_code)
     stage_name = payload.stage_name.strip()
@@ -481,14 +548,8 @@ def add_stage_to_config(
             logger.warning(f"Could not register {stage_name} in StageMaster: {e}")
             db.rollback()
 
-    # 2. Add to file
-    file_path = _get_file_path(safe_code)
-    if not os.path.exists(file_path):
-        default_path = _get_file_path("default")
-        default_data = _read_json_file(default_path)
-        existing = {k: v for k, v in default_data.items() if not k.startswith("_")}
-    else:
-        existing = _read_json_file(file_path)
+    # 2. Load existing config (from DB or seed fallback)
+    existing, _, _ = _get_raw_config_for_client(db, safe_code)
 
     default_template = {
         "enabled": payload.enabled,
@@ -500,7 +561,7 @@ def add_stage_to_config(
     }
 
     existing[stage_name] = default_template
-    _write_json_file_atomic(file_path, existing)
+    _save_raw_config_to_db(db, safe_code, existing)
 
     return {
         "success": True,
@@ -514,22 +575,15 @@ def add_stage_to_config(
 def delete_stage_from_config(
     client_code: str,
     stage_name: str,
-    disable_only: bool = False
+    disable_only: bool = False,
+    db: Session = Depends(get_db)
 ):
     """
     Remove or disable an email notification configuration for a specific stage.
-    If disable_only is True, sets enabled=False instead of deleting the key.
+    Persists directly into PostgreSQL.
     """
     safe_code = _sanitize_code(client_code)
-    file_path = _get_file_path(safe_code)
-
-    if not os.path.exists(file_path):
-        # Fallback to cloning default template if customer has no custom file yet
-        default_path = _get_file_path("default")
-        default_data = _read_json_file(default_path)
-        existing = {k: v for k, v in default_data.items() if not k.startswith("_")}
-    else:
-        existing = _read_json_file(file_path)
+    existing, _, _ = _get_raw_config_for_client(db, safe_code)
 
     if stage_name not in existing:
         raise HTTPException(
@@ -545,7 +599,7 @@ def delete_stage_from_config(
         del existing[stage_name]
         message = f"Stage '{stage_name}' was removed from '{safe_code}' configuration."
 
-    _write_json_file_atomic(file_path, existing)
+    _save_raw_config_to_db(db, safe_code, existing)
 
     return {
         "success": True,
@@ -556,60 +610,62 @@ def delete_stage_from_config(
 
 
 @router.post("/{client_code}/initialize")
-def initialize_from_default(client_code: str):
+def initialize_from_default(client_code: str, db: Session = Depends(get_db)):
     """
-    Explicitly clone the default template to create a customer-specific override file.
+    Explicitly clone the default template to create a customer-specific override in PostgreSQL.
     """
     safe_code = _sanitize_code(client_code)
     if safe_code == "default":
         raise HTTPException(status_code=400, detail="Cannot initialize default from default.")
 
-    default_path = _get_file_path("default")
-    if not os.path.exists(default_path):
-        raise HTTPException(status_code=500, detail="Default template file missing on server.")
-
-    dest_path = _get_file_path(safe_code)
-    default_data = _read_json_file(default_path)
-    # Remove _README from custom file for clean storage
-    clean_data = {k: v for k, v in default_data.items() if not k.startswith("_")}
-
-    _write_json_file_atomic(dest_path, clean_data)
+    default_stages, _, _ = _get_raw_config_for_client(db, "default")
+    _save_raw_config_to_db(db, safe_code, default_stages)
 
     return {
         "success": True,
-        "message": f"Initialized custom configuration for '{safe_code}' from default template.",
+        "message": f"Initialized custom configuration for '{safe_code}' from default template in database.",
         "client_code": safe_code
     }
 
 
 @router.delete("/{client_code}")
-def delete_customer_config(client_code: str):
+def delete_customer_config(client_code: str, db: Session = Depends(get_db)):
     """
-    Delete a customer-specific custom configuration file.
+    Delete a customer-specific custom configuration from PostgreSQL.
     The customer will seamlessly revert to using the default template.
     """
     safe_code = _sanitize_code(client_code)
     if safe_code == "default":
         raise HTTPException(status_code=400, detail="Cannot delete the default template.")
 
+    deleted = False
+
+    # 1. Delete from DB
+    try:
+        db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == safe_code).first()
+        if db_rec:
+            db.delete(db_rec)
+            db.commit()
+            deleted = True
+    except Exception as e:
+        logger.error(f"Error deleting config from DB for {safe_code}: {e}")
+        db.rollback()
+
+    # 2. Check disk file and archive if exists
     file_path = _get_file_path(safe_code)
     bak_path = f"{file_path}.bak"
+    if os.path.exists(file_path):
+        try:
+            shutil.copy2(file_path, bak_path)
+            os.remove(file_path)
+            deleted = True
+        except Exception as e:
+            logger.error(f"Error removing disk file {file_path}: {e}")
 
-    if not os.path.exists(file_path):
+    if not deleted:
         raise HTTPException(
             status_code=404,
             detail=f"No custom configuration found for '{safe_code}'."
-        )
-
-    try:
-        # Keep backup before removing
-        shutil.copy2(file_path, bak_path)
-        os.remove(file_path)
-    except Exception as e:
-        logger.error(f"Error deleting config for {safe_code}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete configuration file: {str(e)}"
         )
 
     return {
@@ -627,7 +683,6 @@ def send_test_notification(req: TestEmailRequest):
     if not req.to_email or "@" not in req.to_email:
         raise HTTPException(status_code=400, detail="A valid recipient email address is required.")
 
-    # Substitute sample variables into subject and body for realistic preview
     sample_mapping = {var["key"]: var["sample"] for var in AVAILABLE_VARIABLES}
     rendered_subject = req.subject
     rendered_body = req.body
@@ -636,7 +691,6 @@ def send_test_notification(req: TestEmailRequest):
         rendered_subject = rendered_subject.replace(placeholder, sample_val)
         rendered_body = rendered_body.replace(placeholder, sample_val)
 
-    # Prefix subject so recipient knows it's a test dispatch
     final_subject = f"[TEST] {rendered_subject}" if not rendered_subject.startswith("[TEST]") else rendered_subject
 
     try:
