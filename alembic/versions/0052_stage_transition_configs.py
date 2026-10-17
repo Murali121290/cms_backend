@@ -1,6 +1,6 @@
 """Add stage_transition_configs table for persistent database storage.
 
-Revision ID: 0052_add_stage_transition_configs
+Revision ID: 0052_stage_transition_configs
 Revises: 0051_term_lists
 Create Date: 2026-10-15 17:50:00.000000
 
@@ -10,13 +10,19 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0052_add_stage_transition_configs'
+revision: str = '0052_stage_transition_configs'
 down_revision: Union[str, Sequence[str], None] = '0051_term_lists'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Ensure alembic_version can accommodate longer revision IDs
+    try:
+        op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)")
+    except Exception:
+        pass
+
     conn = op.get_bind()
     inspector = sa.inspect(conn)
     tables = inspector.get_table_names()
