@@ -138,6 +138,7 @@ export function BodInternalJobPage() {
       document.body.appendChild(link)
       link.click()
       link.parentNode?.removeChild(link)
+      fetchJob()
     } catch (err) {
       toast.error("Failed to download PDF")
     }

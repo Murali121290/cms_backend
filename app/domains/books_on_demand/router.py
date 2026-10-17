@@ -30,6 +30,8 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
     # Serialize to include client_name
     result = []
     for job in jobs:
+        prod_info = (job.stage_history or {}).get("Production", {})
+        pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
         job_dict = {
             "id": job.id,
             "pdf_filename": job.pdf_filename,
@@ -49,7 +51,9 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "updated_at": job.updated_at,
             "due_date": job.due_date,
             "due_date_history": job.due_date_history,
-            "client_name": "BOD"
+            "client_name": "BOD",
+            "pdf_downloaded": pdf_downloaded,
+            "pdf_downloaded_at": prod_info.get("pdf_downloaded_at")
         }
         result.append(job_dict)
     return result
@@ -62,6 +66,8 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
+    prod_info = (job.stage_history or {}).get("Production", {})
+    pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
     return {
         "id": job.id,
         "pdf_filename": job.pdf_filename,
@@ -81,7 +87,9 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "updated_at": job.updated_at,
         "due_date": job.due_date,
         "due_date_history": job.due_date_history,
-        "client_name": "BOD"
+        "client_name": "BOD",
+        "pdf_downloaded": pdf_downloaded,
+        "pdf_downloaded_at": prod_info.get("pdf_downloaded_at")
     }
 
 @router.get("/jobs/{job_id}/download-pdf")
@@ -89,7 +97,40 @@ def download_pdf(job_id: int, db: Session = Depends(get_db)):
     job = db.query(BodJob).filter(BodJob.id == job_id).first()
     if not job or not job.pdf_filepath or not os.path.exists(job.pdf_filepath):
         raise HTTPException(status_code=404, detail="PDF not found")
+        
+    now_iso = datetime.now(timezone.utc).isoformat()
+    history = dict(job.stage_history) if job.stage_history else {}
+    prod_data = dict(history.get("Production", {}))
+    if not prod_data.get("pdf_downloaded"):
+        prod_data["pdf_downloaded"] = True
+        prod_data["pdf_downloaded_at"] = now_iso
+        history["Production"] = prod_data
+        job.stage_history = history
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(job, "stage_history")
+        db.commit()
+
     return FileResponse(path=job.pdf_filepath, filename=job.pdf_filename, media_type='application/pdf')
+
+@router.post("/jobs/{job_id}/start-work")
+def start_work(job_id: int, db: Session = Depends(get_db)):
+    """Mark that work on the job in Production has started (e.g. after downloading PDF)."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    now_iso = datetime.now(timezone.utc).isoformat()
+    history = dict(job.stage_history) if job.stage_history else {}
+    prod_data = dict(history.get("Production", {}))
+    prod_data["pdf_downloaded"] = True
+    prod_data["pdf_downloaded_at"] = now_iso
+    history["Production"] = prod_data
+    job.stage_history = history
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(job, "stage_history")
+    db.commit()
+    db.refresh(job)
+    return {"message": "Work started", "job": job}
 
 @router.get("/jobs/{job_id}/download-epub")
 def download_epub(job_id: int, db: Session = Depends(get_db)):
