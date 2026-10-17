@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -48,6 +48,7 @@ export function BodInternalPage() {
   const [newDueDate, setNewDueDate] = useState('')
   const [dueDateReason, setDueDateReason] = useState('')
   const [savingDueDate, setSavingDueDate] = useState(false)
+
 
   const fetchJobs = async () => {
     try {
@@ -126,6 +127,16 @@ export function BodInternalPage() {
       fetchJobs()
     } catch (err) {
       toast.error("Failed to assign user")
+    }
+  }
+
+  const handleAdvanceJob = async (jobId: number) => {
+    try {
+      await api.post(`/bod/jobs/${jobId}/advance`)
+      toast.success("Job moved to Production stage")
+      fetchJobs()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to proceed to Production")
     }
   }
 
@@ -1092,6 +1103,19 @@ export function BodInternalPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {job.current_stage_name === 'Add job' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleAdvanceJob(job.id)
+                            }}
+                            className="px-2 py-1 text-[11px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-md border border-primary/20 flex items-center gap-1 transition-colors"
+                            title="Proceed to Production"
+                          >
+                            <span>Proceed</span>
+                            <ArrowRight size={12} />
+                          </button>
+                        )}
                         <button
                           onClick={(e) => handleDownloadPdf(e, job)}
                           className="p-1.5 text-muted hover:text-primary hover:bg-primary/10 rounded-md transition-colors"

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Form
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import shutil
 import logging
@@ -98,17 +98,19 @@ def download_pdf(job_id: int, db: Session = Depends(get_db)):
     if not job or not job.pdf_filepath or not os.path.exists(job.pdf_filepath):
         raise HTTPException(status_code=404, detail="PDF not found")
         
-    now_iso = datetime.now(timezone.utc).isoformat()
-    history = dict(job.stage_history) if job.stage_history else {}
-    prod_data = dict(history.get("Production", {}))
-    if not prod_data.get("pdf_downloaded"):
-        prod_data["pdf_downloaded"] = True
-        prod_data["pdf_downloaded_at"] = now_iso
-        history["Production"] = prod_data
-        job.stage_history = history
-        from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(job, "stage_history")
-        db.commit()
+    # Only track production work start if the job is actually in Production stage
+    if job.current_stage_name == "Production":
+        now_iso = datetime.now(timezone.utc).isoformat()
+        history = dict(job.stage_history) if job.stage_history else {}
+        prod_data = dict(history.get("Production", {}))
+        if not prod_data.get("pdf_downloaded"):
+            prod_data["pdf_downloaded"] = True
+            prod_data["pdf_downloaded_at"] = now_iso
+            history["Production"] = prod_data
+            job.stage_history = history
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(job, "stage_history")
+            db.commit()
 
     return FileResponse(path=job.pdf_filepath, filename=job.pdf_filename, media_type='application/pdf')
 
@@ -119,17 +121,18 @@ def start_work(job_id: int, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    now_iso = datetime.now(timezone.utc).isoformat()
-    history = dict(job.stage_history) if job.stage_history else {}
-    prod_data = dict(history.get("Production", {}))
-    prod_data["pdf_downloaded"] = True
-    prod_data["pdf_downloaded_at"] = now_iso
-    history["Production"] = prod_data
-    job.stage_history = history
-    from sqlalchemy.orm.attributes import flag_modified
-    flag_modified(job, "stage_history")
-    db.commit()
-    db.refresh(job)
+    if job.current_stage_name == "Production":
+        now_iso = datetime.now(timezone.utc).isoformat()
+        history = dict(job.stage_history) if job.stage_history else {}
+        prod_data = dict(history.get("Production", {}))
+        prod_data["pdf_downloaded"] = True
+        prod_data["pdf_downloaded_at"] = now_iso
+        history["Production"] = prod_data
+        job.stage_history = history
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(job, "stage_history")
+        db.commit()
+        db.refresh(job)
     return {"message": "Work started", "job": job}
 
 @router.get("/jobs/{job_id}/download-epub")
@@ -254,11 +257,23 @@ def update_due_date(
     else:
         full_name = fn or ln or getattr(current_user, "username", getattr(current_user, "user_name", "Unknown"))
 
+    old_str = job.due_date.strftime("%d %b %Y") if job.due_date else None
+    new_str = new_date.strftime("%d %b %Y") if new_date else None
+
+    changes = [
+        {
+            "field": "Due Date",
+            "old": old_str,
+            "new": new_str
+        }
+    ]
+
     history_entry = {
         "date": payload.due_date,
         "reason": payload.reason,
         "changed_by": full_name,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "changes": changes
     }
     
     history = list(job.due_date_history) if job.due_date_history else []
@@ -266,9 +281,154 @@ def update_due_date(
     
     job.due_date = new_date
     job.due_date_history = history
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(job, "due_date_history")
     db.commit()
     
     return {"status": "success"}
+
+
+class BodAnalysisUpdateRequest(BaseModel):
+    pdf_page_count: Optional[int] = None
+    pdf_type: Optional[str] = None
+    pdf_language: Optional[str] = None
+    due_date: Optional[str] = None
+    due_date_reason: Optional[str] = None
+
+
+@router.put("/jobs/{job_id}/analysis")
+def update_job_analysis(
+    job_id: int, 
+    payload: BodAnalysisUpdateRequest, 
+    db: Session = Depends(get_db), 
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Update job analysis step details: Pages, Type, Language, Due Date. Tracks only changed fields in history."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.current_stage_name != "Add job":
+        raise HTTPException(status_code=400, detail="Job analysis can only be updated in 'Add job' stage")
+
+    changes = []
+
+    # 1. Pages
+    if payload.pdf_page_count is not None and payload.pdf_page_count != job.pdf_page_count:
+        old_val = f"{job.pdf_page_count} pages" if job.pdf_page_count is not None else None
+        new_val = f"{payload.pdf_page_count} pages"
+        changes.append({
+            "field": "Pages",
+            "old": old_val,
+            "new": new_val
+        })
+        job.pdf_page_count = payload.pdf_page_count
+
+    # 2. PDF Type
+    if payload.pdf_type is not None:
+        new_type = payload.pdf_type.strip() if payload.pdf_type else ""
+        old_type = (job.pdf_type or "").strip()
+        if new_type != old_type:
+            changes.append({
+                "field": "PDF Type",
+                "old": old_type if old_type else None,
+                "new": new_type if new_type else None
+            })
+            job.pdf_type = new_type or None
+
+    # 3. Language
+    if payload.pdf_language is not None:
+        new_lang = payload.pdf_language.strip() if payload.pdf_language else ""
+        old_lang = (job.pdf_language or "").strip()
+        if new_lang != old_lang:
+            changes.append({
+                "field": "Language",
+                "old": old_lang if old_lang else None,
+                "new": new_lang if new_lang else None
+            })
+            job.pdf_language = new_lang or None
+
+    # 4. Due Date
+    if payload.due_date is not None:
+        new_due_date = None
+        if payload.due_date.strip():
+            try:
+                new_due_date = datetime.fromisoformat(payload.due_date.replace('Z', '+00:00'))
+                new_due_date = new_due_date.replace(tzinfo=None)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format")
+
+        old_ymd = job.due_date.strftime("%Y-%m-%d") if job.due_date else None
+        new_ymd = new_due_date.strftime("%Y-%m-%d") if new_due_date else None
+
+        if old_ymd != new_ymd:
+            old_str = job.due_date.strftime("%d %b %Y") if job.due_date else None
+            new_str = new_due_date.strftime("%d %b %Y") if new_due_date else None
+            changes.append({
+                "field": "Due Date",
+                "old": old_str,
+                "new": new_str
+            })
+            job.due_date = new_due_date
+
+    if changes:
+        if not payload.due_date_reason or not payload.due_date_reason.strip():
+            raise HTTPException(status_code=400, detail="Update reason is mandatory")
+
+        fn = (getattr(current_user, "first_name", None) or "").strip()
+        ln = (getattr(current_user, "last_name", None) or "").strip()
+        if fn and ln:
+            full_name = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
+        else:
+            full_name = fn or ln or getattr(current_user, "username", getattr(current_user, "user_name", "Unknown"))
+
+        history_entry = {
+            "changes": changes,
+            "reason": payload.due_date_reason.strip(),
+            "changed_by": full_name,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        if payload.due_date:
+            history_entry["date"] = payload.due_date
+
+        history = list(job.due_date_history) if job.due_date_history else []
+        history.append(history_entry)
+        job.due_date_history = history
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(job, "due_date_history")
+
+    db.commit()
+    db.refresh(job)
+
+    prod_info = (job.stage_history or {}).get("Production", {})
+    pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
+
+    return {
+        "message": "Job analysis updated successfully",
+        "job": {
+            "id": job.id,
+            "pdf_filename": job.pdf_filename,
+            "pdf_filepath": job.pdf_filepath,
+            "pdf_page_count": job.pdf_page_count,
+            "pdf_type": job.pdf_type,
+            "pdf_language": job.pdf_language,
+            "epub_filename": job.epub_filename,
+            "epub_filepath": job.epub_filepath,
+            "current_stage_index": job.current_stage_index,
+            "current_stage_name": job.current_stage_name,
+            "current_assignee": job.current_assignee,
+            "assigned_users": job.assigned_users,
+            "stage_history": job.stage_history,
+            "status": job.status,
+            "created_at": job.created_at,
+            "updated_at": job.updated_at,
+            "due_date": job.due_date,
+            "due_date_history": job.due_date_history,
+            "client_name": "BOD",
+            "pdf_downloaded": pdf_downloaded,
+            "pdf_downloaded_at": prod_info.get("pdf_downloaded_at")
+        }
+    }
 
 
 @router.post("/jobs/{job_id}/assign")
@@ -334,12 +494,6 @@ def assign_job(
     db.commit()
     db.refresh(job)
     
-    # Auto-advance if assigned during 'Add job'
-    if job.current_stage_name == "Add job":
-        # Call advance_job_stage logic
-        _advance_job_logic(job, background_tasks, db)
-        db.refresh(job)
-        
     return {"message": "User assigned successfully", "job": job}
 
 
@@ -376,9 +530,30 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     # Set start time for next stage
     new_stage_data = history.get(new_stage, {})
     new_stage_data["start_time"] = now_iso
-    history[new_stage] = new_stage_data
     
+    from sqlalchemy.orm.attributes import flag_modified
+    if new_stage == "Production":
+        # Unassign assignee when moving to Production stage
+        job.current_assignee = None
+        new_stage_data["assignee"] = None
+        
+        history_list = job.assigned_users if isinstance(job.assigned_users, list) else []
+        new_history = list(history_list)
+        new_history.append({
+            "user_id": None,
+            "stage": "Production",
+            "time": now_iso,
+            "assigned_by": "System",
+            "action": "Unassigned on move to Production"
+        })
+        job.assigned_users = new_history
+        flag_modified(job, "assigned_users")
+    elif job.current_assignee and not new_stage_data.get("assignee"):
+        new_stage_data["assignee"] = job.current_assignee
+        
+    history[new_stage] = new_stage_data
     job.stage_history = history
+    flag_modified(job, "stage_history")
     
     # If moving to Archive, status becomes Completed
     if job.current_stage_index == len(stages) - 1:
