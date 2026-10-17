@@ -40,10 +40,11 @@ class InDesignToXMLEngine:
             raise ValueError(f"Chapter with ID {file_record.chapter_id} not found.")
 
         # Resolve file_path to verified physical path if needed
+        from app.domains.processing.service import resolve_physical_file_path
+        from app.services.file_service import UPLOAD_DIR
+        target_upload_dir = upload_dir or UPLOAD_DIR
+
         if not os.path.exists(file_path):
-            from app.domains.processing.service import resolve_physical_file_path
-            from app.services.file_service import UPLOAD_DIR
-            target_upload_dir = upload_dir or UPLOAD_DIR
             file_path = resolve_physical_file_path(file_path, str(target_upload_dir))
             if not os.path.exists(file_path) and file_record and file_record.path:
                 file_path = resolve_physical_file_path(file_record.path, str(target_upload_dir))

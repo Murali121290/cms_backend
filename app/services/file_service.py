@@ -325,9 +325,32 @@ def upload_chapter_files(
 
 def get_file_for_download(db: Session, *, file_id: int):
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
-    if not file_record or not file_record.path or not os.path.exists(file_record.path):
+    if not file_record or not file_record.path:
         return None
-    return file_record
+
+    # Check if path is already an existing absolute path
+    if os.path.isabs(file_record.path) and os.path.exists(file_record.path):
+        file_record.physical_path = file_record.path
+        return file_record
+
+    # Resolve relative path using UPLOAD_DIR
+    from app.domains.processing.service import resolve_physical_file_path
+    physical_path = resolve_physical_file_path(file_record.path, UPLOAD_DIR)
+    if os.path.exists(physical_path):
+        file_record.physical_path = physical_path
+        return file_record
+
+    # Additional fallback using project and chapter hierarchy
+    project = db.query(models.Project).filter(models.Project.id == file_record.project_id).first() if file_record.project_id else None
+    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first() if file_record.chapter_id else None
+    if project and chapter:
+        for cat in [file_record.category, (file_record.category or '').replace(" ", "_"), (file_record.category or '').capitalize()]:
+            candidate = os.path.join(UPLOAD_DIR, project.client_name or 'unknown', project.code, chapter.number or chapter.chapters, cat, file_record.filename)
+            if os.path.exists(candidate):
+                file_record.physical_path = candidate
+                return file_record
+
+    return None
 
 
 def delete_file_and_capture_context(db: Session, *, file_id: int):
@@ -341,11 +364,16 @@ def delete_file_and_capture_context(db: Session, *, file_id: int):
         "category": file_record.category,
     }
 
-    if file_record.path and os.path.exists(file_record.path):
+    physical_path = file_record.path
+    if physical_path and (not os.path.isabs(physical_path) or not os.path.exists(physical_path)):
+        from app.domains.processing.service import resolve_physical_file_path
+        physical_path = resolve_physical_file_path(physical_path, UPLOAD_DIR)
+
+    if physical_path and os.path.exists(physical_path):
         try:
             # Also clean up the corresponding XHTML file if it exists
-            dir_name = os.path.dirname(file_record.path)
-            base_name = os.path.splitext(os.path.basename(file_record.path))[0]
+            dir_name = os.path.dirname(physical_path)
+            base_name = os.path.splitext(os.path.basename(physical_path))[0]
             xhtml_path = os.path.join(dir_name, "xhtml", f"{base_name}.html")
             if os.path.exists(xhtml_path):
                 try:
@@ -353,7 +381,7 @@ def delete_file_and_capture_context(db: Session, *, file_id: int):
                 except Exception as e:
                     print(f"Error deleting associated XHTML file on disk: {e}")
 
-            os.remove(file_record.path)
+            os.remove(physical_path)
         except Exception as e:
             print(f"Error deleting file on disk: {e}")
 

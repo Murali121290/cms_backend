@@ -2929,6 +2929,11 @@ def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResp
     the temp copy is streamed unchanged. For non-DOCX files the original path
     is returned directly.
     """
+    if not os.path.isabs(path) or not os.path.exists(path):
+        from app.domains.processing.service import resolve_physical_file_path
+        from app.services.file_service import UPLOAD_DIR
+        path = resolve_physical_file_path(path, UPLOAD_DIR)
+
     if not filename.lower().endswith(".docx"):
         return FileResponse(path=path, filename=filename, media_type=media_type)
 
@@ -2985,8 +2990,14 @@ def api_v2_download_file(
 
     import mimetypes
     mime, _ = mimetypes.guess_type(file_record.filename)
+    physical_path = getattr(file_record, "physical_path", None)
+    if not physical_path or not os.path.exists(physical_path):
+        from app.domains.processing.service import resolve_physical_file_path
+        from app.services.file_service import UPLOAD_DIR
+        physical_path = resolve_physical_file_path(file_record.path, UPLOAD_DIR)
+
     return _serve_docx_finalized(
-        path=file_record.path,
+        path=physical_path,
         filename=file_record.filename,
         media_type=mime or "application/octet-stream",
     )
@@ -3022,9 +3033,15 @@ def api_v2_file_preview(
             message="File not found.",
         )
 
+    physical_path = getattr(file_record, "physical_path", None)
+    if not physical_path or not os.path.exists(physical_path):
+        from app.domains.processing.service import resolve_physical_file_path
+        from app.services.file_service import UPLOAD_DIR
+        physical_path = resolve_physical_file_path(file_record.path, UPLOAD_DIR)
+
     try:
         preview_path = image_preview_service.get_or_build_preview(
-            file_record.path, file_id=file_id, fmt=fmt  # type: ignore[arg-type]
+            physical_path, file_id=file_id, fmt=fmt  # type: ignore[arg-type]
         )
     except FileNotFoundError:
         return _error_response(
@@ -3072,10 +3089,16 @@ def api_v2_file_metadata(
             message="File not found.",
         )
 
+    physical_path = getattr(file_record, "physical_path", None)
+    if not physical_path or not os.path.exists(physical_path):
+        from app.domains.processing.service import resolve_physical_file_path
+        from app.services.file_service import UPLOAD_DIR
+        physical_path = resolve_physical_file_path(file_record.path, UPLOAD_DIR)
+
     from app.domains.files import image_metadata_service
     try:
         data = image_metadata_service.extract_metadata(
-            file_record.path, filename=file_record.filename
+            physical_path, filename=file_record.filename
         )
     except FileNotFoundError:
         return _error_response(
@@ -5235,13 +5258,38 @@ def _resolve_art_directory(file_path: str, db: Session = None, file_record: mode
     chapter_dir = os.path.dirname(parent_dir)
     project_dir = os.path.dirname(chapter_dir)
 
-    # Extract chapter number from manuscript filename or chapter folder
+    # Extract chapter number from manuscript filename, chapter folder, or DB record
     fname = os.path.basename(file_path)
     num_match = re.search(r'(?:Ch|Chapter)[\s_\-]*0*(\d+)', fname, re.IGNORECASE)
     if not num_match:
         num_match = re.search(r'(?:Ch|Chapter)[\s_\-]*0*(\d+)', os.path.basename(chapter_dir), re.IGNORECASE)
+    if not num_match and re.search(r'^\d+$', os.path.basename(chapter_dir)):
+        num_match = re.search(r'0*(\d+)', os.path.basename(chapter_dir))
+    if not num_match and db and file_record and file_record.chapter_id:
+        ch_rec = db.query(models.Chapter).filter(models.Chapter.id == file_record.chapter_id).first()
+        if ch_rec and ch_rec.chapters:
+            m = re.search(r'0*(\d+)', ch_rec.chapters)
+            if m:
+                ch_num = int(m.group(1))
+            else:
+                ch_num = None
+        else:
+            ch_num = None
+    else:
+        ch_num = int(num_match.group(1)) if num_match else None
 
-    ch_num = int(num_match.group(1)) if num_match else None
+    # 0. Check DB File records for category 'Art' specifically for this chapter_id
+    if db and file_record and file_record.chapter_id:
+        ch_art_files = db.query(models.File).filter(
+            models.File.project_id == file_record.project_id,
+            models.File.chapter_id == file_record.chapter_id,
+            models.File.category.ilike('%art%')
+        ).all()
+        for af in ch_art_files:
+            if af.path and os.path.exists(af.path) and 'indesign' not in af.path.lower():
+                af_dir = os.path.dirname(af.path)
+                if any(f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.pdf')) and not f.lower().endswith('.converted.png') for f in os.listdir(af_dir)):
+                    return af_dir
 
     # 1. Project-level explicit chapter art folder candidates (e.g. Ch 03 - Art/Art, Ch 03/Art)
     if ch_num is not None and os.path.exists(project_dir):
@@ -5254,6 +5302,8 @@ def _resolve_art_directory(file_path: str, db: Session = None, file_record: mode
             os.path.join(project_dir, f"Ch{ch_num}", "Art"),
             os.path.join(project_dir, f"Chapter {ch_num:02d}", "Art"),
             os.path.join(project_dir, f"Chapter {ch_num}", "Art"),
+            os.path.join(project_dir, f"{ch_num:02d}", "Art"),
+            os.path.join(project_dir, f"{ch_num}", "Art"),
         ]
         for c in ch_art_candidates:
             if os.path.exists(c) and os.path.isdir(c):
@@ -5274,27 +5324,27 @@ def _resolve_art_directory(file_path: str, db: Session = None, file_record: mode
             if any(f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.pdf')) and not f.lower().endswith('.converted.png') for f in os.listdir(c) if not f.startswith('.')):
                 return c
 
-    # 3. Check DB File records for category 'Art' if db and file_record provided
-    if db and file_record:
+    # 3. Check DB File records for category 'Art' matching this chapter number with boundary checks
+    if db and file_record and ch_num is not None:
         art_files_db = db.query(models.File).filter(
             models.File.project_id == file_record.project_id,
             models.File.category.ilike('%art%')
         ).all()
 
+        ch_regex = re.compile(rf'(?:\b(?:ch|chapter)[\s_\-]*0*{ch_num}(?!\d)|/(?:0*{ch_num})(?!\d)/)', re.IGNORECASE)
         for af in art_files_db:
             if af.path and os.path.exists(af.path) and 'indesign' not in af.path.lower():
                 af_dir = os.path.dirname(af.path)
-                if ch_num:
-                    af_dir_lower = af_dir.lower()
-                    ch_patterns = [f'ch {ch_num}', f'ch0{ch_num}', f'ch{ch_num}', f'chapter {ch_num}', f'chapter 0{ch_num}']
-                    if any(p in af_dir_lower for p in ch_patterns):
+                rel_to_proj = os.path.relpath(af_dir, project_dir).replace('\\', '/')
+                test_str = f"/{rel_to_proj}/"
+                if ch_regex.search(test_str):
+                    if any(f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.pdf')) and not f.lower().endswith('.converted.png') for f in os.listdir(af_dir)):
                         return af_dir
-                else:
-                    return af_dir
 
-    # 4. Ranked filesystem search in project directory (excluding InDesign)
+    # 4. Ranked filesystem search in project directory (strictly requiring chapter number boundary match)
     if os.path.exists(project_dir):
         ranked_dirs = []
+        ch_regex = re.compile(rf'(?:\b(?:ch|chapter)[\s_\-]*0*{ch_num}(?!\d)|/(?:0*{ch_num})(?!\d)/)', re.IGNORECASE) if ch_num is not None else None
         for root, dirs, files in os.walk(project_dir):
             if 'indesign' in root.lower():
                 continue
@@ -5303,11 +5353,11 @@ def _resolve_art_directory(file_path: str, db: Session = None, file_record: mode
                 continue
 
             score = 0
-            rel_lower = os.path.relpath(root, project_dir).lower()
+            rel_lower = os.path.relpath(root, project_dir).lower().replace('\\', '/')
+            test_str = f"/{rel_lower}/"
 
-            if ch_num is not None:
-                ch_patterns = [f'ch {ch_num}', f'ch{ch_num}', f'ch 0{ch_num}', f'ch0{ch_num}', f'chapter {ch_num}', f'chapter 0{ch_num}', f'/{ch_num}/', f'/{ch_num:02d}/']
-                if any(p in f'/{rel_lower}/' for p in ch_patterns):
+            if ch_regex is not None:
+                if ch_regex.search(test_str):
                     score += 10
                 else:
                     # Do not assign art folders of other chapters
@@ -5322,7 +5372,9 @@ def _resolve_art_directory(file_path: str, db: Session = None, file_record: mode
             ranked_dirs.sort(key=lambda x: (x[0], x[1]), reverse=True)
             return ranked_dirs[0][2]
 
-    return parent_dir
+    # Default to standard chapter Art directory
+    default_art = os.path.join(chapter_dir, "Art")
+    return default_art
 
 
 def _save_art_validation_html_report(db: Session, file_record: models.File, docx_path: str, html_report: str):
@@ -8891,31 +8943,9 @@ class TransitionEmailRequest(BaseModel):
 def _get_stage_notification_config(client_name: str, stage_name: str) -> Optional[dict]:
     import json
     import os
-
-    # 1. Try PostgreSQL database first for client-specific configuration
-    if client_name:
-        try:
-            from app.database import SessionLocal
-            from app.domains.workflow.models import StageTransitionConfig
-            with SessionLocal() as db_session:
-                db_cfg = db_session.query(StageTransitionConfig).filter(
-                    StageTransitionConfig.client_code == client_name.strip()
-                ).first()
-                if db_cfg and db_cfg.stages_config:
-                    data = db_cfg.stages_config
-                    if stage_name in data:
-                        stage_cfg = data.get(stage_name)
-                        if stage_cfg and stage_cfg.get("enabled", True) is False:
-                            return None
-                        return stage_cfg
-                    else:
-                        # Client has custom DB config and this stage was deleted/removed from it
-                        return None
-        except Exception as e:
-            print(f"Error checking DB stage notification config for client {client_name}: {e}")
-
-    # 2. Try client config file on disk (seed / legacy fallback)
     config_dir = os.path.join(os.path.dirname(__file__), "..", "config", "stage_transition")
+    
+    # 1. Try client config file
     if client_name:
         client_file = f"{client_name.strip()}.json"
         client_config_path = os.path.join(config_dir, client_file)
@@ -8934,24 +8964,8 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
                     return None
             except Exception as e:
                 print(f"Error loading stage notification config for client {client_name}: {e}")
-
-    # 3. Try PostgreSQL database for global default template
-    try:
-        from app.database import SessionLocal
-        from app.domains.workflow.models import StageTransitionConfig
-        with SessionLocal() as db_session:
-            db_default = db_session.query(StageTransitionConfig).filter(
-                StageTransitionConfig.client_code == "default"
-            ).first()
-            if db_default and db_default.stages_config:
-                stage_cfg = db_default.stages_config.get(stage_name)
-                if stage_cfg and stage_cfg.get("enabled", True) is False:
-                    return None
-                return stage_cfg
-    except Exception as e:
-        print(f"Error checking DB default stage notification config: {e}")
-
-    # 4. Try default config file on disk (fallback)
+                
+    # 2. Try default config file
     default_config_path = os.path.join(config_dir, "default.json")
     if os.path.exists(default_config_path):
         try:
@@ -8963,7 +8977,7 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
             return stage_cfg
         except Exception as e:
             print(f"Error loading default stage notification config: {e}")
-
+            
     return None
 
 def _resolve_placeholders(text: str, chapter, project, client, current_stage: str, next_stage: str) -> str:

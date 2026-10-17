@@ -49,10 +49,11 @@ class InddToProofEngine:
             raise ValueError(f"Chapter with ID {file_record.chapter_id} not found.")
 
         # Resolve physical INDD path
+        from app.domains.processing.service import resolve_physical_file_path
+        from app.services.file_service import UPLOAD_DIR
+        target_upload_dir = upload_dir or UPLOAD_DIR
+
         if not os.path.isabs(file_path) or not os.path.exists(file_path):
-            from app.domains.processing.service import resolve_physical_file_path
-            from app.services.file_service import UPLOAD_DIR
-            target_upload_dir = upload_dir or UPLOAD_DIR
             file_path = resolve_physical_file_path(file_path, str(target_upload_dir))
             if not os.path.exists(file_path) and file_record and file_record.path:
                 file_path = resolve_physical_file_path(file_record.path, str(target_upload_dir))
@@ -196,8 +197,7 @@ class InddToProofEngine:
                 pname = os.path.basename(spath)
                 pext = os.path.splitext(pname)[1].lower()
                 category = "Proof"
-
-                db_rel_path = os.path.relpath(spath, upload_dir).replace("\\", "/")
+                db_full_path = os.path.abspath(spath).replace("\\", "/")
                 mime, _ = mimetypes.guess_type(spath)
                 if not mime:
                     if pext == ".pdf":
@@ -218,7 +218,7 @@ class InddToProofEngine:
 
                 if existing_file:
                     try:
-                        full_existing_disk_path = os.path.join(upload_dir, existing_file.path.replace("/", os.sep)) if existing_file.path else None
+                        full_existing_disk_path = existing_file.path if (existing_file.path and os.path.isabs(existing_file.path)) else (os.path.join(upload_dir, existing_file.path.replace("/", os.sep)) if existing_file.path else None)
                         archive_existing_file(
                             db,
                             existing_file=existing_file,
@@ -226,7 +226,7 @@ class InddToProofEngine:
                             uploaded_by_id=user_id,
                             source_path=full_existing_disk_path if full_existing_disk_path and os.path.exists(full_existing_disk_path) else (spath if os.path.exists(spath) else None),
                         )
-                        existing_file.path = db_rel_path
+                        existing_file.path = db_full_path
                         existing_file.version = (existing_file.version or 1) + 1
                         existing_file.uploaded_by_id = user_id
                         existing_file.uploaded_at = now_ist_naive()
@@ -241,7 +241,7 @@ class InddToProofEngine:
                         filename=pname,
                         file_type=mime,
                         category=category,
-                        path=db_rel_path,
+                        path=db_full_path,
                         version=1,
                         uploaded_by_id=user_id,
                         uploaded_at=now_ist_naive(),

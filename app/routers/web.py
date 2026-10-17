@@ -1096,8 +1096,13 @@ async def download_file(
         raise HTTPException(status_code=404, detail="File not found")
         
     mime, _ = mimetypes.guess_type(file_record.filename)
+    physical_path = getattr(file_record, "physical_path", None)
+    if not physical_path or not os.path.exists(physical_path):
+        from app.domains.processing.service import resolve_physical_file_path
+        physical_path = resolve_physical_file_path(file_record.path, file_service.UPLOAD_DIR)
+
     return FileResponse(
-        path=file_record.path, 
+        path=physical_path, 
         filename=file_record.filename, 
         media_type=mime or 'application/octet-stream'
     )
