@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 import os
 import shutil
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.database import get_db, SessionLocal
 from app.domains.books_on_demand.models import BodJob
@@ -203,6 +203,14 @@ def get_customer_report(
     
     report = []
     for job in jobs:
+        customer_due = None
+        if job.due_date:
+            customer_due = job.due_date + timedelta(days=1)
+        elif job.created_at:
+            is_image = bool(job.pdf_type and "image" in str(job.pdf_type).lower())
+            days = 7 if is_image else 4
+            customer_due = job.created_at + timedelta(days=days)
+
         report.append({
             "id": job.id,
             "client_name": "BOD",
@@ -216,7 +224,9 @@ def get_customer_report(
             "stage_history": job.stage_history,
             "created_at": job.created_at,
             "updated_at": job.updated_at,
-            "due_date": job.due_date
+            "due_date": customer_due,
+            "internal_due_date": job.due_date,
+            "customer_due_date": customer_due
         })
     return {"jobs": report}
 
@@ -352,10 +362,12 @@ def update_job_analysis(
         job.pdf_page_count = payload.pdf_page_count
 
     # 2. PDF Type
+    type_changed = False
     if payload.pdf_type is not None:
         new_type = payload.pdf_type.strip() if payload.pdf_type else ""
         old_type = (job.pdf_type or "").strip()
         if new_type != old_type:
+            type_changed = True
             changes.append({
                 "field": "PDF Type",
                 "old": old_type if old_type else None,
@@ -376,15 +388,29 @@ def update_job_analysis(
             job.pdf_language = new_lang or None
 
     # 4. Due Date
-    if payload.due_date is not None:
+    if payload.due_date is not None and payload.due_date.strip():
         new_due_date = None
-        if payload.due_date.strip():
-            try:
-                new_due_date = datetime.fromisoformat(payload.due_date.replace('Z', '+00:00'))
-                new_due_date = new_due_date.replace(tzinfo=None)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid date format")
+        try:
+            new_due_date = datetime.fromisoformat(payload.due_date.replace('Z', '+00:00'))
+            new_due_date = new_due_date.replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format")
 
+        old_ymd = job.due_date.strftime("%Y-%m-%d") if job.due_date else None
+        new_ymd = new_due_date.strftime("%Y-%m-%d") if new_due_date else None
+
+        if old_ymd != new_ymd:
+            old_str = job.due_date.strftime("%d %b %Y") if job.due_date else None
+            new_str = new_due_date.strftime("%d %b %Y") if new_due_date else None
+            changes.append({
+                "field": "Due Date",
+                "old": old_str,
+                "new": new_str
+            })
+            job.due_date = new_due_date
+    elif type_changed:
+        calc_due = calculate_bod_due_date(job.pdf_type, job.pdf_page_count, job.created_at)
+        new_due_date = calc_due.replace(tzinfo=None)
         old_ymd = job.due_date.strftime("%Y-%m-%d") if job.due_date else None
         new_ymd = new_due_date.strftime("%Y-%m-%d") if new_due_date else None
 

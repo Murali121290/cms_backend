@@ -160,11 +160,9 @@ export function BodInternalJobPage() {
   const [analysisDueDate, setAnalysisDueDate] = useState<string>('')
   const [analysisReason, setAnalysisReason] = useState<string>('')
 
-  const calculateDefaultDueDate = (type: string, pages: number | string, baseDate?: string | Date) => {
+  const calculateDefaultDueDate = (type: string, baseDate?: string | Date) => {
     const isImage = (type || '').toLowerCase().includes('image')
-    const p = typeof pages === 'number' ? pages : parseInt(String(pages), 10)
-    const pageNum = isNaN(p) ? 0 : p
-    const days = isImage ? (pageNum > 250 ? 7 : 5) : (pageNum > 250 ? 4 : 3)
+    const days = isImage ? 6 : 3
 
     const base = baseDate ? new Date(baseDate) : new Date()
     const result = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
@@ -576,12 +574,16 @@ export function BodInternalJobPage() {
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted">PDF Type</label>
                 <select
                   value={analysisType}
-                  onChange={(e) => setAnalysisType(e.target.value)}
+                  onChange={(e) => {
+                    const newType = e.target.value
+                    setAnalysisType(newType)
+                    const autoDate = calculateDefaultDueDate(newType, job?.created_at)
+                    setAnalysisDueDate(autoDate)
+                  }}
                   className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-primary transition-colors"
                 >
                   <option value="Text PDF">Text PDF</option>
                   <option value="Image PDF">Image PDF</option>
-                  <option value="Scanned PDF">Scanned PDF</option>
                 </select>
               </div>
 
@@ -615,13 +617,13 @@ export function BodInternalJobPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const autoDate = calculateDefaultDueDate(analysisType, analysisPages, job.created_at)
+                      const autoDate = calculateDefaultDueDate(analysisType, job?.created_at)
                       setAnalysisDueDate(autoDate)
                     }}
                     className="text-[10px] text-primary hover:underline font-semibold"
-                    title="Calculate based on: Text (<=250: 3d, >250: 4d) | Image (<=250: 5d, >250: 7d)"
+                    title="Calculate based on: Text (3 days) | Image (6 days)"
                   >
-                    Auto-calc
+                    Auto-calc ({analysisType.toLowerCase().includes('image') ? '6d' : '3d'})
                   </button>
                 </div>
                 <input

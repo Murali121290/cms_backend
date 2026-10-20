@@ -132,11 +132,43 @@ export function BodCustomerReportPage() {
     return fmtUtcDateTime(dateStr)
   }
 
+  const getCompletedDate = (job: any): string | null => {
+    const history = job.stage_history || {}
+    if (history['Archive']?.end_time) return history['Archive'].end_time
+    if (history['Archive']?.start_time) return history['Archive'].start_time
+    if (history['Ready to Dispatch']?.end_time) return history['Ready to Dispatch'].end_time
+    if (job.status === 'Completed' && job.updated_at) return job.updated_at
+    return null
+  }
+
+  const getCompletionTiming = (completedAtStr: string | null, dueDateStr: string | null): 'Ahead' | 'On-time' | 'Delay' => {
+    if (!dueDateStr || !completedAtStr) return 'On-time'
+
+    const compDate = new Date(completedAtStr.endsWith('Z') || completedAtStr.includes('+') ? completedAtStr : `${completedAtStr}Z`)
+    const dueDate = new Date(dueDateStr.endsWith('Z') || dueDateStr.includes('+') ? dueDateStr : `${dueDateStr}Z`)
+
+    if (isNaN(compDate.getTime()) || isNaN(dueDate.getTime())) return 'On-time'
+
+    const compDay = compDate.toISOString().slice(0, 10)
+    const dueDay = dueDate.toISOString().slice(0, 10)
+
+    if (compDay < dueDay) {
+      return 'Ahead'
+    } else if (compDay === dueDay) {
+      return 'On-time'
+    } else {
+      return 'Delay'
+    }
+  }
+
   const getJobStatuses = (job: any) => {
     const history = job.stage_history || {}
     let finalStatus = 'YTS'
+    let completionTiming: 'Ahead' | 'On-time' | 'Delay' | null = null
+
     if (job.status === 'Completed' || job.current_stage === 'Archive') {
-      finalStatus = 'Completed'
+      completionTiming = getCompletionTiming(getCompletedDate(job), job.due_date)
+      finalStatus = completionTiming
     } else {
       if (job.current_stage === 'Production' || job.current_stage === 'QC') finalStatus = 'In-progress'
       if (job.due_date && new Date(job.due_date) < new Date()) {
@@ -152,7 +184,7 @@ export function BodCustomerReportPage() {
     let qcStatus = 'YTS'
     if (qcData.start_time) qcStatus = qcData.end_time ? 'Completed' : 'In-progress'
 
-    return { finalStatus, prodStatus, qcStatus, prodData, qcData }
+    return { finalStatus, prodStatus, qcStatus, prodData, qcData, completionTiming }
   }
 
   const filteredReport = report.filter(job => {
@@ -163,7 +195,9 @@ export function BodCustomerReportPage() {
 
     const prodMatch = prodStatusFilter === 'all' || prodStatus === prodStatusFilter
     const qcMatch = qcStatusFilter === 'all' || qcStatus === qcStatusFilter
-    const finalMatch = finalStatusFilter === 'all' || finalStatus === finalStatusFilter
+    const finalMatch = finalStatusFilter === 'all' ||
+      finalStatus === finalStatusFilter ||
+      (finalStatusFilter === 'Completed' && ['Ahead', 'On-time', 'Delay', 'Completed'].includes(finalStatus))
 
     return textMatch && prodMatch && qcMatch && finalMatch
   })
@@ -175,6 +209,9 @@ export function BodCustomerReportPage() {
   let qcCompleted = 0
   let qcInProgress = 0
   let overallCompleted = 0
+  let overallAhead = 0
+  let overallOnTime = 0
+  let overallDelay = 0
   let overallInProgress = 0
   let overallOverdue = 0
   let overallYts = 0
@@ -182,8 +219,18 @@ export function BodCustomerReportPage() {
   filteredReport.forEach(job => {
     const { finalStatus, prodStatus, qcStatus } = getJobStatuses(job)
 
-    if (finalStatus === 'Completed') overallCompleted++
-    else if (finalStatus === 'In-progress') overallInProgress++
+    if (finalStatus === 'Ahead') {
+      overallAhead++
+      overallCompleted++
+    } else if (finalStatus === 'On-time') {
+      overallOnTime++
+      overallCompleted++
+    } else if (finalStatus === 'Delay') {
+      overallDelay++
+      overallCompleted++
+    } else if (finalStatus === 'Completed') {
+      overallCompleted++
+    } else if (finalStatus === 'In-progress') overallInProgress++
     else if (finalStatus === 'Overdue') overallOverdue++
     else if (finalStatus === 'YTS') overallYts++
 
@@ -211,7 +258,7 @@ export function BodCustomerReportPage() {
   filteredReport.forEach(job => {
     const createdDate = getDateKey(job.created_at)
     const dueDate = getDateKey(job.due_date)
-    const completedDate = job.status === 'Completed' ? getDateKey(job.updated_at) : null
+    const completedDate = (job.status === 'Completed' || job.current_stage === 'Archive') ? getDateKey(getCompletedDate(job)) : null
 
     if (createdDate) {
       if (!chartDataMap.has(createdDate)) chartDataMap.set(createdDate, { date: createdDate, inflow: 0, due: 0, completed: 0, delay: 0 })
@@ -223,10 +270,11 @@ export function BodCustomerReportPage() {
       chartDataMap.get(dueDate)!.due += 1
 
       let delayed = false
-      if (job.status !== 'Completed') {
+      if (job.status !== 'Completed' && job.current_stage !== 'Archive') {
         if (new Date(job.due_date) < new Date()) delayed = true
       } else {
-        if (job.updated_at && new Date(job.updated_at) > new Date(job.due_date)) delayed = true
+        const comp = getCompletedDate(job)
+        if (comp && getDateKey(comp)! > getDateKey(job.due_date)!) delayed = true
       }
       if (delayed) {
         chartDataMap.get(dueDate)!.delay += 1
@@ -330,7 +378,11 @@ export function BodCustomerReportPage() {
 
     // 11. Final Status
     if (colFilters.finalStatus !== 'all') {
-      if (finalStatus !== colFilters.finalStatus) return false
+      if (colFilters.finalStatus === 'Completed') {
+        if (!['Ahead', 'On-time', 'Delay', 'Completed'].includes(finalStatus)) return false
+      } else if (finalStatus !== colFilters.finalStatus) {
+        return false
+      }
     }
 
     return true
@@ -622,24 +674,33 @@ export function BodCustomerReportPage() {
           <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
             <div className="flex justify-between items-start">
               <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><RefreshCw size={14} className="text-primary" /> Overall Final</span>
-              <span className="text-xl font-bold text-text leading-none">{completionPercentage}%</span>
+              <span className="text-xs font-bold text-muted-foreground"><strong className="text-emerald-500">{overallCompleted}</strong> Done ({completionPercentage}%)</span>
             </div>
-            <div className="flex gap-4">
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-muted-foreground leading-tight">{overallYts}</span>
-                <span className="text-[10px] text-muted uppercase">YTS</span>
+            <div className="flex items-center gap-2.5 overflow-x-auto pb-0.5">
+              <div className="flex flex-col min-w-[28px]">
+                <span className="text-base font-bold text-muted-foreground leading-tight">{overallYts}</span>
+                <span className="text-[9px] text-muted uppercase">YTS</span>
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-amber-500 leading-tight">{overallInProgress}</span>
-                <span className="text-[10px] text-muted uppercase">In-Progress</span>
+              <div className="flex flex-col min-w-[36px]">
+                <span className="text-base font-bold text-amber-500 leading-tight">{overallInProgress}</span>
+                <span className="text-[9px] text-muted uppercase">In-Prog</span>
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-red-500 leading-tight">{overallOverdue}</span>
-                <span className="text-[10px] text-muted uppercase">Overdue</span>
+              <div className="flex flex-col min-w-[36px]">
+                <span className="text-base font-bold text-red-500 leading-tight">{overallOverdue}</span>
+                <span className="text-[9px] text-muted uppercase">Overdue</span>
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-emerald-500 leading-tight">{overallCompleted}</span>
-                <span className="text-[10px] text-muted uppercase">Completed</span>
+              <div className="h-6 w-[1px] bg-border/60 mx-0.5 shrink-0" />
+              <div className="flex flex-col min-w-[34px]">
+                <span className="text-base font-bold text-emerald-500 leading-tight">{overallAhead}</span>
+                <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold uppercase">Ahead</span>
+              </div>
+              <div className="flex flex-col min-w-[38px]">
+                <span className="text-base font-bold text-blue-500 leading-tight">{overallOnTime}</span>
+                <span className="text-[9px] text-blue-600 dark:text-blue-400 font-bold uppercase">On-time</span>
+              </div>
+              <div className="flex flex-col min-w-[30px]">
+                <span className="text-base font-bold text-rose-500 leading-tight">{overallDelay}</span>
+                <span className="text-[9px] text-rose-600 dark:text-rose-400 font-bold uppercase">Delay</span>
               </div>
             </div>
           </div>
@@ -1004,7 +1065,10 @@ export function BodCustomerReportPage() {
                       className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
                     >
                       <option value="all">All</option>
-                      <option value="Completed">Completed</option>
+                      <option value="Completed">Completed (All)</option>
+                      <option value="Ahead">Ahead</option>
+                      <option value="On-time">On-time</option>
+                      <option value="Delay">Delay</option>
                       <option value="In-progress">In-progress</option>
                       <option value="Overdue">Overdue</option>
                       <option value="YTS">YTS</option>
@@ -1033,6 +1097,9 @@ export function BodCustomerReportPage() {
                     const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
 
                     const getStatusColor = (s: string) => {
+                      if (s === 'Ahead') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                      if (s === 'On-time') return 'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                      if (s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30'
                       if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
                       if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
                       if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
@@ -1125,6 +1192,9 @@ export function BodCustomerReportPage() {
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
+                            {finalStatus === 'Ahead' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
+                            {finalStatus === 'On-time' && <CheckCircle2 size={10} className="mr-1 text-blue-500" />}
+                            {finalStatus === 'Delay' && <AlertCircle size={10} className="mr-1 text-rose-500" />}
                             {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1" />}
                             {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
                             {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
