@@ -13,7 +13,7 @@ bcrypt
 jinja2
 openpyxl
 pandas
-PyYAML
+PyYAML>=6.0.1
 fastapi
 uvicorn
 gunicorn

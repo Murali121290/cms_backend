@@ -4,7 +4,7 @@ Unit tests for Ninja Inkflow Language Editing module.
 import pytest
 import os
 from docx import Document
-from app.processing.language_editing import segmenter, engine, rules, docx_io
+from app.processing.language_editing import segmenter, engine, rules, docx_io, custom_dict, spell_check
 
 
 def test_segmenter_abbreviations_and_decimals():
@@ -137,7 +137,155 @@ def test_ninja_inkflow_spec_rules():
     assert "because" in suggs
 
 
+# ---------------------------------------------------------------------------
+# Custom dictionary (medical / pharmaceutical) integration
+# ---------------------------------------------------------------------------
 
 
+def _write_utf16_dic(path, lines):
+    """Write a .dic file in UTF-16 LE with BOM — matches the shape of client
+    deliverables (MedSpl800 was shipped this way)."""
+    with open(path, "w", encoding="utf-16", newline="\r\n") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def test_custom_dict_loader_parses_utf16_bom_and_slash(tmp_path):
+    dic = tmp_path / "sample.dic"
+    _write_utf16_dic(dic, [
+        "cholecalciferol",
+        "5-hydroxytryptamine",
+        "anterior/posterior",
+        "Aëtius",
+    ])
+    words = custom_dict.load_dic_file(dic)
+    # Plain long term, both sides of a slash entry, and the alpha portion of
+    # a hyphenated chemistry term are all extracted.
+    assert "cholecalciferol" in words
+    assert "hydroxytryptamine" in words
+    assert "anterior" in words and "posterior" in words
+    # Diacritic entries are split on non-ASCII letters because the Spell
+    # Check tokenizer only recognises [A-Za-z]+ runs — so `Aëtius` in a
+    # document also tokenizes to `A`/`tius`. Storing the ASCII fragment
+    # (`tius`) is what actually shields the document occurrence.
+    assert "tius" in words
+
+
+def test_custom_dict_loader_skips_metadata_header_blanks_and_comments(tmp_path):
+    dic = tmp_path / "with_header.dic"
+    _write_utf16_dic(dic, [
+        "800",            # Hunspell-style count header — must not become a term
+        "# this is a comment",
+        "",
+        "// another comment",
+        "   ",
+        "aspirin",
+        "ibuprofen",
+    ])
+    words = custom_dict.load_dic_file(dic)
+    assert words == {"aspirin", "ibuprofen"}
+    # Specifically prove the metadata/comment lines didn't leak in.
+    assert "800" not in words
+    assert "comment" not in words
+
+
+def test_custom_dict_loader_accepts_utf8_without_bom(tmp_path):
+    dic = tmp_path / "plain.dic"
+    dic.write_text("warfarin\nmetformin\n", encoding="utf-8")
+    words = custom_dict.load_dic_file(dic)
+    assert words == {"warfarin", "metformin"}
+
+
+def test_load_all_custom_dicts_honors_env_var(tmp_path, monkeypatch):
+    dic = tmp_path / "client_x.dic"
+    _write_utf16_dic(dic, ["xyzzyomycin", "foobaritide"])
+    monkeypatch.setenv(custom_dict.ENV_VAR, str(dic))
+    custom_dict.load_all_custom_dicts.cache_clear()
+    try:
+        words = custom_dict.load_all_custom_dicts()
+    finally:
+        custom_dict.load_all_custom_dicts.cache_clear()
+    assert "xyzzyomycin" in words
+    assert "foobaritide" in words
+
+
+def test_spell_check_whitelists_medical_dic_term():
+    """Long, lowercase medical term from a loaded dic MUST NOT be flagged."""
+    sc = spell_check.get_spell_checker(custom_words={"cholecalciferol"})
+    if sc is None:
+        pytest.skip("pyspellchecker not installed")
+    whitelist = spell_check.build_whitelist(extras={"cholecalciferol"})
+    text = "The patient was given cholecalciferol daily."
+    findings = spell_check.spell_check_paragraph(text, sc, whitelist=whitelist)
+    assert not any(f.original.lower() == "cholecalciferol" for f in findings), (
+        f"medical term was flagged: {[f.original for f in findings]}"
+    )
+
+
+def test_spell_check_whitelists_morphological_variant_of_dic_term():
+    """Plural / -s form of a dic term should also pass via morph variants."""
+    sc = spell_check.get_spell_checker(custom_words={"cholecalciferol"})
+    if sc is None:
+        pytest.skip("pyspellchecker not installed")
+    whitelist = spell_check.build_whitelist(extras={"cholecalciferol"})
+    text = "Various cholecalciferols were measured."
+    findings = spell_check.spell_check_paragraph(text, sc, whitelist=whitelist)
+    assert not any(f.original.lower().startswith("cholecalciferol") for f in findings)
+
+
+def test_spell_check_still_detects_genuine_typo_when_dict_loaded():
+    """Loading the medical dict must not disable genuine typo detection."""
+    sc = spell_check.get_spell_checker(custom_words={"cholecalciferol", "ibuprofen"})
+    if sc is None:
+        pytest.skip("pyspellchecker not installed")
+    whitelist = spell_check.build_whitelist(extras={"cholecalciferol", "ibuprofen"})
+    text = "Please recieve the shipment and administer ibuprofen."
+    findings = spell_check.spell_check_paragraph(text, sc, whitelist=whitelist)
+    typos = [f.original for f in findings]
+    assert "recieve" in typos
+    # And the whitelisted drug name is untouched.
+    assert "ibuprofen" not in typos
+
+
+def test_spell_check_bundled_medspl800_integration():
+    """End-to-end: the bundled MedSpl800 dic shields a sampled term, and a
+    genuine misspelling in the same paragraph is still flagged."""
+    custom_dict.load_all_custom_dicts.cache_clear()
+    try:
+        dic_words = custom_dict.load_all_custom_dicts()
+    finally:
+        custom_dict.load_all_custom_dicts.cache_clear()
+    if not dic_words:
+        pytest.skip("no bundled custom dicts available in this environment")
+    # Sanity: the bundle actually loaded many terms, not just a stub.
+    assert len(dic_words) > 1000
+    # Pick a term we know is in the shipped MedSpl800 list.
+    assert "cholecalciferol" in dic_words, (
+        "medspl800.dic should contribute 'cholecalciferol'"
+    )
+
+    sc = spell_check.get_spell_checker(custom_words=dic_words)
+    if sc is None:
+        pytest.skip("pyspellchecker not installed")
+    whitelist = spell_check.build_whitelist(extras=dic_words)
+    text = "The dose of cholecalciferol was adjusted but we recieve more data."
+    findings = spell_check.spell_check_paragraph(text, sc, whitelist=whitelist)
+    flagged = [f.original for f in findings]
+    assert "cholecalciferol" not in flagged
+    assert "recieve" in flagged
+
+
+def test_spell_check_preserves_case_of_document():
+    """The dic is lowercased internally but documents keep their own case."""
+    sc = spell_check.get_spell_checker(custom_words={"cholecalciferol"})
+    if sc is None:
+        pytest.skip("pyspellchecker not installed")
+    whitelist = spell_check.build_whitelist(extras={"cholecalciferol"})
+    # Mid-sentence lowercase occurrence is the one that would otherwise fire;
+    # title-case / all-caps are already skipped by the checker as proper nouns
+    # or acronyms. We only verify no finding is emitted (so no replacement is
+    # suggested that would mutate case).
+    text = "Daily cholecalciferol levels were normal."  # Title-case start irrelevant
+    findings = spell_check.spell_check_paragraph(text, sc, whitelist=whitelist)
+    assert not any(f.original.lower() == "cholecalciferol" for f in findings)
 
 

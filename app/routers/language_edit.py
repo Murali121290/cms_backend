@@ -19,7 +19,7 @@ from app.domains.processing.language_edit_models import LanguageEditJob, Languag
 from app.domains.processing.service import check_permission
 from app.models import User
 
-from app.processing.language_editing import docx_io, engine, segmenter, spell_check
+from app.processing.language_editing import custom_dict, docx_io, engine, segmenter, spell_check
 from app.processing.language_editing.rules import load_rules_from_dict, load_house_style_from_dict
 from app.services.language_rule_service import (
     get_available_style_profiles,
@@ -349,12 +349,23 @@ def start_language_edit_analysis(
         lookup = getattr(cl, "term_lookup", None)
         if isinstance(lookup, dict):
             term_vocab.extend(lookup.keys())
+    # Client-supplied custom dictionaries (medical / pharmaceutical / etc.)
+    # loaded from app/processing/language_editing/config/dictionaries/ plus
+    # anything listed in $CMS_LANGEDIT_CUSTOM_DICTS. Cached per-process.
+    custom_dict_words = custom_dict.load_all_custom_dicts()
     spell_whitelist = spell_check.build_whitelist(
         variant_to_canonical=project_rules_cfg.get("variant_to_canonical", {}),
         uk_us_pairs=UK_US_PAIRS,
         term_vocabulary=term_vocab,
+        extras=custom_dict_words,
     )
-    spell_checker = spell_check.get_spell_checker()  # None if pyspellchecker missing
+    # Also feed custom dict words into pyspellchecker's known-word frequency
+    # table so morphological variants (plurals, -ed forms) of a dic entry
+    # resolve via spell_check._morph_variants without needing every form in
+    # the dic.
+    spell_checker = spell_check.get_spell_checker(
+        custom_words=custom_dict_words,
+    )  # None if pyspellchecker missing
 
     # Read paragraphs from DOCX
     try:
