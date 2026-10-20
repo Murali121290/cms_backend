@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -10,7 +10,7 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import { toast } from '@/store/useToastStore'
 import api from '@/api/client'
 import { getUserDisplayName as formatUserDisplayName } from '@/utils/userUtils'
-import { formatDateTime } from '@/utils/dateUtils'
+import { formatDateTime, formatDate, parseUtcDate } from '@/utils/dateUtils'
 
 export function BodInternalPage() {
   useDocumentTitle('Books on Demand — S4Carlisle CMS')
@@ -21,6 +21,11 @@ export function BodInternalPage() {
   const [jobs, setJobs] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
 
+  // Selection states for bulk dispatch
+  const [selectedJobIds, setSelectedJobIds] = useState<number[]>([])
+  const [isBulkDispatching, setIsBulkDispatching] = useState(false)
+  const [dispatchingJobId, setDispatchingJobId] = useState<number | null>(null)
+
   // Form states
   const [showAddJobModal, setShowAddJobModal] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
@@ -29,10 +34,31 @@ export function BodInternalPage() {
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  type QuickFilter = 'all' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'tomorrow_due' | 'completed'
+  const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
-  const [stageFilter, setStageFilter] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
+
+  // Date Filter states
+  const [dateTarget, setDateTarget] = useState<'created' | 'due'>('created')
+  const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom'>('all')
+  const [customFromDate, setCustomFromDate] = useState('')
+  const [customToDate, setCustomToDate] = useState('')
+
+  // Table heading filters & sorting
+  const [colFilters, setColFilters] = useState({
+    name: '',
+    pages: '',
+    type: 'all',
+    language: 'all',
+    assignee: 'all',
+    status: 'all',
+    stage: 'all',
+    created: '',
+    dueDate: '',
+  })
+  const [sortField, setSortField] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
   // Delete Modal states
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null)
@@ -42,6 +68,7 @@ export function BodInternalPage() {
   const [newDueDate, setNewDueDate] = useState('')
   const [dueDateReason, setDueDateReason] = useState('')
   const [savingDueDate, setSavingDueDate] = useState(false)
+
 
   const fetchJobs = async () => {
     try {
@@ -123,6 +150,16 @@ export function BodInternalPage() {
     }
   }
 
+  const handleAdvanceJob = async (jobId: number) => {
+    try {
+      await api.post(`/bod/jobs/${jobId}/advance`)
+      toast.success("Job moved to Production stage")
+      fetchJobs()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to proceed to Production")
+    }
+  }
+
   const deleteJob = async (jobId: number) => {
     try {
       await api.delete(`/bod/jobs/${jobId}`)
@@ -158,43 +195,248 @@ export function BodInternalPage() {
   }
 
   // Calculate metrics
-  const totalJobs = jobs.length
-  const completedJobs = jobs.filter(j => j.status === 'Completed').length
-  const activeJobs = jobs.filter(j => j.status === 'Active')
+  const isJobCompleted = (job: any) => job.status === 'Completed' || job.current_stage_name === 'Archive'
 
-  const unassignedJobs = activeJobs.filter(j => !j.current_assignee).length
-  const addJobStageJobs = activeJobs.filter(j => j.current_stage_name === 'Add job').length
-  const productionStageJobs = activeJobs.filter(j => j.current_stage_name === 'Production').length
-  const qcStageJobs = activeJobs.filter(j => j.current_stage_name === 'QC').length
+  const parseSafeDate = (dateStr: string | null | undefined): Date | null => {
+    if (!dateStr) return null
+    if (/([+-]\d{2}:?\d{2}|Z)$/.test(dateStr)) {
+      return new Date(dateStr)
+    }
+    return new Date(dateStr + 'Z')
+  }
 
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(now)
-  tomorrow.setDate(tomorrow.getDate() + 1)
+  const isOverdue = (dateStr: string | null | undefined) => {
+    const dueDate = parseSafeDate(dateStr)
+    if (!dueDate || isNaN(dueDate.getTime())) return false
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    dueDate.setHours(0, 0, 0, 0)
+    return dueDate < now
+  }
 
+  const isDueTomorrow = (dateStr: string | null | undefined) => {
+    const dueDate = parseSafeDate(dateStr)
+    if (!dueDate || isNaN(dueDate.getTime())) return false
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    dueDate.setHours(0, 0, 0, 0)
+    return dueDate.getTime() === tomorrow.getTime()
+  }
+
+  const isCreatedToday = (dateStr: string | null | undefined) => {
+    const d = parseSafeDate(dateStr)
+    if (!d || isNaN(d.getTime())) return false
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    return d >= now && d < tomorrow
+  }
+
+  const matchesDateFilter = (job: any): boolean => {
+    if (datePreset === 'all' && !customFromDate && !customToDate) return true
+
+    const targetStr = dateTarget === 'created' ? job.created_at : job.due_date
+    if (!targetStr) return false
+
+    const d = parseSafeDate(targetStr)
+    if (!d || isNaN(d.getTime())) return false
+
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+    const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
+
+    if (datePreset === 'today') {
+      return d >= startOfToday && d < startOfTomorrow
+    }
+
+    if (datePreset === 'yesterday') {
+      const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0)
+      return d >= startOfYesterday && d < startOfToday
+    }
+
+    if (datePreset === 'week') {
+      const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0, 0)
+      return d >= startOfWeek && d < startOfTomorrow
+    }
+
+    if (datePreset === 'month') {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 0, 0, 0, 0)
+      return d >= startOfMonth && d < startOfTomorrow
+    }
+
+    if (datePreset === 'custom') {
+      if (customFromDate) {
+        const from = new Date(`${customFromDate}T00:00:00`)
+        if (d < from) return false
+      }
+      if (customToDate) {
+        const to = new Date(`${customToDate}T23:59:59.999`)
+        if (d > to) return false
+      }
+      return true
+    }
+
+    return true
+  }
+
+  const isDateFilterActive = datePreset !== 'all' || Boolean(customFromDate || customToDate)
+  const dateFilteredCount = jobs.filter(matchesDateFilter).length
+
+  const allAssignees = new Set<string>()
+  jobs.forEach(j => {
+    if (j.current_assignee) {
+      allAssignees.add(j.current_assignee)
+    }
+  })
+  const assigneeOptions = Array.from(allAssignees).sort()
+
+  const uniqueLanguages = React.useMemo(() => {
+    const langs = new Set<string>()
+    jobs.forEach(j => {
+      if (j.pdf_language && j.pdf_language.trim()) {
+        langs.add(j.pdf_language.trim())
+      }
+    })
+    return Array.from(langs).sort()
+  }, [jobs])
+
+  const uniqueTypes = React.useMemo(() => {
+    const types = new Set<string>(['Text PDF', 'Image PDF', 'Scanned PDF'])
+    jobs.forEach(j => {
+      if (j.pdf_type && j.pdf_type.trim()) {
+        types.add(j.pdf_type.trim())
+      }
+    })
+    return Array.from(types).sort()
+  }, [jobs])
+
+  const hasColFilters = Boolean(
+    colFilters.name ||
+    colFilters.pages ||
+    (colFilters.type && colFilters.type !== 'all') ||
+    (colFilters.language && colFilters.language !== 'all') ||
+    (colFilters.assignee && colFilters.assignee !== 'all') ||
+    (colFilters.status && colFilters.status !== 'all') ||
+    (colFilters.stage && colFilters.stage !== 'all') ||
+    colFilters.created ||
+    colFilters.dueDate
+  )
+
+  const clearColFilters = () => {
+    setColFilters({
+      name: '',
+      pages: '',
+      type: 'all',
+      language: 'all',
+      assignee: 'all',
+      status: 'all',
+      stage: 'all',
+      created: '',
+      dueDate: '',
+    })
+  }
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc')
+      } else {
+        setSortField(null)
+        setSortDirection('asc')
+      }
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <ArrowUpDown size={11} className="opacity-35 group-hover:opacity-100 transition-opacity" />
+    }
+    return sortDirection === 'asc' ? (
+      <ArrowUp size={11} className="text-primary font-bold" />
+    ) : (
+      <ArrowDown size={11} className="text-primary font-bold" />
+    )
+  }
+
+  const hasBaseFiltersActive = searchQuery.trim() !== '' || assigneeFilter !== 'all' || isDateFilterActive
+
+  // Base jobs filtered by base filters (Search, Assignee, Date)
+  const baseJobs = jobs.filter(j => {
+    const query = searchQuery.trim().toLowerCase()
+    const matchesSearch = !query
+      || j.pdf_filename.toLowerCase().includes(query)
+      || (j.client_name && j.client_name.toLowerCase().includes(query))
+
+    const currentAssignee = j.current_assignee || null
+    const matchesAssignee = assigneeFilter === 'all'
+      || (assigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === assigneeFilter)
+
+    const matchesDate = matchesDateFilter(j)
+
+    return matchesSearch && matchesAssignee && matchesDate
+  })
+
+  // Metric card counts computed dynamically from baseJobs
+  const totalJobs = baseJobs.length
+  const completedJobs = baseJobs.filter(isJobCompleted).length
+  const activeJobs = baseJobs.filter(j => !isJobCompleted(j))
+
+  // Fresh: means Add job stage, split into Today and Previous days
+  const freshAllJobs = activeJobs.filter(j => j.current_stage_name === 'Add job')
+  const freshTotal = freshAllJobs.length
+  const freshTodayJobs = freshAllJobs.filter(j => isCreatedToday(j.created_at)).length
+  const freshPreviousJobs = freshAllJobs.filter(j => !isCreatedToday(j.created_at)).length
+
+  // Production: sub divided into YTS (pending PDF download) and In Progress (PDF downloaded)
+  const prodJobs = activeJobs.filter(j => j.current_stage_name === 'Production')
+  const prodTotal = prodJobs.length
+  const prodInProgressJobs = prodJobs.filter(j => Boolean(j.pdf_downloaded || j.stage_history?.Production?.pdf_downloaded)).length
+  const prodYtsJobs = prodJobs.filter(j => !j.pdf_downloaded && !j.stage_history?.Production?.pdf_downloaded).length
+
+  // QC: sub divided into YTS (unassigned) and In Progress (assigned)
+  const qcJobs = activeJobs.filter(j => j.current_stage_name === 'QC')
+  const qcTotal = qcJobs.length
+  const qcYtsJobs = qcJobs.filter(j => !j.current_assignee).length
+  const qcInProgressJobs = qcJobs.filter(j => Boolean(j.current_assignee)).length
+
+  // Ready to Dispatch: QC finished, awaiting FTP upload
+  const dispatchJobs = activeJobs.filter(j => j.current_stage_name === 'Ready to Dispatch')
+  const dispatchTotal = dispatchJobs.length
+
+  // Overdue: crossed due date; Tomorrow Due: due soon (tomorrow)
   let overdueJobs = 0
   let dueSoonJobs = 0
-
   activeJobs.forEach(job => {
     if (job.due_date) {
-      const dueDate = new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z')
-      dueDate.setHours(0, 0, 0, 0)
-      if (dueDate < now) overdueJobs++
-      else if (dueDate.getTime() === tomorrow.getTime()) dueSoonJobs++
+      if (isOverdue(job.due_date)) overdueJobs++
+      else if (isDueTomorrow(job.due_date)) dueSoonJobs++
     }
   })
 
-  // Progress calculations: assume 4 stages (0,1,2,3). If completed, 100%
-  let totalProgressStages = jobs.length * 3
-  let completedProgressStages = jobs.reduce((acc, job) => {
-    if (job.status === 'Completed') return acc + 3
-    return acc + Math.min(job.current_stage_index, 3)
-  }, 0)
-
-  const completionPercentage = totalProgressStages > 0 ? Math.round((completedProgressStages / totalProgressStages) * 100) : 0
-
-  // Filter options
-  const statusOptions = ['Active', 'In-Progress', 'YTS', 'Due Soon', 'Overdue', 'Completed']
+  // Quick download PDF handler (starts work if in production)
+  const handleDownloadPdf = async (e: React.MouseEvent, job: any) => {
+    e.stopPropagation()
+    try {
+      const response = await api.get(`/bod/jobs/${job.id}/download-pdf`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', job.pdf_filename)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+      toast.success("PDF downloaded. Work in progress.")
+      fetchJobs()
+    } catch (err) {
+      toast.error("Failed to download PDF")
+    }
+  }
 
   const getUserDisplayName = (username: string | null | undefined) => {
     if (!username) return ''
@@ -206,102 +448,261 @@ export function BodInternalPage() {
     return username
   }
 
-  const getStatusBadgeClass = (job: any) => {
-    if (job.status === 'Completed') return 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-
-    const now = new Date()
-    now.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(now)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-
-    if (job.due_date && job.status !== 'Completed') {
-      const dueDate = new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z')
-      dueDate.setHours(0, 0, 0, 0)
-
-      if (dueDate < now) {
-        return 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
-      }
-      if (dueDate.getTime() === tomorrow.getTime()) {
-        return 'bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400'
+  const getJobStatusInfo = (job: any) => {
+    if (isJobCompleted(job)) {
+      return {
+        label: 'Completed',
+        badgeClass: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400',
+        isOverdue: false,
+        isTomorrow: false,
       }
     }
 
-    if (job.created_at && job.status !== 'Completed') {
-      const createdDate = new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z')
-      createdDate.setHours(0, 0, 0, 0)
-      if (createdDate.getTime() === now.getTime()) {
-        return 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400'
+    const isOverdueJob = isOverdue(job.due_date)
+    const isTomorrowJob = isDueTomorrow(job.due_date)
+
+    if (job.current_stage_name === 'Add job') {
+      const addedToday = isCreatedToday(job.created_at)
+      return {
+        label: addedToday ? 'Fresh (Today)' : 'Fresh (Previous)',
+        badgeClass: addedToday
+          ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold'
+          : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400',
+        sublabel: addedToday ? 'Added Today' : 'Previous Days',
+        isOverdue: isOverdueJob,
+        isTomorrow: isTomorrowJob,
       }
     }
 
-    return 'bg-primary/10 border-primary/20 text-primary'
+    if (job.current_stage_name === 'Production') {
+      const isDownloaded = Boolean(job.pdf_downloaded || job.stage_history?.Production?.pdf_downloaded)
+      if (isDownloaded) {
+        return {
+          label: 'In-Progress',
+          badgeClass: 'bg-purple-500/10 border-purple-500/20 text-purple-600 dark:text-purple-400',
+          isOverdue: isOverdueJob,
+          isTomorrow: isTomorrowJob,
+        }
+      } else {
+        return {
+          label: 'YTS',
+          badgeClass: 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400',
+          isOverdue: isOverdueJob,
+          isTomorrow: isTomorrowJob,
+        }
+      }
+    }
+
+    if (job.current_stage_name === 'QC') {
+      if (job.current_assignee) {
+        return {
+          label: 'In-Progress',
+          badgeClass: 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400',
+          isOverdue: isOverdueJob,
+          isTomorrow: isTomorrowJob,
+        }
+      } else {
+        return {
+          label: 'YTS',
+          badgeClass: 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400',
+          isOverdue: isOverdueJob,
+          isTomorrow: isTomorrowJob,
+        }
+      }
+    }
+
+    if (job.current_stage_name === 'Ready to Dispatch') {
+      return {
+        label: 'Ready to Dispatch',
+        badgeClass: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold',
+        isOverdue: isOverdueJob,
+        isTomorrow: isTomorrowJob,
+      }
+    }
+
+    return {
+      label: job.status || 'Active',
+      badgeClass: 'bg-primary/10 border-primary/20 text-primary',
+      isOverdue: isOverdueJob,
+      isTomorrow: isTomorrowJob,
+    }
   }
 
-  const getStatusText = (job: any) => {
-    if (job.status === 'Completed') return 'Completed'
-
-    const now = new Date()
-    now.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(now)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-
-    if (job.due_date && job.status !== 'Completed') {
-      const dueDate = new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z')
-      dueDate.setHours(0, 0, 0, 0)
-
-      if (dueDate < now) {
-        return 'Overdue'
-      }
-      if (dueDate.getTime() === tomorrow.getTime()) {
-        return 'Due Soon'
-      }
-    }
-
-    if (job.created_at && job.status !== 'Completed') {
-      const createdDate = new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z')
-      createdDate.setHours(0, 0, 0, 0)
-      if (createdDate.getTime() === now.getTime()) {
-        return 'Active'
-      }
-    }
-
-    if (!job.current_assignee) {
-      return 'YTS'
-    }
-
-    return 'In-Progress'
+  const getStagePercent = (job: any) => {
+    if (isJobCompleted(job)) return 100
+    if (job.current_stage_name === 'Add job') return 10
+    if (job.current_stage_name === 'Production') return 35
+    if (job.current_stage_name === 'QC') return 65
+    if (job.current_stage_name === 'Ready to Dispatch') return 90
+    return Math.min(95, Math.round((job.current_stage_index / 4) * 100))
   }
 
+  const getStatusBadgeClass = (job: any) => getJobStatusInfo(job).badgeClass
+  const getStatusText = (job: any) => getJobStatusInfo(job).label
 
-  const allAssignees = new Set<string>()
-  jobs.forEach(j => {
-    if (j.current_assignee) {
-      allAssignees.add(j.current_assignee)
+  const filteredJobs = baseJobs.filter(j => {
+    const jobCompleted = isJobCompleted(j)
+
+    let matchesFilter = true
+    if (cardFilter === 'fresh_all' || (cardFilter as any) === 'fresh') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Add job'
+    } else if (cardFilter === 'fresh_today') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Add job' && isCreatedToday(j.created_at)
+    } else if (cardFilter === 'fresh_previous') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Add job' && !isCreatedToday(j.created_at)
+    } else if (cardFilter === 'prod_all') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Production'
+    } else if (cardFilter === 'prod_yts') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Production' && !j.pdf_downloaded && !j.stage_history?.Production?.pdf_downloaded
+    } else if (cardFilter === 'prod_in_progress') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Production' && Boolean(j.pdf_downloaded || j.stage_history?.Production?.pdf_downloaded)
+    } else if (cardFilter === 'qc_all') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'QC'
+    } else if (cardFilter === 'qc_yts') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'QC' && !j.current_assignee
+    } else if (cardFilter === 'qc_in_progress') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'QC' && Boolean(j.current_assignee)
+    } else if (cardFilter === 'ready_to_dispatch') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Ready to Dispatch'
+    } else if (cardFilter === 'overdue') {
+      matchesFilter = !jobCompleted && isOverdue(j.due_date)
+    } else if (cardFilter === 'tomorrow_due') {
+      matchesFilter = !jobCompleted && isDueTomorrow(j.due_date)
+    } else if (cardFilter === 'completed') {
+      matchesFilter = jobCompleted
     }
-  })
-  const assigneeOptions = Array.from(allAssignees).sort()
 
-  const filteredJobs = jobs.filter(j => {
-    const query = searchQuery.trim().toLowerCase()
-    const matchesSearch = !query
-      || j.pdf_filename.toLowerCase().includes(query)
-      || (j.client_name && j.client_name.toLowerCase().includes(query))
+    if (!matchesFilter) return false
 
-    let matchesStatus = true
-    if (statusFilter !== 'all') {
-      matchesStatus = getStatusText(j) === statusFilter
+    // Column Filters from table heading
+    if (colFilters.name) {
+      const q = colFilters.name.toLowerCase().trim()
+      const matchName = (j.pdf_filename && j.pdf_filename.toLowerCase().includes(q)) ||
+        (j.epub_filename && j.epub_filename.toLowerCase().includes(q))
+      if (!matchName) return false
     }
 
-    const currentAssignee = j.current_assignee || null
-    const matchesAssignee = assigneeFilter === 'all'
-      || (assigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === assigneeFilter)
+    if (colFilters.pages) {
+      const p = colFilters.pages.trim()
+      const pagesStr = String(j.pdf_page_count || '')
+      if (!pagesStr.includes(p)) return false
+    }
 
-    const matchesStage = stageFilter === 'all' || j.current_stage_name === stageFilter
+    if (colFilters.type && colFilters.type !== 'all') {
+      if ((j.pdf_type || '').toLowerCase() !== colFilters.type.toLowerCase()) return false
+    }
 
-    return matchesSearch && matchesStatus && matchesAssignee && matchesStage
+    if (colFilters.language && colFilters.language !== 'all') {
+      if ((j.pdf_language || '').toLowerCase() !== colFilters.language.toLowerCase()) return false
+    }
+
+    if (colFilters.assignee && colFilters.assignee !== 'all') {
+      if (colFilters.assignee === 'unassigned') {
+        if (j.current_assignee) return false
+      } else {
+        if (j.current_assignee !== colFilters.assignee) return false
+      }
+    }
+
+    if (colFilters.status && colFilters.status !== 'all') {
+      const statusInfo = getJobStatusInfo(j)
+      if (colFilters.status === 'completed') {
+        if (!jobCompleted) return false
+      } else if (colFilters.status === 'active') {
+        if (jobCompleted) return false
+      } else if (colFilters.status === 'overdue') {
+        if (!statusInfo.isOverdue || jobCompleted) return false
+      } else if (colFilters.status === 'tomorrow_due') {
+        if (!statusInfo.isTomorrow || jobCompleted) return false
+      } else if (colFilters.status === 'fresh') {
+        if (jobCompleted || j.current_stage_name !== 'Add job') return false
+      } else if (colFilters.status === 'yts') {
+        if (jobCompleted) return false
+        const isYts = (j.current_stage_name === 'Production' && !j.pdf_downloaded && !j.stage_history?.Production?.pdf_downloaded) ||
+                      (j.current_stage_name === 'QC' && !j.current_assignee)
+        if (!isYts) return false
+      } else if (colFilters.status === 'in_progress') {
+        if (jobCompleted) return false
+        const isInProgress = (j.current_stage_name === 'Production' && Boolean(j.pdf_downloaded || j.stage_history?.Production?.pdf_downloaded)) ||
+                             (j.current_stage_name === 'QC' && Boolean(j.current_assignee))
+        if (!isInProgress) return false
+      } else if (colFilters.status === 'ready_to_dispatch') {
+        if (jobCompleted || j.current_stage_name !== 'Ready to Dispatch') return false
+      }
+    }
+
+    if (colFilters.stage && colFilters.stage !== 'all') {
+      if (colFilters.stage === 'Completed') {
+        if (!jobCompleted) return false
+      } else {
+        if (j.current_stage_name !== colFilters.stage || jobCompleted) return false
+      }
+    }
+
+    if (colFilters.created) {
+      if (!j.created_at) return false
+      const d = parseSafeDate(j.created_at)
+      if (!d || isNaN(d.getTime())) return false
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      const dateStr = `${year}-${month}-${day}`
+      if (dateStr !== colFilters.created) return false
+    }
+
+    if (colFilters.dueDate) {
+      if (!j.due_date) return false
+      const d = parseSafeDate(j.due_date)
+      if (!d || isNaN(d.getTime())) return false
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      const dateStr = `${year}-${month}-${day}`
+      if (dateStr !== colFilters.dueDate) return false
+    }
+
+    return true
   }).sort((a, b) => {
-    const aIsCompleted = a.status === 'Completed'
-    const bIsCompleted = b.status === 'Completed'
+    if (sortField) {
+      let valA: any = ''
+      let valB: any = ''
+
+      if (sortField === 'name') {
+        valA = (a.pdf_filename || '').toLowerCase()
+        valB = (b.pdf_filename || '').toLowerCase()
+      } else if (sortField === 'pages') {
+        valA = Number(a.pdf_page_count) || 0
+        valB = Number(b.pdf_page_count) || 0
+      } else if (sortField === 'type') {
+        valA = (a.pdf_type || '').toLowerCase()
+        valB = (b.pdf_type || '').toLowerCase()
+      } else if (sortField === 'language') {
+        valA = (a.pdf_language || '').toLowerCase()
+        valB = (b.pdf_language || '').toLowerCase()
+      } else if (sortField === 'assignee') {
+        valA = getUserDisplayName(a.current_assignee).toLowerCase()
+        valB = getUserDisplayName(b.current_assignee).toLowerCase()
+      } else if (sortField === 'status') {
+        valA = getStatusText(a).toLowerCase()
+        valB = getStatusText(b).toLowerCase()
+      } else if (sortField === 'progress') {
+        valA = a.status === 'Completed' ? 100 : Math.round((a.current_stage_index / 3) * 100)
+        valB = b.status === 'Completed' ? 100 : Math.round((b.current_stage_index / 3) * 100)
+      } else if (sortField === 'created') {
+        valA = a.created_at ? new Date(a.created_at).getTime() : 0
+        valB = b.created_at ? new Date(b.created_at).getTime() : 0
+      } else if (sortField === 'dueDate') {
+        valA = a.due_date ? new Date(a.due_date).getTime() : 0
+        valB = b.due_date ? new Date(b.due_date).getTime() : 0
+      }
+
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1
+      return 0
+    }
+
+    const aIsCompleted = isJobCompleted(a)
+    const bIsCompleted = isJobCompleted(b)
     if (aIsCompleted && !bIsCompleted) return 1
     if (!aIsCompleted && bIsCompleted) return -1
 
@@ -314,12 +715,79 @@ export function BodInternalPage() {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
 
-  const hasActiveFilters = searchQuery.trim() !== '' || statusFilter !== 'all' || assigneeFilter !== 'all' || stageFilter !== 'all'
+  const hasActiveFilters = searchQuery.trim() !== '' || cardFilter !== 'all' || assigneeFilter !== 'all' || isDateFilterActive || hasColFilters || sortField !== null
   const clearFilters = () => {
     setSearchQuery('')
-    setStatusFilter('all')
+    setCardFilter('all')
     setAssigneeFilter('all')
-    setStageFilter('all')
+    setDatePreset('all')
+    setCustomFromDate('')
+    setCustomToDate('')
+    clearColFilters()
+    setSortField(null)
+    setSortDirection('asc')
+  }
+
+  // Jobs eligible for dispatch in the currently filtered list
+  const dispatchableJobs = filteredJobs.filter(j => j.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(j))
+  const allDispatchableSelected = dispatchableJobs.length > 0 && dispatchableJobs.every(j => selectedJobIds.includes(j.id))
+
+  const toggleSelectAllDispatchable = () => {
+    if (allDispatchableSelected) {
+      setSelectedJobIds(prev => prev.filter(id => !dispatchableJobs.some(j => j.id === id)))
+    } else {
+      setSelectedJobIds(prev => Array.from(new Set([...prev, ...dispatchableJobs.map(j => j.id)])))
+    }
+  }
+
+  const toggleSelectJob = (jobId: number) => {
+    setSelectedJobIds(prev =>
+      prev.includes(jobId) ? prev.filter(id => id !== jobId) : [...prev, jobId]
+    )
+  }
+
+  const handleSingleDispatch = async (e: React.MouseEvent, jobId: number) => {
+    e.stopPropagation()
+    setDispatchingJobId(jobId)
+    try {
+      await api.post(`/bod/jobs/${jobId}/dispatch`, {
+        dispatched_by: viewer?.username || undefined
+      })
+      toast.success("Job dispatched successfully and uploaded to FTP!")
+      setSelectedJobIds(prev => prev.filter(id => id !== jobId))
+      fetchJobs()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to dispatch job to FTP")
+    } finally {
+      setDispatchingJobId(null)
+    }
+  }
+
+  const handleBulkDispatch = async () => {
+    if (selectedJobIds.length === 0) return
+    setIsBulkDispatching(true)
+    try {
+      const { data } = await api.post('/bod/jobs/bulk-dispatch', { 
+        job_ids: selectedJobIds,
+        dispatched_by: viewer?.username || undefined
+      })
+      if (data.failed_count === 0) {
+        toast.success(`All ${data.success_count} job(s) dispatched successfully to FTP!`)
+        setSelectedJobIds([])
+      } else if (data.success_count === 0) {
+        const errorDetails = data.results.filter((r: any) => !r.success).map((r: any) => `${r.job_name || r.job_id}: ${r.error}`).join('; ')
+        toast.error(`Dispatch failed: ${errorDetails}`)
+      } else {
+        toast.warning(`${data.success_count} job(s) dispatched, ${data.failed_count} failed.`)
+        const failedIds = data.results.filter((r: any) => !r.success).map((r: any) => r.job_id)
+        setSelectedJobIds(failedIds)
+      }
+      fetchJobs()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to execute bulk dispatch")
+    } finally {
+      setIsBulkDispatching(false)
+    }
   }
 
   return (
@@ -340,175 +808,13 @@ export function BodInternalPage() {
             <div>
               <h1 className="text-xl font-bold font-serif text-text m-0">Books on Demand</h1>
               <p className="text-sm text-muted">
-                {totalJobs} job{totalJobs !== 1 ? 's' : ''}
+                {totalJobs} job{totalJobs !== 1 ? 's' : ''} {hasBaseFiltersActive && totalJobs !== jobs.length ? `(filtered from ${jobs.length})` : ''}
               </p>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Button onClick={() => setShowAddJobModal(true)} leftIcon={<Plus size={15} />}>
-            Create Job
-          </Button>
-        </div>
-      </div>
-
-      {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
-        <div
-          onClick={clearFilters}
-          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${!hasActiveFilters ? 'border-primary/50 ring-1 ring-primary/20' : 'border-border/70 hover:border-primary/30'}`}
-        >
-          <div className="p-2 bg-primary/10 text-primary rounded-lg hidden xl:block">
-            <Layers size={18} />
-          </div>
-          <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Total</span>
-            <span className="text-lg font-bold text-text">{totalJobs}</span>
-          </div>
-        </div>
-
-        <div
-          onClick={() => { clearFilters(); setAssigneeFilter('unassigned') }}
-          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${assigneeFilter === 'unassigned' ? 'border-rose-500/50 ring-1 ring-rose-500/20' : 'border-border/70 hover:border-rose-500/30'}`}
-        >
-          <div className="p-2 bg-rose-500/10 text-rose-600 rounded-lg hidden xl:block">
-            <User size={18} />
-          </div>
-          <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Unassigned</span>
-            <span className="text-lg font-bold text-text">{unassignedJobs}</span>
-          </div>
-        </div>
-
-        <div
-          onClick={() => { clearFilters(); setStageFilter('Add job') }}
-          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'Add job' ? 'border-amber-500/50 ring-1 ring-amber-500/20' : 'border-border/70 hover:border-amber-500/30'}`}
-        >
-          <div className="p-2 bg-amber-500/10 text-amber-600 rounded-lg hidden xl:block">
-            <RefreshCw size={18} />
-          </div>
-          <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Add Job</span>
-            <span className="text-lg font-bold text-text">{addJobStageJobs}</span>
-          </div>
-        </div>
-
-        <div
-          onClick={() => { clearFilters(); setStageFilter('Production') }}
-          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'Production' ? 'border-purple-500/50 ring-1 ring-purple-500/20' : 'border-border/70 hover:border-purple-500/30'}`}
-        >
-          <div className="p-2 bg-purple-500/10 text-purple-600 rounded-lg hidden xl:block">
-            <RefreshCw size={18} />
-          </div>
-          <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Production</span>
-            <span className="text-lg font-bold text-text">{productionStageJobs}</span>
-          </div>
-        </div>
-
-        <div
-          onClick={() => { clearFilters(); setStageFilter('QC') }}
-          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'QC' ? 'border-blue-500/50 ring-1 ring-blue-500/20' : 'border-border/70 hover:border-blue-500/30'}`}
-        >
-          <div className="p-2 bg-blue-500/10 text-blue-600 rounded-lg hidden xl:block">
-            <CheckCircle2 size={18} />
-          </div>
-          <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">QC</span>
-            <span className="text-lg font-bold text-text">{qcStageJobs}</span>
-          </div>
-        </div>
-
-        <div
-          onClick={() => { clearFilters(); setStatusFilter('Overdue') }}
-          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${statusFilter === 'Overdue' ? 'border-red-500/50 ring-1 ring-red-500/20' : 'border-border/70 hover:border-red-500/30'}`}
-        >
-          <div className="p-2 bg-red-500/10 text-red-600 rounded-lg hidden xl:block">
-            <Clock size={18} />
-          </div>
-          <div>
-            <span className="text-[10px] text-red-500 font-bold uppercase tracking-wider block">Overdue</span>
-            <span className="text-lg font-bold text-text">{overdueJobs}</span>
-          </div>
-        </div>
-
-        <div
-          onClick={() => { clearFilters(); setStatusFilter('Due Soon') }}
-          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${statusFilter === 'Due Soon' ? 'border-orange-500/50 ring-1 ring-orange-500/20' : 'border-border/70 hover:border-orange-500/30'}`}
-        >
-          <div className="p-2 bg-orange-500/10 text-orange-600 rounded-lg hidden xl:block">
-            <Clock size={18} />
-          </div>
-          <div>
-            <span className="text-[10px] text-orange-500 font-bold uppercase tracking-wider block">Due Soon</span>
-            <span className="text-lg font-bold text-text">{dueSoonJobs}</span>
-          </div>
-        </div>
-
-        <div
-          onClick={() => { clearFilters(); setStatusFilter('Completed') }}
-          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${statusFilter === 'Completed' ? 'border-emerald-500/50 ring-1 ring-emerald-500/20' : 'border-border/70 hover:border-emerald-500/30'}`}
-        >
-          <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-lg hidden xl:block">
-            <CheckCircle2 size={18} />
-          </div>
-          <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Completed</span>
-            <span className="text-lg font-bold text-text">{completedJobs}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter bar */}
-      {jobs.length > 0 && (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search by filename or customer…"
-              className="w-full bg-card border border-border rounded-lg pl-8 pr-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/50"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Filter size={13} className="text-muted shrink-0" />
-            <div className="w-[140px]">
-              <Dropdown
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={[
-                  { value: 'all', label: 'All statuses' },
-                  ...statusOptions.map(s => ({ value: s, label: s }))
-                ]}
-              />
-            </div>
-
-            <div className="w-[150px]">
-              <Dropdown
-                value={assigneeFilter}
-                onChange={setAssigneeFilter}
-                options={[
-                  { value: 'all', label: 'All assignees' },
-                  { value: 'unassigned', label: 'Unassigned' },
-                  ...assigneeOptions.map(a => ({ value: a, label: getUserDisplayName(a) }))
-                ]}
-              />
-            </div>
-
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="text-xs text-primary hover:underline font-semibold whitespace-nowrap"
-              >
-                Clear filters
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center ml-auto bg-card border border-border rounded-lg p-0.5 shrink-0">
+          <div className="flex items-center bg-card border border-border rounded-lg p-0.5 shrink-0">
             <button
               onClick={() => setViewMode('grid')}
               className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-accent text-primary shadow-sm' : 'text-muted hover:text-text'}`}
@@ -524,248 +830,813 @@ export function BodInternalPage() {
               <List size={15} />
             </button>
           </div>
-        </div>
-      )}
 
-      {/* Grid listing of all active jobs */}
-      {jobs.length === 0 ? (
-        <div className="text-center py-16 text-muted border border-dashed border-border rounded-xl bg-card/10">
-          <p className="text-xs font-medium">No jobs added yet</p>
-          <button
-            onClick={() => setShowAddJobModal(true)}
-            className="mt-2 text-xs text-primary hover:underline font-bold"
-          >
-            Create first job
-          </button>
+          <Button onClick={() => setShowAddJobModal(true)} leftIcon={<Plus size={15} />}>
+            Create Job
+          </Button>
         </div>
-      ) : filteredJobs.length === 0 ? (
-        <div className="text-center py-16 text-muted border border-dashed border-border rounded-xl bg-card/10">
-          <p className="text-xs font-medium">No jobs match the current filters</p>
-          <button
-            onClick={clearFilters}
-            className="mt-2 text-xs text-primary hover:underline font-bold"
-          >
-            Clear filters
-          </button>
-        </div>
-      ) : viewMode === 'list' ? (
-        <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-text whitespace-nowrap">
-              <thead className="bg-accent/50 border-b border-border text-xs font-bold text-muted uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3">Job Name</th>
-                  <th className="px-4 py-3">Pages</th>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3">Language</th>
-                  <th className="px-4 py-3">Assignee</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 min-w-[150px]">Progress</th>
-                  <th className="px-4 py-3">Created</th>
-                  <th className="px-4 py-3">Due Date</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {filteredJobs.map((job) => {
-                  const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
-                  const currentAssignee = job.current_assignee || null
+      </div>
 
-                  const assigneeOptions = [
-                    { value: '', label: 'Unassigned' },
-                    ...users.filter(u => u.active_status).map(u => ({
-                      value: u.user_name,
-                      label: formatUserDisplayName(u)
-                    }))
-                  ]
-                  if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
-                    assigneeOptions.push({ value: currentAssignee, label: getUserDisplayName(currentAssignee) })
-                  }
+      {/* Metrics Section: 2 Compact Rows */}
+      <div className="space-y-1.5">
+        {/* Row 1: Deadlines & Dates (Overdue, Tomorrow Due, Completed, Date Filters) */}
+        <div>
+          <div className="flex items-center justify-between mb-1 px-0.5">
+            <span className="text-[10px] font-bold tracking-wider uppercase text-muted flex items-center gap-1.5">
+              <Clock size={12} className="text-orange-500" />
+              Deadlines & Date Filters
+            </span>
+            {isDateFilterActive && (
+              <span className="text-[9px] text-primary font-medium bg-primary/10 px-2 py-0.5 rounded-full">
+                Date filter active: {dateFilteredCount} matching job{dateFilteredCount !== 1 ? 's' : ''} ({dateTarget === 'created' ? 'Created' : 'Due'} Date)
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+            {/* 1. Overdue */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'overdue' ? 'all' : 'overdue')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'overdue' ? 'border-red-500/60 ring-2 ring-red-500/20 bg-red-500/[0.04]' : 'border-border/80 hover:border-red-500/40'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-red-500 font-bold uppercase tracking-wider">Overdue</span>
+                <div className="p-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded">
+                  <Clock size={12} />
+                </div>
+              </div>
+              <div className="flex items-baseline justify-between mt-1">
+                <span className="text-lg font-bold text-red-600 dark:text-red-400 leading-none">{overdueJobs}</span>
+                <span className="text-[8px] text-red-500/80 truncate">Past due</span>
+              </div>
+            </div>
 
-                  return (
-                    <tr
-                      key={job.id}
-                      onClick={() => handleJobClick(job)}
-                      className="hover:bg-accent/30 cursor-pointer transition-colors"
+            {/* 2. Tomorrow Due */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'tomorrow_due' ? 'all' : 'tomorrow_due')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'tomorrow_due' ? 'border-orange-500/60 ring-2 ring-orange-500/20 bg-orange-500/[0.04]' : 'border-border/80 hover:border-orange-500/40'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-orange-500 font-bold uppercase tracking-wider">Tomorrow Due</span>
+                <div className="p-1 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded">
+                  <Clock size={12} />
+                </div>
+              </div>
+              <div className="flex items-baseline justify-between mt-1">
+                <span className="text-lg font-bold text-orange-600 dark:text-orange-400 leading-none">{dueSoonJobs}</span>
+                <span className="text-[8px] text-orange-500/80 truncate">Due tomorrow</span>
+              </div>
+            </div>
+
+            {/* 3. Completed */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'completed' ? 'all' : 'completed')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'completed' ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-emerald-500/[0.04]' : 'border-border/80 hover:border-emerald-500/40'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-muted font-bold uppercase tracking-wider">Completed</span>
+                <div className="p-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded">
+                  <CheckCircle2 size={12} />
+                </div>
+              </div>
+              <div className="flex items-baseline justify-between mt-1">
+                <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400 leading-none">{completedJobs}</span>
+                <span className="text-[8px] text-muted truncate">Archived</span>
+              </div>
+            </div>
+
+            {/* 4. Date Filters Card */}
+            <div
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs col-span-1 sm:col-span-2 lg:col-span-1 xl:col-span-4 min-h-[62px] ${isDateFilterActive ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.02]' : 'border-border/80 hover:border-primary/30'}`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1 border-b border-border/50">
+                <div className="flex items-center gap-1.5">
+                  <div className="p-0.5 bg-primary/10 text-primary rounded">
+                    <Calendar size={11} />
+                  </div>
+                  <span className="text-[9px] font-bold text-primary uppercase tracking-wider">Date Filters</span>
+
+                  {/* Target Toggle: Created Date vs Due Date */}
+                  <div className="flex items-center bg-background/80 p-0.5 rounded border border-border/60 text-[8px] font-medium ml-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setDateTarget('created')}
+                      className={`px-1.5 py-0.5 rounded transition-colors ${dateTarget === 'created' ? 'bg-primary text-primary-foreground font-bold shadow-xs' : 'text-muted hover:text-text'}`}
+                      title="Filter jobs by when they were added/created"
                     >
-                      <td className="px-4 py-3 min-w-[200px] max-w-[300px]">
-                        <h3 className="font-semibold text-sm truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
-                        {job.epub_filename && (
-                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
-                            {job.epub_filename}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted font-mono">
-                        {job.pdf_page_count || '-'}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted font-medium">
-                        {job.pdf_type ? job.pdf_type : '-'}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted font-medium">
-                        {job.pdf_language ? job.pdf_language : '-'}
-                      </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1.5 text-muted">
-                          <User size={13} className="text-muted/70" />
-                          <Dropdown
-                            variant="inline"
-                            searchable
-                            value={currentAssignee || ''}
-                            onChange={(val) => assignUser(job.id, val)}
-                            className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[12px]"
-                            options={assigneeOptions}
-                          />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`capitalize font-bold px-2.5 py-1 rounded-md text-[10px] border ${getStatusBadgeClass(job)}`}>
-                          {getStatusText(job)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 w-[200px]">
-                        <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1.5">
-                          <span>{job.current_stage_name}</span>
-                          <span>{percent}%</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary transition-all duration-500 rounded-full"
-                            style={{ width: `${percent}%` }}
-                          />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-[11px] text-muted font-medium">
-                        {formatDateTime(job.created_at)}
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-[11px] font-medium ${isManager ? 'text-primary hover:underline cursor-pointer' : 'text-muted'}`}
-                        onClick={(e) => {
-                          if (isManager) {
-                            e.stopPropagation()
-                            setShowEditDueDateModal(job)
-                            setNewDueDate(job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toISOString().slice(0, 10) : '')
-                            setDueDateReason('')
-                          }
-                        }}
-                      >
-                        {job.due_date ? formatDateTime(job.due_date) : (isManager ? 'Set Date' : '-')}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {isAdmin && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
-                              className="p-1.5 text-muted hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
-                              title="Delete Job"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          )}
-                          <ChevronRight size={18} className="text-muted" />
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                      Created Date
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDateTarget('due')}
+                      className={`px-1.5 py-0.5 rounded transition-colors ${dateTarget === 'due' ? 'bg-primary text-primary-foreground font-bold shadow-xs' : 'text-muted hover:text-text'}`}
+                      title="Filter jobs by due date"
+                    >
+                      Due Date
+                    </button>
+                  </div>
+                </div>
+
+                {isDateFilterActive && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[8px] text-primary font-bold bg-primary/10 px-1.5 py-0.5 rounded">
+                      {dateFilteredCount} jobs
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDatePreset('all')
+                        setCustomFromDate('')
+                        setCustomToDate('')
+                      }}
+                      className="text-[8px] text-muted hover:text-red-500 font-semibold px-1 py-0.5 rounded hover:bg-red-500/10 transition-colors"
+                      title="Clear date filter"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Preset buttons + Custom Date Picker */}
+              <div className="flex flex-wrap items-center justify-between gap-1 pt-1">
+                <div className="flex items-center gap-1 flex-wrap">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'today', label: 'Today' },
+                    { id: 'yesterday', label: 'Yesterday' },
+                    { id: 'week', label: '7 Days' },
+                    { id: 'month', label: 'Month' },
+                    { id: 'custom', label: 'Custom' },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setDatePreset(p.id as any)}
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-semibold transition-all border ${datePreset === p.id
+                        ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                        : 'bg-background/60 border-border/60 text-muted hover:text-text hover:bg-accent/50'
+                        }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                {datePreset === 'custom' && (
+                  <div className="flex items-center gap-1 text-[9px]">
+                    <div className="flex items-center gap-1 bg-background/60 border border-border/70 rounded px-1 py-0.5">
+                      <span className="text-[8px] text-muted uppercase font-bold">From</span>
+                      <input
+                        type="date"
+                        value={customFromDate}
+                        onChange={(e) => setCustomFromDate(e.target.value)}
+                        className="bg-transparent border-0 text-[9px] text-text p-0 focus:outline-none focus:ring-0 cursor-pointer"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 bg-background/60 border border-border/70 rounded px-1 py-0.5">
+                      <span className="text-[8px] text-muted uppercase font-bold">To</span>
+                      <input
+                        type="date"
+                        value={customToDate}
+                        onChange={(e) => setCustomToDate(e.target.value)}
+                        className="bg-transparent border-0 text-[9px] text-text p-0 focus:outline-none focus:ring-0 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredJobs.map((job) => {
-            const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
-            const currentAssignee = job.current_assignee || null
 
-            const assigneeOptions = [
-              { value: '', label: 'Unassigned' },
-              ...users.filter(u => u.active_status).map(u => ({
-                value: u.user_name,
-                label: formatUserDisplayName(u)
-              }))
-            ]
-            if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
-              assigneeOptions.push({ value: currentAssignee, label: getUserDisplayName(currentAssignee) })
-            }
+        {/* Row 2: Stages (Total, Fresh, Production, QC, Ready to Dispatch) */}
+        <div>
+          <div className="flex items-center justify-between mb-1 px-0.5">
+            <span className="text-[10px] font-bold tracking-wider uppercase text-muted flex items-center gap-1.5">
+              <Layers size={12} className="text-primary" />
+              Workflow Stages
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-9 gap-2">
+            {/* 1. Total */}
+            <div
+              onClick={() => setCardFilter('all')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'all' && !hasActiveFilters ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.03]' : 'border-border/80 hover:border-primary/40'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-muted font-bold uppercase tracking-wider">Total</span>
+                <div className="p-1 bg-primary/10 text-primary rounded">
+                  <Layers size={12} />
+                </div>
+              </div>
+              <div className="flex items-baseline justify-between mt-1">
+                <span className="text-lg font-bold text-text leading-none">{totalJobs}</span>
+                <span className="text-[8px] text-muted truncate">{hasBaseFiltersActive && totalJobs !== jobs.length ? `${jobs.length} total` : 'All jobs'}</span>
+              </div>
+            </div>
 
-            return (
-              <div
-                key={job.id}
-                onClick={() => handleJobClick(job)}
-                className="p-4 rounded-xl border bg-card border-border shadow-sm flex flex-col justify-between cursor-pointer hover:border-primary/50 transition-colors"
-              >
-                <div>
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="min-w-0">
-                      <h3 className="font-semibold text-sm text-text truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
+            {/* 2. Fresh (Add Job): subdivided into Today and Previous Days */}
+            <div
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter.startsWith('fresh') ? 'border-amber-500/60 ring-2 ring-amber-500/20' : 'border-border/80 hover:border-amber-500/30'}`}
+            >
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center gap-1">
+                  <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded">
+                    <Plus size={11} />
+                  </div>
+                  <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Fresh (Add Job)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'fresh_all' ? 'all' : 'fresh_all')}
+                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors ${cardFilter === 'fresh_all' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'}`}
+                  title="Show all Fresh (Add job) jobs"
+                >
+                  Total {freshTotal}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'fresh_today' ? 'all' : 'fresh_today')}
+                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'fresh_today' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                  title="Fresh jobs added today"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                      Today
+                    </span>
+                    <span className="text-xs font-bold text-text">{freshTodayJobs}</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'fresh_previous' ? 'all' : 'fresh_previous')}
+                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'fresh_previous' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                  title="Fresh jobs added in previous days"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600/80 dark:text-amber-400/80 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60"></span>
+                      Previous
+                    </span>
+                    <span className="text-xs font-bold text-text">{freshPreviousJobs}</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* 3. Production: subdivided into YTS and In Progress */}
+            <div
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter.startsWith('prod_') ? 'border-purple-500/60 ring-2 ring-purple-500/20' : 'border-border/80 hover:border-purple-500/30'}`}
+            >
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center gap-1">
+                  <div className="p-0.5 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded">
+                    <RefreshCw size={11} />
+                  </div>
+                  <span className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">Production</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'prod_all' ? 'all' : 'prod_all')}
+                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors ${cardFilter === 'prod_all' ? 'bg-purple-600 text-white' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20'}`}
+                  title="Show all Production jobs"
+                >
+                  Total {prodTotal}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'prod_yts' ? 'all' : 'prod_yts')}
+                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'prod_yts' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                  title="Assigned, pending PDF download"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      YTS
+                    </span>
+                    <span className="text-xs font-bold text-text">{prodYtsJobs}</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'prod_in_progress' ? 'all' : 'prod_in_progress')}
+                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'prod_in_progress' ? 'bg-purple-500/10 border-purple-500/40 ring-1 ring-purple-500/30' : 'bg-background/60 border-border/60 hover:border-purple-500/30 hover:bg-accent/40'}`}
+                  title="Work started, PDF downloaded"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
+                      In Progress
+                    </span>
+                    <span className="text-xs font-bold text-text">{prodInProgressJobs}</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* 4. QC: subdivided into YTS and In Progress */}
+            <div
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter.startsWith('qc_') ? 'border-blue-500/60 ring-2 ring-blue-500/20' : 'border-border/80 hover:border-blue-500/30'}`}
+            >
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center gap-1">
+                  <div className="p-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded">
+                    <CheckCircle2 size={11} />
+                  </div>
+                  <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">QC</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'qc_all' ? 'all' : 'qc_all')}
+                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors ${cardFilter === 'qc_all' ? 'bg-blue-600 text-white' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20'}`}
+                  title="Show all QC jobs"
+                >
+                  Total {qcTotal}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'qc_yts' ? 'all' : 'qc_yts')}
+                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'qc_yts' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                  title="Unassigned in QC"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      YTS
+                    </span>
+                    <span className="text-xs font-bold text-text">{qcYtsJobs}</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'qc_in_progress' ? 'all' : 'qc_in_progress')}
+                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'qc_in_progress' ? 'bg-blue-500/10 border-blue-500/40 ring-1 ring-blue-500/30' : 'bg-background/60 border-border/60 hover:border-blue-500/30 hover:bg-accent/40'}`}
+                  title="Assigned in QC"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                      In Progress
+                    </span>
+                    <span className="text-xs font-bold text-text">{qcInProgressJobs}</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* 5. Ready to Dispatch */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'ready_to_dispatch' ? 'all' : 'ready_to_dispatch')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter === 'ready_to_dispatch' ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-emerald-500/[0.03]' : 'border-border/80 hover:border-emerald-500/40'}`}
+            >
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center gap-1">
+                  <div className="p-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded">
+                    <Send size={11} />
+                  </div>
+                  <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Ready to Dispatch</span>
+                </div>
+                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  Total {dispatchTotal}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between mt-1 pt-0.5">
+                <span className="text-lg font-bold text-text leading-none">{dispatchTotal}</span>
+                <span className="text-[8px] text-muted truncate">Awaiting FTP Delivery</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+  {/* Bulk dispatch toolbar */}
+  {selectedJobIds.length > 0 && (
+    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-2.5 flex items-center justify-between shadow-xs animate-fadeIn">
+      <div className="flex items-center gap-2.5">
+        <div className="p-1.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-md">
+          <Send size={15} />
+        </div>
+        <div>
+          <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">
+            {selectedJobIds.length} job{selectedJobIds.length > 1 ? 's' : ''} selected for dispatch
+          </span>
+          <span className="hidden sm:inline text-[11px] text-muted ml-2">
+            (Click Dispatch to package deliverables and upload to FTP server)
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          onClick={handleBulkDispatch}
+          disabled={isBulkDispatching}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7 px-3 flex items-center gap-1.5"
+          leftIcon={isBulkDispatching ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+        >
+          {isBulkDispatching ? 'Dispatching to FTP...' : `Dispatch Selected (${selectedJobIds.length})`}
+        </Button>
+        <button
+          onClick={() => setSelectedJobIds([])}
+          disabled={isBulkDispatching}
+          className="text-xs text-muted hover:text-text px-2 py-1 transition-colors font-medium"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )}
+
+  {/* Grid listing of all active jobs */ }
+  {
+    jobs.length === 0 ? (
+      <div className="text-center py-16 text-muted border border-dashed border-border rounded-xl bg-card/10">
+        <p className="text-xs font-medium">No jobs added yet</p>
+        <button
+          onClick={() => setShowAddJobModal(true)}
+          className="mt-2 text-xs text-primary hover:underline font-bold"
+        >
+          Create first job
+        </button>
+      </div>
+    ) : viewMode === 'list' ? (
+      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs text-text table-fixed">
+            <thead className="bg-accent/50 border-b border-border text-[11px] font-bold text-muted uppercase tracking-wider">
+              <tr className="select-none">
+                <th className="px-1 py-2 text-center w-[3%] overflow-hidden">
+                  <input
+                    type="checkbox"
+                    checked={allDispatchableSelected}
+                    onChange={toggleSelectAllDispatchable}
+                    disabled={dispatchableJobs.length === 0}
+                    title={dispatchableJobs.length === 0 ? "No dispatchable jobs in view" : "Select all Ready to Dispatch jobs"}
+                    className="w-3.5 h-3.5 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                  />
+                </th>
+                <th onClick={() => handleSort('name')} className="px-2 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[18%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Job Name</span>
+                    {renderSortIcon('name')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('pages')} className="px-1 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[5%] text-center overflow-hidden">
+                  <div className="flex items-center justify-center gap-0.5">
+                    <span className="truncate">Pages</span>
+                    {renderSortIcon('pages')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('type')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[8%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Type</span>
+                    {renderSortIcon('type')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('language')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[8%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Language</span>
+                    {renderSortIcon('language')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[13%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Assignee</span>
+                    {renderSortIcon('assignee')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('status')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[11%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Status</span>
+                    {renderSortIcon('status')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[12%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Progress</span>
+                    {renderSortIcon('progress')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('created')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Created</span>
+                    {renderSortIcon('created')}
+                  </div>
+                </th>
+                <th onClick={() => handleSort('dueDate')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate">Due Date</span>
+                    {renderSortIcon('dueDate')}
+                  </div>
+                </th>
+                <th className="px-1 py-2 text-center w-[6%]"></th>
+              </tr>
+
+              <tr className="border-b border-border bg-accent/20 font-normal normal-case tracking-normal">
+                {/* Select All placeholder */}
+                <th className="px-1 py-1 font-normal text-center overflow-hidden"></th>
+
+                {/* Job Name */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={colFilters.name}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="Filter..."
+                      className="w-full bg-background border border-border rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                    />
+                    {colFilters.name && (
+                      <button
+                        onClick={() => setColFilters(prev => ({ ...prev, name: '' }))}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                        title="Clear"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                </th>
+
+                {/* Pages */}
+                <th className="px-1 py-1 font-normal overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={colFilters.pages}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
+                      placeholder="Pages"
+                      className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                    />
+                    {colFilters.pages && (
+                      <button
+                        onClick={() => setColFilters(prev => ({ ...prev, pages: '' }))}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                        title="Clear"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                </th>
+
+                {/* Type */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.type}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Types</option>
+                    {uniqueTypes.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </th>
+
+                {/* Language */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.language}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Langs</option>
+                    {uniqueLanguages.map(l => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </select>
+                </th>
+
+                {/* Assignee */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.assignee}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, assignee: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Assignees</option>
+                    <option value="unassigned">Unassigned</option>
+                    {assigneeOptions.map(a => (
+                      <option key={a} value={a}>{getUserDisplayName(a)}</option>
+                    ))}
+                  </select>
+                </th>
+
+                {/* Status */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.status}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, status: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="fresh">Fresh</option>
+                    <option value="yts">YTS</option>
+                    <option value="in_progress">In-Progress</option>
+                    <option value="ready_to_dispatch">Ready to Dispatch</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="tomorrow_due">Due Soon</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </th>
+
+                {/* Progress (Stage) */}
+                <th className="px-1.5 py-1 font-normal overflow-hidden">
+                  <select
+                    value={colFilters.stage}
+                    onChange={(e) => setColFilters(prev => ({ ...prev, stage: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                  >
+                    <option value="all">All Stages</option>
+                    <option value="Add job">Add job</option>
+                    <option value="Production">Production</option>
+                    <option value="QC">QC</option>
+                    <option value="Ready to Dispatch">Ready to Dispatch</option>
+                    <option value="Completed">Completed</option>
+                  </select>
+                </th>
+
+                {/* Created */}
+                <th className="px-1 py-1 font-normal overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={colFilters.created}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
+                      className="w-full bg-background border border-border rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                    />
+                    {colFilters.created && (
+                      <button
+                        onClick={() => setColFilters(prev => ({ ...prev, created: '' }))}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                        title="Clear date"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                </th>
+
+                {/* Due Date */}
+                <th className="px-1 py-1 font-normal overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={colFilters.dueDate}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
+                      className="w-full bg-background border border-border rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                    />
+                    {colFilters.dueDate && (
+                      <button
+                        onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                        title="Clear date"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                </th>
+
+                {/* Clear action */}
+                <th className="px-1 py-1 font-normal text-center overflow-hidden">
+                  {hasColFilters ? (
+                    <button
+                      onClick={clearColFilters}
+                      className="p-1 text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors inline-flex items-center justify-center"
+                      title="Clear all column filters"
+                    >
+                      <X size={13} />
+                    </button>
+                  ) : null}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {filteredJobs.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="text-center py-16 text-muted">
+                    <p className="text-xs font-medium">No jobs match the current filters</p>
+                    <button
+                      onClick={clearFilters}
+                      className="mt-2 text-xs text-primary hover:underline font-bold inline-block"
+                    >
+                      Clear filters
+                    </button>
+                  </td>
+                </tr>
+              ) : (
+                filteredJobs.map((job) => {
+                const percent = getStagePercent(job)
+                const currentAssignee = job.current_assignee || null
+
+                const assigneeOptions = [
+                  { value: '', label: '— Unassigned —' },
+                  ...users.filter(u => u.active_status).map(u => ({
+                    value: u.user_name,
+                    label: formatUserDisplayName(u)
+                  }))
+                ]
+                if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
+                  assigneeOptions.push({ value: currentAssignee, label: getUserDisplayName(currentAssignee) })
+                }
+
+                return (
+                  <tr
+                    key={job.id}
+                    onClick={() => handleJobClick(job)}
+                    className="hover:bg-accent/30 cursor-pointer transition-colors"
+                  >
+                    <td className="px-1 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                      {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedJobIds.includes(job.id)}
+                          onChange={() => toggleSelectJob(job.id)}
+                          className="w-3.5 h-3.5 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          title="Select for bulk dispatch"
+                        />
+                      ) : (
+                        <input
+                          type="checkbox"
+                          disabled
+                          className="w-3.5 h-3.5 rounded border-border opacity-20 cursor-not-allowed"
+                          title="Only jobs in Ready to Dispatch stage can be dispatched"
+                        />
+                      )}
+                    </td>
+                    <td className="px-2 py-2 overflow-hidden">
+                      <h3 className="font-semibold text-xs truncate m-0 text-text" title={job.pdf_filename}>{job.pdf_filename}</h3>
                       {job.epub_filename && (
                         <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
                           {job.epub_filename}
                         </p>
                       )}
-                      <p className="text-[11px] text-muted mt-0.5 flex items-center flex-wrap gap-2">
-                        {job.pdf_page_count ? `${job.pdf_page_count} Pages` : 'No Pages Info'}
-                        {job.pdf_type && (
-                          <span>({job.pdf_type})</span>
-                        )}
-                        {job.pdf_language && (
-                          <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-bold">{job.pdf_language}</span>
-                        )}
+                    </td>
+                    <td className="px-1 py-2 text-center text-xs text-muted font-mono overflow-hidden">
+                      {job.pdf_page_count || '-'}
+                    </td>
+                    <td className="px-1.5 py-2 text-xs text-muted font-medium truncate overflow-hidden" title={job.pdf_type || ''}>
+                      {job.pdf_type ? job.pdf_type : '-'}
+                    </td>
+                    <td className="px-1.5 py-2 text-xs text-muted font-medium truncate overflow-hidden" title={job.pdf_language || ''}>
+                      {job.pdf_language ? job.pdf_language : '-'}
+                    </td>
+                    <td className="px-1.5 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1 text-muted min-w-0">
+                        <User size={12} className="text-muted/70 shrink-0" />
+                        <div className="min-w-0 flex-1 truncate">
+                          <Dropdown
+                            variant="inline"
+                            searchable
+                            searchPlaceholder="Search assignees..."
+                            value={currentAssignee || ''}
+                            onChange={(val) => assignUser(job.id, val)}
+                            className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px] truncate"
+                            options={assigneeOptions}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-1.5 py-2 overflow-hidden">
+                      <span className={`capitalize font-bold px-1.5 py-0.5 rounded text-[9px] border truncate inline-block max-w-full ${getStatusBadgeClass(job)}`}>
+                        {getStatusText(job)}
+                      </span>
+                    </td>
+                    <td className="px-1.5 py-2 overflow-hidden">
+                      <div className="flex items-center justify-between text-[9px] text-muted font-bold mb-1">
+                        <span className="truncate">{job.current_stage_name}</span>
+                        <span className="shrink-0 ml-1">{percent}%</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-500 rounded-full"
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                    </td>
+                    <td className="px-1.5 py-2 text-[11px] text-muted font-medium overflow-hidden">
+                      <p className="text-[11px] font-medium text-text m-0 truncate">{formatDate(job.created_at)}</p>
+                      <p className="text-[9px] text-muted m-0 truncate">
+                        {parseUtcDate(job.created_at)?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
                       </p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {isAdmin && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
-                          className="p-1.5 text-muted hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                          title="Delete Job"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                      <ChevronRight size={18} className="text-muted" />
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between text-[11px]">
-                    <div className="flex items-center gap-1 text-muted" onClick={(e) => e.stopPropagation()}>
-                      <User size={12} className="text-muted/70" />
-                      <Dropdown
-                        variant="inline"
-                        searchable
-                        value={currentAssignee || ''}
-                        onChange={(val) => assignUser(job.id, val)}
-                        className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-auto shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px]"
-                        dropdownClassName="w-48 text-[11px] font-normal"
-                        options={assigneeOptions}
-                      />
-                    </div>
-                    <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${getStatusBadgeClass(job)}`}>
-                      {getStatusText(job)}
-                    </span>
-                  </div>
-
-                  {/* Progress bar visual indicator */}
-                  <div className="mt-3 mb-3">
-                    <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
-                      <span>Progress</span>
-                      <span>Stage: {job.current_stage_name}</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary transition-all duration-500 rounded-full"
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
-                  <div className="flex flex-col gap-0.5">
-                    <span>Created: {formatDateTime(job.created_at)}</span>
-                    <span
-                      className={isManager ? 'text-primary hover:underline cursor-pointer' : ''}
+                    </td>
+                    <td
+                      className={`px-1.5 py-2 text-[11px] font-medium overflow-hidden ${isManager ? 'text-primary hover:underline cursor-pointer' : 'text-muted'}`}
                       onClick={(e) => {
                         if (isManager) {
                           e.stopPropagation()
@@ -775,201 +1646,440 @@ export function BodInternalPage() {
                         }
                       }}
                     >
-                      Due: {job.due_date ? formatDateTime(job.due_date) : (isManager ? 'Set Date' : '-')}
-                    </span>
+                      {job.due_date ? (
+                        <div>
+                          <p className={`text-[11px] font-medium m-0 truncate flex items-center gap-1 ${getJobStatusInfo(job).isOverdue ? 'text-red-600 dark:text-red-400 font-semibold' : getJobStatusInfo(job).isTomorrow ? 'text-orange-600 dark:text-orange-400 font-semibold' : ''}`}>
+                            {getJobStatusInfo(job).isOverdue && <Clock size={10} className="shrink-0" />}
+                            {getJobStatusInfo(job).isTomorrow && <Clock size={10} className="shrink-0" />}
+                            <span className="truncate">{formatDate(job.due_date)}</span>
+                          </p>
+                          <p className="text-[9px] text-muted m-0 truncate">
+                            {parseUtcDate(job.due_date)?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                          </p>
+                        </div>
+                      ) : (
+                        isManager ? <span className="text-primary text-[11px]">Set Date</span> : '-'
+                      )}
+                    </td>
+                    <td className="px-1 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1">
+                        {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
+                          <button
+                            onClick={(e) => handleSingleDispatch(e, job.id)}
+                            disabled={dispatchingJobId === job.id}
+                            className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                            title="Dispatch & Deliver to FTP"
+                          >
+                            {dispatchingJobId === job.id ? (
+                              <Loader2 size={15} className="animate-spin text-emerald-600" />
+                            ) : (
+                              <Send size={15} />
+                            )}
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
+                            className="p-1 text-muted hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors"
+                            title="Delete Job"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    ) : filteredJobs.length === 0 ? (
+      <div className="text-center py-16 text-muted border border-dashed border-border rounded-xl bg-card/10">
+        <p className="text-xs font-medium">No jobs match the current filters</p>
+        <button
+          onClick={clearFilters}
+          className="mt-2 text-xs text-primary hover:underline font-bold"
+        >
+          Clear filters
+        </button>
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {filteredJobs.map((job) => {
+        const percent = getStagePercent(job)
+        const currentAssignee = job.current_assignee || null
+
+        const assigneeOptions = [
+          { value: '', label: '— Unassigned —' },
+          ...users.filter(u => u.active_status).map(u => ({
+            value: u.user_name,
+            label: formatUserDisplayName(u)
+          }))
+        ]
+        if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
+          assigneeOptions.push({ value: currentAssignee, label: getUserDisplayName(currentAssignee) })
+        }
+
+        return (
+          <div
+            key={job.id}
+            onClick={() => handleJobClick(job)}
+            className="p-4 rounded-xl border bg-card border-border shadow-sm flex flex-col justify-between cursor-pointer hover:border-primary/50 transition-colors"
+          >
+            <div>
+              <div className="flex justify-between items-start gap-2">
+                <div className="flex items-start gap-2 min-w-0">
+                  {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
+                    <div onClick={(e) => e.stopPropagation()} className="pt-0.5 shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={selectedJobIds.includes(job.id)}
+                        onChange={() => toggleSelectJob(job.id)}
+                        className="w-3.5 h-3.5 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        title="Select for bulk dispatch"
+                      />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-sm text-text truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
+                    {job.epub_filename && (
+                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
+                        {job.epub_filename}
+                      </p>
+                    )}
+                    <p className="text-[11px] text-muted mt-0.5 flex items-center flex-wrap gap-2">
+                      {job.pdf_page_count ? `${job.pdf_page_count} Pages` : 'No Pages Info'}
+                      {job.pdf_type && (
+                        <span>({job.pdf_type})</span>
+                      )}
+                      {job.pdf_language && (
+                        <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-bold">{job.pdf_language}</span>
+                      )}
+                    </p>
                   </div>
-                  <span className="flex items-center gap-1 text-primary">View Details <ArrowRight size={10} /></span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
+                    <button
+                      onClick={(e) => handleSingleDispatch(e, job.id)}
+                      disabled={dispatchingJobId === job.id}
+                      className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                      title="Dispatch & Deliver to FTP"
+                    >
+                      {dispatchingJobId === job.id ? (
+                        <Loader2 size={15} className="animate-spin text-emerald-600" />
+                      ) : (
+                        <Send size={15} />
+                      )}
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => handleDownloadPdf(e, job)}
+                    className="p-1.5 text-muted hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                    title="Download PDF (Starts Work in Production)"
+                  >
+                    <Download size={15} />
+                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
+                      className="p-1.5 text-muted hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                      title="Delete Job"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                  <ChevronRight size={18} className="text-muted" />
                 </div>
               </div>
-            )
-          })}
-        </div>
-      )}
 
-      {/* Add Job Modal */}
-      {showAddJobModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-card border border-border rounded-xl max-w-md w-full p-5 shadow-xl space-y-4">
-            <div className="flex justify-between items-start border-b border-border/60 pb-2">
-              <div>
-                <h3 className="text-base font-bold text-text m-0">Add New Job</h3>
-                <p className="text-[10px] text-muted mt-0.5">Upload a PDF for Books on Demand</p>
+              <div className="mt-3 flex items-center justify-between text-[11px]">
+                <div className="flex items-center gap-1 text-muted" onClick={(e) => e.stopPropagation()}>
+                  <User size={12} className="text-muted/70" />
+                  <Dropdown
+                    variant="inline"
+                    searchable
+                    searchPlaceholder="Search assignees..."
+                    value={currentAssignee || ''}
+                    onChange={(val) => assignUser(job.id, val)}
+                    className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-auto shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px]"
+                    dropdownClassName="w-56 text-[11px] font-normal"
+                    options={assigneeOptions}
+                  />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${getStatusBadgeClass(job)}`}>
+                    {getStatusText(job)}
+                  </span>
+                  {getJobStatusInfo(job).isOverdue && (
+                    <span className="font-bold px-1.5 py-0.5 rounded text-[9px] bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400">
+                      Overdue
+                    </span>
+                  )}
+                  {getJobStatusInfo(job).isTomorrow && (
+                    <span className="font-bold px-1.5 py-0.5 rounded text-[9px] bg-orange-500/10 border border-orange-500/20 text-orange-600 dark:text-orange-400">
+                      Due Soon
+                    </span>
+                  )}
+                </div>
               </div>
+
+              {/* Progress bar visual indicator */}
+              <div className="mt-3 mb-3">
+                <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
+                  <span>Progress</span>
+                  <span>Stage: {job.current_stage_name}</span>
+                </div>
+                <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-500 rounded-full"
+                    style={{ width: `${percent}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
+              <div className="flex flex-col gap-0.5">
+                <span>Created: {formatDateTime(job.created_at)}</span>
+                <span
+                  className={isManager ? 'text-primary hover:underline cursor-pointer' : ''}
+                  onClick={(e) => {
+                    if (isManager) {
+                      e.stopPropagation()
+                      setShowEditDueDateModal(job)
+                      setNewDueDate(job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toISOString().slice(0, 10) : '')
+                      setDueDateReason('')
+                    }
+                  }}
+                >
+                  Due: {job.due_date ? (
+                    <span className={getJobStatusInfo(job).isOverdue ? 'text-red-500 font-semibold' : getJobStatusInfo(job).isTomorrow ? 'text-orange-500 font-semibold' : ''}>
+                      {formatDateTime(job.due_date)}
+                    </span>
+                  ) : (isManager ? 'Set Date' : '-')}
+                </span>
+              </div>
+              <span className="flex items-center gap-1 text-primary">View Details <ArrowRight size={10} /></span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+  }
+
+  {/* Add Job Modal */ }
+  {
+    showAddJobModal && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+        <div className="bg-card border border-border rounded-xl max-w-md w-full p-5 shadow-xl space-y-4">
+          <div className="flex justify-between items-start border-b border-border/60 pb-2">
+            <div>
+              <h3 className="text-base font-bold text-text m-0">Add New Job</h3>
+              <p className="text-[10px] text-muted mt-0.5">Upload a PDF for Books on Demand</p>
+            </div>
+            <button
+              onClick={() => {
+                setShowAddJobModal(false)
+                setErrorMsg(null)
+              }}
+              className="text-muted hover:text-text transition-colors p-1"
+            >
+              <XCircle size={18} />
+            </button>
+          </div>
+
+          {errorMsg && (
+            <div className="p-2.5 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-center gap-1.5">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleAddJob} className="space-y-3.5">
+            <div>
+              <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload PDF Document</label>
+              <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-5 text-center cursor-pointer transition-colors bg-background/50">
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={e => e.target.files && setPdfFile(e.target.files[0])}
+                  className="hidden"
+                  id="pdf-upload"
+                  required
+                />
+                <label htmlFor="pdf-upload" className="cursor-pointer space-y-1.5 block">
+                  <Upload className="mx-auto text-muted/80" size={22} />
+                  <p className="text-xs font-semibold text-text">Click to choose PDF</p>
+                  <p className="text-[9px] text-muted">Must be a valid PDF file</p>
+                </label>
+              </div>
+              {pdfFile && (
+                <div className="mt-2 bg-background border border-border rounded-lg p-2 text-xs text-muted flex items-center justify-between">
+                  <span className="truncate max-w-[280px] font-medium text-text">{pdfFile.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPdfFile(null)}
+                    className="text-red-600 hover:text-red-500 font-bold text-[10px]"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2.5">
               <button
+                type="button"
                 onClick={() => {
                   setShowAddJobModal(false)
                   setErrorMsg(null)
                 }}
-                className="text-muted hover:text-text transition-colors p-1"
-              >
-                <XCircle size={18} />
-              </button>
-            </div>
-
-            {errorMsg && (
-              <div className="p-2.5 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-center gap-1.5">
-                <AlertCircle size={14} className="shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleAddJob} className="space-y-3.5">
-              <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload PDF Document</label>
-                <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-5 text-center cursor-pointer transition-colors bg-background/50">
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={e => e.target.files && setPdfFile(e.target.files[0])}
-                    className="hidden"
-                    id="pdf-upload"
-                    required
-                  />
-                  <label htmlFor="pdf-upload" className="cursor-pointer space-y-1.5 block">
-                    <Upload className="mx-auto text-muted/80" size={22} />
-                    <p className="text-xs font-semibold text-text">Click to choose PDF</p>
-                    <p className="text-[9px] text-muted">Must be a valid PDF file</p>
-                  </label>
-                </div>
-                {pdfFile && (
-                  <div className="mt-2 bg-background border border-border rounded-lg p-2 text-xs text-muted flex items-center justify-between">
-                    <span className="truncate max-w-[280px] font-medium text-text">{pdfFile.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => setPdfFile(null)}
-                      className="text-red-600 hover:text-red-500 font-bold text-[10px]"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAddJobModal(false)
-                    setErrorMsg(null)
-                  }}
-                  className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploading || !pdfFile}
-                  className="px-3.5 py-1.5 bg-primary text-primary-foreground font-bold rounded-lg hover:bg-primary/95 transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs"
-                >
-                  {uploading ? 'Uploading...' : 'Create Job'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal !== null && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-card border border-border rounded-xl max-w-sm w-full p-5 shadow-xl space-y-4">
-            <div className="flex justify-between items-start border-b border-border/60 pb-2">
-              <div>
-                <h3 className="text-base font-bold text-text m-0 flex items-center gap-2">
-                  <AlertCircle size={18} className="text-red-500" />
-                  Confirm Deletion
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowDeleteModal(null)}
-                className="text-muted hover:text-text transition-colors p-1"
-              >
-                <XCircle size={18} />
-              </button>
-            </div>
-
-            <p className="text-sm text-muted">
-              Are you sure you want to delete this job and its files? This action cannot be undone.
-            </p>
-
-            <div className="pt-2 flex justify-end gap-2.5">
-              <button
-                onClick={() => setShowDeleteModal(null)}
                 className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
               >
                 Cancel
               </button>
               <button
-                onClick={() => deleteJob(showDeleteModal)}
-                className="px-3.5 py-1.5 bg-red-500 text-white font-bold rounded-lg hover:bg-red-600 transition-colors flex items-center gap-1.5 text-xs"
+                type="submit"
+                disabled={uploading || !pdfFile}
+                className="px-3.5 py-1.5 bg-primary text-primary-foreground font-bold rounded-lg hover:bg-primary/95 transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs"
               >
-                Delete Job
+                {uploading ? 'Uploading...' : 'Create Job'}
               </button>
             </div>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
+  {/* Delete Confirmation Modal */ }
+  {
+    showDeleteModal !== null && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+        <div className="bg-card border border-border rounded-xl max-w-sm w-full p-5 shadow-xl space-y-4">
+          <div className="flex justify-between items-start border-b border-border/60 pb-2">
+            <div>
+              <h3 className="text-base font-bold text-text m-0 flex items-center gap-2">
+                <AlertCircle size={18} className="text-red-500" />
+                Confirm Deletion
+              </h3>
+            </div>
+            <button
+              onClick={() => setShowDeleteModal(null)}
+              className="text-muted hover:text-text transition-colors p-1"
+            >
+              <XCircle size={18} />
+            </button>
+          </div>
+
+          <p className="text-sm text-muted">
+            Are you sure you want to delete this job and its files? This action cannot be undone.
+          </p>
+
+          <div className="pt-2 flex justify-end gap-2.5">
+            <button
+              onClick={() => setShowDeleteModal(null)}
+              className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => deleteJob(showDeleteModal)}
+              className="px-3.5 py-1.5 bg-red-500 text-white font-bold rounded-lg hover:bg-red-600 transition-colors flex items-center gap-1.5 text-xs"
+            >
+              Delete Job
+            </button>
           </div>
         </div>
-      )}
+      </div>
+    )
+  }
 
-      {/* Edit Due Date Modal */}
-      {showEditDueDateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-card w-full max-w-sm rounded-xl shadow-xl border border-border flex flex-col p-5 gap-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-text text-sm">Update Due Date</h3>
-              <button
-                onClick={() => setShowEditDueDateModal(null)}
-                className="text-muted hover:text-text transition-colors p-1"
-              >
-                <XCircle size={18} />
-              </button>
-            </div>
+  {/* Edit Due Date Modal */ }
+  {
+    showEditDueDateModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        <div className="bg-card w-full max-w-sm rounded-xl shadow-xl border border-border flex flex-col p-5 gap-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-text text-sm">Update Due Date</h3>
+            <button
+              onClick={() => setShowEditDueDateModal(null)}
+              className="text-muted hover:text-text transition-colors p-1"
+            >
+              <XCircle size={18} />
+            </button>
+          </div>
 
-            <form onSubmit={updateDueDate} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
+          <form onSubmit={updateDueDate} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-muted">New Due Date</label>
-                <div className="relative">
-                  <input
-                    type="date"
-                    required
-                    value={newDueDate}
-                    onChange={(e) => setNewDueDate(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-background border border-border rounded-xl text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm appearance-none cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-50 hover:[&::-webkit-calendar-picker-indicator]:opacity-100"
-                    style={{ colorScheme: 'light dark' }}
-                  />
-                </div>
+                {showEditDueDateModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const isImg = (showEditDueDateModal.pdf_type || '').toLowerCase().includes('image')
+                      const pageCount = showEditDueDateModal.pdf_page_count || 0
+                      const days = isImg ? (pageCount > 250 ? 7 : 5) : (pageCount > 250 ? 4 : 3)
+                      const base = showEditDueDateModal.created_at ? new Date(showEditDueDateModal.created_at) : new Date()
+                      const result = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
+                      setNewDueDate(result.toISOString().slice(0, 10))
+                    }}
+                    className="text-[11px] text-primary hover:underline font-semibold"
+                    title="Calculate based on: Text (<=250: 3d, >250: 4d) | Image (<=250: 5d, >250: 7d)"
+                  >
+                    Auto-calc ({((showEditDueDateModal.pdf_type || '').toLowerCase().includes('image') ? ((showEditDueDateModal.pdf_page_count || 0) > 250 ? '7d' : '5d') : ((showEditDueDateModal.pdf_page_count || 0) > 250 ? '4d' : '3d'))})
+                  </button>
+                )}
               </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-muted">Reason for Change</label>
-                <textarea
+              <div className="relative">
+                <input
+                  type="date"
                   required
-                  value={dueDateReason}
-                  onChange={(e) => setDueDateReason(e.target.value)}
-                  placeholder="Why is the date changing?"
-                  className="px-3 py-2 bg-background border border-border rounded-lg text-sm text-text focus:outline-none focus:border-primary transition-colors min-h-[80px] resize-none"
+                  value={newDueDate}
+                  onChange={(e) => setNewDueDate(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-background border border-border rounded-xl text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm appearance-none cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-50 hover:[&::-webkit-calendar-picker-indicator]:opacity-100"
+                  style={{ colorScheme: 'light dark' }}
                 />
               </div>
+            </div>
 
-              <div className="pt-2 flex justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setShowEditDueDateModal(null)}
-                  className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingDueDate}
-                  className="px-3.5 py-1.5 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-colors text-xs disabled:opacity-70"
-                >
-                  {savingDueDate ? 'Saving...' : 'Save Date'}
-                </button>
-              </div>
-            </form>
-          </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-muted">Reason for Change</label>
+              <textarea
+                required
+                value={dueDateReason}
+                onChange={(e) => setDueDateReason(e.target.value)}
+                placeholder="Why is the date changing?"
+                className="px-3 py-2 bg-background border border-border rounded-lg text-sm text-text focus:outline-none focus:border-primary transition-colors min-h-[80px] resize-none"
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowEditDueDateModal(null)}
+                className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingDueDate}
+                className="px-3.5 py-1.5 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-colors text-xs disabled:opacity-70"
+              >
+                {savingDueDate ? 'Saving...' : 'Save Date'}
+              </button>
+            </div>
+          </form>
         </div>
-      )}
-    </div>
+      </div>
+    )
+  }
+    </div >
   )
 }

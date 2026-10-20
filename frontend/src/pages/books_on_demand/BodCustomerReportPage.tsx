@@ -327,7 +327,6 @@ export function BodCustomerReportPage() {
               className="px-3 py-2 bg-background border-border border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary outline-none"
             >
               <option value="all">Prod: All</option>
-              <option value="Completed">Prod: Completed</option>
               <option value="In-progress">Prod: In-progress</option>
               <option value="YTS">Prod: YTS</option>
             </select>
@@ -337,20 +336,8 @@ export function BodCustomerReportPage() {
               className="px-3 py-2 bg-background border-border border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary outline-none"
             >
               <option value="all">QC: All</option>
-              <option value="Completed">QC: Completed</option>
               <option value="In-progress">QC: In-progress</option>
               <option value="YTS">QC: YTS</option>
-            </select>
-            <select
-              value={finalStatusFilter}
-              onChange={(e) => setFinalStatusFilter(e.target.value)}
-              className="px-3 py-2 bg-background border-border border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary outline-none"
-            >
-              <option value="all">Final: All</option>
-              <option value="Completed">Final: Completed</option>
-              <option value="In-progress">Final: In-progress</option>
-              <option value="Overdue">Final: Overdue</option>
-              <option value="YTS">Final: YTS</option>
             </select>
           </div>
 

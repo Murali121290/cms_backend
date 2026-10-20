@@ -5,6 +5,7 @@ from app.core.celery_app import celery_app
 from app.database import SessionLocal
 from app.domains.books_on_demand.models import BodJob
 from app.domains.books_on_demand.services.ftp_service import BodFtpService
+from app.domains.books_on_demand.utils import calculate_bod_due_date
 from app.domains.notifications.email_service import send_bod_new_job_email
 from app.core.config import get_settings
 
@@ -90,12 +91,11 @@ def watch_ftp_for_new_pdfs():
                         except Exception as e:
                             logger.error(f"Failed to extract page count and type for {pdf_name}: {e}")
                         
-                        stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Archive"
+                        stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
                         stages = [s.strip() for s in stages_str.split(",")]
                         initial_stage_name = stages[0]
-                        now_iso = datetime.now(timezone.utc).isoformat()
                         now_utc = datetime.now(timezone.utc)
-                        from datetime import timedelta
+                        now_iso = now_utc.isoformat()
                         
                         initial_history = {
                             initial_stage_name: {
@@ -115,7 +115,7 @@ def watch_ftp_for_new_pdfs():
                             stage_history=initial_history,
                             status="Active",
                             created_at=now_utc,
-                            due_date=now_utc + timedelta(days=3)
+                            due_date=calculate_bod_due_date(pdf_type, page_count, now_utc)
                         )
                         db.add(new_job)
                         db.commit()
