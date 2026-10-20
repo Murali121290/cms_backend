@@ -2016,7 +2016,26 @@ export function BodInternalPage() {
 
           <form onSubmit={updateDueDate} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-muted">New Due Date</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-muted">New Due Date</label>
+                {showEditDueDateModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const isImg = (showEditDueDateModal.pdf_type || '').toLowerCase().includes('image')
+                      const pageCount = showEditDueDateModal.pdf_page_count || 0
+                      const days = isImg ? (pageCount > 250 ? 7 : 5) : (pageCount > 250 ? 4 : 3)
+                      const base = showEditDueDateModal.created_at ? new Date(showEditDueDateModal.created_at) : new Date()
+                      const result = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
+                      setNewDueDate(result.toISOString().slice(0, 10))
+                    }}
+                    className="text-[11px] text-primary hover:underline font-semibold"
+                    title="Calculate based on: Text (<=250: 3d, >250: 4d) | Image (<=250: 5d, >250: 7d)"
+                  >
+                    Auto-calc ({((showEditDueDateModal.pdf_type || '').toLowerCase().includes('image') ? ((showEditDueDateModal.pdf_page_count || 0) > 250 ? '7d' : '5d') : ((showEditDueDateModal.pdf_page_count || 0) > 250 ? '4d' : '3d'))})
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <input
                   type="date"

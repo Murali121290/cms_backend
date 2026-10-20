@@ -160,6 +160,17 @@ export function BodInternalJobPage() {
   const [analysisDueDate, setAnalysisDueDate] = useState<string>('')
   const [analysisReason, setAnalysisReason] = useState<string>('')
 
+  const calculateDefaultDueDate = (type: string, pages: number | string, baseDate?: string | Date) => {
+    const isImage = (type || '').toLowerCase().includes('image')
+    const p = typeof pages === 'number' ? pages : parseInt(String(pages), 10)
+    const pageNum = isNaN(p) ? 0 : p
+    const days = isImage ? (pageNum > 250 ? 7 : 5) : (pageNum > 250 ? 4 : 3)
+
+    const base = baseDate ? new Date(baseDate) : new Date()
+    const result = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
+    return result.toISOString().slice(0, 10)
+  }
+
   const startEditingAnalysis = () => {
     if (!job) return
     setAnalysisPages(job.pdf_page_count ?? '')
@@ -599,7 +610,20 @@ export function BodInternalJobPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-muted">Due Date</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-muted">Due Date</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const autoDate = calculateDefaultDueDate(analysisType, analysisPages, job.created_at)
+                      setAnalysisDueDate(autoDate)
+                    }}
+                    className="text-[10px] text-primary hover:underline font-semibold"
+                    title="Calculate based on: Text (<=250: 3d, >250: 4d) | Image (<=250: 5d, >250: 7d)"
+                  >
+                    Auto-calc
+                  </button>
+                </div>
                 <input
                   type="date"
                   value={analysisDueDate}

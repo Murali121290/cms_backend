@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from app.database import get_db, SessionLocal
 from app.domains.books_on_demand.models import BodJob
 from app.domains.books_on_demand.services.ftp_service import BodFtpService
+from app.domains.books_on_demand.utils import calculate_bod_due_date
 from app.domains.notifications.email_service import send_bod_qc_ready_email, send_bod_new_job_email, send_bod_job_completed_email
 from pydantic import BaseModel
 from app.domains.auth.security import get_current_user_from_cookie
@@ -993,7 +994,7 @@ def create_job(
         stage_history=initial_history,
         status="Active",
         created_at=now_utc,
-        due_date=now_utc + timedelta(days=3)
+        due_date=calculate_bod_due_date(pdf_type, page_count, now_utc)
     )
     db.add(new_job)
     db.commit()
