@@ -125,17 +125,7 @@ foreach my $full_path (@file_queue) {
     }
 
     my $parser = XML::LibXML->new(load_ext_dtd => 0, no_network => 1);
-    my $dom;
-    eval {
-        $dom = $parser->parse_file($full_path);
-    };
-    if ($@ || !$dom) {
-        my $xml_str = read_file($full_path);
-        # Clean up any duplicated attributes such as aid:pstyle="..."
-        $xml_str =~ s{(<[a-zA-Z0-9_\-]+[^>]*?\s+aid:pstyle="[^"]*")[^>]*?\s+aid:pstyle="[^"]*"}{$1}gi;
-        $xml_str =~ s{(<[a-zA-Z0-9_\-]+[^>]*?\s+aid:cstyle="[^"]*")[^>]*?\s+aid:cstyle="[^"]*"}{$1}gi;
-        $dom = $parser->parse_string($xml_str);
-    }
+    my $dom    = $parser->parse_file($full_path);
     my $out    = XML::LibXML::Document->new('1.0', 'UTF-8');
 
     if ($mode eq 'xml2xhtml') {
@@ -207,8 +197,11 @@ foreach my $full_path (@file_queue) {
 
         my ($pub, $sys) = ($meta->('xml-doctype-public'), $meta->('xml-doctype-system'));
         $out->createInternalSubset($root->nodeName, $pub, $sys) if defined $pub || defined $sys;
-
-        save_file($target_out_path, $out->toString(0));
+        my $xml = $out->toString(0);
+        $xml =~ s{<para}{<p}g;
+        $xml =~ s{</para>}{</p><enter\/>}g;
+        
+        save_file($target_out_path, $xml);
     }
     print "Written: $target_out_path\n";
 }

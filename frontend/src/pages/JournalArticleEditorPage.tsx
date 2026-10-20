@@ -295,11 +295,27 @@ export function JournalArticleEditorPage() {
   const goTo = (issue: JournalIssue) => {
     setSelectedId(issue.id)
     if (occIndexByIssue.has(issue.id)) return // the editor scrolls to the selected occurrence
-    const idx = locOf(issue).para_idx
+    const loc = locOf(issue)
+    const idx = loc.para_idx
     const root = editorRef.current?.editor?.view.dom as HTMLElement | undefined
-    const el = idx !== undefined && root ? root.querySelector<HTMLElement>(`[data-para-idx="${idx}"]`) : null
+    let el = idx !== undefined && root ? root.querySelector<HTMLElement>(`[data-para-idx="${idx}"]`) : null
+
+    // Fallback: search for surface text in editor DOM (e.g. inside tables, cells, captions)
+    if (!el && root && loc.surface) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let node: Node | null
+      while ((node = walker.nextNode())) {
+        if (node.textContent && node.textContent.includes(loc.surface)) {
+          el = node.parentElement
+          break
+        }
+      }
+    }
+
     if (!el) {
-      if (issue.module === 'xml' || idx === undefined) toast.error('This finding has no position in the manuscript text')
+      if (issue.module === 'xml') {
+        toast.info('XML / DTD structure finding')
+      }
       return
     }
     el.scrollIntoView({ block: 'center', behavior: 'smooth' })

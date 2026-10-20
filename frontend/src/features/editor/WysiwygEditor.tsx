@@ -2626,36 +2626,45 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           padding: 1px 0;
         }
         
-        /* Specific Bibliography styles */
-        .bib_fname, .bib_surname {
+        /* Specific Bibliography styles (exact shading from UTP.dotm) */
+        .bib_fname {
           font-weight: 700;
-          color: #0d9488 !important;
-          background-color: rgba(13, 148, 136, 0.08) !important;
-          border-bottom: 1px dotted rgba(13, 148, 136, 0.4) !important;
+          color: #1e293b !important;
+          background-color: #ffffcc !important;
+        }
+        .bib_surname {
+          font-weight: 700;
+          color: #1e293b !important;
+          background-color: #ccff99 !important;
         }
         .bib_year {
           font-weight: 700;
-          color: #64748b !important;
-          background-color: rgba(100, 116, 139, 0.08) !important;
-          border-bottom: 1px dotted rgba(100, 116, 139, 0.4) !important;
+          color: #1e293b !important;
+          background-color: #ffccff !important;
         }
-        .bib_title, .bib_journal {
+        .bib_title {
+          color: #1e293b !important;
+          background-color: #d99594 !important;
+        }
+        .bib_journal {
           font-style: italic;
-          color: #4f46e5 !important;
-          background-color: rgba(79, 70, 229, 0.08) !important;
-          border-bottom: 1px dotted rgba(79, 70, 229, 0.4) !important;
+          color: #1e293b !important;
+          background-color: #f9decf !important;
         }
         .bib_volume {
           font-weight: 700;
           color: #1e293b !important;
-          background-color: rgba(241, 245, 249, 0.8) !important;
-          border-bottom: none !important;
+          background-color: #ccecff !important;
         }
-        .bib_doi, .bib_url {
+        .bib_doi {
           text-decoration: underline;
-          color: #e11d48 !important;
-          background-color: rgba(225, 29, 72, 0.08) !important;
-          border-bottom: none !important;
+          color: #1e293b !important;
+          background-color: #ccffcc !important;
+        }
+        .bib_url {
+          text-decoration: underline;
+          color: #1e293b !important;
+          background-color: #ccff66 !important;
         }
 
         /* Specific Citation styles */
@@ -3114,16 +3123,16 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
 
         /* Reference Validation Character Style Highlights (no borders) */
-        .ProseMirror span.bib_alt-year { background-color: #d8b4fe !important; }
-        .ProseMirror span.bib_article { background-color: #bae6fd !important; }
-        .ProseMirror span.bib_book { background-color: #93c5fd !important; }
-        .ProseMirror span.bib_chapterno { background-color: #e5e7eb !important; }
-        .ProseMirror span.bib_chaptertitle { background-color: #fdba74 !important; }
-        .ProseMirror span.bib_comment { background-color: #c7d2fe !important; }
-        .ProseMirror span.bib_confacronym { background-color: #f472b6 !important; }
-        .ProseMirror span.bib_confdate { background-color: #2dd4bf !important; }
-        .ProseMirror span.bib_conference { background-color: #60a5fa !important; }
-        .ProseMirror span.bib_conflocation { background-color: #f87171 !important; }
+        .ProseMirror span.bib_alt-year, .ProseMirror span.bib_alt_year { background-color: #cc99ff !important; }
+        .ProseMirror span.bib_article { background-color: #ccffff !important; }
+        .ProseMirror span.bib_book { background-color: #99ccff !important; }
+        .ProseMirror span.bib_chapterno { background-color: #d9d9d9 !important; }
+        .ProseMirror span.bib_chaptertitle { background-color: #ff9d5b !important; }
+        .ProseMirror span.bib_comment { background-color: #e5e7eb !important; }
+        .ProseMirror span.bib_confacronym { background-color: #fd77f3 !important; }
+        .ProseMirror span.bib_confdate { background-color: #3ce0c1 !important; }
+        .ProseMirror span.bib_conference { background-color: #9cb3fe !important; }
+        .ProseMirror span.bib_conflocation { background-color: #ec493c !important; }
         .ProseMirror span.bib_confpaper { background-color: #86efac !important; }
         .ProseMirror span.bib_confproceedings { background-color: #fbbf24 !important; }
         .ProseMirror span.bib_day { background-color: #fef08a !important; }

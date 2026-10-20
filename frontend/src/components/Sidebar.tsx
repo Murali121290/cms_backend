@@ -93,6 +93,7 @@ export function Sidebar() {
     ...(!isAccessibilityUser && !isCustomerUser
       ? [
         { to: '/clients', icon: Users, label: 'Books Production' },
+        { to: '/journal-production', icon: BookText, label: 'Journal Production' },
         { to: '/reports', icon: BarChart3, label: 'Reports' },
       ]
       : []),

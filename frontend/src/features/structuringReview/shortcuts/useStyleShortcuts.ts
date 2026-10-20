@@ -10,6 +10,92 @@ interface UseStyleShortcutsOptions {
   enabled?: boolean;
 }
 
+export function matchShortcutKey(e: KeyboardEvent, shortcut: string): boolean {
+  if (!shortcut) return false;
+  const norm = shortcut.trim().toLowerCase();
+  const isCtrl = e.ctrlKey && !e.metaKey;
+  const isAlt = e.altKey;
+  const isShift = e.shiftKey;
+
+  // 1. Quick Palette: Alt+S
+  if (norm === "alt+s") {
+    return isAlt && !isCtrl && !isShift && (e.code === "KeyS" || e.key.toLowerCase() === "s");
+  }
+
+  // 2. Alt + Number (Alt+1 to Alt+9)
+  for (let n = 1; n <= 9; n++) {
+    if (norm === `alt+${n}`) {
+      return isAlt && !isCtrl && !isShift && (e.code === `Digit${n}` || e.code === `Numpad${n}` || e.key === String(n));
+    }
+  }
+
+  // 3. Alt+0 or Alt+10 (TableNote) -> Digit0, Numpad0, or F10
+  if (norm === "alt+0" || norm === "alt+10") {
+    return isAlt && !isCtrl && !isShift && (e.code === "Digit0" || e.code === "Numpad0" || e.code === "F10" || e.key === "0");
+  }
+
+  // 4. Alt+F11 or Alt+11 (FigureLegend) -> F11 or Minus (-)
+  if (norm === "alt+f11" || norm === "alt+11") {
+    return isAlt && !isCtrl && !isShift && (e.code === "F11" || e.code === "Minus" || e.key === "-");
+  }
+
+  // 5. Alt+F12 or Alt+12 (FigureSource) -> F12 or Equal (=)
+  if (norm === "alt+f12" || norm === "alt+12") {
+    return isAlt && !isCtrl && !isShift && (e.code === "F12" || e.code === "Equal" || e.key === "=");
+  }
+
+  // 6. Ctrl + Alt + Digit (Ctrl+Alt+1 to Ctrl+Alt+7, etc.)
+  for (let n = 0; n <= 9; n++) {
+    if (norm === `ctrl+alt+${n}`) {
+      return isCtrl && isAlt && !isShift && (e.code === `Digit${n}` || e.code === `Numpad${n}` || e.key === String(n));
+    }
+  }
+
+  // 7. Ctrl + Alt + Letter (Ctrl+Alt+T, Ctrl+Alt+E)
+  if (norm.startsWith("ctrl+alt+")) {
+    const letter = norm.replace("ctrl+alt+", "").toUpperCase();
+    return isCtrl && isAlt && !isShift && (e.code === `Key${letter}` || e.key.toUpperCase() === letter);
+  }
+
+  // 8. Ctrl + Number (Ctrl+0, Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+7, Ctrl+8, Ctrl+9)
+  for (let n = 0; n <= 9; n++) {
+    if (norm === `ctrl+${n}`) {
+      return isCtrl && !isAlt && !isShift && (e.code === `Digit${n}` || e.code === `Numpad${n}` || e.key === String(n));
+    }
+  }
+
+  // 9. Ctrl + Period (Ctrl+.)
+  if (norm === "ctrl+.") {
+    return isCtrl && !isAlt && (e.code === "Period" || e.code === "NumpadDecimal" || e.key === ".");
+  }
+
+  // 10. Ctrl + Asterisk (Ctrl+*)
+  if (norm === "ctrl+*") {
+    return isCtrl && !isAlt && (e.key === "*" || e.code === "NumpadMultiply" || (isShift && e.code === "Digit8"));
+  }
+
+  // 11. Ctrl + Plus (Ctrl++)
+  if (norm === "ctrl++" || norm === "ctrl+=") {
+    return isCtrl && !isAlt && (e.key === "+" || e.code === "NumpadAdd" || (isShift && e.code === "Equal") || e.key === "=");
+  }
+
+  // 12. Ctrl + Letter (Ctrl+D for bib_doi)
+  if (norm === "ctrl+d") {
+    return isCtrl && !isAlt && !isShift && (e.code === "KeyD" || e.key.toLowerCase() === "d");
+  }
+
+  // 13. Alt + Shift + Letter or Digit (Alt+Shift+F, Alt+Shift+T, Alt+Shift+B, Alt+Shift+X, Alt+Shift+0)
+  if (norm.startsWith("alt+shift+")) {
+    const keyPart = norm.replace("alt+shift+", "").toUpperCase();
+    if (keyPart >= "0" && keyPart <= "9") {
+      return isAlt && isShift && !isCtrl && (e.code === `Digit${keyPart}` || e.code === `Numpad${keyPart}` || e.key === keyPart);
+    }
+    return isAlt && isShift && !isCtrl && (e.code === `Key${keyPart}` || e.key.toUpperCase() === keyPart);
+  }
+
+  return false;
+}
+
 export function useStyleShortcuts({
   editorRef,
   clientKey,
@@ -74,45 +160,23 @@ export function useStyleShortcuts({
 
       const clientData = getClientShortcuts(clientKey);
 
-      // 2. Paragraph Shortcuts: Ctrl + Alt + Key
-      if (e.ctrlKey && e.altKey && !e.shiftKey) {
-        let keyCombo: string | null = null;
-        if (e.code === "Digit0") keyCombo = "Ctrl+Alt+0";
-        else if (e.code === "Digit1") keyCombo = "Ctrl+Alt+1";
-        else if (e.code === "Digit2") keyCombo = "Ctrl+Alt+2";
-        else if (e.code === "Digit3") keyCombo = "Ctrl+Alt+3";
-        else if (e.code === "Digit4") keyCombo = "Ctrl+Alt+4";
-        else if (e.code === "KeyT") keyCombo = "Ctrl+Alt+T";
-        else if (e.code === "KeyE") keyCombo = "Ctrl+Alt+E";
-
-        if (keyCombo) {
-          const match = clientData.paragraph_shortcuts.find((s) => s.shortcut === keyCombo);
-          if (match) {
-            e.preventDefault();
-            e.stopPropagation();
-            applyShortcut(match);
-            return;
-          }
+      // 2. Check character shortcuts (e.g. Ctrl+0, Ctrl+., Ctrl+Alt+5, Ctrl+*, Ctrl+D, Ctrl++, Alt+Shift+F, etc.)
+      for (const item of clientData.character_shortcuts) {
+        if (item.shortcut && matchShortcutKey(e, item.shortcut)) {
+          e.preventDefault();
+          e.stopPropagation();
+          applyShortcut(item);
+          return;
         }
       }
 
-      // 3. Character Shortcuts: Alt + Shift + Key
-      if (e.altKey && e.shiftKey && !e.ctrlKey) {
-        let charCombo: string | null = null;
-        if (e.code === "KeyF") charCombo = "Alt+Shift+F";
-        else if (e.code === "KeyT") charCombo = "Alt+Shift+T";
-        else if (e.code === "KeyB") charCombo = "Alt+Shift+B";
-        else if (e.code === "KeyX") charCombo = "Alt+Shift+X";
-        else if (e.code === "Digit0") charCombo = "Alt+Shift+0";
-
-        if (charCombo) {
-          const match = clientData.character_shortcuts.find((s) => s.shortcut === charCombo);
-          if (match) {
-            e.preventDefault();
-            e.stopPropagation();
-            applyShortcut(match);
-            return;
-          }
+      // 3. Check paragraph shortcuts (e.g. Alt+1..9, Alt+0, Alt+F11, Alt+F12, Ctrl+Alt+T, Ctrl+Alt+E)
+      for (const item of clientData.paragraph_shortcuts) {
+        if (item.shortcut && matchShortcutKey(e, item.shortcut)) {
+          e.preventDefault();
+          e.stopPropagation();
+          applyShortcut(item);
+          return;
         }
       }
     };

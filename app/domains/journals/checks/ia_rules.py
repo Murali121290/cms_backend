@@ -7,10 +7,13 @@ to the suggested replacements. Findings carry para_idx + surface, so the editor 
 and "Apply fix" works as for the other checks.
 """
 import os
+import logging
 from typing import List
 
 from app.domains.journals.checks.base import CheckResult, IssueDraft, JournalCheck, register
 from app.domains.journals.manuscript import load_blocks, resolve_manuscript_path
+
+logger = logging.getLogger(__name__)
 
 SEVERITY = {"error": "error", "warn": "warning", "warning": "warning", "info": "info"}
 
@@ -44,12 +47,12 @@ class IaRulesCheck(JournalCheck):
 
         rows = selected_ia_rows(db, article.journal)
         if not rows:
-            return CheckResult(issues=[IssueDraft(
-                rule_id="IA-00", severity="error", title="No IA rules selected for this journal",
-                message="Choose the rules in Journal settings → IA rules, then run this step again. "
-                        "Mark this fixed if the journal uses no IA rules.",
-                suggestion={"type": "signoff"}, fingerprint="IA-00",
-            )], rules_total=1, rule_set_version="IA template")
+            from app.domains.journals.book_review import ia_catalog, save_journal_ia_rules
+            rows = ia_catalog()
+            try:
+                save_journal_ia_rules(db, article.journal, rows)
+            except Exception:
+                pass
 
         path = resolve_manuscript_path(db, article)
         if not path:
@@ -64,14 +67,19 @@ class IaRulesCheck(JournalCheck):
             para = f.get("para_index")
             surface = f.get("surface") or ""
             start = f.get("match_start")
-            body = (f.get("source") or "body") == "body" and para is not None
-            text = texts.get(para, "") if body else ""
-            if body and surface and (start is None or text[start:start + len(surface)] != surface):
-                # Some rules report match_start 0; find the surface in the paragraph instead.
+            source = f.get("source") or "body"
+            text = texts.get(para, "") if para is not None else ""
+            if para is not None and surface and (start is None or text[start:start + len(surface)] != surface):
                 start = text.find(surface) if surface in text else None
-            location = {"para_idx": para, "block_id": f"p{para}", "surface": surface} if body else {"surface": surface}
-            if body and start is not None:
-                location.update(start=start, end=start + len(surface))
+
+            location = {"surface": surface, "source": source}
+            if para is not None:
+                location["para_idx"] = para
+                location["block_id"] = f"p{para}"
+            if start is not None and start >= 0:
+                location["start"] = start
+                location["end"] = start + len(surface)
+
             replacement = f.get("replacement")
             issues.append(IssueDraft(
                 rule_id=f"IA:{f.get('rule_id')}",
@@ -83,4 +91,44 @@ class IaRulesCheck(JournalCheck):
                 suggestion={"type": "replace", "from": surface, "to": replacement} if replacement and replacement != surface else None,
                 fingerprint=f"IA:{f.get('rule_id')}:{para}:{start}:{surface}"[:255],
             ))
-        return CheckResult(issues=issues, rules_total=len(rows), rule_set_version="IA template")
+
+        # Also run PA 121 Mechanical detectors (En-dash ranges, SI units, Grammar agreement, Abbreviations)
+        try:
+            from app.domains.journals.pa_preediting import PAPreEditingEngine
+            pa_engine = PAPreEditingEngine(path)
+            pa_analysis = pa_engine.run_ms_analysis()
+            le_findings = pa_analysis.get("step_7_le_and_elog", {}).get("language_findings", [])
+            for idx, lf in enumerate(le_findings):
+                orig = lf.get("original", "")
+                sugg = lf.get("suggested", "")
+                pa_para_idx = None
+                pa_start = None
+                if orig:
+                    for p_idx, p_txt in texts.items():
+                        s_pos = p_txt.find(orig)
+                        if s_pos >= 0:
+                            pa_para_idx = p_idx
+                            pa_start = s_pos
+                            break
+                pa_loc = {"surface": orig, "source": "body"}
+                if pa_para_idx is not None:
+                    pa_loc["para_idx"] = pa_para_idx
+                    pa_loc["block_id"] = f"p{pa_para_idx}"
+                if pa_start is not None and pa_start >= 0:
+                    pa_loc["start"] = pa_start
+                    pa_loc["end"] = pa_start + len(orig)
+
+                issues.append(IssueDraft(
+                    rule_id=f"PA:{lf.get('rule_id', idx+1)}",
+                    severity=SEVERITY.get(lf.get("severity", "minor").lower(), "warning"),
+                    title=lf.get("category") or "Mechanical Rule",
+                    message=lf.get("message") or f"Standardize '{orig}' to '{sugg}'",
+                    location=pa_loc,
+                    context_snippet=f"{lf.get('location')}: {orig} -> {sugg}",
+                    suggestion={"type": "replace", "from": orig, "to": sugg} if sugg else None,
+                    fingerprint=f"PA:{lf.get('rule_id')}:{orig}:{idx}"[:255]
+                ))
+        except Exception as e:
+            logger.warning("Error running PA mechanical rules detector: %s", e)
+
+        return CheckResult(issues=issues, rules_total=len(rows) + len(issues), rule_set_version="PA Editorial / IA template")

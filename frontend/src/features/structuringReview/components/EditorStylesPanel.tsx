@@ -83,9 +83,11 @@ const DEFAULT_CHAR_STYLES: { group: string; styles: string[] }[] = [
   {
     group: "Bibliography",
     styles: [
-      "bib_article", "bib_book", "bib_chapterno", "bib_chaptertitle",
-      "bib_doi", "bib_journal", "bib_publisher", "bib_title",
-      "bib_volume", "bib_year", "bib_fname", "bib_surname", "bib_url",
+      "bib_surname", "bib_fname", "bib_article", "bib_journal",
+      "bib_year", "bib_volume", "bib_issue", "bib_fpage", "bib_lpage",
+      "bib_book", "bib_chaptertitle", "bib_title", "bib_url", "bib_doi",
+      "bib_ed-surname", "bib_ed-fname", "bib_editionno", "bib_organization",
+      "bib_chapterno", "bib_publisher",
     ],
   },
   {

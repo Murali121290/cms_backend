@@ -30,7 +30,8 @@
     "table-wrap-foot": { "target_tag": "div" },
     "fn":              { "target_tag": "div" },
     "fig":             { "target_tag": "div" },
-
+    "caption":         { "target_tag": "div", "class": "caption" },
+    
     "title":           { "target_tag": "h2", "class": "title" },
     "p":               { "target_tag": "p" },
     "para":            { "target_tag": "p" },

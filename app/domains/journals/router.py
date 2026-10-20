@@ -733,6 +733,74 @@ def reopen_pre_editing_step(article_id: int, step: str, db: Session = Depends(ge
         raise HTTPException(status_code=e.status_code, detail=e.message)
 
 
+# --- PA Editorial Ltd. Pre-Editing Module Endpoints (121/160 Rules & 7-Step Protocol) ---
+
+@router.get("/pa-rules-catalog")
+def get_pa_rules_catalog():
+    """Returns the master catalog of PA Editorial Ltd. 121 core rules and 160 extended points crosswalk."""
+    from app.domains.journals.pa_preediting import PA_121_RULES_CATALOG
+    return {
+        "status": "success",
+        "total_rules": len(PA_121_RULES_CATALOG),
+        "protocol": "PA Editorial Ltd. Protocol v2.4",
+        "rules": PA_121_RULES_CATALOG
+    }
+
+
+@router.get("/articles/{article_id}/pa-analysis")
+def get_pa_article_analysis(article_id: int, db: Session = Depends(get_db)):
+    """Runs Stage 1: 7-Step Manuscript Analysis Protocol & Advisory LE Level for PA articles."""
+    from app.domains.journals.manuscript import resolve_manuscript_path
+    from app.domains.journals.pa_preediting import PAPreEditingEngine
+
+    article = _get_article(db, article_id)
+    docx_path = resolve_manuscript_path(db, article)
+    if not docx_path or not os.path.exists(docx_path):
+        raise HTTPException(status_code=404, detail="No manuscript DOCX found for this article.")
+
+    engine = PAPreEditingEngine(docx_path)
+    return {
+        "status": "success",
+        "article_id": article_id,
+        "analysis": engine.run_ms_analysis()
+    }
+
+
+@router.get("/articles/{article_id}/pa-gated-steps")
+def get_pa_gated_steps(article_id: int, db: Session = Depends(get_db)):
+    """Returns the status and findings of the 4 Gated Steps for PA Pre-Editing."""
+    from app.domains.journals.manuscript import resolve_manuscript_path
+    from app.domains.journals.pa_preediting import PAPreEditingEngine
+
+    article = _get_article(db, article_id)
+    docx_path = resolve_manuscript_path(db, article)
+    if not docx_path or not os.path.exists(docx_path):
+        raise HTTPException(status_code=404, detail="No manuscript DOCX found for this article.")
+
+    engine = PAPreEditingEngine(docx_path)
+    return {
+        "status": "success",
+        "article_id": article_id,
+        "gated_steps": engine.run_gated_steps()
+    }
+
+
+@router.get("/articles/{article_id}/pa-elog")
+def get_pa_elog_html(article_id: int, db: Session = Depends(get_db)):
+    """Generates the official client-ready ELOG dossier HTML report."""
+    from fastapi.responses import HTMLResponse
+    from app.domains.journals.manuscript import resolve_manuscript_path
+    from app.domains.journals.pa_preediting import PAPreEditingEngine
+
+    article = _get_article(db, article_id)
+    docx_path = resolve_manuscript_path(db, article)
+    if not docx_path or not os.path.exists(docx_path):
+        raise HTTPException(status_code=404, detail="No manuscript DOCX found for this article.")
+
+    engine = PAPreEditingEngine(docx_path)
+    return HTMLResponse(content=engine.generate_elog_html(), status_code=200)
+
+
 class XhtmlSaveBody(BaseModel):
     html_content: str
 

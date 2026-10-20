@@ -1,7 +1,7 @@
 import { DEFAULT_CLIENT_SHORTCUTS } from "./defaultShortcuts";
 import type { AllClientsShortcutsConfig, ClientShortcutsMap, StyleShortcutItem } from "./types";
 
-const STORAGE_KEY = "cms_client_shortcuts_config_v1";
+const STORAGE_KEY = "cms_client_shortcuts_config_v2";
 
 export function resolveClientKey(
   clientName?: string | null,
