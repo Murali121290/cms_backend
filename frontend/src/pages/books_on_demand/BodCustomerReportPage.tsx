@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
-import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle } from 'lucide-react'
+import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import * as XLSX from 'xlsx'
@@ -22,6 +22,68 @@ export function BodCustomerReportPage() {
   const [prodStatusFilter, setProdStatusFilter] = useState('all')
   const [qcStatusFilter, setQcStatusFilter] = useState('all')
   const [finalStatusFilter, setFinalStatusFilter] = useState('all')
+
+  // Table heading filters & sorting
+  const [colFilters, setColFilters] = useState({
+    job: '',
+    pages: '',
+    type: 'all',
+    language: 'all',
+    created: '',
+    dueDate: '',
+    prodStatus: 'all',
+    prodTiming: '',
+    qcStatus: 'all',
+    qcTiming: '',
+    finalStatus: 'all'
+  })
+  const [sortField, setSortField] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc')
+      } else {
+        setSortField(null)
+        setSortDirection('asc')
+      }
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <ArrowUpDown size={11} className="opacity-35 group-hover:opacity-100 transition-opacity ml-1 shrink-0" />
+    }
+    return sortDirection === 'asc' ? (
+      <ArrowUp size={11} className="text-primary font-bold ml-1 shrink-0" />
+    ) : (
+      <ArrowDown size={11} className="text-primary font-bold ml-1 shrink-0" />
+    )
+  }
+
+  const resetColFilters = () => {
+    setColFilters({
+      job: '',
+      pages: '',
+      type: 'all',
+      language: 'all',
+      created: '',
+      dueDate: '',
+      prodStatus: 'all',
+      prodTiming: '',
+      qcStatus: 'all',
+      qcTiming: '',
+      finalStatus: 'all'
+    })
+    setSortField(null)
+    setSortDirection('asc')
+  }
+
+  const hasActiveColFilters = Object.values(colFilters).some(v => v !== '' && v !== 'all')
 
   useEffect(() => {
     fetchReport()
@@ -179,6 +241,147 @@ export function BodCustomerReportPage() {
 
   const chartData = Array.from(chartDataMap.values()).sort((a, b) => a.date.localeCompare(b.date))
 
+  const uniqueTypes = Array.from(
+    new Set(report.map(j => (j.pdf_type || '').trim()).filter(Boolean))
+  ).sort()
+
+  const uniqueLanguages = Array.from(
+    new Set(report.map(j => (j.pdf_language || '').trim()).filter(Boolean))
+  ).sort()
+
+  const tableJobs = filteredReport.filter(job => {
+    const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
+
+    // 1. Job
+    if (colFilters.job.trim()) {
+      const q = colFilters.job.trim().toLowerCase()
+      const match = (job.pdf_filename && job.pdf_filename.toLowerCase().includes(q)) ||
+                    (job.client_name && job.client_name.toLowerCase().includes(q)) ||
+                    (job.epub_filename && job.epub_filename.toLowerCase().includes(q))
+      if (!match) return false
+    }
+
+    // 2. Pages
+    if (colFilters.pages.trim()) {
+      const q = colFilters.pages.trim()
+      const pages = job.pdf_page_count ?? 0
+      if (q.startsWith('>=')) {
+        const n = parseInt(q.slice(2), 10)
+        if (isNaN(n) || pages < n) return false
+      } else if (q.startsWith('>')) {
+        const n = parseInt(q.slice(1), 10)
+        if (isNaN(n) || pages <= n) return false
+      } else if (q.startsWith('<=')) {
+        const n = parseInt(q.slice(2), 10)
+        if (isNaN(n) || pages > n) return false
+      } else if (q.startsWith('<')) {
+        const n = parseInt(q.slice(1), 10)
+        if (isNaN(n) || pages >= n) return false
+      } else {
+        if (!String(job.pdf_page_count ?? '').includes(q)) return false
+      }
+    }
+
+    // 3. Type
+    if (colFilters.type !== 'all') {
+      if ((job.pdf_type || '').toLowerCase() !== colFilters.type.toLowerCase()) return false
+    }
+
+    // 4. Language
+    if (colFilters.language !== 'all') {
+      if ((job.pdf_language || '').toLowerCase() !== colFilters.language.toLowerCase()) return false
+    }
+
+    // 5. Created At
+    if (colFilters.created) {
+      if (getDateKey(job.created_at) !== colFilters.created) return false
+    }
+
+    // 6. Due Date
+    if (colFilters.dueDate) {
+      if (getDateKey(job.due_date) !== colFilters.dueDate) return false
+    }
+
+    // 7. Production Status
+    if (colFilters.prodStatus !== 'all') {
+      if (prodStatus !== colFilters.prodStatus) return false
+    }
+
+    // 8. Production Timing
+    if (colFilters.prodTiming.trim()) {
+      const q = colFilters.prodTiming.trim().toLowerCase()
+      const s = prodData.start_time ? formatDateTime(prodData.start_time).toLowerCase() : ''
+      const e = prodData.end_time ? formatDateTime(prodData.end_time).toLowerCase() : ''
+      if (!s.includes(q) && !e.includes(q)) return false
+    }
+
+    // 9. QC Status
+    if (colFilters.qcStatus !== 'all') {
+      if (qcStatus !== colFilters.qcStatus) return false
+    }
+
+    // 10. QC Timing
+    if (colFilters.qcTiming.trim()) {
+      const q = colFilters.qcTiming.trim().toLowerCase()
+      const s = qcData.start_time ? formatDateTime(qcData.start_time).toLowerCase() : ''
+      const e = qcData.end_time ? formatDateTime(qcData.end_time).toLowerCase() : ''
+      if (!s.includes(q) && !e.includes(q)) return false
+    }
+
+    // 11. Final Status
+    if (colFilters.finalStatus !== 'all') {
+      if (finalStatus !== colFilters.finalStatus) return false
+    }
+
+    return true
+  }).sort((a, b) => {
+    if (!sortField) return 0
+    const { finalStatus: finalA, prodStatus: prodA, qcStatus: qcA, prodData: pDataA, qcData: qDataA } = getJobStatuses(a)
+    const { finalStatus: finalB, prodStatus: prodB, qcStatus: qcB, prodData: pDataB, qcData: qDataB } = getJobStatuses(b)
+
+    let valA: any = ''
+    let valB: any = ''
+
+    if (sortField === 'job') {
+      valA = (a.pdf_filename || '').toLowerCase()
+      valB = (b.pdf_filename || '').toLowerCase()
+    } else if (sortField === 'pages') {
+      valA = a.pdf_page_count || 0
+      valB = b.pdf_page_count || 0
+    } else if (sortField === 'type') {
+      valA = (a.pdf_type || '').toLowerCase()
+      valB = (b.pdf_type || '').toLowerCase()
+    } else if (sortField === 'language') {
+      valA = (a.pdf_language || '').toLowerCase()
+      valB = (b.pdf_language || '').toLowerCase()
+    } else if (sortField === 'created') {
+      valA = a.created_at ? new Date(a.created_at).getTime() : 0
+      valB = b.created_at ? new Date(b.created_at).getTime() : 0
+    } else if (sortField === 'dueDate') {
+      valA = a.due_date ? new Date(a.due_date).getTime() : 0
+      valB = b.due_date ? new Date(b.due_date).getTime() : 0
+    } else if (sortField === 'prodStatus') {
+      valA = prodA
+      valB = prodB
+    } else if (sortField === 'prodTiming') {
+      valA = pDataA.start_time ? new Date(pDataA.start_time).getTime() : 0
+      valB = pDataB.start_time ? new Date(pDataB.start_time).getTime() : 0
+    } else if (sortField === 'qcStatus') {
+      valA = qcA
+      valB = qcB
+    } else if (sortField === 'qcTiming') {
+      valA = qDataA.start_time ? new Date(qDataA.start_time).getTime() : 0
+      valB = qDataB.start_time ? new Date(qDataB.start_time).getTime() : 0
+    } else if (sortField === 'finalStatus') {
+      valA = finalA
+      valB = finalB
+    }
+
+    if (valA < valB) return sortDirection === 'asc' ? -1 : 1
+    if (valA > valB) return sortDirection === 'asc' ? 1 : -1
+    return 0
+  })
+
   const downloadReport = () => {
     const headers = [
       'Client',
@@ -198,8 +401,9 @@ export function BodCustomerReportPage() {
       'Final Status'
     ]
     const data = [headers]
+    const dataToExport = tableJobs.length > 0 ? tableJobs : filteredReport
 
-    filteredReport.forEach(job => {
+    dataToExport.forEach(job => {
       const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
 
       const prodStart = prodData.start_time ? formatDateTime(prodData.start_time) : '-'
@@ -508,41 +712,324 @@ export function BodCustomerReportPage() {
 
         {/* Data Table */}
         <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl">
+          <div className="flex items-center justify-between px-3.5 py-2 border-b border-border/50 bg-muted/15 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-muted font-medium">
+                Showing <strong className="text-text">{tableJobs.length}</strong> of {filteredReport.length} jobs
+              </span>
+              {hasActiveColFilters && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-semibold">
+                  Filtered
+                </span>
+              )}
+            </div>
+            {(hasActiveColFilters || sortField !== null) && (
+              <button
+                onClick={resetColFilters}
+                className="flex items-center gap-1 text-[11px] text-primary hover:underline font-semibold"
+              >
+                <X size={12} /> Reset sort & table filters
+              </button>
+            )}
+          </div>
+
           <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full min-w-[1150px] text-left border-collapse">
               <thead className="sticky top-0 z-10 shadow-sm bg-card">
+                {/* Header Row with Sort */}
                 <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Job</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Type</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Language</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Created At</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Production</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Production Timing</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">QC</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">QC Timing</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Final Status</th>
+                  <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[18%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Job</span>
+                      {renderSortIcon('job')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('pages')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[6%]">
+                    <div className="flex items-center justify-center gap-0.5">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</span>
+                      {renderSortIcon('pages')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('type')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Type</span>
+                      {renderSortIcon('type')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('language')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Language</span>
+                      {renderSortIcon('language')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('created')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Created At</span>
+                      {renderSortIcon('created')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('dueDate')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</span>
+                      {renderSortIcon('dueDate')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('prodStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Production</span>
+                      {renderSortIcon('prodStatus')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('prodTiming')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[11%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Production Timing</span>
+                      {renderSortIcon('prodTiming')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('qcStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">QC</span>
+                      {renderSortIcon('qcStatus')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('qcTiming')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[11%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">QC Timing</span>
+                      {renderSortIcon('qcTiming')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('finalStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Final Status</span>
+                      {renderSortIcon('finalStatus')}
+                    </div>
+                  </th>
+                </tr>
+
+                {/* Filter Row */}
+                <tr className="border-b border-border/50 bg-muted/20 font-normal normal-case tracking-normal">
+                  {/* Job */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={colFilters.job}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, job: e.target.value }))}
+                        placeholder="Filter..."
+                        className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                      />
+                      {colFilters.job && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, job: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Pages */}
+                  <th className="px-1 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={colFilters.pages}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
+                        placeholder="e.g. >250"
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                      />
+                      {colFilters.pages && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, pages: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Type */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.type}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All Types</option>
+                      {uniqueTypes.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </th>
+
+                  {/* Language */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.language}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All Langs</option>
+                      {uniqueLanguages.map(l => (
+                        <option key={l} value={l}>{l}</option>
+                      ))}
+                    </select>
+                  </th>
+
+                  {/* Created At */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={colFilters.created}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
+                        style={{ colorScheme: 'light dark' }}
+                      />
+                      {colFilters.created && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, created: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Due Date */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={colFilters.dueDate}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
+                        style={{ colorScheme: 'light dark' }}
+                      />
+                      {colFilters.dueDate && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Production */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.prodStatus}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, prodStatus: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All</option>
+                      <option value="Completed">Completed</option>
+                      <option value="In-progress">In-progress</option>
+                      <option value="YTS">YTS</option>
+                    </select>
+                  </th>
+
+                  {/* Production Timing */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={colFilters.prodTiming}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, prodTiming: e.target.value }))}
+                        placeholder="Filter..."
+                        className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                      />
+                      {colFilters.prodTiming && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, prodTiming: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* QC */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.qcStatus}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, qcStatus: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All</option>
+                      <option value="Completed">Completed</option>
+                      <option value="In-progress">In-progress</option>
+                      <option value="YTS">YTS</option>
+                    </select>
+                  </th>
+
+                  {/* QC Timing */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={colFilters.qcTiming}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, qcTiming: e.target.value }))}
+                        placeholder="Filter..."
+                        className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                      />
+                      {colFilters.qcTiming && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, qcTiming: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Final Status */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.finalStatus}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, finalStatus: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All</option>
+                      <option value="Completed">Completed</option>
+                      <option value="In-progress">In-progress</option>
+                      <option value="Overdue">Overdue</option>
+                      <option value="YTS">YTS</option>
+                    </select>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
                 {loading ? (
                   <tr>
-                    <td colSpan={10} className="px-6 py-12 text-center">
+                    <td colSpan={11} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center text-muted">
                         <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary" />
                         <p>Loading report data...</p>
                       </div>
                     </td>
                   </tr>
-                ) : filteredReport.length === 0 ? (
+                ) : tableJobs.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-6 py-12 text-center text-muted">
+                    <td colSpan={11} className="px-6 py-12 text-center text-muted">
                       No matching records found.
                     </td>
                   </tr>
                 ) : (
-                  filteredReport.map((job) => {
+                  tableJobs.map((job) => {
                     const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
 
                     const getStatusColor = (s: string) => {
