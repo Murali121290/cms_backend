@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -10,11 +10,13 @@ import { toast } from '@/store/useToastStore'
 import api from '@/api/client'
 import { formatDateTime as fmtUtcDateTime } from '@/utils/dateUtils'
 import { useUsersStore } from '@/stores/usersStore'
+import { useSessionStore } from '@/stores/sessionStore'
 
 export function BodInternalJobPage() {
   const { jobId } = useParams()
   const navigate = useNavigate()
   const { isAdmin } = useRBAC()
+  const viewer = useSessionStore(s => s.viewer)
 
   const [job, setJob] = useState<any>(null)
 
@@ -97,13 +99,31 @@ export function BodInternalJobPage() {
 
     try {
       await api.post(`/bod/jobs/${jobId}/advance`)
-      toast.success("QC completed and uploaded to FTP")
-      fetchJob()
+      toast.success("QC completed. Job moved to Ready to Dispatch.")
       setShowQCModal(false)
+      navigate('/bod/internal')
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to advance stage")
     } finally {
       setIsAdvancing(false)
+    }
+  }
+
+  const [isDispatching, setIsDispatching] = useState(false)
+
+  const dispatchJob = async () => {
+    if (!job) return
+    setIsDispatching(true)
+    try {
+      await api.post(`/bod/jobs/${jobId}/dispatch`, {
+        dispatched_by: viewer?.username || undefined
+      })
+      toast.success("Job dispatched successfully and uploaded to FTP!")
+      fetchJob()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to dispatch job to FTP")
+    } finally {
+      setIsDispatching(false)
     }
   }
 
@@ -232,6 +252,36 @@ export function BodInternalJobPage() {
     }
   }
 
+  const downloadAce = async () => {
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-ace`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', job.ace_report_filename || `${job.pdf_filename.replace('.pdf', '')}_ace_report.zip`)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+    } catch (err) {
+      toast.error("Failed to download ACE report")
+    }
+  }
+
+  const downloadEpubcheck = async () => {
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-epubcheck`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', job.epubcheck_report_filename || `${job.pdf_filename.replace('.pdf', '')}_log.txt`)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+    } catch (err) {
+      toast.error("Failed to download Epubcheck report")
+    }
+  }
+
   if (loading) {
     return <div className="p-6 text-muted">Loading...</div>
   }
@@ -249,7 +299,7 @@ export function BodInternalJobPage() {
   }
 
   const assigneeOptions = [
-    { value: '', label: 'Unassigned' },
+    { value: '', label: '— Unassigned —' },
     ...users.filter((u: any) => u.active_status !== false).map((u: any) => ({
       value: u.user_name || u.username,
       label: getUserDisplayName(u.user_name || u.username) || (u.user_name || u.username)
@@ -292,6 +342,7 @@ export function BodInternalJobPage() {
                   <Dropdown
                     variant="inline"
                     searchable
+                    searchPlaceholder="Search assignees..."
                     value={job.current_assignee || ''}
                     onChange={(val) => assignUser(val)}
                     className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[12px]"
@@ -322,6 +373,18 @@ export function BodInternalJobPage() {
             </Button>
           )}
 
+          {!isCompleted && job.current_stage_name === 'Ready to Dispatch' && (
+            <Button
+              variant="primary"
+              onClick={dispatchJob}
+              disabled={isDispatching}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+              leftIcon={isDispatching ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            >
+              {isDispatching ? 'Dispatching to FTP...' : 'Dispatch'}
+            </Button>
+          )}
+
           {canUploadEpub && (
             <div className="relative">
               <input
@@ -340,6 +403,80 @@ export function BodInternalJobPage() {
         </div>
       </div>
 
+
+      {/* Ready to Dispatch Stage Card */}
+      {job.current_stage_name === 'Ready to Dispatch' && !isCompleted && (
+        <div className="bg-card border rounded-xl p-5 shadow-sm transition-all border-emerald-500/40 ring-1 ring-emerald-500/20">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/60">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                <Send size={18} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-text m-0 flex items-center gap-2">
+                  Ready to Dispatch
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                    Awaiting FTP Delivery
+                  </span>
+                </h3>
+                <p className="text-xs text-muted m-0">QC reports verified. Click Dispatch to package deliverables into a ZIP and upload to FTP delivery server.</p>
+              </div>
+            </div>
+
+            <Button
+              variant="primary"
+              onClick={dispatchJob}
+              disabled={isDispatching}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-4 py-2"
+              leftIcon={isDispatching ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            >
+              {isDispatching ? 'Uploading to FTP...' : 'Dispatch & Deliver to FTP'}
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4">
+            <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
+              <div className="min-w-0 pr-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">Processed EPUB</span>
+                <p className="text-xs font-semibold text-text truncate m-0">{job.epub_filename || 'Not available'}</p>
+              </div>
+              {job.epub_filename && (
+                <Button size="sm" variant="ghost" onClick={downloadEpub} className="h-7 px-2 text-xs text-primary" title="Download EPUB">
+                  <Download size={13} />
+                </Button>
+              )}
+            </div>
+
+            <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
+              <div className="min-w-0 pr-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">ACE Report</span>
+                <p className="text-xs font-semibold text-text truncate m-0">
+                  {job.ace_report_filename || (job.ace_report_filepath ? 'Uploaded' : 'Pending')}
+                </p>
+              </div>
+              {job.ace_report_filepath && (
+                <Button size="sm" variant="ghost" onClick={downloadAce} className="h-7 px-2 text-xs text-emerald-600" title="Download ACE Report">
+                  <Download size={13} />
+                </Button>
+              )}
+            </div>
+
+            <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
+              <div className="min-w-0 pr-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">Epubcheck Log</span>
+                <p className="text-xs font-semibold text-text truncate m-0">
+                  {job.epubcheck_report_filename || (job.epubcheck_report_filepath ? 'Uploaded' : 'Pending')}
+                </p>
+              </div>
+              {job.epubcheck_report_filepath && (
+                <Button size="sm" variant="ghost" onClick={downloadEpubcheck} className="h-7 px-2 text-xs text-emerald-600" title="Download Epubcheck Log">
+                  <Download size={13} />
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Job Analysis Step Card (Only shown in Add job stage) */}
       {job.current_stage_name === 'Add job' && (
@@ -517,6 +654,30 @@ export function BodInternalJobPage() {
                 </Button>
               </div>
             )}
+
+            {job.ace_report_filepath && (
+              <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">ACE Validation Report</p>
+                  <p className="text-sm font-semibold truncate">{job.ace_report_filename || 'ACE Report'}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={downloadAce} leftIcon={<Download size={14} />}>
+                  Download
+                </Button>
+              </div>
+            )}
+
+            {job.epubcheck_report_filepath && (
+              <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Epubcheck Validation Report</p>
+                  <p className="text-sm font-semibold truncate">{job.epubcheck_report_filename || 'Epubcheck Log'}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={downloadEpubcheck} leftIcon={<Download size={14} />}>
+                  Download
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -580,7 +741,13 @@ export function BodInternalJobPage() {
                           <h4 className={`text-sm font-bold ${isCurrent ? 'text-text' : 'text-text/70'}`}>{stageName}</h4>
 
                           <div className="mt-1.5 space-y-1">
-                            {data.assignee && (
+                            {data.dispatched_by && (
+                              <div className="flex items-center gap-1.5 text-xs text-muted">
+                                <Send size={12} className="text-emerald-600 dark:text-emerald-400" /> Dispatched by: <strong className="text-text">{getUserDisplayName(data.dispatched_by)}</strong>
+                              </div>
+                            )}
+
+                            {data.assignee && !data.dispatched_by && (
                               <div className="flex items-center gap-1.5 text-xs text-muted">
                                 <User size={12} /> Assigned to: <strong className="text-text">{getUserDisplayName(data.assignee)}</strong>
                               </div>
@@ -611,11 +778,19 @@ export function BodInternalJobPage() {
                   <div key={idx} className="flex items-center justify-between bg-background border border-border rounded-lg p-3">
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0">
-                        <User size={14} />
+                        {assignment.action && assignment.action.toLowerCase().includes('dispatch') ? (
+                          <Send size={14} className="text-emerald-600 dark:text-emerald-400" />
+                        ) : (
+                          <User size={14} />
+                        )}
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-text m-0">Assigned to: {getUserDisplayName(assignment.user_id)}</p>
-                        <p className="text-[10px] text-muted m-0 mt-0.5">Stage: {assignment.stage} • Assigned By: {getUserDisplayName(assignment.assigned_by) || 'System'}</p>
+                        <p className="text-sm font-semibold text-text m-0">
+                          {assignment.action || `Assigned to: ${getUserDisplayName(assignment.user_id)}`}
+                        </p>
+                        <p className="text-[10px] text-muted m-0 mt-0.5">
+                          Stage: {assignment.stage} {assignment.assigned_by ? `• By: ${getUserDisplayName(assignment.assigned_by)}` : ''}
+                        </p>
                       </div>
                     </div>
                     <div className="text-xs text-muted font-medium">
@@ -783,7 +958,7 @@ export function BodInternalJobPage() {
                 {(isAdvancing || isUploadingReports) ? (
                   <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> {isUploadingReports ? 'Uploading...' : 'Completing...'}</span>
                 ) : (
-                  <span className="flex items-center gap-2"><CheckCircle size={16} /> Mark as Complete</span>
+                  <span className="flex items-center gap-2"><CheckCircle size={16} /> Complete & Move to Dispatch</span>
                 )}
               </Button>
             </div>

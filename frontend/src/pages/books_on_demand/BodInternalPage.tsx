@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -21,6 +21,11 @@ export function BodInternalPage() {
   const [jobs, setJobs] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
 
+  // Selection states for bulk dispatch
+  const [selectedJobIds, setSelectedJobIds] = useState<number[]>([])
+  const [isBulkDispatching, setIsBulkDispatching] = useState(false)
+  const [dispatchingJobId, setDispatchingJobId] = useState<number | null>(null)
+
   // Form states
   const [showAddJobModal, setShowAddJobModal] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
@@ -29,7 +34,7 @@ export function BodInternalPage() {
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
-  type QuickFilter = 'all' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'overdue' | 'tomorrow_due' | 'completed'
+  type QuickFilter = 'all' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'tomorrow_due' | 'completed'
   const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
@@ -400,6 +405,10 @@ export function BodInternalPage() {
   const qcYtsJobs = qcJobs.filter(j => !j.current_assignee).length
   const qcInProgressJobs = qcJobs.filter(j => Boolean(j.current_assignee)).length
 
+  // Ready to Dispatch: QC finished, awaiting FTP upload
+  const dispatchJobs = activeJobs.filter(j => j.current_stage_name === 'Ready to Dispatch')
+  const dispatchTotal = dispatchJobs.length
+
   // Overdue: crossed due date; Tomorrow Due: due soon (tomorrow)
   let overdueJobs = 0
   let dueSoonJobs = 0
@@ -502,12 +511,30 @@ export function BodInternalPage() {
       }
     }
 
+    if (job.current_stage_name === 'Ready to Dispatch') {
+      return {
+        label: 'Ready to Dispatch',
+        badgeClass: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold',
+        isOverdue: isOverdueJob,
+        isTomorrow: isTomorrowJob,
+      }
+    }
+
     return {
       label: job.status || 'Active',
       badgeClass: 'bg-primary/10 border-primary/20 text-primary',
       isOverdue: isOverdueJob,
       isTomorrow: isTomorrowJob,
     }
+  }
+
+  const getStagePercent = (job: any) => {
+    if (isJobCompleted(job)) return 100
+    if (job.current_stage_name === 'Add job') return 10
+    if (job.current_stage_name === 'Production') return 35
+    if (job.current_stage_name === 'QC') return 65
+    if (job.current_stage_name === 'Ready to Dispatch') return 90
+    return Math.min(95, Math.round((job.current_stage_index / 4) * 100))
   }
 
   const getStatusBadgeClass = (job: any) => getJobStatusInfo(job).badgeClass
@@ -535,6 +562,8 @@ export function BodInternalPage() {
       matchesFilter = !jobCompleted && j.current_stage_name === 'QC' && !j.current_assignee
     } else if (cardFilter === 'qc_in_progress') {
       matchesFilter = !jobCompleted && j.current_stage_name === 'QC' && Boolean(j.current_assignee)
+    } else if (cardFilter === 'ready_to_dispatch') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Ready to Dispatch'
     } else if (cardFilter === 'overdue') {
       matchesFilter = !jobCompleted && isOverdue(j.due_date)
     } else if (cardFilter === 'tomorrow_due') {
@@ -597,6 +626,8 @@ export function BodInternalPage() {
         const isInProgress = (j.current_stage_name === 'Production' && Boolean(j.pdf_downloaded || j.stage_history?.Production?.pdf_downloaded)) ||
                              (j.current_stage_name === 'QC' && Boolean(j.current_assignee))
         if (!isInProgress) return false
+      } else if (colFilters.status === 'ready_to_dispatch') {
+        if (jobCompleted || j.current_stage_name !== 'Ready to Dispatch') return false
       }
     }
 
@@ -695,6 +726,68 @@ export function BodInternalPage() {
     clearColFilters()
     setSortField(null)
     setSortDirection('asc')
+  }
+
+  // Jobs eligible for dispatch in the currently filtered list
+  const dispatchableJobs = filteredJobs.filter(j => j.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(j))
+  const allDispatchableSelected = dispatchableJobs.length > 0 && dispatchableJobs.every(j => selectedJobIds.includes(j.id))
+
+  const toggleSelectAllDispatchable = () => {
+    if (allDispatchableSelected) {
+      setSelectedJobIds(prev => prev.filter(id => !dispatchableJobs.some(j => j.id === id)))
+    } else {
+      setSelectedJobIds(prev => Array.from(new Set([...prev, ...dispatchableJobs.map(j => j.id)])))
+    }
+  }
+
+  const toggleSelectJob = (jobId: number) => {
+    setSelectedJobIds(prev =>
+      prev.includes(jobId) ? prev.filter(id => id !== jobId) : [...prev, jobId]
+    )
+  }
+
+  const handleSingleDispatch = async (e: React.MouseEvent, jobId: number) => {
+    e.stopPropagation()
+    setDispatchingJobId(jobId)
+    try {
+      await api.post(`/bod/jobs/${jobId}/dispatch`, {
+        dispatched_by: viewer?.username || undefined
+      })
+      toast.success("Job dispatched successfully and uploaded to FTP!")
+      setSelectedJobIds(prev => prev.filter(id => id !== jobId))
+      fetchJobs()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to dispatch job to FTP")
+    } finally {
+      setDispatchingJobId(null)
+    }
+  }
+
+  const handleBulkDispatch = async () => {
+    if (selectedJobIds.length === 0) return
+    setIsBulkDispatching(true)
+    try {
+      const { data } = await api.post('/bod/jobs/bulk-dispatch', { 
+        job_ids: selectedJobIds,
+        dispatched_by: viewer?.username || undefined
+      })
+      if (data.failed_count === 0) {
+        toast.success(`All ${data.success_count} job(s) dispatched successfully to FTP!`)
+        setSelectedJobIds([])
+      } else if (data.success_count === 0) {
+        const errorDetails = data.results.filter((r: any) => !r.success).map((r: any) => `${r.job_name || r.job_id}: ${r.error}`).join('; ')
+        toast.error(`Dispatch failed: ${errorDetails}`)
+      } else {
+        toast.warning(`${data.success_count} job(s) dispatched, ${data.failed_count} failed.`)
+        const failedIds = data.results.filter((r: any) => !r.success).map((r: any) => r.job_id)
+        setSelectedJobIds(failedIds)
+      }
+      fetchJobs()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to execute bulk dispatch")
+    } finally {
+      setIsBulkDispatching(false)
+    }
   }
 
   return (
@@ -916,7 +1009,7 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        {/* Row 2: Stages (Total, Fresh, Production, QC) */}
+        {/* Row 2: Stages (Total, Fresh, Production, QC, Ready to Dispatch) */}
         <div>
           <div className="flex items-center justify-between mb-1 px-0.5">
             <span className="text-[10px] font-bold tracking-wider uppercase text-muted flex items-center gap-1.5">
@@ -924,7 +1017,7 @@ export function BodInternalPage() {
               Workflow Stages
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-9 gap-2">
             {/* 1. Total */}
             <div
               onClick={() => setCardFilter('all')}
@@ -1103,9 +1196,68 @@ export function BodInternalPage() {
                 </button>
               </div>
             </div>
+
+            {/* 5. Ready to Dispatch */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'ready_to_dispatch' ? 'all' : 'ready_to_dispatch')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter === 'ready_to_dispatch' ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-emerald-500/[0.03]' : 'border-border/80 hover:border-emerald-500/40'}`}
+            >
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center gap-1">
+                  <div className="p-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded">
+                    <Send size={11} />
+                  </div>
+                  <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Ready to Dispatch</span>
+                </div>
+                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  Total {dispatchTotal}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between mt-1 pt-0.5">
+                <span className="text-lg font-bold text-text leading-none">{dispatchTotal}</span>
+                <span className="text-[8px] text-muted truncate">Awaiting FTP Delivery</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+
+  {/* Bulk dispatch toolbar */}
+  {selectedJobIds.length > 0 && (
+    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-2.5 flex items-center justify-between shadow-xs animate-fadeIn">
+      <div className="flex items-center gap-2.5">
+        <div className="p-1.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-md">
+          <Send size={15} />
+        </div>
+        <div>
+          <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">
+            {selectedJobIds.length} job{selectedJobIds.length > 1 ? 's' : ''} selected for dispatch
+          </span>
+          <span className="hidden sm:inline text-[11px] text-muted ml-2">
+            (Click Dispatch to package deliverables and upload to FTP server)
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          onClick={handleBulkDispatch}
+          disabled={isBulkDispatching}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7 px-3 flex items-center gap-1.5"
+          leftIcon={isBulkDispatching ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+        >
+          {isBulkDispatching ? 'Dispatching to FTP...' : `Dispatch Selected (${selectedJobIds.length})`}
+        </Button>
+        <button
+          onClick={() => setSelectedJobIds([])}
+          disabled={isBulkDispatching}
+          className="text-xs text-muted hover:text-text px-2 py-1 transition-colors font-medium"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )}
 
   {/* Grid listing of all active jobs */ }
   {
@@ -1125,7 +1277,17 @@ export function BodInternalPage() {
           <table className="w-full text-left text-xs text-text table-fixed">
             <thead className="bg-accent/50 border-b border-border text-[11px] font-bold text-muted uppercase tracking-wider">
               <tr className="select-none">
-                <th onClick={() => handleSort('name')} className="px-2 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[19%] overflow-hidden">
+                <th className="px-1 py-2 text-center w-[3%] overflow-hidden">
+                  <input
+                    type="checkbox"
+                    checked={allDispatchableSelected}
+                    onChange={toggleSelectAllDispatchable}
+                    disabled={dispatchableJobs.length === 0}
+                    title={dispatchableJobs.length === 0 ? "No dispatchable jobs in view" : "Select all Ready to Dispatch jobs"}
+                    className="w-3.5 h-3.5 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                  />
+                </th>
+                <th onClick={() => handleSort('name')} className="px-2 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[18%] overflow-hidden">
                   <div className="flex items-center gap-1">
                     <span className="truncate">Job Name</span>
                     {renderSortIcon('name')}
@@ -1137,13 +1299,13 @@ export function BodInternalPage() {
                     {renderSortIcon('pages')}
                   </div>
                 </th>
-                <th onClick={() => handleSort('type')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
+                <th onClick={() => handleSort('type')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[8%] overflow-hidden">
                   <div className="flex items-center gap-1">
                     <span className="truncate">Type</span>
                     {renderSortIcon('type')}
                   </div>
                 </th>
-                <th onClick={() => handleSort('language')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
+                <th onClick={() => handleSort('language')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[8%] overflow-hidden">
                   <div className="flex items-center gap-1">
                     <span className="truncate">Language</span>
                     {renderSortIcon('language')}
@@ -1167,22 +1329,25 @@ export function BodInternalPage() {
                     {renderSortIcon('progress')}
                   </div>
                 </th>
-                <th onClick={() => handleSort('created')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10%] overflow-hidden">
+                <th onClick={() => handleSort('created')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
                   <div className="flex items-center gap-1">
                     <span className="truncate">Created</span>
                     {renderSortIcon('created')}
                   </div>
                 </th>
-                <th onClick={() => handleSort('dueDate')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10%] overflow-hidden">
+                <th onClick={() => handleSort('dueDate')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
                   <div className="flex items-center gap-1">
                     <span className="truncate">Due Date</span>
                     {renderSortIcon('dueDate')}
                   </div>
                 </th>
-                <th className="px-1 py-2 text-center w-[4%]"></th>
+                <th className="px-1 py-2 text-center w-[6%]"></th>
               </tr>
 
               <tr className="border-b border-border bg-accent/20 font-normal normal-case tracking-normal">
+                {/* Select All placeholder */}
+                <th className="px-1 py-1 font-normal text-center overflow-hidden"></th>
+
                 {/* Job Name */}
                 <th className="px-1.5 py-1 font-normal overflow-hidden">
                   <div className="relative">
@@ -1282,6 +1447,7 @@ export function BodInternalPage() {
                     <option value="fresh">Fresh</option>
                     <option value="yts">YTS</option>
                     <option value="in_progress">In-Progress</option>
+                    <option value="ready_to_dispatch">Ready to Dispatch</option>
                     <option value="overdue">Overdue</option>
                     <option value="tomorrow_due">Due Soon</option>
                     <option value="completed">Completed</option>
@@ -1299,6 +1465,7 @@ export function BodInternalPage() {
                     <option value="Add job">Add job</option>
                     <option value="Production">Production</option>
                     <option value="QC">QC</option>
+                    <option value="Ready to Dispatch">Ready to Dispatch</option>
                     <option value="Completed">Completed</option>
                   </select>
                 </th>
@@ -1362,7 +1529,7 @@ export function BodInternalPage() {
             <tbody className="divide-y divide-border/60">
               {filteredJobs.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-16 text-muted">
+                  <td colSpan={11} className="text-center py-16 text-muted">
                     <p className="text-xs font-medium">No jobs match the current filters</p>
                     <button
                       onClick={clearFilters}
@@ -1374,11 +1541,11 @@ export function BodInternalPage() {
                 </tr>
               ) : (
                 filteredJobs.map((job) => {
-                const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
+                const percent = getStagePercent(job)
                 const currentAssignee = job.current_assignee || null
 
                 const assigneeOptions = [
-                  { value: '', label: 'Unassigned' },
+                  { value: '', label: '— Unassigned —' },
                   ...users.filter(u => u.active_status).map(u => ({
                     value: u.user_name,
                     label: formatUserDisplayName(u)
@@ -1394,6 +1561,24 @@ export function BodInternalPage() {
                     onClick={() => handleJobClick(job)}
                     className="hover:bg-accent/30 cursor-pointer transition-colors"
                   >
+                    <td className="px-1 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                      {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedJobIds.includes(job.id)}
+                          onChange={() => toggleSelectJob(job.id)}
+                          className="w-3.5 h-3.5 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          title="Select for bulk dispatch"
+                        />
+                      ) : (
+                        <input
+                          type="checkbox"
+                          disabled
+                          className="w-3.5 h-3.5 rounded border-border opacity-20 cursor-not-allowed"
+                          title="Only jobs in Ready to Dispatch stage can be dispatched"
+                        />
+                      )}
+                    </td>
                     <td className="px-2 py-2 overflow-hidden">
                       <h3 className="font-semibold text-xs truncate m-0 text-text" title={job.pdf_filename}>{job.pdf_filename}</h3>
                       {job.epub_filename && (
@@ -1411,13 +1596,14 @@ export function BodInternalPage() {
                     <td className="px-1.5 py-2 text-xs text-muted font-medium truncate overflow-hidden" title={job.pdf_language || ''}>
                       {job.pdf_language ? job.pdf_language : '-'}
                     </td>
-                    <td className="px-1.5 py-2 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-1.5 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-1 text-muted min-w-0">
                         <User size={12} className="text-muted/70 shrink-0" />
                         <div className="min-w-0 flex-1 truncate">
                           <Dropdown
                             variant="inline"
                             searchable
+                            searchPlaceholder="Search assignees..."
                             value={currentAssignee || ''}
                             onChange={(val) => assignUser(job.id, val)}
                             className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px] truncate"
@@ -1475,15 +1661,31 @@ export function BodInternalPage() {
                         isManager ? <span className="text-primary text-[11px]">Set Date</span> : '-'
                       )}
                     </td>
-                    <td className="px-1 py-2 text-center overflow-hidden">
-                      <div className="flex items-center justify-center">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
-                          className="p-1 text-muted hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors"
-                          title="Delete Job"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                    <td className="px-1 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1">
+                        {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
+                          <button
+                            onClick={(e) => handleSingleDispatch(e, job.id)}
+                            disabled={dispatchingJobId === job.id}
+                            className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                            title="Dispatch & Deliver to FTP"
+                          >
+                            {dispatchingJobId === job.id ? (
+                              <Loader2 size={15} className="animate-spin text-emerald-600" />
+                            ) : (
+                              <Send size={15} />
+                            )}
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
+                            className="p-1 text-muted hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors"
+                            title="Delete Job"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1506,11 +1708,11 @@ export function BodInternalPage() {
     ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredJobs.map((job) => {
-        const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
+        const percent = getStagePercent(job)
         const currentAssignee = job.current_assignee || null
 
         const assigneeOptions = [
-          { value: '', label: 'Unassigned' },
+          { value: '', label: '— Unassigned —' },
           ...users.filter(u => u.active_status).map(u => ({
             value: u.user_name,
             label: formatUserDisplayName(u)
@@ -1528,24 +1730,51 @@ export function BodInternalPage() {
           >
             <div>
               <div className="flex justify-between items-start gap-2">
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-sm text-text truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
-                  {job.epub_filename && (
-                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
-                      {job.epub_filename}
-                    </p>
+                <div className="flex items-start gap-2 min-w-0">
+                  {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
+                    <div onClick={(e) => e.stopPropagation()} className="pt-0.5 shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={selectedJobIds.includes(job.id)}
+                        onChange={() => toggleSelectJob(job.id)}
+                        className="w-3.5 h-3.5 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        title="Select for bulk dispatch"
+                      />
+                    </div>
                   )}
-                  <p className="text-[11px] text-muted mt-0.5 flex items-center flex-wrap gap-2">
-                    {job.pdf_page_count ? `${job.pdf_page_count} Pages` : 'No Pages Info'}
-                    {job.pdf_type && (
-                      <span>({job.pdf_type})</span>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-sm text-text truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
+                    {job.epub_filename && (
+                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
+                        {job.epub_filename}
+                      </p>
                     )}
-                    {job.pdf_language && (
-                      <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-bold">{job.pdf_language}</span>
-                    )}
-                  </p>
+                    <p className="text-[11px] text-muted mt-0.5 flex items-center flex-wrap gap-2">
+                      {job.pdf_page_count ? `${job.pdf_page_count} Pages` : 'No Pages Info'}
+                      {job.pdf_type && (
+                        <span>({job.pdf_type})</span>
+                      )}
+                      {job.pdf_language && (
+                        <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-bold">{job.pdf_language}</span>
+                      )}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
+                    <button
+                      onClick={(e) => handleSingleDispatch(e, job.id)}
+                      disabled={dispatchingJobId === job.id}
+                      className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                      title="Dispatch & Deliver to FTP"
+                    >
+                      {dispatchingJobId === job.id ? (
+                        <Loader2 size={15} className="animate-spin text-emerald-600" />
+                      ) : (
+                        <Send size={15} />
+                      )}
+                    </button>
+                  )}
                   <button
                     onClick={(e) => handleDownloadPdf(e, job)}
                     className="p-1.5 text-muted hover:text-primary hover:bg-primary/10 rounded transition-colors"
@@ -1572,10 +1801,11 @@ export function BodInternalPage() {
                   <Dropdown
                     variant="inline"
                     searchable
+                    searchPlaceholder="Search assignees..."
                     value={currentAssignee || ''}
                     onChange={(val) => assignUser(job.id, val)}
                     className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-auto shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px]"
-                    dropdownClassName="w-48 text-[11px] font-normal"
+                    dropdownClassName="w-56 text-[11px] font-normal"
                     options={assigneeOptions}
                   />
                 </div>

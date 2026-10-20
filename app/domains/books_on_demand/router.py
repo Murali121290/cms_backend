@@ -53,7 +53,11 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "due_date_history": job.due_date_history,
             "client_name": "BOD",
             "pdf_downloaded": pdf_downloaded,
-            "pdf_downloaded_at": prod_info.get("pdf_downloaded_at")
+            "pdf_downloaded_at": prod_info.get("pdf_downloaded_at"),
+            "ace_report_filepath": job.ace_report_filepath,
+            "ace_report_filename": os.path.basename(job.ace_report_filepath) if job.ace_report_filepath else None,
+            "epubcheck_report_filepath": job.epubcheck_report_filepath,
+            "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
         }
         result.append(job_dict)
     return result
@@ -89,7 +93,11 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "due_date_history": job.due_date_history,
         "client_name": "BOD",
         "pdf_downloaded": pdf_downloaded,
-        "pdf_downloaded_at": prod_info.get("pdf_downloaded_at")
+        "pdf_downloaded_at": prod_info.get("pdf_downloaded_at"),
+        "ace_report_filepath": job.ace_report_filepath,
+        "ace_report_filename": os.path.basename(job.ace_report_filepath) if job.ace_report_filepath else None,
+        "epubcheck_report_filepath": job.epubcheck_report_filepath,
+        "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
     }
 
 @router.get("/jobs/{job_id}/download-pdf")
@@ -141,6 +149,24 @@ def download_epub(job_id: int, db: Session = Depends(get_db)):
     if not job or not job.epub_filepath or not os.path.exists(job.epub_filepath):
         raise HTTPException(status_code=404, detail="EPUB not found")
     return FileResponse(path=job.epub_filepath, filename=job.epub_filename, media_type='application/epub+zip')
+
+
+@router.get("/jobs/{job_id}/download-ace")
+def download_ace(job_id: int, db: Session = Depends(get_db)):
+    """Download ACE report for a job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job or not job.ace_report_filepath or not os.path.exists(job.ace_report_filepath):
+        raise HTTPException(status_code=404, detail="ACE report not found")
+    return FileResponse(path=job.ace_report_filepath, filename=os.path.basename(job.ace_report_filepath), media_type='application/zip')
+
+
+@router.get("/jobs/{job_id}/download-epubcheck")
+def download_epubcheck(job_id: int, db: Session = Depends(get_db)):
+    """Download Epubcheck report for a job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job or not job.epubcheck_report_filepath or not os.path.exists(job.epubcheck_report_filepath):
+        raise HTTPException(status_code=404, detail="Epubcheck report not found")
+    return FileResponse(path=job.epubcheck_report_filepath, filename=os.path.basename(job.epubcheck_report_filepath), media_type='text/plain')
 
 
 @router.get("/report")
@@ -426,7 +452,11 @@ def update_job_analysis(
             "due_date_history": job.due_date_history,
             "client_name": "BOD",
             "pdf_downloaded": pdf_downloaded,
-            "pdf_downloaded_at": prod_info.get("pdf_downloaded_at")
+            "pdf_downloaded_at": prod_info.get("pdf_downloaded_at"),
+            "ace_report_filepath": job.ace_report_filepath,
+            "ace_report_filename": os.path.basename(job.ace_report_filepath) if job.ace_report_filepath else None,
+            "epubcheck_report_filepath": job.epubcheck_report_filepath,
+            "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
         }
     }
 
@@ -508,23 +538,36 @@ def advance_job_stage(job_id: int, background_tasks: BackgroundTasks, db: Sessio
 
 def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Session):
     settings = get_settings()
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     
-    if job.current_stage_index >= len(stages) - 1:
+    try:
+        curr_idx = stages.index(job.current_stage_name)
+    except ValueError:
+        curr_idx = job.current_stage_index
+    
+    if curr_idx >= len(stages) - 1:
         raise HTTPException(status_code=400, detail="Job is already at the final stage")
         
     # Mark end time for current stage
     now_iso = datetime.now(timezone.utc).isoformat()
-    history = dict(job.stage_history)
+    history = dict(job.stage_history) if job.stage_history else {}
     current_stage = job.current_stage_name
     stage_data = history.get(current_stage, {})
     stage_data["end_time"] = now_iso
     history[current_stage] = stage_data
     
+    # If currently at Ready to Dispatch, advancing requires FTP upload success
+    if current_stage == "Ready to Dispatch" or stages[curr_idx + 1] == "Archive":
+        success, error = _execute_dispatch_and_upload(job, db, settings)
+        if not success:
+            raise HTTPException(status_code=400, detail=error or "Failed to upload deliverable to FTP")
+        return {"message": "Job dispatched successfully and uploaded to FTP", "job": job}
+
     # Advance
-    job.current_stage_index += 1
-    new_stage = stages[job.current_stage_index]
+    next_idx = curr_idx + 1
+    job.current_stage_index = next_idx
+    new_stage = stages[next_idx]
     job.current_stage_name = new_stage
     
     # Set start time for next stage
@@ -532,8 +575,8 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     new_stage_data["start_time"] = now_iso
     
     from sqlalchemy.orm.attributes import flag_modified
-    if new_stage == "Production":
-        # Unassign assignee when moving to Production stage
+    if new_stage in ("Production", "Ready to Dispatch") or current_stage == "QC":
+        # Unassign assignee when moving to Production or when QC is completed
         job.current_assignee = None
         new_stage_data["assignee"] = None
         
@@ -541,10 +584,10 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
         new_history = list(history_list)
         new_history.append({
             "user_id": None,
-            "stage": "Production",
+            "stage": new_stage,
             "time": now_iso,
             "assigned_by": "System",
-            "action": "Unassigned on move to Production"
+            "action": f"Unassigned on move to {new_stage}"
         })
         job.assigned_users = new_history
         flag_modified(job, "assigned_users")
@@ -558,6 +601,7 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     # If moving to Archive, status becomes Completed
     if job.current_stage_index == len(stages) - 1:
         job.status = "Completed"
+        new_stage_data["end_time"] = now_iso
         
     db.commit()
     db.refresh(job)
@@ -570,49 +614,51 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     elif job.current_stage_name == "Archive" and manager_email:
         send_bod_job_completed_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
         
-    # Upload to FTP if moving to Archive and epub exists
-    if job.current_stage_name == "Archive" and job.epub_filename and job.epub_filepath:
-        background_tasks.add_task(_upload_to_ftp_task, job.epub_filepath, job.epub_filename, job.ace_report_filepath, job.epubcheck_report_filepath, job.pdf_filename)
-
-        
     return {"message": "Job advanced successfully", "job": job}
 
 
 import zipfile
 
-def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str, ace_path: str = None, epubcheck_path: str = None, pdf_filename: str = None):
-    settings = get_settings()
+def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_by: str = "System") -> tuple[bool, str | None]:
+    """
+    Packages EPUB and QC reports into a ZIP, uploads to FTP, and ONLY transitions
+    the job to Archive / Completed status after the FTP upload succeeds.
+    Returns (success: bool, error_message: str | None).
+    """
+    if not job.epub_filepath or not os.path.exists(job.epub_filepath):
+        return False, "Cannot dispatch: EPUB file is missing"
+
     if not settings.BOD_FTP_HOST:
-        logger.error("BOD FTP host is not configured.")
-        return
-        
+        return False, "BOD FTP host is not configured in settings."
+
     delivery_dir = settings.BOD_FTP_DELIVERY_PATH
     if not delivery_dir:
-        logger.error("BOD_FTP_DELIVERY_PATH is not configured in environment.")
-        raise ValueError("BOD_FTP_DELIVERY_PATH is missing from environment configuration.")
-    
+        return False, "BOD_FTP_DELIVERY_PATH is missing from environment configuration."
+
     try:
         # Create a combined zip file named after the PDF or EPUB
-        if pdf_filename:
-            zip_filename = pdf_filename.replace('.pdf', '.zip')
+        if job.pdf_filename:
+            zip_filename = job.pdf_filename.replace('.pdf', '.zip')
         else:
-            zip_filename = remote_epub_name.replace('.epub', '.zip')
-        if local_epub_path:
-            local_dir = os.path.dirname(local_epub_path)
+            zip_filename = (job.epub_filename or f"deliverable_{job.id}").replace('.epub', '.zip')
+            
+        if job.epub_filepath:
+            local_dir = os.path.dirname(job.epub_filepath)
         else:
             upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
             local_dir = os.path.join(upload_dir, "bod")
         os.makedirs(local_dir, exist_ok=True)
         zip_filepath = os.path.join(local_dir, zip_filename)
-        
+
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            if os.path.exists(local_epub_path):
-                zipf.write(local_epub_path, os.path.basename(local_epub_path))
-            if ace_path and os.path.exists(ace_path):
-                zipf.write(ace_path, os.path.basename(ace_path))
-            if epubcheck_path and os.path.exists(epubcheck_path):
-                zipf.write(epubcheck_path, os.path.basename(epubcheck_path))
-                
+            if os.path.exists(job.epub_filepath):
+                zipf.write(job.epub_filepath, os.path.basename(job.epub_filepath))
+            if job.ace_report_filepath and os.path.exists(job.ace_report_filepath):
+                zipf.write(job.ace_report_filepath, os.path.basename(job.ace_report_filepath))
+            if job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath):
+                zipf.write(job.epubcheck_report_filepath, os.path.basename(job.epubcheck_report_filepath))
+
+        # Upload to FTP server
         with BodFtpService(
             settings.BOD_FTP_HOST,
             settings.BOD_FTP_USERNAME,
@@ -622,8 +668,145 @@ def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str, ace_path: s
         ) as ftp:
             ftp.ensure_dir(delivery_dir)
             ftp.upload_file(zip_filepath, zip_filename)
+            
     except Exception as e:
-        logger.error(f"Failed background FTP upload for {remote_epub_name}: {str(e)}")
+        logger.error(f"Failed FTP upload for job {job.id} ({job.pdf_filename}): {str(e)}")
+        return False, f"FTP upload failed: {str(e)}"
+
+    # ONLY AFTER FTP SUCCEEDS: Update stage to Archive and status to Completed
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages = [s.strip() for s in stages_str.split(",")]
+    archive_index = stages.index("Archive") if "Archive" in stages else len(stages) - 1
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    history = dict(job.stage_history) if job.stage_history else {}
+    current_stage = job.current_stage_name
+    stage_data = history.get(current_stage, {})
+    stage_data["end_time"] = now_iso
+    stage_data["dispatched_by"] = dispatched_by
+    if not stage_data.get("assignee"):
+        stage_data["assignee"] = dispatched_by
+    history[current_stage] = stage_data
+
+    # Update job's current assignee to the user who dispatched it
+    job.current_assignee = dispatched_by
+    job.current_stage_index = archive_index
+    job.current_stage_name = "Archive"
+    job.status = "Completed"
+
+    new_stage_data = history.get("Archive", {})
+    new_stage_data["start_time"] = now_iso
+    new_stage_data["end_time"] = now_iso
+    new_stage_data["dispatched_by"] = dispatched_by
+    new_stage_data["assignee"] = dispatched_by
+    history["Archive"] = new_stage_data
+
+    from sqlalchemy.orm.attributes import flag_modified
+    job.stage_history = history
+    flag_modified(job, "stage_history")
+
+    history_list = job.assigned_users if isinstance(job.assigned_users, list) else []
+    new_history = list(history_list)
+    new_history.append({
+        "user_id": dispatched_by,
+        "stage": "Ready to Dispatch",
+        "time": now_iso,
+        "assigned_by": dispatched_by,
+        "action": f"Dispatched to FTP by {dispatched_by}"
+    })
+    job.assigned_users = new_history
+    flag_modified(job, "assigned_users")
+
+    db.commit()
+    db.refresh(job)
+
+    manager_email = settings.BOD_MANAGER_EMAIL
+    if manager_email:
+        send_bod_job_completed_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
+
+    return True, None
+
+
+class SingleDispatchPayload(BaseModel):
+    dispatched_by: Optional[str] = None
+
+
+@router.post("/jobs/{job_id}/dispatch")
+def dispatch_job(
+    job_id: int, 
+    payload: Optional[SingleDispatchPayload] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Dispatch job to FTP: packages EPUB and QC reports into ZIP, uploads to FTP, and marks job Completed only on success."""
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status == "Completed" or job.current_stage_name == "Archive":
+        raise HTTPException(status_code=400, detail="Job is already completed")
+
+    user_identifier = (payload.dispatched_by if payload and payload.dispatched_by else None) or (current_user.username if current_user else None) or "System"
+
+    settings = get_settings()
+    success, error = _execute_dispatch_and_upload(job, db, settings, dispatched_by=user_identifier)
+    if not success:
+        raise HTTPException(status_code=400, detail=error or "Failed to upload to FTP")
+
+    return {"message": "Job dispatched successfully and uploaded to FTP", "job": job}
+
+
+class BulkDispatchPayload(BaseModel):
+    job_ids: List[int]
+    dispatched_by: Optional[str] = None
+
+
+@router.post("/jobs/bulk-dispatch")
+def bulk_dispatch_jobs(
+    payload: BulkDispatchPayload, 
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Bulk dispatch multiple jobs to FTP: only successfully uploaded jobs are marked Completed."""
+    if not payload.job_ids:
+        raise HTTPException(status_code=400, detail="No job IDs provided")
+
+    user_identifier = (payload.dispatched_by if payload and payload.dispatched_by else None) or (current_user.username if current_user else None) or "System"
+
+    settings = get_settings()
+    results = []
+    success_count = 0
+    failed_count = 0
+
+    for jid in payload.job_ids:
+        job = db.query(BodJob).filter(BodJob.id == jid, BodJob.is_deleted == False).first()
+        if not job:
+            results.append({"job_id": jid, "success": False, "error": "Job not found"})
+            failed_count += 1
+            continue
+        if job.status == "Completed" or job.current_stage_name == "Archive":
+            results.append({"job_id": jid, "job_name": job.pdf_filename, "success": False, "error": "Job already completed"})
+            failed_count += 1
+            continue
+        if job.current_stage_name != "Ready to Dispatch":
+            results.append({"job_id": jid, "job_name": job.pdf_filename, "success": False, "error": f"Job is in '{job.current_stage_name}', not 'Ready to Dispatch'"})
+            failed_count += 1
+            continue
+
+        success, err = _execute_dispatch_and_upload(job, db, settings, dispatched_by=user_identifier)
+        if success:
+            success_count += 1
+            results.append({"job_id": jid, "job_name": job.pdf_filename, "success": True})
+        else:
+            failed_count += 1
+            results.append({"job_id": jid, "job_name": job.pdf_filename, "success": False, "error": err})
+
+    return {
+        "message": f"Bulk dispatch finished: {success_count} succeeded, {failed_count} failed",
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "results": results
+    }
 
 
 @router.post("/jobs/{job_id}/upload-qc-reports")
@@ -694,7 +877,7 @@ def upload_epub(
     now_iso = datetime.now(timezone.utc).isoformat()
     history = dict(job.stage_history)
     
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     
     qc_index = stages.index("QC") if "QC" in stages else 2
@@ -784,7 +967,7 @@ def create_job(
     except Exception as e:
         logger.error(f"Failed to extract page count and type for {file.filename}: {e}")
         
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     first_stage = stages[0]
     

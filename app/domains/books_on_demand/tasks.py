@@ -90,7 +90,7 @@ def watch_ftp_for_new_pdfs():
                         except Exception as e:
                             logger.error(f"Failed to extract page count and type for {pdf_name}: {e}")
                         
-                        stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Archive"
+                        stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
                         stages = [s.strip() for s in stages_str.split(",")]
                         initial_stage_name = stages[0]
                         now_iso = datetime.now(timezone.utc).isoformat()

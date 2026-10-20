@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     BOD_FTP_BASE_PATH: str = "Input"
     BOD_FTP_DELIVERY_PATH: str = "Delivery"
     BOD_MANAGER_EMAIL: str = ""
-    BOD_CUSTOM_STAGES: str = "Add job,Production,QC,Archive"
+    BOD_CUSTOM_STAGES: str = "Add job,Production,QC,Ready to Dispatch,Archive"
 
     def __init__(self, **values):
         super().__init__(**values)
