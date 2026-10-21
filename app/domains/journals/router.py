@@ -26,12 +26,14 @@ from app.domains.journals.schemas import (
     JournalStylesheetCreate, JournalStylesheetResponse,
     JournalGrammarsheetCreate, JournalGrammarsheetResponse,
     JournalCheckRunResponse, JournalIssueResponse, JournalIssueAction,
-    JournalWorkflowCreate, JournalWorkflowResponse, ArticleCounts, JournalClientOverview, JournalOverview,
+    JournalWorkflowCreate, JournalWorkflowUpdate, JournalWorkflowResponse, JournalWorkflowAssignment, MasterJournalStage,
+    ArticleCounts, JournalClientOverview, JournalOverview,
     JournalArticleRow, ArticleStageStatus
 )
 from app.domains.journals.files import latest_file, save_version
 from app.domains.journals.service import (
     initialize_article_stages, advance_article_stage, revert_article_stage, default_workflow, ensure_default_workflows, stage_names,
+    workflow_stage_names, MASTER_JOURNAL_STAGES,
     STAGE_PIPELINE as STAGE_NAMES, INDESIGN,
 )
 
@@ -641,6 +643,37 @@ def update_article_le_level(article_id: int, body: LeLevelUpdateBody, db: Sessio
     return set_le_level(db, article, body.le_level, body.reason)
 
 
+class EditorialScreeningUpdateBody(BaseModel):
+    scope_aligned: Optional[bool] = True
+    scope_notes: Optional[str] = None
+    article_type: Optional[str] = None
+    similarity_percentage: Optional[int] = None
+    peer_review_status: Optional[str] = None
+    ethics_clearance_confirmed: Optional[bool] = True
+    intake_status: Optional[str] = None
+
+
+class TrtaTriggerBody(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.put("/articles/{article_id}/editorial-screening")
+def update_editorial_screening_endpoint(article_id: int, body: EditorialScreeningUpdateBody, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Updates Editorial Scope & Quality Screening parameters and refreshes the ELOG."""
+    from app.domains.journals.ms_analysis import set_editorial_screening
+    article = _get_article(db, article_id)
+    return set_editorial_screening(db, article, body.model_dump(exclude_unset=True))
+
+
+@router.post("/articles/{article_id}/trta")
+def trigger_trta_endpoint(article_id: int, body: Optional[TrtaTriggerBody] = None, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    """Marks article as Technical Return to Author (TRTA) and returns intake deficiencies summary."""
+    from app.domains.journals.ms_analysis import trigger_trta_package
+    article = _get_article(db, article_id)
+    reason = body.reason if body else None
+    return trigger_trta_package(db, article, reason)
+
+
 @router.post("/articles/{article_id}/ms-analysis/complete")
 def complete_article_ms_analysis(article_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user=Depends(require_journal_user)):
     """Completes Stage 1 (MS Analysis & ELOG) and advances article to Stage 2 (Pre-Editing)."""
@@ -1005,6 +1038,20 @@ def list_issues(
     elif not include_superseded:
         query = query.filter(JournalIssue.status != "superseded")
     return query.order_by(JournalIssue.id).all()
+
+
+@router.get("/articles/{article_id}/121-rules")
+def get_121_rules_compliance(
+    article_id: int,
+    db: Session = Depends(get_db),
+):
+    article = _get_article(db, article_id)
+    issues = db.query(JournalIssue).filter(
+        JournalIssue.article_id == article_id,
+        JournalIssue.status != "superseded"
+    ).all()
+    from app.domains.journals.pa_preediting import evaluate_121_rules_compliance
+    return evaluate_121_rules_compliance(article, issues)
 
 
 @router.patch("/articles/{article_id}/issues/{issue_id}", response_model=JournalIssueResponse)
@@ -1766,9 +1813,19 @@ def download_proof(article_id: int, db: Session = Depends(get_db)):
 
 
 # --- Workflows, overviews and batch upload (client -> journal -> articles pages) ---
-def _workflow_out(wf: JournalWorkflow) -> JournalWorkflowResponse:
-    return JournalWorkflowResponse(id=wf.id, name=wf.name, description=wf.description, stage_numbers=sorted(set(wf.stage_numbers)),
-                                   stages=stage_names(wf.stage_numbers), is_default=wf.is_default, is_active=wf.is_active)
+def _workflow_out(wf: JournalWorkflow, db: Optional[Session] = None) -> JournalWorkflowResponse:
+    j_count = db.query(Journal).filter(Journal.workflow_id == wf.id).count() if db else 0
+    return JournalWorkflowResponse(
+        id=wf.id,
+        name=wf.name,
+        description=wf.description,
+        stage_numbers=sorted(set(wf.stage_numbers)) if wf.stage_numbers else [],
+        custom_stages=wf.custom_stages if wf.custom_stages else None,
+        stages=workflow_stage_names(wf),
+        is_default=wf.is_default,
+        is_active=wf.is_active,
+        journals_count=j_count
+    )
 
 
 def _is_delayed(article: JournalArticle, stages) -> bool:
@@ -1805,27 +1862,99 @@ def _article_counts(db: Session, journal_ids: List[int]):
     return counts
 
 
+@router.get("/workflows/stages/available", response_model=List[MasterJournalStage])
+def list_available_stages():
+    """List all master journal stages available for workflow composition."""
+    return [MasterJournalStage(**s) for s in MASTER_JOURNAL_STAGES]
+
+
 @router.get("/workflows", response_model=List[JournalWorkflowResponse])
 def list_workflows(db: Session = Depends(get_db)):
     ensure_default_workflows(db)
     rows = db.query(JournalWorkflow).filter(JournalWorkflow.is_active == True).order_by(JournalWorkflow.is_default.desc(), JournalWorkflow.id).all()  # noqa: E712
-    return [_workflow_out(w) for w in rows]
+    return [_workflow_out(w, db) for w in rows]
+
+
+@router.get("/workflows/{workflow_id}", response_model=JournalWorkflowResponse)
+def get_workflow(workflow_id: int, db: Session = Depends(get_db)):
+    wf = db.query(JournalWorkflow).filter(JournalWorkflow.id == workflow_id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return _workflow_out(wf, db)
 
 
 @router.post("/workflows", response_model=JournalWorkflowResponse, status_code=status.HTTP_201_CREATED)
 def create_workflow(body: JournalWorkflowCreate, db: Session = Depends(get_db)):
-    numbers = sorted(set(body.stage_numbers))
-    if any(n < 1 or n > len(STAGE_NAMES) for n in numbers):
-        raise HTTPException(status_code=400, detail=f"Stage numbers must be between 1 and {len(STAGE_NAMES)}")
     if db.query(JournalWorkflow).filter(JournalWorkflow.name == body.name).first():
         raise HTTPException(status_code=400, detail="A workflow with this name already exists")
+    numbers = sorted(set(body.stage_numbers)) if body.stage_numbers else []
     if body.is_default:
         db.query(JournalWorkflow).update({JournalWorkflow.is_default: False})
-    wf = JournalWorkflow(name=body.name, description=body.description, stage_numbers=numbers, is_default=body.is_default)
+    wf = JournalWorkflow(
+        name=body.name,
+        description=body.description,
+        stage_numbers=numbers,
+        custom_stages=body.custom_stages,
+        is_default=body.is_default,
+        is_active=True
+    )
     db.add(wf)
     db.commit()
     db.refresh(wf)
-    return _workflow_out(wf)
+    return _workflow_out(wf, db)
+
+
+@router.put("/workflows/{workflow_id}", response_model=JournalWorkflowResponse)
+def update_workflow(workflow_id: int, body: JournalWorkflowUpdate, db: Session = Depends(get_db)):
+    wf = db.query(JournalWorkflow).filter(JournalWorkflow.id == workflow_id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if body.name is not None and body.name.strip() != wf.name:
+        if db.query(JournalWorkflow).filter(JournalWorkflow.name == body.name.strip(), JournalWorkflow.id != workflow_id).first():
+            raise HTTPException(status_code=400, detail="A workflow with this name already exists")
+        wf.name = body.name.strip()
+    if body.description is not None:
+        wf.description = body.description
+    if body.stage_numbers is not None:
+        wf.stage_numbers = sorted(set(body.stage_numbers))
+    if body.custom_stages is not None:
+        wf.custom_stages = body.custom_stages
+    if body.is_default is not None:
+        if body.is_default:
+            db.query(JournalWorkflow).filter(JournalWorkflow.id != workflow_id).update({JournalWorkflow.is_default: False})
+        wf.is_default = body.is_default
+    if body.is_active is not None:
+        wf.is_active = body.is_active
+    db.commit()
+    db.refresh(wf)
+    return _workflow_out(wf, db)
+
+
+@router.delete("/workflows/{workflow_id}")
+def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
+    wf = db.query(JournalWorkflow).filter(JournalWorkflow.id == workflow_id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    assigned = db.query(Journal).filter(Journal.workflow_id == workflow_id).count()
+    if assigned > 0:
+        wf.is_active = False
+        db.commit()
+        return {"status": "deactivated", "message": f"Workflow deactivated ({assigned} journals currently use it)"}
+    db.delete(wf)
+    db.commit()
+    return {"status": "deleted", "message": "Workflow deleted successfully"}
+
+
+@router.put("/{journal_id}/workflow")
+def update_journal_workflow(journal_id: int, body: JournalWorkflowAssignment, db: Session = Depends(get_db)):
+    journal = _get_journal(db, journal_id)
+    wf = db.query(JournalWorkflow).filter(JournalWorkflow.id == body.workflow_id, JournalWorkflow.is_active == True).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found or inactive")
+    journal.workflow_id = wf.id
+    db.commit()
+    db.refresh(journal)
+    return {"status": "success", "message": f"Workflow updated to {wf.name}", "workflow": _workflow_out(wf, db).model_dump(mode="json")}
 
 
 @router.get("/clients/overview", response_model=List[JournalClientOverview])
@@ -1866,7 +1995,7 @@ def _journal_overviews(db: Session, journals: List[Journal]) -> List[JournalOver
         c = clients.get(j.client_id)
         row.client_code = c.client_code if c else None
         row.publisher_name = c.publisher_name if c else None
-        row.stages = stage_names(j.workflow.stage_numbers) if j.workflow else list(STAGE_NAMES)
+        row.stages = workflow_stage_names(j.workflow) if j.workflow else list(STAGE_NAMES)
         row.articles = counts[j.id]
         row.setup = _setup_status(db, j.id)
         out.append(row)
@@ -2093,13 +2222,20 @@ def _art_file(db: Session, article_id: int, file_id: int) -> JournalFile:
 @router.get("/articles/{article_id}/art")
 def article_art(article_id: int, db: Session = Depends(get_db)):
     """Current art per figure with measurements and the journal's art checks, and the figures the article cites."""
-    from app.domains.journals.art import art_rules, article_figures, check_art, effective_ppi, measure
+    from app.domains.journals.art import art_rules, article_figures, check_art, effective_ppi, measure, capture_images_from_docx
     from app.domains.journals.checks.structuring import active_stylesheet
     from app.domains.journals.files import art_files
 
     article = _get_article(db, article_id)
     sheet = active_stylesheet(db, article)
     rules = art_rules(sheet.style_rules if sheet else None)
+
+    # Auto-capture embedded figures from manuscript docx if not yet captured
+    figs_in_text = article_figures(db, article)
+    curr_arts = art_files(db, article_id)
+    if figs_in_text and (not curr_arts or len(curr_arts) < len(figs_in_text)):
+        capture_images_from_docx(db, article)
+
     counts = {}
     for r in db.query(JournalFile).filter(JournalFile.article_id == article_id, JournalFile.category == "Art").all():
         if r.figure_number is not None:
@@ -2115,11 +2251,25 @@ def article_art(article_id: int, db: Session = Depends(get_db)):
             else "warning" if any(c["status"] == "warning" for c in checks) else "ok",
         })
     figures = []
-    for n in sorted(set(article_figures(db, article)) | {f["figure_number"] for f in files_out if f["figure_number"]}):
+    for n in sorted(set(figs_in_text) | {f["figure_number"] for f in files_out if f["figure_number"]}):
         f = next((x for x in files_out if x["figure_number"] == n), None)
         figures.append({"number": n, "file_id": f["id"] if f else None, "filename": f["filename"] if f else None,
                         "status": (f["status"] if f else "missing")})
     return {"rules": rules, "figures": figures, "files": files_out}
+
+
+@router.post("/articles/{article_id}/art/capture")
+def capture_article_art(article_id: int, db: Session = Depends(get_db)):
+    """Explicitly capture and extract embedded images from the manuscript DOCX into Art files."""
+    from app.domains.journals.art import capture_images_from_docx
+    article = _get_article(db, article_id)
+    captured = capture_images_from_docx(db, article)
+    return {
+        "status": "success",
+        "captured_count": len(captured),
+        "files": [{"id": r.id, "filename": r.filename, "figure_number": r.figure_number} for r in captured]
+    }
+
 
 
 @router.post("/articles/{article_id}/art", status_code=status.HTTP_201_CREATED)

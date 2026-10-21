@@ -38,14 +38,41 @@ export interface Journal {
   created_at: string
 }
 
+export interface MasterJournalStage {
+  id: number
+  stage_name: string
+  short_name: string
+  description?: string
+  roles: string[]
+}
+
 export interface JournalWorkflow {
   id: number
   name: string
   description?: string
   stage_numbers: number[]
+  custom_stages?: string[] | null
   stages: string[]
   is_default: boolean
   is_active: boolean
+  journals_count?: number
+}
+
+export interface JournalWorkflowCreatePayload {
+  name: string
+  description?: string
+  stage_numbers: number[]
+  custom_stages?: string[]
+  is_default?: boolean
+}
+
+export interface JournalWorkflowUpdatePayload {
+  name?: string
+  description?: string
+  stage_numbers?: number[]
+  custom_stages?: string[]
+  is_default?: boolean
+  is_active?: boolean
 }
 
 export interface ArticleCounts {
@@ -161,6 +188,67 @@ export interface ChecklistItem {
   details: string
 }
 
+export interface EditorialScreeningData {
+  scope_aligned: boolean
+  scope_notes?: string
+  article_type?: string
+  peer_review_status?: string
+  similarity_percentage?: number
+  similarity_status?: string
+  ethics_clearance_confirmed?: boolean
+  intake_status?: string
+  trta_reason?: string
+  trta_timestamp?: string
+}
+
+export interface MsAnalysisFigureItem {
+  label: string
+  number: string
+  called_in_text: boolean
+  matched_file?: string
+  status: 'ok' | 'missing_file'
+  width?: number
+  height?: number
+  dpi?: number
+  format?: string
+  is_low_res?: boolean
+}
+
+export interface ItaComplianceBreakdown {
+  score: number
+  max: number
+  weight: number
+}
+
+export interface ItaComplianceData {
+  score: number
+  verdict: string
+  verdict_badge: string
+  breakdown: {
+    front_matter: ItaComplianceBreakdown
+    body_text: ItaComplianceBreakdown
+    figures: ItaComplianceBreakdown
+    tables: ItaComplianceBreakdown
+    references: ItaComplianceBreakdown
+  }
+  metrics: {
+    title?: string
+    title_length: number
+    max_title_chars: number
+    is_type_flag?: boolean
+    abstract_words: number
+    max_abstract_words: number
+    keywords_count: number
+    keywords: string[]
+    total_words: number
+    min_words: number
+    max_words: number
+    citations_count: number
+    references_count: number
+    citation_reference_ratio: number
+  }
+}
+
 export interface MsAnalysisState {
   article_id: number
   title: string
@@ -174,12 +262,21 @@ export interface MsAnalysisState {
   estimated_pages: number
   paragraphs_count: number
   table_count: number
+  abstract_words?: number
+  abstract_text?: string
+  keywords?: string[]
+  keywords_count?: number
+  title_length?: number
+  citation_reference_ratio?: number
+  ita_compliance?: ItaComplianceData
   imrad_sections?: Record<string, boolean>
   declarations: Record<string, { present: boolean; label: string; snippet?: string; status: string; message: string }>
-  figures: { label: string; number: string; called_in_text: boolean; matched_file?: string; status: 'ok' | 'missing_file' }[]
+  figures: MsAnalysisFigureItem[]
+  uncalled_art_files?: string[]
   tables: { label: string; number: string; called_in_text: boolean; status: string }[]
   citations_count: number
   references_count: number
+  editorial_screening?: EditorialScreeningData
   le_error_count: number
   le_density: number
   le_recommended_level: string
@@ -189,6 +286,32 @@ export interface MsAnalysisState {
   checklist: ChecklistItem[]
   elog_html?: string
   analyzed_at: string
+}
+
+export interface PaRuleComplianceItem {
+  id: number
+  rule_160_id?: number
+  part: string
+  domain: string
+  name: string
+  mode: string
+  severity: string
+  gate: number
+  desc: string
+  status: 'passed' | 'flagged'
+  issues_count: number
+  open_issues_count: number
+  issue_ids: number[]
+}
+
+export interface Pa121RulesComplianceReport {
+  article_id: number
+  total: number
+  technical_count: number
+  language_count: number
+  passed_count: number
+  flagged_count: number
+  rules: PaRuleComplianceItem[]
 }
 
 export interface ArticleWorkspace {
@@ -536,11 +659,40 @@ export const journalsApi = {
     const res = await apiClient.post(`/journals/articles/${articleId}/art/${fileId}/rename`)
     return res.data
   },
+  captureArt: async (articleId: number): Promise<{ status: string; captured_count: number; files: any[] }> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/art/capture`)
+    return res.data
+  },
   artUrl: (articleId: number, fileId: number) => `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/art/${fileId}/download`,
+
 
   // Workflows
   getWorkflows: async (): Promise<JournalWorkflow[]> => {
     const res = await apiClient.get('/journals/workflows')
+    return res.data
+  },
+  getAvailableStages: async (): Promise<MasterJournalStage[]> => {
+    const res = await apiClient.get('/journals/workflows/stages/available')
+    return res.data
+  },
+  getWorkflow: async (workflowId: number): Promise<JournalWorkflow> => {
+    const res = await apiClient.get(`/journals/workflows/${workflowId}`)
+    return res.data
+  },
+  createWorkflow: async (data: JournalWorkflowCreatePayload): Promise<JournalWorkflow> => {
+    const res = await apiClient.post('/journals/workflows', data)
+    return res.data
+  },
+  updateWorkflow: async (workflowId: number, data: JournalWorkflowUpdatePayload): Promise<JournalWorkflow> => {
+    const res = await apiClient.put(`/journals/workflows/${workflowId}`, data)
+    return res.data
+  },
+  deleteWorkflow: async (workflowId: number): Promise<{ status: string; message: string }> => {
+    const res = await apiClient.delete(`/journals/workflows/${workflowId}`)
+    return res.data
+  },
+  updateJournalWorkflow: async (journalId: number, workflowId: number): Promise<any> => {
+    const res = await apiClient.put(`/journals/${journalId}/workflow`, { workflow_id: workflowId })
     return res.data
   },
 
@@ -563,6 +715,10 @@ export const journalsApi = {
   },
   assignStage: async (data: StageAssignment): Promise<{ status: string; message: string }> => {
     const res = await apiClient.post('/journals/articles/assign-stage', data)
+    return res.data
+  },
+  get121RulesCompliance: async (articleId: number): Promise<Pa121RulesComplianceReport> => {
+    const res = await apiClient.get(`/journals/articles/${articleId}/121-rules`)
     return res.data
   },
   convertXhtmlToXml: async (articleId: number, content?: string): Promise<{ status: boolean; message: string; xml_content: string; file?: any }> => {
@@ -784,6 +940,14 @@ export const journalsApi = {
   elogDownloadUrl: (articleId: number) => `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/elog/download`,
   setLeLevel: async (articleId: number, le_level: string, reason?: string): Promise<{ status: string; le_level: string }> => {
     const res = await apiClient.put(`/journals/articles/${articleId}/le-level`, { le_level, reason })
+    return res.data
+  },
+  updateEditorialScreening: async (articleId: number, data: Partial<EditorialScreeningData>): Promise<MsAnalysisState> => {
+    const res = await apiClient.put(`/journals/articles/${articleId}/editorial-screening`, data)
+    return res.data
+  },
+  triggerTrta: async (articleId: number, reason?: string): Promise<{ status: string; message: string; author_queries_count: number; missing_declarations: number; missing_figures: number; trta_timestamp: string }> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/trta`, { reason })
     return res.data
   },
   completeMsAnalysis: async (articleId: number): Promise<any> => {

@@ -49,8 +49,10 @@ def _now() -> str:
 
 
 def stage_row(db: Session, article: JournalArticle) -> Optional[JournalStageDetail]:
-    return db.query(JournalStageDetail).filter(JournalStageDetail.article_id == article.id,
-                                               JournalStageDetail.stage_number == PRE_EDITING).first()
+    return db.query(JournalStageDetail).filter(
+        JournalStageDetail.article_id == article.id,
+        (JournalStageDetail.stage_number == PRE_EDITING) | (JournalStageDetail.stage_name.ilike("%pre-edit%"))
+    ).first()
 
 
 def _state(row: Optional[JournalStageDetail]) -> Dict[str, Dict[str, Any]]:
@@ -130,8 +132,9 @@ def step_status(db: Session, article: JournalArticle) -> Dict[str, Any]:
         })
         previous_finished = previous_finished and finished
     current = next((s["key"] for s in steps if s["status"] != "finished"), None)
+    is_pre_editing = "pre-edit" in article.current_stage.lower() or article.current_stage.split(".", 1)[0].strip() == str(PRE_EDITING)
     return {"steps": steps, "current_step": current, "all_finished": current is None,
-            "applies": article.current_stage.split(".", 1)[0].strip() == str(PRE_EDITING) and article.status != "Completed"}
+            "applies": is_pre_editing and article.status != "Completed"}
 
 
 def _get_step(key: str) -> Dict[str, str]:

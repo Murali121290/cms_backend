@@ -21,18 +21,113 @@ STAGE_PIPELINE = [
 MS_ANALYSIS, PRE_EDITING, LANGUAGE, XML_CONVERSION, INDESIGN, INDESIGN_QC, PROOF, DELIVERY = range(1, 9)
 
 # Seeded when the workflow table is empty (also by migration 0034).
+MASTER_JOURNAL_STAGES = [
+    {
+        "id": 1,
+        "stage_name": "1. MS review & elog",
+        "short_name": "MS review & elog",
+        "description": "Manuscript analysis, metadata extraction, queries log, and ELOG report generation",
+        "roles": ["Reviewer", "Editor", "Managing Editor"]
+    },
+    {
+        "id": 2,
+        "stage_name": "2. Pre-editing",
+        "short_name": "Pre-editing",
+        "description": "Structuring, references, 121 mechanical rules, and citation checks",
+        "roles": ["Pre-editor", "Copyeditor"]
+    },
+    {
+        "id": 3,
+        "stage_name": "3. Language editing",
+        "short_name": "Language editing",
+        "description": "Linguistic refinement, grammar rules (UK/US house style), readability, and tracked changes",
+        "roles": ["Language Editor", "Copyeditor"]
+    },
+    {
+        "id": 4,
+        "stage_name": "4. XML Conversion",
+        "short_name": "XML Conversion",
+        "description": "Conversion to JATS 1.3 XML and DTD validation",
+        "roles": ["XML Specialist", "Production Editor"]
+    },
+    {
+        "id": 5,
+        "stage_name": "5. Generate InDesign",
+        "short_name": "Generate InDesign",
+        "description": "Automated InDesign typesetting from XML and templates",
+        "roles": ["Typesetter", "Layout Artist"]
+    },
+    {
+        "id": 6,
+        "stage_name": "6. InDesign Final QC",
+        "short_name": "InDesign Final QC",
+        "description": "Quality control of InDesign layouts, font checks, and visual inspection",
+        "roles": ["QC Specialist", "Layout Artist"]
+    },
+    {
+        "id": 7,
+        "stage_name": "7. View Proof",
+        "short_name": "View Proof",
+        "description": "Proof PDF inspection, TinyMCE proof corrections, and proof sign-off",
+        "roles": ["Proofreader", "Author", "Editor"]
+    },
+    {
+        "id": 8,
+        "stage_name": "8. Final Delivery",
+        "short_name": "final delivery",
+        "description": "Assembly of final publication package (ZIP) with all validated deliverables",
+        "roles": ["Production Manager", "Dispatcher"]
+    },
+]
+
+# Seeded when the workflow table is empty (also by migration 0034).
 DEFAULT_WORKFLOWS = [
-    {"name": "Full production", "stage_numbers": [1, 2, 3, 4, 5, 6, 7, 8], "is_default": True,
-     "description": "MS Analysis & ELOG, pre-editing (structuring, references, IA rules, technical), language editing, JATS XML, InDesign typesetting, QC, proof and delivery."},
-    {"name": "XML only (no typesetting)", "stage_numbers": [1, 2, 4, 7, 8], "is_default": False,
-     "description": "MS Analysis, pre-editing, edited and delivered as JATS XML; the publisher typesets."},
-    {"name": "Fast track (no language edit)", "stage_numbers": [1, 2, 4, 5, 6, 7, 8], "is_default": False,
-     "description": "MS Analysis, pre-editing; skips language editing for articles that arrive copy-edited."},
+    {
+        "name": "PA Editorial (4 stages)",
+        "stage_numbers": [1, 2, 3, 4],
+        "custom_stages": [
+            "1. MS review & elog",
+            "2. Pre-editing",
+            "3. Language editing",
+            "4. final delivery"
+        ],
+        "is_default": False,
+        "description": "Streamlined 4-stage editorial pipeline: MS review & elog, Pre-editing, Language editing, and final delivery."
+    },
+    {
+        "name": "Full production",
+        "stage_numbers": [1, 2, 3, 4, 5, 6, 7, 8],
+        "custom_stages": None,
+        "is_default": True,
+        "description": "MS Analysis & ELOG, pre-editing (structuring, references, IA rules, technical), language editing, JATS XML, InDesign typesetting, QC, proof and delivery."
+    },
+    {
+        "name": "XML only (no typesetting)",
+        "stage_numbers": [1, 2, 4, 7, 8],
+        "custom_stages": None,
+        "is_default": False,
+        "description": "MS Analysis, pre-editing, edited and delivered as JATS XML; the publisher typesets."
+    },
+    {
+        "name": "Fast track (no language edit)",
+        "stage_numbers": [1, 2, 4, 5, 6, 7, 8],
+        "custom_stages": None,
+        "is_default": False,
+        "description": "MS Analysis, pre-editing; skips language editing for articles that arrive copy-edited."
+    },
 ]
 
 
 def stage_names(stage_numbers: List[int]) -> List[str]:
     return [STAGE_PIPELINE[n - 1] for n in sorted(set(stage_numbers)) if 1 <= n <= len(STAGE_PIPELINE)]
+
+
+def workflow_stage_names(wf: Optional[JournalWorkflow]) -> List[str]:
+    if wf and wf.custom_stages and isinstance(wf.custom_stages, list) and len(wf.custom_stages) > 0:
+        return list(wf.custom_stages)
+    if wf and wf.stage_numbers:
+        return stage_names(wf.stage_numbers)
+    return list(STAGE_PIPELINE)
 
 
 def ensure_pa_editorial_client(db: Session) -> None:
@@ -53,8 +148,9 @@ def ensure_pa_editorial_client(db: Session) -> None:
         db.add(pa_client)
         db.flush()
 
+    pa_wf = db.query(JournalWorkflow).filter(JournalWorkflow.name.ilike("%PA Editorial%")).first()
     pa_journal = db.query(Journal).filter(Journal.journal_code == "PAJ-01").first()
-    default_wf = db.query(JournalWorkflow).filter(JournalWorkflow.is_default == True).first()
+    default_wf = pa_wf or db.query(JournalWorkflow).filter(JournalWorkflow.is_default == True).first()
     if not pa_journal:
         pa_journal = Journal(
             client_id=pa_client.id,
@@ -86,6 +182,9 @@ def ensure_pa_editorial_client(db: Session) -> None:
             is_active=True
         ))
         db.commit()
+    elif pa_wf and pa_journal.workflow_id != pa_wf.id:
+        pa_journal.workflow_id = pa_wf.id
+        db.commit()
 
 
 def ensure_default_workflows(db: Session) -> None:
@@ -96,8 +195,9 @@ def ensure_default_workflows(db: Session) -> None:
             db.add(JournalWorkflow(**dw))
         else:
             wf.stage_numbers = dw["stage_numbers"]
+            if "custom_stages" in dw:
+                wf.custom_stages = dw["custom_stages"]
             wf.description = dw["description"]
-            wf.is_default = dw["is_default"]
     db.commit()
     try:
         ensure_pa_editorial_client(db)
@@ -114,11 +214,30 @@ def default_workflow(db: Session) -> JournalWorkflow:
 def article_stage_numbers(db: Session, article: JournalArticle) -> List[int]:
     journal = db.query(Journal).filter(Journal.id == article.journal_id).first()
     wf = journal.workflow if journal and journal.workflow else None
+    if wf and wf.custom_stages and isinstance(wf.custom_stages, list) and len(wf.custom_stages) > 0:
+        return list(range(1, len(wf.custom_stages) + 1))
     return sorted(set(wf.stage_numbers)) if wf else list(range(1, len(STAGE_PIPELINE) + 1))
 
 
 def initialize_article_stages(db: Session, article: JournalArticle):
     """Creates the stage detail records for a new article from its journal's workflow."""
+    journal = db.query(Journal).filter(Journal.id == article.journal_id).first()
+    wf = journal.workflow if journal and journal.workflow else None
+
+    if wf and wf.custom_stages and isinstance(wf.custom_stages, list) and len(wf.custom_stages) > 0:
+        stage_labels = list(wf.custom_stages)
+        for pos, label in enumerate(stage_labels):
+            db.add(JournalStageDetail(
+                article_id=article.id,
+                stage_number=pos + 1,
+                stage_name=label,
+                stage_status="In-progress" if pos == 0 else "Pending",
+                actual_start_date=datetime.now(timezone.utc) if pos == 0 else None,
+            ))
+        article.current_stage = stage_labels[0]
+        db.commit()
+        return
+
     numbers = article_stage_numbers(db, article)
     for pos, number in enumerate(numbers):
         db.add(JournalStageDetail(

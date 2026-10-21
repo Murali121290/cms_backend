@@ -74,10 +74,27 @@ export function ArticleFilesPanel({ articleId, settingsHref }: { articleId: numb
           ))}
         </div>
       )}
+      {art.figures.length > 0 && (
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => act(async () => {
+              const res = await journalsApi.captureArt(articleId)
+              return res
+            }, 'Extracted and captured embedded figures from manuscript')}
+            className="w-full text-xs font-semibold"
+          >
+            📸 Capture Figures from Manuscript DOCX
+          </Button>
+        </div>
+      )}
 
       <UploadZone accept=".tif,.tiff,.eps,.pdf,.png,.jpg,.jpeg,.svg,.ai" multiple isUploading={busy}
                   label="Upload or replace art (fig2.tif replaces Figure 2 as a new version)"
                   onFiles={files => act(() => journalsApi.uploadArt(articleId, files), `${files.length} file${files.length > 1 ? 's' : ''} uploaded`)} />
+
 
       <div className="flex flex-col gap-2">
         {art.files.length === 0 && <p className="text-muted text-center py-4">No art files yet.</p>}

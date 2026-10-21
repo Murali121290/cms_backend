@@ -35,6 +35,7 @@ class JournalWorkflow(Base):
     name = Column(String(150), unique=True, nullable=False)
     description = Column(Text, nullable=True)
     stage_numbers = Column(JSON, nullable=False) # e.g. [1, 2, 3, 4, 8]
+    custom_stages = Column(JSON, nullable=True) # e.g. ["1. MS review & elog", "2. Pre-editing", "3. Language editing", "4. final delivery"]
     is_default = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -60,6 +60,9 @@ class IaRulesCheck(JournalCheck):
         findings = annotate_with_stylesheet(analyze_docx(path), rows)
         texts = {b.idx: b.text for b in load_blocks(path)}
 
+        from app.domains.journals.pa_preediting import IA_TO_PA_MAPPING, PA_121_RULES_CATALOG
+        catalog_by_id = {r["id"]: r for r in PA_121_RULES_CATALOG}
+
         issues: List[IssueDraft] = []
         for f in findings:
             if not f.get("in_stylesheet"):
@@ -80,16 +83,32 @@ class IaRulesCheck(JournalCheck):
                 location["start"] = start
                 location["end"] = start + len(surface)
 
+            raw_rule = f.get("rule_id", "")
+            pa_rule_id = IA_TO_PA_MAPPING.get(raw_rule)
+            pa_rule = catalog_by_id.get(pa_rule_id) if pa_rule_id else None
+
+            if pa_rule:
+                rule_id_out = f"PA #{pa_rule['id']} ({raw_rule})"
+                title_out = f"PA Point #{pa_rule['id']}: {pa_rule['name']}"
+                location["pa_point"] = pa_rule["id"]
+                location["pa_part"] = pa_rule["part"]
+                location["pa_domain"] = pa_rule["domain"]
+                location["source_type"] = "PA 121 Rules"
+            else:
+                rule_id_out = f"IA:{raw_rule}"
+                title_out = f.get("rule_label") or raw_rule or "IA rule"
+                location["source_type"] = "IA Baseline"
+
             replacement = f.get("replacement")
             issues.append(IssueDraft(
-                rule_id=f"IA:{f.get('rule_id')}",
+                rule_id=rule_id_out,
                 severity=SEVERITY.get((f.get("severity") or "info").lower(), "info"),
-                title=f.get("rule_label") or f.get("rule_id") or "IA rule",
+                title=title_out,
                 message=(f"Journal style: {replacement}" if replacement else None),
                 location=location,
                 context_snippet=_snippet(f.get("context")),
                 suggestion={"type": "replace", "from": surface, "to": replacement} if replacement and replacement != surface else None,
-                fingerprint=f"IA:{f.get('rule_id')}:{para}:{start}:{surface}"[:255],
+                fingerprint=f"{rule_id_out}:{para}:{start}:{surface}"[:255],
             ))
 
         # Also run PA 121 Mechanical detectors (En-dash ranges, SI units, Grammar agreement, Abbreviations)
@@ -101,6 +120,9 @@ class IaRulesCheck(JournalCheck):
             for idx, lf in enumerate(le_findings):
                 orig = lf.get("original", "")
                 sugg = lf.get("suggested", "")
+                rule_num = lf.get("rule_id", idx + 1)
+                pa_meta = catalog_by_id.get(rule_num)
+
                 pa_para_idx = None
                 pa_start = None
                 if orig:
@@ -117,16 +139,25 @@ class IaRulesCheck(JournalCheck):
                 if pa_start is not None and pa_start >= 0:
                     pa_loc["start"] = pa_start
                     pa_loc["end"] = pa_start + len(orig)
+                
+                pa_loc["pa_point"] = rule_num
+                if pa_meta:
+                    pa_loc["pa_part"] = pa_meta["part"]
+                    pa_loc["pa_domain"] = pa_meta["domain"]
+                pa_loc["source_type"] = "PA 121 Rules"
+
+                rule_tag = f"PA #{rule_num}"
+                rule_title = f"PA Point #{rule_num}: {pa_meta['name']}" if pa_meta else (lf.get("category") or "Mechanical Rule")
 
                 issues.append(IssueDraft(
-                    rule_id=f"PA:{lf.get('rule_id', idx+1)}",
+                    rule_id=rule_tag,
                     severity=SEVERITY.get(lf.get("severity", "minor").lower(), "warning"),
-                    title=lf.get("category") or "Mechanical Rule",
+                    title=rule_title,
                     message=lf.get("message") or f"Standardize '{orig}' to '{sugg}'",
                     location=pa_loc,
                     context_snippet=f"{lf.get('location')}: {orig} -> {sugg}",
                     suggestion={"type": "replace", "from": orig, "to": sugg} if sugg else None,
-                    fingerprint=f"PA:{lf.get('rule_id')}:{orig}:{idx}"[:255]
+                    fingerprint=f"PA:{rule_num}:{orig}:{idx}"[:255]
                 ))
         except Exception as e:
             logger.warning("Error running PA mechanical rules detector: %s", e)

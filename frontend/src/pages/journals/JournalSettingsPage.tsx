@@ -16,9 +16,11 @@ import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
 import { cn } from '@/utils/cn'
 import { PaRulesSettingsTab } from './PaRulesSettingsTab'
+import { JournalWorkflowSettingsTab } from './JournalWorkflowSettingsTab'
 
-type Tab = 'design' | 'style' | 'ia' | 'grammar' | 'pa_rules'
+type Tab = 'workflow' | 'pa_rules' | 'design' | 'style' | 'ia' | 'grammar'
 const TABS: { key: Tab; label: string }[] = [
+  { key: 'workflow', label: 'Workflow & Stages' },
   { key: 'pa_rules', label: '121 Pre-Editing Rules' },
   { key: 'design', label: 'Design pack' },
   { key: 'style', label: 'Style sheet' },
@@ -32,7 +34,7 @@ export function JournalSettingsPage() {
   const id = Number(journalId)
   const { hash } = useLocation()
   const navigate = useNavigate()
-  const tab: Tab = (['design', 'style', 'ia', 'grammar', 'pa_rules'] as Tab[]).find(t => `#${t}` === hash) ?? 'pa_rules'
+  const tab: Tab = (['workflow', 'design', 'style', 'ia', 'grammar', 'pa_rules'] as Tab[]).find(t => `#${t}` === hash) ?? 'workflow'
   const [journal, setJournal] = useState<JournalOverview | null>(null)
 
   const loadJournal = useCallback(() => journalsApi.getJournal(id).then(setJournal)
@@ -65,6 +67,7 @@ export function JournalSettingsPage() {
           </button>
         ))}
       </div>
+      {tab === 'workflow' && <JournalWorkflowSettingsTab journalId={id} journal={journal} onJournalUpdated={loadJournal} />}
       {tab === 'pa_rules' && <PaRulesSettingsTab journalId={id} />}
       {tab === 'design' && <DesignTab journalId={id} onChange={loadJournal} />}
       {tab === 'style' && <StyleTab journalId={id} onChange={loadJournal} />}

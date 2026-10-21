@@ -106,7 +106,13 @@ STAGE_OUTPUTS = {
 
 
 def missing_output(article: JournalArticle) -> Optional[str]:
-    need = STAGE_OUTPUTS.get(stage_number(article.current_stage))
+    # Delivery stage does not require intermediate conversion files
+    if "delivery" in article.current_stage.lower():
+        return None
+    s_num = stage_number(article.current_stage)
+    if s_num == 4 and "delivery" in article.current_stage.lower():
+        return None
+    need = STAGE_OUTPUTS.get(s_num)
     if need and not getattr(article, need[0]):
         return need[1]
     return None
@@ -114,8 +120,14 @@ def missing_output(article: JournalArticle) -> Optional[str]:
 
 def blocking_issues(db: Session, article: JournalArticle) -> List[JournalIssue]:
     """Open errors from checks at or before the article's current stage."""
-    current = stage_number(article.current_stage)
-    modules = [k for k, s in CHECK_STAGES.items() if s <= current]
+    if "delivery" in article.current_stage.lower():
+        return []
+    s_num = stage_number(article.current_stage)
+    if "pre-edit" in article.current_stage.lower():
+        s_num = 2
+    elif "language" in article.current_stage.lower():
+        s_num = 3
+    modules = [k for k, s in CHECK_STAGES.items() if s <= s_num]
     return db.query(JournalIssue).filter(
         JournalIssue.article_id == article.id,
         JournalIssue.module.in_(modules),

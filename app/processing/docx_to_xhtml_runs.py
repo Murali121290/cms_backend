@@ -27,6 +27,13 @@ logger = logging.getLogger("app.processing.docx_to_xhtml_runs")
 _M_NS_URI = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
 
+def _safe_escape(s, quote: bool = True) -> str:
+    """Safe html.escape that handles None, int, or other non-string types gracefully."""
+    if s is None:
+        return ""
+    return html.escape(str(s), quote=quote)
+
+
 def _omml_element_to_math_span(omml_el, display: str = "inline") -> str:
     """Render an <m:oMath> or <m:oMathPara> as a TipTap math-node span.
 
@@ -477,10 +484,37 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None, 
         bm_name = _get_or_create_run_bookmark(run, para, doc)
         return f'<span class="EndnoteRef" data-bookmark="{bm_name}" data-id="{etn_id}"><sup>{etn_id}</sup></span>'
 
+    # Check for embedded drawing / image in run
+    drawing_html = ""
+    if run._element is not None:
+        drawings = run._element.findall(".//" + qn("w:drawing"))
+        if drawings:
+            for d in drawings:
+                for blip in d.findall(".//" + qn("a:blip")):
+                    rid = blip.get(qn("r:embed")) or blip.get(qn("r:link"))
+                    if rid and hasattr(para, "part") and rid in para.part.rels:
+                        try:
+                            blob = para.part.rels[rid].target_part.blob
+                            import io
+                            from PIL import Image
+                            im = Image.open(io.BytesIO(blob)).convert("RGB")
+                            buf = io.BytesIO()
+                            im.save(buf, format="PNG")
+                            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                            drawing_html += f'<span class="docx-figure-img" data-embed="{rid}"><img src="data:image/png;base64,{b64}" alt="Figure" style="max-width:100%;height:auto;border-radius:4px;display:block;margin:10px auto;" /></span>'
+                        except Exception as e:
+                            logger.warning(f"Failed to convert drawing blip to image: {e}")
+
+    if text == "" and drawing_html:
+        return drawing_html
+
     if text == "":
         return ""
 
     inner = html.escape(text).replace("\n", "<br>")
+    if drawing_html:
+        inner = drawing_html + inner
+
 
     # Parse formatting directly from XML elements
     fmt = _get_run_formatting(run)
@@ -521,13 +555,13 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None, 
     if rpr:
         attrs += f' data-rpr="{rpr}"'
     if style:
-        attrs += f' style="{html.escape(style, quote=True)}"'
+        attrs += f' style="{_safe_escape(style, quote=True)}"'
     if finding_replacement is not None:
-        attrs += f' data-replacement="{html.escape(finding_replacement, quote=True)}"'
+        attrs += f' data-replacement="{_safe_escape(finding_replacement, quote=True)}"'
     if finding_rule_id:
-        attrs += f' data-rule-id="{html.escape(finding_rule_id, quote=True)}"'
+        attrs += f' data-rule-id="{_safe_escape(finding_rule_id, quote=True)}"'
     if finding_category:
-        attrs += f' data-rule-category="{html.escape(finding_category, quote=True)}"'
+        attrs += f' data-rule-category="{_safe_escape(finding_category, quote=True)}"'
     
     # Export character style name as class if present, plus highlight classes if applicable
     char_style = ""
@@ -726,6 +760,23 @@ def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_id
             parts.append(_omml_element_to_math_span(child, display=display))
             continue
 
+        if tag_local == "drawing":
+            for blip in child.findall(".//" + qn("a:blip")):
+                rid = blip.get(qn("r:embed")) or blip.get(qn("r:link"))
+                if rid and hasattr(para, "part") and rid in para.part.rels:
+                    try:
+                        blob = para.part.rels[rid].target_part.blob
+                        import io
+                        from PIL import Image
+                        im = Image.open(io.BytesIO(blob)).convert("RGB")
+                        buf = io.BytesIO()
+                        im.save(buf, format="PNG")
+                        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                        parts.append(f'<span class="docx-figure-img" data-embed="{rid}"><img src="data:image/png;base64,{b64}" alt="Figure" style="max-width:100%;height:auto;border-radius:4px;display:block;margin:10px auto;" /></span>')
+                    except Exception as e:
+                        logger.warning(f"Failed to convert direct drawing blip to image: {e}")
+            continue
+
         if tag_local == 'r':
             run = Run(child, para)
             parts.append(_run_to_html(run, para, doc, track_change_element=None, para_findings=para_findings, inside_track_change=inside_track_change))
@@ -852,10 +903,10 @@ def _get_cell_width(tc) -> str:
 
 def _paragraph_to_html(para, para_idx: int, doc, findings_by_para=None) -> str:
     """Render a standard body paragraph to HTML preserving alignment."""
-    style_name = para.style.name if para.style else "Normal"
+    style_name = (para.style.name if (para.style and para.style.name) else "") or "Normal"
     tag = "p"
-    if style_name.lower().startswith("heading "):
-        level = style_name.lower().replace("heading ", "").strip()
+    if str(style_name).lower().startswith("heading "):
+        level = str(style_name).lower().replace("heading ", "").strip()
         if level in {"1", "2", "3", "4", "5", "6"}:
             tag = f"h{level}"
 
@@ -863,7 +914,7 @@ def _paragraph_to_html(para, para_idx: int, doc, findings_by_para=None) -> str:
     if not runs_html:
         runs_html = "<br/>"
 
-    label = html.escape(style_name, quote=True)
+    label = _safe_escape(style_name, quote=True)
     bm_name = _get_or_create_para_bookmark(para, doc)
 
     # Preserve paragraph alignment
@@ -882,8 +933,8 @@ def _paragraph_to_html(para, para_idx: int, doc, findings_by_para=None) -> str:
 def _table_to_html(table, doc, body_p_map=None, findings_by_para=None) -> str:
     """Render a table and its cells to HTML with grid-aware colspan, rowspan, and cell formatting."""
     tbl_bm = _get_or_create_table_bookmark(table, doc)
-    style_name = table.style.name if table.style else "TableGrid"
-    tbl_class = html.escape(style_name, quote=True)
+    style_name = (table.style.name if (table.style and table.style.name) else "") or "TableGrid"
+    tbl_class = _safe_escape(style_name, quote=True)
 
     tblPr = table._tbl.find(qn("w:tblPr"))
     tbl_styles = []
@@ -997,8 +1048,8 @@ def _table_to_html(table, doc, body_p_map=None, findings_by_para=None) -> str:
 
             cell_inner = ""
             for p in cell_paras:
-                p_style = p.style.name if p.style else "Normal"
-                p_label = html.escape(p_style, quote=True)
+                p_style = (p.style.name if (p.style and p.style.name) else "") or "Normal"
+                p_label = _safe_escape(p_style, quote=True)
                 para_idx = body_p_map.get(p._element, 0) if body_p_map else 0
                 runs = _paragraph_content_to_html(p._p, p, doc, findings_by_para, para_idx)
                 if not runs:
@@ -1309,8 +1360,8 @@ def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
                 if not first_item:
                     html_parts.append("</li>")
                 
-        style_name = para.style.name if para.style else "Normal"
-        label = html.escape(style_name, quote=True)
+        style_name = (para.style.name if (para.style and para.style.name) else "") or "Normal"
+        label = _safe_escape(style_name, quote=True)
         bm_name = _get_or_create_para_bookmark(para, doc)
         
         all_items = _get_all_paragraph_runs(para)

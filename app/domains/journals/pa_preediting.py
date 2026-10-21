@@ -32,213 +32,324 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 PA_121_RULES_CATALOG: List[Dict[str, Any]] = [
-    # PART 1: TECHNICAL POINTS (1–91)
+    # ── PART 1: TECHNICAL POINTS (1–91) ──
     # Units and measurements (1–6)
-    {"id": 1, "rule_160_id": 31, "part": "Technical", "domain": "Units and measurements",
-     "name": "SI Units Standard Form", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Check units of measurement follow standard SI format (e.g., kg, mL, cm)."},
-    {"id": 2, "rule_160_id": 32, "part": "Technical", "domain": "Units and measurements",
-     "name": "Consistency of Unit Presentation", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Ensure consistent presentation of units throughout the manuscript."},
-    {"id": 3, "rule_160_id": 33, "part": "Technical", "domain": "Units and measurements",
-     "name": "Space Between Numbers and Units", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Insert non-breaking space between quantity and unit; close up percentage signs."},
-    {"id": 4, "rule_160_id": 34, "part": "Technical", "domain": "Units and measurements",
-     "name": "Combined and Complex Units", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Verify compound units follow journal style consistently (e.g., mg/kg/day or mg·kg⁻¹·day⁻¹)."},
-    {"id": 5, "rule_160_id": 35, "part": "Technical", "domain": "Units and measurements",
-     "name": "Non-Standard Unit Clarification", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Flag archaic or non-standard units (e.g., psi, mmHg in non-clinical contexts)."},
-    {"id": 6, "rule_160_id": 36, "part": "Technical", "domain": "Units and measurements",
-     "name": "Temperature Degree Symbol", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Ensure degree symbol is closed up to unit letter without space (e.g., 37 °C or 37°C per house style)."},
+    {"id": 1, "rule_160_id": 31, "part": "Technical", "domain": "Units and measurements", "name": "SI Units Standard Form", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Check units of measurement follow standard SI format (e.g., kg, mL, cm)."},
+    {"id": 2, "rule_160_id": 32, "part": "Technical", "domain": "Units and measurements", "name": "Consistency of Unit Presentation", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Ensure consistent presentation of units throughout the manuscript."},
+    {"id": 3, "rule_160_id": 33, "part": "Technical", "domain": "Units and measurements", "name": "Space Between Numbers and Units", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Insert non-breaking space between quantity and unit; close up percentage signs."},
+    {"id": 4, "rule_160_id": 34, "part": "Technical", "domain": "Units and measurements", "name": "Combined and Complex Units", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Verify compound units follow journal style consistently (e.g., mg/kg/day or mg·kg⁻¹·day⁻¹)."},
+    {"id": 5, "rule_160_id": 35, "part": "Technical", "domain": "Units and measurements", "name": "Non-Standard Unit Clarification", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Flag archaic or non-standard units (e.g., psi, mmHg in non-clinical contexts)."},
+    {"id": 6, "rule_160_id": 36, "part": "Technical", "domain": "Units and measurements", "name": "Temperature Degree Symbol", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Ensure degree symbol is closed up to unit letter without space (e.g., 37°C per house style)."},
 
     # Mathematical symbols and superscripts (7–10)
-    {"id": 7, "rule_160_id": 37, "part": "Technical", "domain": "Mathematical symbols",
-     "name": "Mathematical Operator Spacing", "mode": "Review Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Check spaces around operational signs (=, +, −, ±, <, >) as operators vs prefixes."},
-    {"id": 8, "rule_160_id": 38, "part": "Technical", "domain": "Mathematical symbols",
-     "name": "Minus Sign vs Hyphen", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Replace regular hyphens with true minus signs (−) in mathematical contexts and negative values."},
-    {"id": 9, "rule_160_id": 39, "part": "Technical", "domain": "Mathematical symbols",
-     "name": "Multiplication Sign Formatting", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Replace letter 'x' with true multiplication sign (×) in dimensions and magnifications."},
-    {"id": 10, "rule_160_id": 40, "part": "Technical", "domain": "Mathematical symbols",
-     "name": "Superscript and Subscript Verification", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Verify correct formatting of exponents, chemical valencies, and isotopic notations."},
+    {"id": 7, "rule_160_id": 37, "part": "Technical", "domain": "Mathematical symbols", "name": "Mathematical Operator Spacing", "mode": "Review Auto Fix", "severity": "Minor", "gate": 3, "desc": "Check spaces around operational signs (=, +, −, ±, <, >) as operators vs prefixes."},
+    {"id": 8, "rule_160_id": 38, "part": "Technical", "domain": "Mathematical symbols", "name": "Minus Sign vs Hyphen", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Replace regular hyphens with true minus signs (−) in mathematical contexts and negative values."},
+    {"id": 9, "rule_160_id": 39, "part": "Technical", "domain": "Mathematical symbols", "name": "Multiplication Sign Formatting", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Replace letter 'x' with true multiplication sign (×) in dimensions and magnifications."},
+    {"id": 10, "rule_160_id": 40, "part": "Technical", "domain": "Mathematical symbols", "name": "Superscript and Subscript Verification", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Verify correct formatting of exponents, chemical valencies, and isotopic notations."},
 
     # Numbers (11–16)
-    {"id": 11, "rule_160_id": 41, "part": "Technical", "domain": "Numbers",
-     "name": "Words vs Numerals Threshold", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Spell out numbers under 10 in running text; use numerals for measurements and statistics."},
-    {"id": 12, "rule_160_id": 42, "part": "Technical", "domain": "Numbers",
-     "name": "Sentence-Initial Numbers", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Ensure numbers beginning sentences are spelled out in full or sentence rephrased."},
-    {"id": 13, "rule_160_id": 43, "part": "Technical", "domain": "Numbers",
-     "name": "En-Dash for Number Ranges", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Replace hyphens with en-dashes (–) in numerical and page ranges without spaces."},
-    {"id": 14, "rule_160_id": 44, "part": "Technical", "domain": "Numbers",
-     "name": "Decimal Separator Consistency", "mode": "Auto Fix", "severity": "Major", "gate": 3,
-     "desc": "Enforce consistent decimal point (.) vs decimal comma (,) per journal language style."},
-    {"id": 15, "rule_160_id": 45, "part": "Technical", "domain": "Numbers",
-     "name": "Thousands Separator", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Ensure consistent digit grouping (thin space or comma) for numbers ≥ 10,000."},
-    {"id": 16, "rule_160_id": 46, "part": "Technical", "domain": "Numbers",
-     "name": "Leading Zero for Decimals", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Add leading zero before decimal points (< 1.0) unless restricted (e.g. p < .05 in APA)."},
+    {"id": 11, "rule_160_id": 41, "part": "Technical", "domain": "Numbers", "name": "Words vs Numerals Threshold", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Spell out numbers under 10 in running text; use numerals for measurements and statistics."},
+    {"id": 12, "rule_160_id": 42, "part": "Technical", "domain": "Numbers", "name": "Sentence-Initial Numbers", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Ensure numbers beginning sentences are spelled out in full or sentence rephrased."},
+    {"id": 13, "rule_160_id": 43, "part": "Technical", "domain": "Numbers", "name": "En-Dash for Number Ranges", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Replace hyphens with en-dashes (–) in numerical and page ranges without spaces."},
+    {"id": 14, "rule_160_id": 44, "part": "Technical", "domain": "Numbers", "name": "Decimal Separator Consistency", "mode": "Auto Fix", "severity": "Major", "gate": 3, "desc": "Enforce consistent decimal point (.) vs decimal comma (,) per journal language style."},
+    {"id": 15, "rule_160_id": 45, "part": "Technical", "domain": "Numbers", "name": "Thousands Separator", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Ensure consistent digit grouping (thin space or comma) for numbers ≥ 10,000."},
+    {"id": 16, "rule_160_id": 46, "part": "Technical", "domain": "Numbers", "name": "Leading Zero for Decimals", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Add leading zero before decimal points (< 1.0) unless restricted (e.g. p < .05 in APA)."},
 
     # Dates, times and currency (17–21)
-    {"id": 17, "rule_160_id": 47, "part": "Technical", "domain": "Dates, times and currency",
-     "name": "Date Format Consistency", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Standardize dates to journal format (e.g., 1 January 2024 or January 1, 2024)."},
-    {"id": 18, "rule_160_id": 48, "part": "Technical", "domain": "Dates, times and currency",
-     "name": "Time Format Standard", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Ensure 24-hour clock or 12-hour clock with standard a.m./p.m. notation."},
+    {"id": 17, "rule_160_id": 47, "part": "Technical", "domain": "Dates, times and currency", "name": "Date Format Consistency", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Standardize dates to journal format (e.g., 1 January 2024 or January 1, 2024)."},
+    {"id": 18, "rule_160_id": 48, "part": "Technical", "domain": "Dates, times and currency", "name": "Time Format Standard", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Ensure 24-hour clock or 12-hour clock with standard a.m./p.m. notation."},
+    {"id": 19, "rule_160_id": 49, "part": "Technical", "domain": "Dates, times and currency", "name": "Time Zone Notation", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Specify standard time zones (UTC/GMT/EST) where relevant for event timing."},
+    {"id": 20, "rule_160_id": 50, "part": "Technical", "domain": "Dates, times and currency", "name": "Currency Symbol Placement", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Ensure currency symbols precede numbers without space (e.g., $100, €50, £25)."},
+    {"id": 21, "rule_160_id": 51, "part": "Technical", "domain": "Dates, times and currency", "name": "Percentage Symbol Formatting", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Enforce house style for percentage sign closed up to numeral (e.g., 95% vs 95 %)."},
+
+    # Reference structure & styles (22–30)
+    {"id": 22, "rule_160_id": 52, "part": "Technical", "domain": "Reference structure", "name": "Bibliography System Adherence", "mode": "Review and Fix", "severity": "Major", "gate": 2, "desc": "Verify bibliography follows Vancouver, AMA, or Harvard style as prescribed."},
+    {"id": 23, "rule_160_id": 53, "part": "Technical", "domain": "Reference structure", "name": "Reference List Alphabetization / Ordering", "mode": "Auto Fix", "severity": "Major", "gate": 2, "desc": "Ensure alphabetical ordering for author-date systems or numerical sequence for Vancouver."},
+    {"id": 24, "rule_160_id": 54, "part": "Technical", "domain": "Reference structure", "name": "Journal Article Reference Elements", "mode": "Review and Fix", "severity": "Major", "gate": 2, "desc": "Verify required elements: authors, title, journal, year, volume, and pages."},
+    {"id": 25, "rule_160_id": 55, "part": "Technical", "domain": "Reference structure", "name": "Book Reference Elements", "mode": "Review and Fix", "severity": "Major", "gate": 2, "desc": "Ensure book citations list authors/editors, book title, edition, publisher, place, year."},
+    {"id": 26, "rule_160_id": 56, "part": "Technical", "domain": "Reference structure", "name": "Book Chapter Reference Elements", "mode": "Review and Fix", "severity": "Major", "gate": 2, "desc": "Verify chapter author, chapter title, in: book editor, book title, and chapter page range."},
+    {"id": 27, "rule_160_id": 57, "part": "Technical", "domain": "Reference structure", "name": "Conference Proceedings Format", "mode": "Review and Fix", "severity": "Minor", "gate": 2, "desc": "Include conference title, date, location, and proceedings publication details."},
+    {"id": 28, "rule_160_id": 58, "part": "Technical", "domain": "Reference structure", "name": "Web / Online Resource References", "mode": "Review and Fix", "severity": "Major", "gate": 2, "desc": "Include full URL and access date for online citations without permanent DOI."},
+    {"id": 29, "rule_160_id": 59, "part": "Technical", "domain": "Reference structure", "name": "Preprint Citation Disclosure", "mode": "Review and Fix", "severity": "Minor", "gate": 2, "desc": "Clearly label preprints (e.g. bioRxiv, medRxiv, arXiv) as non-peer-reviewed preprints."},
+    {"id": 30, "rule_160_id": 60, "part": "Technical", "domain": "Reference structure", "name": "Legal and Regulatory References", "mode": "Review and Fix", "severity": "Minor", "gate": 2, "desc": "Format clinical trial registry numbers, statutes, and directives consistently."},
 
     # Abbreviations and acronyms (31–35)
-    {"id": 31, "rule_160_id": 61, "part": "Technical", "domain": "Abbreviations and acronyms",
-     "name": "First-Use Abbreviation Expansion", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Expand acronyms at first mention in abstract and body followed by abbreviation in parentheses."},
-    {"id": 32, "rule_160_id": 62, "part": "Technical", "domain": "Abbreviations and acronyms",
-     "name": "Unexpanded Abbreviation Identification", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Flag all unexplained abbreviations or acronyms for author clarification."},
-    {"id": 33, "rule_160_id": 63, "part": "Technical", "domain": "Abbreviations and acronyms",
-     "name": "Established Abbreviations List", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Permit standard universally recognized terms (DNA, RNA, AIDS, CT, MRI, COVID-19) without expansion."},
-    {"id": 34, "rule_160_id": 64, "part": "Technical", "domain": "Abbreviations and acronyms",
-     "name": "Consistent Use of Established Abbreviations", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "After defining an acronym, ensure the abbreviation is used consistently rather than reverting to full term."},
-    {"id": 35, "rule_160_id": 65, "part": "Technical", "domain": "Abbreviations and acronyms",
-     "name": "Acronyms in Titles and Headings", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Avoid unexpanded acronyms in article titles and main headings unless approved."},
+    {"id": 31, "rule_160_id": 61, "part": "Technical", "domain": "Abbreviations and acronyms", "name": "First-Use Abbreviation Expansion", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Expand acronyms at first mention in abstract and body followed by abbreviation in parentheses."},
+    {"id": 32, "rule_160_id": 62, "part": "Technical", "domain": "Abbreviations and acronyms", "name": "Unexpanded Abbreviation Identification", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Flag all unexplained abbreviations or acronyms for author clarification."},
+    {"id": 33, "rule_160_id": 63, "part": "Technical", "domain": "Abbreviations and acronyms", "name": "Established Abbreviations List", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Permit standard universally recognized terms (DNA, RNA, AIDS, CT, MRI, COVID-19) without expansion."},
+    {"id": 34, "rule_160_id": 64, "part": "Technical", "domain": "Abbreviations and acronyms", "name": "Consistent Use of Established Abbreviations", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "After defining an acronym, ensure the abbreviation is used consistently rather than reverting to full term."},
+    {"id": 35, "rule_160_id": 65, "part": "Technical", "domain": "Abbreviations and acronyms", "name": "Acronyms in Titles and Headings", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Avoid unexpanded acronyms in article titles and main headings unless approved."},
 
-    # Scientific, medical and chemical nomenclature (36–42)
-    {"id": 36, "rule_160_id": 66, "part": "Technical", "domain": "Scientific nomenclature",
-     "name": "Binomial Taxonomic Italicization", "mode": "Auto Fix", "severity": "Major", "gate": 3,
-     "desc": "Ensure genus and species names are italicized (e.g., Staphylococcus aureus, E. coli)."},
-    {"id": 37, "rule_160_id": 67, "part": "Technical", "domain": "Scientific nomenclature",
-     "name": "Taxonomic Genus Abbreviation", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Spell genus in full on first occurrence; abbreviate on subsequent mentions."},
-    {"id": 38, "rule_160_id": 68, "part": "Technical", "domain": "Scientific nomenclature",
-     "name": "Gene vs Protein Symbol Formatting", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Ensure gene symbols are italicized and protein products are in regular roman font."},
-    {"id": 39, "rule_160_id": 69, "part": "Technical", "domain": "Scientific nomenclature",
-     "name": "Chemical Formula Validation", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Verify chemical formulas have proper subscripts (e.g. H₂O, CO₂) and valencies."},
-    {"id": 40, "rule_160_id": 70, "part": "Technical", "domain": "Scientific nomenclature",
-     "name": "Drug Generic vs Proprietary Names", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Ensure generic International Nonproprietary Names (INN) are in lowercase; proprietary names capitalized."},
+    # Scientific nomenclature (36–42)
+    {"id": 36, "rule_160_id": 66, "part": "Technical", "domain": "Scientific nomenclature", "name": "Binomial Taxonomic Italicization", "mode": "Auto Fix", "severity": "Major", "gate": 3, "desc": "Ensure genus and species names are italicized (e.g., Staphylococcus aureus, E. coli)."},
+    {"id": 37, "rule_160_id": 67, "part": "Technical", "domain": "Scientific nomenclature", "name": "Taxonomic Genus Abbreviation", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Spell genus in full on first occurrence; abbreviate on subsequent mentions."},
+    {"id": 38, "rule_160_id": 68, "part": "Technical", "domain": "Scientific nomenclature", "name": "Gene vs Protein Symbol Formatting", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Ensure gene symbols are italicized and protein products are in regular roman font."},
+    {"id": 39, "rule_160_id": 69, "part": "Technical", "domain": "Scientific nomenclature", "name": "Chemical Formula Validation", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Verify chemical formulas have proper subscripts (e.g. H₂O, CO₂) and valencies."},
+    {"id": 40, "rule_160_id": 70, "part": "Technical", "domain": "Scientific nomenclature", "name": "Drug Generic vs Proprietary Names", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Ensure generic International Nonproprietary Names (INN) are in lowercase; proprietary names capitalized."},
+    {"id": 41, "rule_160_id": 71, "part": "Technical", "domain": "Scientific nomenclature", "name": "Anatomical Nomenclature Consistency", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Adhere to standard anatomical terminology (Terminologia Anatomica)."},
+    {"id": 42, "rule_160_id": 72, "part": "Technical", "domain": "Scientific nomenclature", "name": "Medical Diagnostic & Clinical Scales", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Validate standard score notations (e.g. Glasgow Coma Scale, ASA classification)."},
 
-    # Citation format, matching and sequence (48–51)
-    {"id": 48, "rule_160_id": 81, "part": "Technical", "domain": "Citation format and matching",
-     "name": "Citation Style Compliance", "mode": "Review Auto Fix", "severity": "Major", "gate": 2,
-     "desc": "Ensure in-text citations follow journal style (AMA superscript, Vancouver bracketed [1], or Harvard (Author, Year))."},
-    {"id": 49, "rule_160_id": 82, "part": "Technical", "domain": "Citation format and matching",
-     "name": "Sequential Citation Numbering", "mode": "Review and Fix", "severity": "Critical", "gate": 2,
-     "desc": "For numerical systems, citations must appear in strict sequential order throughout text."},
-    {"id": 50, "rule_160_id": 83, "part": "Technical", "domain": "Citation format and matching",
-     "name": "Citation–Reference 100% Cross-Match", "mode": "Review and Fix", "severity": "Critical", "gate": 2,
-     "desc": "Every citation must match an entry in the bibliography; every bibliography entry must be cited in text."},
-    {"id": 51, "rule_160_id": 84, "part": "Technical", "domain": "Citation format and matching",
-     "name": "Parenthetical Citation Range Standardization", "mode": "Auto Fix", "severity": "Minor", "gate": 2,
-     "desc": "Standardize ranges within citations (e.g., [1-3] to [1–3] with en-dash, comma separators with space)."},
+    # Footnotes and endnotes (43–47)
+    {"id": 43, "rule_160_id": 73, "part": "Technical", "domain": "Footnotes and endnotes", "name": "Footnote Numbering Sequence", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Ensure consecutive superscript numbering for body footnotes."},
+    {"id": 44, "rule_160_id": 74, "part": "Technical", "domain": "Footnotes and endnotes", "name": "Table Footnote Symbol Sequence", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Use standard symbol sequence (*, †, ‡, §) or lowercase letters (a, b, c) for table notes."},
+    {"id": 45, "rule_160_id": 75, "part": "Technical", "domain": "Footnotes and endnotes", "name": "Author Affiliation Footnotes", "mode": "Review and Fix", "severity": "Major", "gate": 1, "desc": "Link author superscripts accurately to institutional affiliations and correspondence address."},
+    {"id": 46, "rule_160_id": 76, "part": "Technical", "domain": "Footnotes and endnotes", "name": "Corresponding Author Designation", "mode": "Review and Fix", "severity": "Major", "gate": 1, "desc": "Identify corresponding author clearly with email and institutional address."},
+    {"id": 47, "rule_160_id": 77, "part": "Technical", "domain": "Footnotes and endnotes", "name": "Equal Contribution Statement", "mode": "Review and Fix", "severity": "Minor", "gate": 1, "desc": "Mark co-first authors with equal contribution symbol and explanatory note."},
 
-    # Reference details (52–60)
-    {"id": 52, "rule_160_id": 85, "part": "Technical", "domain": "Reference details",
-     "name": "Author Name Inversion in References", "mode": "Auto Fix", "severity": "Minor", "gate": 2,
-     "desc": "Format reference author names per style (e.g., Surname Initial(s) without periods in Vancouver/AMA)."},
-    {"id": 53, "rule_160_id": 86, "part": "Technical", "domain": "Reference details",
-     "name": "NLM Standard Journal Title Abbreviations", "mode": "Review Auto Fix", "severity": "Minor", "gate": 2,
-     "desc": "Ensure journal titles are abbreviated per PubMed/NLM catalog standards."},
-    {"id": 54, "rule_160_id": 87, "part": "Technical", "domain": "Reference details",
-     "name": "DOI Validation and Hyperlinking", "mode": "Review and Fix", "severity": "Major", "gate": 2,
-     "desc": "Ensure DOIs are valid, present for journal articles, and formatted as https://doi.org/... URLs."},
-    {"id": 61, "rule_160_id": 94, "part": "Technical", "domain": "Reference details",
-     "name": "Unnumbered Bibliography Delineation", "mode": "Auto Fix", "severity": "Major", "gate": 2,
-     "desc": "Detect and number unnumbered bibliography items matching in-text numbered citations."},
+    # Citation format and matching (48–51)
+    {"id": 48, "rule_160_id": 81, "part": "Technical", "domain": "Citation format and matching", "name": "Citation Style Compliance", "mode": "Review Auto Fix", "severity": "Major", "gate": 2, "desc": "Ensure in-text citations follow journal style (Vancouver bracketed [1], AMA superscript, or Harvard)."},
+    {"id": 49, "rule_160_id": 82, "part": "Technical", "domain": "Citation format and matching", "name": "Sequential Citation Numbering", "mode": "Review and Fix", "severity": "Critical", "gate": 2, "desc": "For numerical systems, citations must appear in strict sequential order throughout text."},
+    {"id": 50, "rule_160_id": 83, "part": "Technical", "domain": "Citation format and matching", "name": "Citation–Reference 100% Cross-Match", "mode": "Review and Fix", "severity": "Critical", "gate": 2, "desc": "Every citation must match an entry in the bibliography; every bibliography entry must be cited in text."},
+    {"id": 51, "rule_160_id": 84, "part": "Technical", "domain": "Citation format and matching", "name": "Parenthetical Citation Range Standardization", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Standardize ranges within citations (e.g., [1-3] to [1–3] with en-dash, comma separators with space)."},
 
-    # Headings and Structuring (68–70)
-    {"id": 68, "rule_160_id": 121, "part": "Technical", "domain": "Headings and structure",
-     "name": "Heading Hierarchy and Order", "mode": "Review and Fix", "severity": "Major", "gate": 1,
-     "desc": "Validate H1, H2, H3 hierarchy; flag orphan subheadings and ensure IMRAD logical progression."},
-    {"id": 69, "rule_160_id": 122, "part": "Technical", "domain": "Headings and structure",
-     "name": "Heading Capitalization Style", "mode": "Auto Fix", "severity": "Minor", "gate": 1,
-     "desc": "Enforce sentence-case or title-case on section headings per journal style guidelines."},
-    {"id": 70, "rule_160_id": 123, "part": "Technical", "domain": "Headings and structure",
-     "name": "Heading Numbering Consistency", "mode": "Review and Fix", "severity": "Minor", "gate": 1,
-     "desc": "Ensure section numbers (e.g. 1.0, 1.1) follow uniform scheme or remove if unnumbered style."},
+    # Reference details (52–67)
+    {"id": 52, "rule_160_id": 85, "part": "Technical", "domain": "Reference details", "name": "Author Name Inversion in References", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Format reference author names per style (e.g., Surname Initial(s) without periods in Vancouver/AMA)."},
+    {"id": 53, "rule_160_id": 86, "part": "Technical", "domain": "Reference details", "name": "NLM Standard Journal Title Abbreviations", "mode": "Review Auto Fix", "severity": "Minor", "gate": 2, "desc": "Ensure journal titles are abbreviated per PubMed/NLM catalog standards."},
+    {"id": 54, "rule_160_id": 87, "part": "Technical", "domain": "Reference details", "name": "DOI Validation and Hyperlinking", "mode": "Review and Fix", "severity": "Major", "gate": 2, "desc": "Ensure DOIs are valid, present for journal articles, and formatted as https://doi.org/... URLs."},
+    {"id": 55, "rule_160_id": 88, "part": "Technical", "domain": "Reference details", "name": "Volume and Issue Number Consistency", "mode": "Review and Fix", "severity": "Minor", "gate": 2, "desc": "Verify volume and issue numbers follow journal conventions."},
+    {"id": 56, "rule_160_id": 89, "part": "Technical", "domain": "Reference details", "name": "Page Range En-Dash in References", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Ensure page ranges in references use en-dash (–) without spaces (e.g., 100–105)."},
+    {"id": 57, "rule_160_id": 90, "part": "Technical", "domain": "Reference details", "name": "Truncated vs Full Page Numbers", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Standardize page truncation (e.g., 121–128 vs 121–8) per style guidelines."},
+    {"id": 58, "rule_160_id": 91, "part": "Technical", "domain": "Reference details", "name": "Multi-Author 'et al.' Threshold", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Apply author cutoff policy (e.g., list first 6 authors followed by et al. in Vancouver)."},
+    {"id": 59, "rule_160_id": 92, "part": "Technical", "domain": "Reference details", "name": "Publication Year Placement", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Position publication year per style (e.g., after authors in Harvard, after journal in Vancouver)."},
+    {"id": 60, "rule_160_id": 93, "part": "Technical", "domain": "Reference details", "name": "Article Title Sentence Case in References", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Format reference article titles in sentence case with initial capital and proper nouns only."},
+    {"id": 61, "rule_160_id": 94, "part": "Technical", "domain": "Reference details", "name": "Unnumbered Bibliography Delineation", "mode": "Auto Fix", "severity": "Major", "gate": 2, "desc": "Detect and number unnumbered bibliography items matching in-text numbered citations."},
+    {"id": 62, "rule_160_id": 95, "part": "Technical", "domain": "Reference details", "name": "Reference Punctuation Normalization", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Ensure consistent periods, colons, and semi-colons separating reference fields."},
+    {"id": 63, "rule_160_id": 96, "part": "Technical", "domain": "Reference details", "name": "Institutional Author Formatting", "mode": "Review and Fix", "severity": "Minor", "gate": 2, "desc": "Format corporate or institutional authors without trailing commas (e.g. World Health Organization)."},
+    {"id": 64, "rule_160_id": 97, "part": "Technical", "domain": "Reference details", "name": "Epub Ahead of Print Notation", "mode": "Review and Fix", "severity": "Minor", "gate": 2, "desc": "Clarify early-access or ahead-of-print citations with publication date and DOI."},
+    {"id": 65, "rule_160_id": 98, "part": "Technical", "domain": "Reference details", "name": "Retracted Article Flagging", "mode": "Review and Fix", "severity": "Critical", "gate": 2, "desc": "Cross-check references against Retraction Watch / CrossRef to alert if a cited paper was retracted."},
+    {"id": 66, "rule_160_id": 99, "part": "Technical", "domain": "Reference details", "name": "Reference Language Disclosure", "mode": "Review and Fix", "severity": "Minor", "gate": 2, "desc": "Indicate non-English references with language tag (e.g., [in Italian])."},
+    {"id": 67, "rule_160_id": 100, "part": "Technical", "domain": "Reference details", "name": "Bibliography Italicization", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Verify journal names or book titles italicized per house style."},
+
+    # Headings and structure (68–70)
+    {"id": 68, "rule_160_id": 121, "part": "Technical", "domain": "Headings and structure", "name": "Heading Hierarchy and Order", "mode": "Review and Fix", "severity": "Major", "gate": 1, "desc": "Validate H1, H2, H3 hierarchy; flag orphan subheadings and ensure IMRAD logical progression."},
+    {"id": 69, "rule_160_id": 122, "part": "Technical", "domain": "Headings and structure", "name": "Heading Capitalization Style", "mode": "Auto Fix", "severity": "Minor", "gate": 1, "desc": "Enforce sentence-case or title-case on section headings per journal style guidelines."},
+    {"id": 70, "rule_160_id": 123, "part": "Technical", "domain": "Headings and structure", "name": "Heading Numbering Consistency", "mode": "Review and Fix", "severity": "Minor", "gate": 1, "desc": "Ensure section numbers (e.g. 1.0, 1.1) follow uniform scheme or remove if unnumbered style."},
 
     # Numbering and callouts (Tables & Figures) (71–74)
-    {"id": 71, "rule_160_id": 126, "part": "Technical", "domain": "Numbering and callouts",
-     "name": "Table Numbering Sequence", "mode": "Review and Fix", "severity": "Major", "gate": 4,
-     "desc": "Verify tables are numbered consecutively in order of in-text citation."},
-    {"id": 72, "rule_160_id": 127, "part": "Technical", "domain": "Numbering and callouts",
-     "name": "Figure Numbering Sequence", "mode": "Review and Fix", "severity": "Major", "gate": 4,
-     "desc": "Verify figures are numbered consecutively in order of in-text citation."},
-    {"id": 73, "rule_160_id": 128, "part": "Technical", "domain": "Numbering and callouts",
-     "name": "Table Callout Verification", "mode": "Review and Fix", "severity": "Critical", "gate": 4,
-     "desc": "Ensure every table has a corresponding in-text callout and vice versa."},
-    {"id": 74, "rule_160_id": 129, "part": "Technical", "domain": "Numbering and callouts",
-     "name": "Figure Callout Verification & Artwork Check", "mode": "Review and Fix", "severity": "Critical", "gate": 4,
-     "desc": "Ensure every figure is cited in text and corresponding high-res artwork file is provided."},
+    {"id": 71, "rule_160_id": 126, "part": "Technical", "domain": "Numbering and callouts", "name": "Table Numbering Sequence", "mode": "Review and Fix", "severity": "Major", "gate": 4, "desc": "Verify tables are numbered consecutively in order of in-text citation."},
+    {"id": 72, "rule_160_id": 127, "part": "Technical", "domain": "Numbering and callouts", "name": "Figure Numbering Sequence", "mode": "Review and Fix", "severity": "Major", "gate": 4, "desc": "Verify figures are numbered consecutively in order of in-text citation."},
+    {"id": 73, "rule_160_id": 128, "part": "Technical", "domain": "Numbering and callouts", "name": "Table Callout Verification", "mode": "Review and Fix", "severity": "Critical", "gate": 4, "desc": "Ensure every table has a corresponding in-text callout and vice versa."},
+    {"id": 74, "rule_160_id": 129, "part": "Technical", "domain": "Numbering and callouts", "name": "Figure Callout Verification & Artwork Check", "mode": "Review and Fix", "severity": "Critical", "gate": 4, "desc": "Ensure every figure is cited in text and corresponding high-res artwork file is provided."},
 
-    # Missing and duplicate content (83–84) & Mandatory Declarations (90–91)
-    {"id": 83, "rule_160_id": 146, "part": "Technical", "domain": "Missing content",
-     "name": "Missing Required Frontmatter", "mode": "Review and Fix", "severity": "Critical", "gate": 1,
-     "desc": "Verify presence of title, all author names, institutional affiliations, and abstract."},
-    {"id": 90, "rule_160_id": 158, "part": "Technical", "domain": "Declarations and compliance",
-     "name": "Mandatory Ethical Declarations", "mode": "Review and Fix", "severity": "Critical", "gate": 4,
-     "desc": "Flag missing Conflict of Interest, Ethical Approval, Informed Consent, and Funding statements."},
-    {"id": 91, "rule_160_id": 159, "part": "Technical", "domain": "Declarations and compliance",
-     "name": "Data Availability Statement", "mode": "Review and Fix", "severity": "Major", "gate": 4,
-     "desc": "Confirm presence of required research data access and repository statement."},
+    # Quotations and Callouts (75–80)
+    {"id": 75, "rule_160_id": 131, "part": "Technical", "domain": "Quotations", "name": "Quotation Marks Style Consistency", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Enforce double quotes (US style) or single quotes (UK style) consistently."},
+    {"id": 76, "rule_160_id": 132, "part": "Technical", "domain": "Quotations", "name": "Punctuation Relative to Quotation Marks", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Enforce punctuation inside quotes (US style) or outside quotes (UK style)."},
+    {"id": 77, "rule_160_id": 133, "part": "Technical", "domain": "Quotations", "name": "Block Quotation Formatting (> 40 Words)", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Set long quotations exceeding 40 words as indented block quote without quotation marks."},
+    {"id": 78, "rule_160_id": 134, "part": "Technical", "domain": "Quotations", "name": "Page Citation for Direct Quotations", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Ensure direct quotations include specific page or paragraph reference in citation."},
+    {"id": 79, "rule_160_id": 135, "part": "Technical", "domain": "Quotations", "name": "Ellipsis in Quotations", "mode": "Auto Fix", "severity": "Minor", "gate": 3, "desc": "Format omitted words with standard three spaced dots or unicode ellipsis character (…)."},
+    {"id": 80, "rule_160_id": 136, "part": "Technical", "domain": "Quotations", "name": "Interpolations in Quotations [Square Brackets]", "mode": "Review and Fix", "severity": "Minor", "gate": 3, "desc": "Verify editorial additions or clarifying words within quotations are enclosed in square brackets."},
 
-    # PART 2: LANGUAGE & STYLE POINTS (92–121)
+    # Missing Content & Metadata (81–84)
+    {"id": 81, "rule_160_id": 141, "part": "Technical", "domain": "Missing content", "name": "Article Title & Running Head", "mode": "Review and Fix", "severity": "Major", "gate": 1, "desc": "Verify presence of full title and short running title under 50 characters."},
+    {"id": 82, "rule_160_id": 142, "part": "Technical", "domain": "Missing content", "name": "Structured Abstract Sections & Word Count", "mode": "Review and Fix", "severity": "Major", "gate": 1, "desc": "Verify abstract headings (Background, Methods, Results, Conclusion) and check 250 word limit."},
+    {"id": 83, "rule_160_id": 146, "part": "Technical", "domain": "Missing content", "name": "Missing Required Frontmatter", "mode": "Review and Fix", "severity": "Critical", "gate": 1, "desc": "Verify presence of title, all author names, institutional affiliations, and abstract."},
+    {"id": 84, "rule_160_id": 147, "part": "Technical", "domain": "Missing content", "name": "Keywords Specification & Count", "mode": "Review and Fix", "severity": "Minor", "gate": 1, "desc": "Ensure 3–6 keywords provided from MeSH (Medical Subject Headings) or standard ontology."},
+
+    # Duplicate & Conflicting Content (85–89)
+    {"id": 85, "rule_160_id": 151, "part": "Technical", "domain": "Duplicate content", "name": "Duplicate In-Text Citations", "mode": "Auto Fix", "severity": "Minor", "gate": 2, "desc": "Eliminate redundant adjacent duplicate citations (e.g. [1, 1] to [1])."},
+    {"id": 86, "rule_160_id": 152, "part": "Technical", "domain": "Duplicate content", "name": "Duplicate Bibliography Entries", "mode": "Review and Fix", "severity": "Major", "gate": 2, "desc": "Identify identical or near-identical citations appearing multiple times in references list."},
+    {"id": 87, "rule_160_id": 153, "part": "Technical", "domain": "Duplicate content", "name": "Duplicate Table or Figure Numbering", "mode": "Review and Fix", "severity": "Critical", "gate": 4, "desc": "Flag duplicate numbering assigned to different tables or figures."},
+    {"id": 88, "rule_160_id": 154, "part": "Technical", "domain": "Duplicate content", "name": "Repeated Paragraphs or Sections", "mode": "Review and Fix", "severity": "Major", "gate": 1, "desc": "Flag copy-paste duplication across sections."},
+    {"id": 89, "rule_160_id": 155, "part": "Technical", "domain": "Duplicate content", "name": "Data Consistency Text vs Tables", "mode": "Review and Fix", "severity": "Major", "gate": 3, "desc": "Verify sample sizes (N), percentages, and p-values in text match table cells."},
+
+    # Mandatory Declarations (90–91)
+    {"id": 90, "rule_160_id": 158, "part": "Technical", "domain": "Declarations and compliance", "name": "Mandatory Ethical Declarations", "mode": "Review and Fix", "severity": "Critical", "gate": 4, "desc": "Flag missing Conflict of Interest, Ethical Approval, Informed Consent, and Funding statements."},
+    {"id": 91, "rule_160_id": 159, "part": "Technical", "domain": "Declarations and compliance", "name": "Data Availability Statement", "mode": "Review and Fix", "severity": "Major", "gate": 4, "desc": "Confirm presence of required research data access and repository statement."},
+
+    # ── PART 2: LANGUAGE & STYLE POINTS (92–121) ──
     # Spelling and language variant (92–94)
-    {"id": 92, "rule_160_id": 1, "part": "Language", "domain": "Spelling and language variant",
-     "name": "US vs UK English Consistency", "mode": "Review Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Standardize spelling to selected journal variant (e.g., -ize vs -ise, -or vs -our, center vs centre)."},
-    {"id": 93, "rule_160_id": 2, "part": "Language", "domain": "Spelling and language variant",
-     "name": "Specialized Medical/Scientific Spelling", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Verify domain spellings (e.g., fetus vs foetus, edema vs oedema, sulfur vs sulphur)."},
+    {"id": 92, "rule_160_id": 1, "part": "Language", "domain": "Spelling and language variant", "name": "US vs UK English Consistency", "mode": "Review Auto Fix", "severity": "Minor", "gate": 5, "desc": "Standardize spelling to selected journal variant (e.g., -ize vs -ise, -or vs -our, center vs centre)."},
+    {"id": 93, "rule_160_id": 2, "part": "Language", "domain": "Spelling and language variant", "name": "Specialized Medical/Scientific Spelling", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Verify domain spellings (e.g., fetus vs foetus, edema vs oedema, sulfur vs sulphur)."},
+    {"id": 94, "rule_160_id": 3, "part": "Language", "domain": "Spelling and language variant", "name": "Compound Words and Hyphenation", "mode": "Review Auto Fix", "severity": "Minor", "gate": 5, "desc": "Standardize open, hyphenated, and closed compounds per medical dictionary (e.g. post-operative vs postoperative)."},
 
     # Grammar (95–99)
-    {"id": 95, "rule_160_id": 4, "part": "Language", "domain": "Grammar",
-     "name": "Subject–Verb Agreement", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Ensure subjects agree in number with verbs (e.g. 'PSA was performed' vs 'PSA were performed')."},
-    {"id": 96, "rule_160_id": 5, "part": "Language", "domain": "Grammar",
-     "name": "Tense Consistency in Methodology & Results", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Maintain past tense for completed experimental methods and findings."},
-    {"id": 99, "rule_160_id": 8, "part": "Language", "domain": "Grammar",
-     "name": "Definite and Indefinite Article Usage", "mode": "Review and Fix", "severity": "Minor", "gate": 3,
-     "desc": "Supply missing articles ('a', 'an', 'the') in noun phrases (e.g. 'remains subject of debate' -> 'remains a subject of debate')."},
+    {"id": 95, "rule_160_id": 4, "part": "Language", "domain": "Grammar", "name": "Subject–Verb Agreement", "mode": "Review and Fix", "severity": "Major", "gate": 5, "desc": "Ensure subjects agree in number with verbs (e.g. 'PSA was performed' vs 'PSA were performed')."},
+    {"id": 96, "rule_160_id": 5, "part": "Language", "domain": "Grammar", "name": "Tense Consistency in Methodology & Results", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Maintain past tense for completed experimental methods and findings."},
+    {"id": 97, "rule_160_id": 6, "part": "Language", "domain": "Grammar", "name": "Dangling and Misplaced Modifiers", "mode": "Review and Fix", "severity": "Major", "gate": 5, "desc": "Ensure participial phrases clearly modify the intended agent rather than an unintended noun."},
+    {"id": 98, "rule_160_id": 7, "part": "Language", "domain": "Grammar", "name": "Pronoun–Antecedent Agreement", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Ensure singular pronouns refer to singular entities (e.g., each patient ... his/her/their)."},
+    {"id": 99, "rule_160_id": 8, "part": "Language", "domain": "Grammar", "name": "Definite and Indefinite Article Usage", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Supply missing articles ('a', 'an', 'the') in noun phrases (e.g. 'remains subject of debate' -> 'remains a subject of debate')."},
 
-    # Punctuation and capitalization (100–101)
-    {"id": 100, "rule_160_id": 9, "part": "Language", "domain": "Punctuation",
-     "name": "Punctuation Spacing Normalization", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Remove spaces before commas/periods; ensure single space after punctuation; remove double spaces."},
-    {"id": 101, "rule_160_id": 10, "part": "Language", "domain": "Punctuation",
-     "name": "Serial Comma (Oxford Comma) Policy", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Apply serial comma policy consistently across series of three or more items."},
+    # Punctuation and spacing (100–101)
+    {"id": 100, "rule_160_id": 9, "part": "Language", "domain": "Punctuation", "name": "Punctuation Spacing Normalization", "mode": "Auto Fix", "severity": "Minor", "gate": 5, "desc": "Remove spaces before commas/periods; ensure single space after punctuation; remove double spaces."},
+    {"id": 101, "rule_160_id": 10, "part": "Language", "domain": "Punctuation", "name": "Serial Comma (Oxford Comma) Policy", "mode": "Auto Fix", "severity": "Minor", "gate": 5, "desc": "Apply serial comma policy consistently across series of three or more items."},
 
-    # Sentence structure (102–106)
-    {"id": 102, "rule_160_id": 11, "part": "Language", "domain": "Sentence structure",
-     "name": "Em-Dash vs Hyphen in Parenthetical Breaks", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Replace single hyphens with unspaced em-dashes (—) for sentence-level parenthetical thoughts."},
-    {"id": 103, "rule_160_id": 12, "part": "Language", "domain": "Sentence structure",
-     "name": "Run-On and Overly Long Sentences", "mode": "Review and Fix", "severity": "Major", "gate": 3,
-     "desc": "Flag sentences exceeding 40 words that impair syntactic clarity."},
+    # Sentence structure & syntax (102–106)
+    {"id": 102, "rule_160_id": 11, "part": "Language", "domain": "Sentence structure", "name": "Em-Dash vs Hyphen in Parenthetical Breaks", "mode": "Auto Fix", "severity": "Minor", "gate": 5, "desc": "Replace single hyphens with unspaced em-dashes (—) for sentence-level parenthetical thoughts."},
+    {"id": 103, "rule_160_id": 12, "part": "Language", "domain": "Sentence structure", "name": "Run-On and Overly Long Sentences", "mode": "Review and Fix", "severity": "Major", "gate": 5, "desc": "Flag sentences exceeding 40 words that impair syntactic clarity."},
+    {"id": 104, "rule_160_id": 13, "part": "Language", "domain": "Sentence structure", "name": "Sentence Fragments & Incomplete Syntax", "mode": "Review and Fix", "severity": "Major", "gate": 5, "desc": "Identify phrases punctuated as full sentences that lack an independent clause or finite verb."},
+    {"id": 105, "rule_160_id": 14, "part": "Language", "domain": "Sentence structure", "name": "Parallel Structure in Bulleted Lists", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Ensure list elements share identical grammatical forms (e.g., all starting with verbs or all noun phrases)."},
+    {"id": 106, "rule_160_id": 15, "part": "Language", "domain": "Sentence structure", "name": "Plain English & Jargon Clarification", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Recommend accessible scientific phrasings for obfuscated clinical jargon."},
 
-    # Latin abbreviations and word forms (107–111)
-    {"id": 107, "rule_160_id": 16, "part": "Language", "domain": "Word forms",
-     "name": "Latin Abbreviation Punctuation (et al., i.e., e.g.)", "mode": "Auto Fix", "severity": "Minor", "gate": 3,
-     "desc": "Ensure 'et al.' has period only after 'al', 'i.e.' and 'e.g.' punctuated with periods and trailing comma."},
+    # Word forms & Latin abbreviations (107–111)
+    {"id": 107, "rule_160_id": 16, "part": "Language", "domain": "Word forms", "name": "Latin Abbreviation Punctuation (et al., i.e., e.g.)", "mode": "Auto Fix", "severity": "Minor", "gate": 5, "desc": "Ensure 'et al.' has period only after 'al', 'i.e.' and 'e.g.' punctuated with periods and trailing comma."},
+    {"id": 108, "rule_160_id": 17, "part": "Language", "domain": "Word forms", "name": "Latin Terms Italicization Policy", "mode": "Auto Fix", "severity": "Minor", "gate": 5, "desc": "Leave common Latin terms (in vitro, in vivo, ad hoc, de novo) in roman text per modern scientific style."},
+    {"id": 109, "rule_160_id": 18, "part": "Language", "domain": "Word forms", "name": "Restrictive 'That' vs Non-Restrictive 'Which'", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Enforce 'that' for essential restrictive clauses; 'which' preceded by a comma for descriptive non-restrictive clauses."},
+    {"id": 110, "rule_160_id": 19, "part": "Language", "domain": "Word forms", "name": "Affect vs Effect Precision", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Distinguish between 'affect' (usually verb: to influence) and 'effect' (usually noun: result)."},
+    {"id": 111, "rule_160_id": 20, "part": "Language", "domain": "Word forms", "name": "Pluralization of Scientific Nouns (Data, Criteria)", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Ensure 'data are', 'criteria are', 'phenomena are' used consistently as plural forms."},
+
+    # Academic Style & Tone (112–115)
+    {"id": 112, "rule_160_id": 21, "part": "Language", "domain": "Style and tone", "name": "Objective Academic Tone", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Avoid emotional, hyperbolic, or promotional language in presenting research results."},
+    {"id": 113, "rule_160_id": 22, "part": "Language", "domain": "Style and tone", "name": "Elimination of Colloquial Phrasing", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Replace informal conversational idioms with formal academic vocabulary."},
+    {"id": 114, "rule_160_id": 23, "part": "Language", "domain": "Style and tone", "name": "Gender-Neutral and Inclusive Language", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Use inclusive terminology per APA/ICMJE guidelines (e.g. they/their, person with diabetes)."},
+    {"id": 115, "rule_160_id": 24, "part": "Language", "domain": "Style and tone", "name": "Active vs Passive Voice Optimization", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Promote direct, vigorous active voice where agent is known while permitting passive voice for objective procedures."},
+
+    # Clarity and Precision (116–120)
+    {"id": 116, "rule_160_id": 25, "part": "Language", "domain": "Clarity and precision", "name": "Conciseness and Wordiness Reduction", "mode": "Review Auto Fix", "severity": "Minor", "gate": 5, "desc": "Trim pleonasms and empty phrases (e.g., 'due to the fact that' -> 'because', 'in order to' -> 'to')."},
+    {"id": 117, "rule_160_id": 26, "part": "Language", "domain": "Clarity and precision", "name": "Quantifier Precision", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Replace vague words ('a lot of', 'quite few', 'several') with specific statistical metrics."},
+    {"id": 118, "rule_160_id": 27, "part": "Language", "domain": "Clarity and precision", "name": "Unambiguous Comparative Referents", "mode": "Review and Fix", "severity": "Major", "gate": 5, "desc": "Ensure comparisons specify baseline (e.g., 'higher than baseline controls' rather than simply 'higher')."},
+    {"id": 119, "rule_160_id": 28, "part": "Language", "domain": "Clarity and precision", "name": "Transitional Word Variety", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Vary repetitive discourse markers (furthermore, moreover, therefore) to maintain prose vitality."},
+    {"id": 120, "rule_160_id": 29, "part": "Language", "domain": "Clarity and precision", "name": "Paragraph Unity and Topic Coherence", "mode": "Review and Fix", "severity": "Minor", "gate": 5, "desc": "Ensure single core concept per paragraph with clear topic sentences and smooth transitions."},
 
     # AI and compliance disclosure (121)
-    {"id": 121, "rule_160_id": 30, "part": "Language", "domain": "Editorial compliance",
-     "name": "AI Tool Usage Disclosure Verification", "mode": "Review and Fix", "severity": "Major", "gate": 4,
-     "desc": "Verify author declaration on generative AI or LLM tool usage per COPE/ICMJE recommendations."}
+    {"id": 121, "rule_160_id": 30, "part": "Language", "domain": "Editorial compliance", "name": "AI Tool Usage Disclosure Verification", "mode": "Review and Fix", "severity": "Major", "gate": 5, "desc": "Verify author declaration on generative AI or LLM tool usage per COPE/ICMJE recommendations."}
 ]
+PA_121_RULES = PA_121_RULES_CATALOG
+
+IA_TO_PA_MAPPING: Dict[str, int] = {
+    "units": 1,
+    "unit_space": 3,
+    "unit_spacing": 3,
+    "temperature_deg": 6,
+    "deg_celsius_word": 6,
+    "math_operators": 7,
+    "minus_hyphen": 8,
+    "multiplication_x": 9,
+    "times_x_char": 9,
+    "num_single_spelled": 11,
+    "num_single_numeral": 11,
+    "num_double_spelled": 11,
+    "num_double_numeral": 11,
+    "ordinal_spelled": 11,
+    "fract_symbol_half": 11,
+    "fract_symbol_quarter": 11,
+    "fract_symbol_three_quarters": 11,
+    "range_hyphen": 13,
+    "spaced_hyphens": 13,
+    "thousands_nosep": 15,
+    "leading_zero_absent": 16,
+    "leading_zero_present": 16,
+    "leading_zero_missing": 16,
+    "date_format": 17,
+    "century_numeric": 17,
+    "era_ad_nodot": 17,
+    "era_bc_nodot": 17,
+    "ampm_am_upper": 18,
+    "ampm_pm_upper": 18,
+    "ampm_am_lower": 18,
+    "ampm_pm_lower": 18,
+    "currency_symbol": 20,
+    "percent_symbol": 21,
+    "percent_word": 21,
+    "percent_percentage": 21,
+    "per_cent_word": 21,
+    "abbrev_body": 31,
+    "abbrev_table": 31,
+    "abbrev_abstract": 31,
+    "genus_species_nodot": 36,
+    "genus_species_sp": 36,
+    "ref_table_single": 73,
+    "ref_tabs_single": 73,
+    "ref_tab_single": 73,
+    "ref_tabs_and": 73,
+    "ref_tabs_dotted": 73,
+    "ref_figure_single": 74,
+    "ref_figs_single": 74,
+    "ref_fig_single": 74,
+    "ref_figs_and": 74,
+    "ref_figs_dotted": 74,
+    "spelling_variant": 92,
+    "aux_verb_was": 95,
+    "aux_verb_is": 95,
+    "aux_verb_are": 95,
+    "subject_terms": 95,
+    "pronoun_check": 98,
+    "caps_after_colon": 100,
+    "lowercase_after_colon": 100,
+    "para_no_full_stop": 100,
+    "ellipsis_3dots": 100,
+    "ellipsis_spaced": 100,
+    "ellipsis_symbol": 100,
+    "clinical_jargon": 106,
+    "latin_et_al": 107,
+    "latin_ie": 107,
+    "latin_eg": 107,
+    "latin_etc": 107,
+    "versus_vs": 107,
+    "versus_v": 107,
+    "versus_vs_dot": 107,
+    "versus_v_dot": 107,
+}
+
+
+def evaluate_121_rules_compliance(article: Any, issues: List[Any]) -> Dict[str, Any]:
+    """Generates the 121 Rules Compliance Matrix showing verified vs flagged points."""
+    catalog = PA_121_RULES_CATALOG
+    issues_by_pa_id: Dict[int, List[Any]] = {r["id"]: [] for r in catalog}
+
+    for iss in issues:
+        rule_id_str = getattr(iss, "rule_id", "") or ""
+        loc = getattr(iss, "location", {}) or {}
+        pa_id = loc.get("pa_point")
+        if not pa_id:
+            m = re.search(r'PA\s*[:#]\s*(\d+)', rule_id_str)
+            if m:
+                pa_id = int(m.group(1))
+            else:
+                clean_id = rule_id_str.replace("IA:", "").strip()
+                pa_id = IA_TO_PA_MAPPING.get(clean_id)
+        if pa_id and pa_id in issues_by_pa_id:
+            issues_by_pa_id[pa_id].append(iss)
+
+    rules_out = []
+    flagged_count = 0
+    passed_count = 0
+
+    for r in catalog:
+        matched = issues_by_pa_id.get(r["id"], [])
+        open_matched = [i for i in matched if getattr(i, "status", "open") == "open"]
+        status_val = "flagged" if len(open_matched) > 0 else "passed"
+        if status_val == "flagged":
+            flagged_count += 1
+        else:
+            passed_count += 1
+
+        gate_num = r.get("gate", 3)
+        gate_labels = {
+            1: "Gate 1: Structuring",
+            2: "Gate 2: References",
+            3: "Gate 3: Mechanical",
+            4: "Gate 4: Asset Callouts",
+            5: "Stage 3: Language"
+        }
+        gate_label = gate_labels.get(gate_num, "Stage 3: Language" if r["part"] == "Language" else f"Gate {gate_num}")
+
+        rules_out.append({
+            "id": r["id"],
+            "rule_160_id": r.get("rule_160_id"),
+            "part": r["part"],
+            "domain": r["domain"],
+            "name": r["name"],
+            "mode": r["mode"],
+            "severity": r["severity"],
+            "gate": gate_num,
+            "gate_label": gate_label,
+            "desc": r["desc"],
+            "status": status_val,
+            "issues_count": len(matched),
+            "open_issues_count": len(open_matched),
+            "issue_ids": [getattr(i, "id", None) for i in matched if getattr(i, "id", None) is not None]
+        })
+
+    return {
+        "article_id": getattr(article, "id", None),
+        "total": len(catalog),
+        "technical_count": sum(1 for r in catalog if r["part"] == "Technical"),
+        "language_count": sum(1 for r in catalog if r["part"] == "Language"),
+        "passed_count": passed_count,
+        "flagged_count": flagged_count,
+        "rules": rules_out
+    }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -25,7 +25,10 @@ export function PaRulesSettingsTab({ journalId }: Props) {
       if (saved) {
         const parsed = JSON.parse(saved)
         if (Array.isArray(parsed) && parsed.length === PA_121_RULES.length) {
-          return parsed
+          return parsed.map((p: any) => {
+            const cat = PA_121_RULES.find(r => r.id === p.id)
+            return cat ? { ...p, gate: cat.gate, gateKey: cat.gateKey, part: cat.part } : p
+          })
         }
       }
     } catch {
@@ -229,11 +232,12 @@ export function PaRulesSettingsTab({ journalId }: Props) {
               onChange={e => setSelectedGate(e.target.value)}
               className="text-xs rounded-lg border border-border bg-background px-2.5 py-1.5 text-text"
             >
-              <option value="all">All Gated Steps (4)</option>
-              <option value="gate1">Gate 1: Structuring (#68–70, #83–84)</option>
-              <option value="gate2">Gate 2: References (#48–67)</option>
-              <option value="gate3">Gate 3: Mechanical Rules (#1–47, #92–121)</option>
-              <option value="gate4">Gate 4: Asset Callouts (#71–91)</option>
+              <option value="all">All Gated Steps & Stages (5)</option>
+              <option value="gate1">Gate 1: Structuring (#68–70, #81–84, #88)</option>
+              <option value="gate2">Gate 2: References (#22–30, #48–67, #85–86)</option>
+              <option value="gate3">Gate 3: Mechanical Rules (#1–21, #31–47, #75–80, #89)</option>
+              <option value="gate4">Gate 4: Asset Callouts (#71–74, #87, #90–91)</option>
+              <option value="gate_language">Stage 3: Language Editing (#92–121)</option>
             </select>
 
             <select
@@ -355,7 +359,8 @@ export function PaRulesSettingsTab({ journalId }: Props) {
                       rule.gateKey === 'gate1' ? 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
                       rule.gateKey === 'gate2' ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
                       rule.gateKey === 'gate3' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' :
-                      'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                      rule.gateKey === 'gate4' ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
+                      'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
                     }`}>
                       {rule.gate}
                     </span>

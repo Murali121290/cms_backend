@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { journalReviewPath, type BookReviewKind } from '@/features/journals/useJournalReviewMode'
-import { ArrowLeft, Check, Crosshair, Play, Search, FileText, Loader2, Download } from 'lucide-react'
-import { journalsApi, type ArticleWorkspace, type JournalIssue, type JournalCheckModule, type PreEditingStepKey } from '@/api/journals'
+import { ArrowLeft, Check, Crosshair, Play, Search, FileText, Loader2, Download, Zap, Sparkles, CheckCircle2, AlertCircle, X, RotateCw } from 'lucide-react'
+import { journalsApi, type ArticleWorkspace, type JournalIssue, type JournalCheckModule, type PreEditingStepKey, type Pa121RulesComplianceReport } from '@/api/journals'
 import { WysiwygEditor, type WysiwygEditorHandle } from '@/features/editor'
 import { TinyMceEditor } from '@/features/editor/TinyMceEditor'
 import type { Occurrence } from '@/features/editor/OccurrenceHighlight'
@@ -115,29 +115,85 @@ export function JournalArticleEditorPage() {
   }
 
   // Findings checklist filters
+  const PRE_EDITING_MODULES: string[] = ['structuring', 'references', 'ia_rules', 'technical']
+  const [stageGroupFilter, setStageGroupFilter] = useState<'all' | 'pre_editing' | 'language'>('all')
+  const [statusFilter, setStatusFilter] = useState<'open' | 'all'>('open')
   const [moduleFilter, setModuleFilter] = useState<'all' | JournalCheckModule>('all')
   const [severityFilter, setSeverityFilter] = useState<'all' | 'error' | 'warning' | 'info'>('all')
+  const [fixModeFilter, setFixModeFilter] = useState<'all' | 'autofix' | 'review'>('all')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const { hash } = useLocation()
   const [sideTab, setSideTab] = useState<'checks' | 'styles' | 'files'>(hash === '#files' ? 'files' : 'checks')
 
+  // 121 Rules Compliance Matrix state
+  const [rulesModalOpen, setRulesModalOpen] = useState(false)
+  const [complianceReport, setComplianceReport] = useState<Pa121RulesComplianceReport | null>(null)
+  const [loadingRules, setLoadingRules] = useState(false)
+  const [rulesSearch, setRulesSearch] = useState('')
+  const [rulesPartFilter, setRulesPartFilter] = useState<'all' | 'Technical' | 'Language'>('all')
+  const [rulesStatusFilter, setRulesStatusFilter] = useState<'all' | 'flagged' | 'passed'>('all')
+  const [batchFixing, setBatchFixing] = useState(false)
+  const [reCheckingAll, setReCheckingAll] = useState(false)
+
+  const fetchCompliance = useCallback(async () => {
+    try {
+      setLoadingRules(true)
+      const data = await journalsApi.get121RulesCompliance(id)
+      setComplianceReport(data)
+    } catch {
+      // ignore
+    } finally {
+      setLoadingRules(false)
+    }
+  }, [id])
+
   const load = useCallback(async () => {
     if (!Number.isFinite(id) || id <= 0) { setNotFound(true); setLoading(false); return }
     try {
-      const [w, open] = await Promise.all([journalsApi.getWorkspace(id), journalsApi.getIssues(id, { issue_status: 'open' })])
+      const [w, fetchedIssues] = await Promise.all([
+        journalsApi.getWorkspace(id),
+        journalsApi.getIssues(id, statusFilter === 'open' ? { issue_status: 'open' } : undefined)
+      ])
       setWs(w)
-      setIssues(open)
+      setIssues(fetchedIssues)
+      void fetchCompliance()
     } catch (err) {
       setNotFound(true)
       toast.error(getApiErrorMessage(err, 'Could not load this article'))
     } finally {
       setLoading(false)
     }
-  }, [id])
+  }, [id, statusFilter, fetchCompliance])
   useEffect(() => { load() }, [load])
 
+  const handleReRunAllChecks = async () => {
+    setReCheckingAll(true)
+    try {
+      await Promise.allSettled([
+        journalsApi.runCheck(id, 'ia_rules'),
+        journalsApi.runCheck(id, 'structuring'),
+        journalsApi.runCheck(id, 'references'),
+        journalsApi.runCheck(id, 'technical'),
+        journalsApi.runCheck(id, 'language'),
+      ])
+      toast.success('Pre-Editing & Language Editing checks re-run successfully!')
+      await load()
+      void fetchCompliance()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to re-run checks'))
+    } finally {
+      setReCheckingAll(false)
+    }
+  }
+
   const stageNo = useMemo(() => Number.parseInt(ws?.article.current_stage ?? '1', 10) || 1, [ws])
+  const stageLower = (ws?.article.current_stage ?? '').toLowerCase()
+  const isMsReview = stageNo === STAGE.MS_ANALYSIS || stageLower.includes('ms review') || stageLower.includes('ms analysis')
+  const isPreEditing = stageNo === STAGE.PRE_EDITING || stageLower.includes('pre-edit')
+  const isLanguage = stageNo === STAGE.LANGUAGE || stageLower.includes('language')
+  const isDelivery = stageNo === STAGE.DELIVERY || stageLower.includes('delivery') || Boolean(ws?.stages && ws.stages.length > 0 && ws.stages[ws.stages.length - 1].stage_name === ws.article.current_stage)
+  const isProof = !isDelivery && stageNo === STAGE.PROOF
 
   const styles = useMemo(() => {
     const inDoc = new Set<string>()
@@ -170,14 +226,40 @@ export function JournalArticleEditorPage() {
     return { byModule, bySeverity }
   }, [issues])
 
+  const autoFixableIssues = useMemo(() => {
+    return issues.filter(i => i.suggestion?.type === 'replace' && occIndexByIssue.has(i.id))
+  }, [issues, occIndexByIssue])
+
+  const reviewIssues = useMemo(() => {
+    return issues.filter(i => !(i.suggestion?.type === 'replace' && occIndexByIssue.has(i.id)))
+  }, [issues, occIndexByIssue])
+
+  const preEditingIssues = useMemo(() => {
+    return issues.filter(i => PRE_EDITING_MODULES.includes(i.module))
+  }, [issues])
+
+  const languageIssues = useMemo(() => {
+    return issues.filter(i => i.module === 'language')
+  }, [issues])
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return issues
+      .filter(i => {
+        if (stageGroupFilter === 'pre_editing') return PRE_EDITING_MODULES.includes(i.module)
+        if (stageGroupFilter === 'language') return i.module === 'language'
+        return true
+      })
       .filter(i => moduleFilter === 'all' || i.module === moduleFilter)
       .filter(i => severityFilter === 'all' || i.severity === severityFilter)
+      .filter(i => {
+        if (fixModeFilter === 'autofix') return i.suggestion?.type === 'replace' && occIndexByIssue.has(i.id)
+        if (fixModeFilter === 'review') return !(i.suggestion?.type === 'replace' && occIndexByIssue.has(i.id))
+        return true
+      })
       .filter(i => !q || `${i.rule_id} ${i.title} ${i.context_snippet ?? ''}`.toLowerCase().includes(q))
       .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || (locOf(a).para_idx ?? 1e9) - (locOf(b).para_idx ?? 1e9))
-  }, [issues, moduleFilter, severityFilter, query])
+  }, [issues, stageGroupFilter, moduleFilter, severityFilter, fixModeFilter, query, occIndexByIssue])
 
   // ── Actions ────────────────────────────────────────────────────────────────
   // ── Pre-Editing steps (Structuring → References → IA rules → Technical), finished one by one ──
@@ -366,6 +448,40 @@ export function JournalArticleEditorPage() {
     }
     await resolve(issue, 'accept')
     toast.success('Fix applied in the editor. Save to write it to the manuscript.')
+  }
+
+  /** Batch auto-fix all pending auto-fixable occurrences in the editor. */
+  const applyFixAll = async () => {
+    const targets = issues.filter(i => i.suggestion?.type === 'replace' && occIndexByIssue.has(i.id))
+    if (targets.length === 0 || !editorRef.current) return
+    setBatchFixing(true)
+    let appliedCount = 0
+    try {
+      // Sort descending by position (bottom to top) to ensure earlier offsets remain valid
+      const sorted = [...targets].sort((a, b) => {
+        const la = locOf(a), lb = locOf(b)
+        return (lb.para_idx ?? 0) - (la.para_idx ?? 0) || (lb.start ?? 0) - (la.start ?? 0)
+      })
+
+      for (const issue of sorted) {
+        const idx = occIndexByIssue.get(issue.id)
+        const to = issue.suggestion?.to
+        if (idx !== undefined && to !== undefined && occurrences[idx]) {
+          const ok = editorRef.current.replaceOccurrence(occurrences[idx], to, { asTrackChanges: trackChanges })
+          if (ok !== false) {
+            await journalsApi.updateIssue(id, issue.id, 'accept').catch(() => {})
+            appliedCount++
+          }
+        }
+      }
+      toast.success(`⚡ Auto-fixed ${appliedCount} issue(s) in editor! Click "Save edits to DOCX" to persist to manuscript.`)
+      await load()
+      void fetchCompliance()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to complete auto-fix'))
+    } finally {
+      setBatchFixing(false)
+    }
   }
 
   const navigate = useNavigate()
@@ -707,10 +823,10 @@ export function JournalArticleEditorPage() {
             </span>
           )}
         </div>
-        {stageNo === STAGE.MS_ANALYSIS && !done && (
+        {isMsReview && !done && (
           <>
             <Button variant="secondary" size="sm" onClick={handleRunMsAnalysis} isLoading={isAnalyzingMs}>
-              Re-run MS Analysis
+              Re-run MS Review
             </Button>
             <Button variant="secondary" size="sm" onClick={() => setElogModalOpen(true)}>
               📄 View ELOG Report
@@ -737,7 +853,7 @@ export function JournalArticleEditorPage() {
             ))}
           </div>
         )}
-        {stageNo === STAGE.PRE_EDITING && !done && ws.xhtml && ws.pre_editing.steps[1]?.status !== 'locked' && (
+        {isPreEditing && !done && ws.xhtml && ws.pre_editing.steps[1]?.status !== 'locked' && (
           <>
             <Button variant="secondary" size="sm" onClick={() => stageAction('references')} isLoading={stageBusy}>Process references</Button>
             <Button variant="ghost" size="sm" onClick={() => stageAction('references-status')}>Reference status</Button>
@@ -748,45 +864,49 @@ export function JournalArticleEditorPage() {
             )}
           </>
         )}
-        {stageNo === STAGE.XML && !done && (
+        {stageNo === STAGE.XML && !isDelivery && !done && (
           <Button variant="secondary" size="sm" onClick={() => stageAction('jats')} isLoading={stageBusy}>Convert to JATS XML</Button>
         )}
-        {stageNo === STAGE.INDESIGN && !done && (
+        {stageNo === STAGE.INDESIGN && !isDelivery && !done && (
           <>
             <Button variant="secondary" size="sm" onClick={() => stageAction('indesign')} isLoading={stageBusy}>Generate InDesign</Button>
             <Button variant="ghost" size="sm" onClick={() => stageAction('indesign-status')}>Check InDesign status</Button>
           </>
         )}
-        {stageNo === STAGE.INDESIGN_QC && !done && (
+        {stageNo === STAGE.INDESIGN_QC && !isDelivery && !done && (
           <Button variant="primary" size="sm" onClick={handleFinishQc} isLoading={stageBusy}>
             Finish QC
           </Button>
         )}
-        {stageNo === STAGE.PROOF && !done && (
+        {stageNo === STAGE.PROOF && !isDelivery && !done && (
           <Button variant="primary" size="sm" onClick={handleCompleteProof} isLoading={stageBusy}>
             Complete Proof
           </Button>
         )}
-        {stageNo === STAGE.DELIVERY && (
+        {isDelivery && (
           <Button variant="primary" size="sm" onClick={handleDownloadDeliveryZip}>
             Download Delivery ZIP
           </Button>
         )}
-        {stageNo >= STAGE.INDESIGN_QC && (
+        {stageNo >= STAGE.INDESIGN_QC && !isDelivery && (
           <a href={journalsApi.proofUrl(id)} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">
             Download proof PDF
           </a>
         )}
-        {stageNo > 1 && (
-          <Button variant="secondary" size="sm" onClick={() => setRevertTarget(ws.stages.find(s => s.stage_number < stageNo)?.stage_number ?? 1)}
+        {ws.stages.findIndex(s => s.stage_name === article.current_stage) > 0 && (
+          <Button variant="secondary" size="sm" onClick={() => {
+            const currIdx = ws.stages.findIndex(s => s.stage_name === article.current_stage)
+            const prevStage = currIdx > 0 ? ws.stages[currIdx - 1] : ws.stages[0]
+            setRevertTarget(prevStage.stage_number)
+          }}
             title="Move back to a previous workflow stage to edit manuscript/XML and re-run stage conversions">
             ↩ Move Back Stage
           </Button>
         )}
-        {!done && stageNo !== STAGE.MS_ANALYSIS && (
+        {!done && !isMsReview && (
           <Button size="sm" onClick={advance} isLoading={advancing}
-            disabled={stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && !ws.pre_editing.all_finished}
-            title={stageNo === STAGE.PRE_EDITING && !ws.pre_editing.all_finished ? 'Finish all 4 Pre-Editing steps first' : undefined}>
+            disabled={isPreEditing && ws.pre_editing.applies && !ws.pre_editing.all_finished}
+            title={isPreEditing && !ws.pre_editing.all_finished ? 'Finish all 4 Pre-Editing steps first' : undefined}>
             Complete {shortStage(article.current_stage)}
           </Button>
         )}
@@ -794,23 +914,24 @@ export function JournalArticleEditorPage() {
 
       {/* Workflow stages */}
       <ol className="bg-card border-b border-border px-4 py-1.5 flex gap-1 overflow-x-auto" aria-label="Workflow stages">
-        {ws.stages.map(s => {
+        {ws.stages.map((s, idx) => {
           const isDone = s.stage_status === 'Completed'
           const current = !isDone && s.stage_name === article.current_stage
-          const isPrevious = s.stage_number < stageNo || isDone
+          const currIdx = ws.stages.findIndex(st => st.stage_name === article.current_stage)
+          const isPrevious = (currIdx !== -1 && idx < currIdx) || isDone
           return (
             <li key={s.stage_number} aria-current={current ? 'step' : undefined}>
               <button
                 type="button"
                 disabled={!isPrevious || current || reverting}
                 onClick={() => isPrevious && !current && setRevertTarget(s.stage_number)}
-                title={isPrevious && !current ? `Click to move workflow back to Stage ${s.stage_number} (${shortStage(s.stage_name)})` : undefined}
+                title={isPrevious && !current ? `Click to move workflow back to Stage ${idx + 1} (${shortStage(s.stage_name)})` : undefined}
                 className={cn('flex items-center gap-1.5 text-xs px-3 py-1 rounded-md whitespace-nowrap transition-colors',
                   current ? 'bg-amber-500/10 text-amber-700 font-semibold' :
                   isPrevious ? 'text-green-600 hover:bg-surface cursor-pointer' : 'text-muted cursor-default')}>
                 <span className={cn('size-4 rounded-full flex items-center justify-center text-[10px]',
                   isDone ? 'bg-green-600 text-white' : current ? 'bg-amber-500 text-white' : 'bg-border')}>
-                  {isDone ? <Check className="size-2.5" /> : s.stage_number}
+                  {isDone ? <Check className="size-2.5" /> : idx + 1}
                 </span>
                 {shortStage(s.stage_name)}
               </button>
@@ -848,49 +969,245 @@ export function JournalArticleEditorPage() {
                 onRun={runStep} onFinish={finishStep} onReopen={reopenStep} />
             )}
             <div className="p-3 space-y-2 border-b border-border">
-              <div className="flex items-center gap-2">
-                <p className="text-xs font-bold uppercase tracking-wider text-text">Findings checklist</p>
-                <span className="rounded-full bg-surface px-2 text-xs tabular-nums">{issues.length}</span>
-                {visible.length > 0 && (
-                  <button type="button" onClick={ignoreAll}
-                    className="ml-auto text-[11px] font-semibold text-primary hover:underline">
-                    Ignore all ({visible.length})
+              <div className="flex items-center justify-between gap-1">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs font-bold uppercase tracking-wider text-text">Findings checklist</p>
+                  <span className="rounded-full bg-surface px-2 text-xs tabular-nums font-semibold">{issues.length}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={handleReRunAllChecks}
+                    disabled={reCheckingAll}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-surface hover:bg-muted/30 text-text border border-border transition-colors disabled:opacity-50"
+                    title="Re-run both Pre-Editing (IA Mechanical #1–91) and Language Editing (#92–121) checks"
+                  >
+                    <RotateCw className={cn("size-3 text-muted", reCheckingAll && "animate-spin text-primary")} />
+                    <span>Re-check</span>
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => { setRulesModalOpen(true); void fetchCompliance() }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                    title="View 121 Rules Compliance Matrix"
+                  >
+                    <Sparkles className="size-3 text-primary" />
+                    <span>121 Rules</span>
+                    {complianceReport && (
+                      <span className="font-mono text-[10px] text-primary/80">
+                        ({complianceReport.passed_count}/{complianceReport.total})
+                      </span>
+                    )}
+                  </button>
+                </div>
               </div>
+
+              {/* Single Consolidated Filter Section */}
+              {/* 1. Stage / Step Scope Filter */}
+              {isPreEditing ? (
+                <div className="grid grid-cols-5 gap-1 rounded-md bg-surface p-0.5 text-[10.5px]">
+                  <button
+                    type="button"
+                    onClick={() => { setModuleFilter('all'); setStageGroupFilter('pre_editing') }}
+                    className={cn('py-1 px-1 rounded text-center transition-all truncate',
+                      moduleFilter === 'all' ? 'bg-card shadow-xs font-semibold text-text' : 'text-muted hover:text-text')}
+                    title={`All Pre-Editing findings (${preEditingIssues.length})`}
+                  >
+                    All ({preEditingIssues.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setModuleFilter('structuring'); setSelectedStep('structuring') }}
+                    className={cn('py-1 px-1 rounded text-center transition-all truncate',
+                      moduleFilter === 'structuring' ? 'bg-purple-500/20 text-purple-900 dark:text-purple-300 font-semibold shadow-xs' : 'text-muted hover:text-text')}
+                    title={`Step 1: Structuring (${counts.byModule.structuring ?? 0})`}
+                  >
+                    1. Struct ({counts.byModule.structuring ?? 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setModuleFilter('references'); setSelectedStep('references') }}
+                    className={cn('py-1 px-1 rounded text-center transition-all truncate',
+                      moduleFilter === 'references' ? 'bg-blue-500/20 text-blue-900 dark:text-blue-300 font-semibold shadow-xs' : 'text-muted hover:text-text')}
+                    title={`Step 2: Reference validation (${counts.byModule.references ?? 0})`}
+                  >
+                    2. Refs ({counts.byModule.references ?? 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setModuleFilter('ia_rules'); setSelectedStep('ia_rules') }}
+                    className={cn('py-1 px-1 rounded text-center transition-all truncate',
+                      moduleFilter === 'ia_rules' ? 'bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 font-semibold shadow-xs' : 'text-muted hover:text-text')}
+                    title={`Step 3: Mechanical rules (${counts.byModule.ia_rules ?? 0})`}
+                  >
+                    3. Mech ({counts.byModule.ia_rules ?? 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setModuleFilter('technical'); setSelectedStep('technical') }}
+                    className={cn('py-1 px-1 rounded text-center transition-all truncate',
+                      moduleFilter === 'technical' ? 'bg-amber-500/20 text-amber-900 dark:text-amber-300 font-semibold shadow-xs' : 'text-muted hover:text-text')}
+                    title={`Step 4: Citation checks (${counts.byModule.technical ?? 0})`}
+                  >
+                    4. Cites ({counts.byModule.technical ?? 0})
+                  </button>
+                </div>
+              ) : isLanguage ? (
+                <div className="flex items-center justify-between rounded-md bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 text-xs text-blue-900 dark:text-blue-300">
+                  <span className="font-semibold">Stage 3: Language Editing</span>
+                  <span className="font-mono text-[11px] font-bold">{languageIssues.length} items</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-1 rounded-md bg-surface p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => { setStageGroupFilter('all'); setModuleFilter('all') }}
+                    className={cn('py-1 rounded text-center transition-all',
+                      stageGroupFilter === 'all' ? 'bg-card shadow-xs font-semibold text-text' : 'text-muted hover:text-text')}>
+                    All ({issues.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setStageGroupFilter('pre_editing'); setModuleFilter('all') }}
+                    className={cn('py-1 rounded text-center transition-all',
+                      stageGroupFilter === 'pre_editing' ? 'bg-purple-500/20 text-purple-900 dark:text-purple-300 shadow-xs font-semibold' : 'text-muted hover:text-text')}>
+                    Pre-Editing ({preEditingIssues.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setStageGroupFilter('language'); setModuleFilter('all') }}
+                    className={cn('py-1 rounded text-center transition-all',
+                      stageGroupFilter === 'language' ? 'bg-blue-500/20 text-blue-900 dark:text-blue-300 shadow-xs font-semibold' : 'text-muted hover:text-text')}>
+                    Language ({languageIssues.length})
+                  </button>
+                </div>
+              )}
+
+              {/* Batch Auto-fix button if any auto-fixable findings exist */}
+              {autoFixableIssues.length > 0 && (
+                <div className="pt-0.5">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={applyFixAll}
+                    isLoading={batchFixing}
+                    className="w-full bg-amber-500/15 border border-amber-500/40 text-amber-800 hover:bg-amber-500/25 font-semibold text-xs flex items-center justify-center gap-1.5 shadow-2xs py-1"
+                  >
+                    <Zap className="size-3 text-amber-600 fill-amber-500" />
+                    <span>Auto Fix All ({autoFixableIssues.length} items)</span>
+                  </Button>
+                </div>
+              )}
+
+              {/* 2. Search Input */}
               <label className="relative block">
                 <span className="sr-only">Search findings</span>
                 <Search className="size-3.5 text-muted absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search findings or rules…"
                   className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-2 text-xs outline-none focus:ring-2 focus:ring-primary/30" />
               </label>
-              <div className="flex flex-wrap gap-1">
-                <button type="button" onClick={() => setModuleFilter('all')}
-                  className={cn('px-2 py-0.5 rounded text-[11px] font-semibold', moduleFilter === 'all' ? 'bg-text text-card' : 'bg-surface text-muted')}>
-                  ALL ({issues.length})
+
+              {/* 3. Refinement Chips (Auto-Fix, Errors, Warnings, Hints) - Toggleable with no duplicate 'All' */}
+              <div className="flex flex-wrap items-center gap-1 text-[11px]">
+                {autoFixableIssues.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFixModeFilter(prev => prev === 'autofix' ? 'all' : 'autofix')}
+                    className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full border transition-all text-[11px]',
+                      fixModeFilter === 'autofix' ? 'bg-amber-500 text-white border-amber-600 font-semibold shadow-xs' : 'bg-amber-500/10 text-amber-800 border-amber-500/30 hover:bg-amber-500/20')}>
+                    <Zap className="size-2.5" />
+                    <span>Auto-Fix ({autoFixableIssues.length})</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSeverityFilter(prev => prev === 'error' ? 'all' : 'error')}
+                  className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full border transition-all text-[11px]',
+                    severityFilter === 'error' ? 'bg-red-600 text-white border-red-700 font-semibold shadow-xs' :
+                    counts.bySeverity.error > 0 ? 'bg-red-500/10 text-red-700 border-red-500/30 hover:bg-red-500/20' : 'bg-surface text-muted border-border hover:text-text')}>
+                  <span>Errors ({counts.bySeverity.error})</span>
                 </button>
-                {modulesWithIssues.map(c => (
-                  <button key={c.key} type="button" onClick={() => setModuleFilter(c.key)}
-                    className={cn('px-2 py-0.5 rounded text-[11px] font-semibold uppercase', moduleFilter === c.key ? 'bg-text text-card' : 'bg-surface text-muted')}>
-                    {c.name.split(' ')[0]} ({counts.byModule[c.key]})
+                <button
+                  type="button"
+                  onClick={() => setSeverityFilter(prev => prev === 'warning' ? 'all' : 'warning')}
+                  className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full border transition-all text-[11px]',
+                    severityFilter === 'warning' ? 'bg-amber-600 text-white border-amber-700 font-semibold shadow-xs' :
+                    counts.bySeverity.warning > 0 ? 'bg-amber-500/10 text-amber-800 border-amber-500/30 hover:bg-amber-500/20' : 'bg-surface text-muted border-border hover:text-text')}>
+                  <span>Warnings ({counts.bySeverity.warning})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSeverityFilter(prev => prev === 'info' ? 'all' : 'info')}
+                  className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full border transition-all text-[11px]',
+                    severityFilter === 'info' ? 'bg-blue-600 text-white border-blue-700 font-semibold shadow-xs' :
+                    counts.bySeverity.info > 0 ? 'bg-blue-500/10 text-blue-800 border-blue-500/30 hover:bg-blue-500/20' : 'bg-surface text-muted border-border hover:text-text')}>
+                  <span>Hints ({counts.bySeverity.info})</span>
+                </button>
+                {(severityFilter !== 'all' || fixModeFilter !== 'all') && (
+                  <button
+                    type="button"
+                    onClick={() => { setSeverityFilter('all'); setFixModeFilter('all') }}
+                    className="text-[10px] text-primary hover:underline ml-auto"
+                  >
+                    Clear filter
                   </button>
-                ))}
+                )}
               </div>
-              <div className="grid grid-cols-4 rounded-md bg-surface p-0.5 text-[11px]">
-                {(['all', 'error', 'warning', 'info'] as const).map(s => (
-                  <button key={s} type="button" onClick={() => setSeverityFilter(s)}
-                    className={cn('py-1 rounded capitalize', severityFilter === s ? 'bg-card shadow-sm font-semibold text-text' : 'text-muted')}>
-                    {s === 'info' ? 'Hints' : s === 'all' ? 'All' : `${s}s`}
+
+              {/* 4. Status Toggle & Shown Count */}
+              <div className="flex items-center justify-between text-[11px] text-muted pt-0.5 border-t border-border/50">
+                <span className="font-medium text-text">{visible.length} shown</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted">Status:</span>
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(prev => prev === 'open' ? 'all' : 'open')}
+                    className={cn("px-1.5 py-0.2 rounded text-[10px] font-semibold transition-all border",
+                      statusFilter === 'all' ? "bg-primary/10 text-primary border-primary/30" : "bg-surface text-muted border-border hover:text-text")}
+                  >
+                    {statusFilter === 'open' ? 'Open Only' : 'All (incl. Fixed)'}
                   </button>
-                ))}
+                  {visible.length > 0 && (
+                    <button type="button" onClick={ignoreAll}
+                      className="ml-1 font-semibold text-primary hover:underline">
+                      Ignore all ({visible.length})
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
               {visible.length === 0 ? (
-                <p className="text-xs text-muted text-center py-8">
-                  {issues.length ? 'No findings match these filters.' : ws.xhtml ? 'No open findings. Complete the stage when you are ready.' : 'Run pre-editing to check the manuscript.'}
-                </p>
+                <div className="text-center py-8 space-y-3 px-4">
+                  <div className="size-10 rounded-full bg-surface text-muted mx-auto flex items-center justify-center text-lg">
+                    🔍
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-text">No findings match current filters</p>
+                    <p className="text-[11px] text-muted mt-1 leading-relaxed">
+                      {severityFilter === 'error' && counts.bySeverity.error === 0 ? (
+                        <>There are <strong>0 errors</strong>. All {issues.length} findings are classified as <strong>Hints/Suggestions</strong> or <strong>Warnings</strong>.</>
+                      ) : (
+                        <>Active filters: {severityFilter !== 'all' ? `[${severityFilter}] ` : ''}{stageGroupFilter !== 'all' ? `[${stageGroupFilter}] ` : ''}{moduleFilter !== 'all' ? `[${moduleFilter}] ` : ''}{fixModeFilter !== 'all' ? `[${fixModeFilter}]` : ''}</>
+                      )}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setSeverityFilter('all')
+                      setModuleFilter('all')
+                      setStageGroupFilter('all')
+                      setFixModeFilter('all')
+                      setQuery('')
+                    }}
+                    className="text-xs"
+                  >
+                    Reset all filters ({issues.length} findings)
+                  </Button>
+                </div>
               ) : visible.map(i => {
                 const l = locOf(i)
                 const selected = selectedId === i.id
@@ -904,6 +1221,16 @@ export function JournalArticleEditorPage() {
                     <div className="flex items-center gap-2">
                       <span className="font-bold uppercase text-[10px] tracking-wide text-text">{CHECK_NAME[i.module] ?? i.module}</span>
                       <span className="font-mono text-muted">{i.rule_id}</span>
+                      {i.status === 'fixed' && (
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-green-500/10 text-green-700 border border-green-500/30">
+                          ✓ Fixed
+                        </span>
+                      )}
+                      {i.status === 'ignored' && (
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-300">
+                          Ignored
+                        </span>
+                      )}
                       <span className="ml-auto text-muted">{l.para_idx !== undefined ? `Para ${l.para_idx}` : (i.location as { xml_line?: number } | undefined)?.xml_line ? `Line ${(i.location as { xml_line?: number }).xml_line}` : ''}</span>
                     </div>
                     <p className="font-semibold text-text text-[13px] leading-snug">{i.title}</p>
@@ -946,7 +1273,7 @@ export function JournalArticleEditorPage() {
 
         {/* Editor / Main View Area */}
         <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-          {stageNo === STAGE.MS_ANALYSIS ? (
+          {isMsReview ? (
             <Stage1MsAnalysisWorkspace
               workspace={ws}
               onRunAnalysis={handleRunMsAnalysis}
@@ -955,7 +1282,7 @@ export function JournalArticleEditorPage() {
               onViewElog={() => setElogModalOpen(true)}
               isBusy={isAnalyzingMs || advancing}
             />
-          ) : stageNo === STAGE.PROOF ? (
+          ) : isProof ? (
             /* Stage 7: Split-Screen Dual Editor View */
             <div className="flex-1 flex flex-col min-h-0 bg-slate-900">
               <div className="flex items-center justify-between px-4 py-2 bg-slate-800 text-white text-xs border-b border-slate-700">
@@ -1054,8 +1381,8 @@ export function JournalArticleEditorPage() {
                 </div>
               </div>
             </div>
-          ) : stageNo === STAGE.DELIVERY ? (
-            /* Stage 8: Final Delivery Package Dashboard */
+          ) : isDelivery ? (
+            /* Final Delivery Package Dashboard */
             <div className="flex-1 p-8 bg-slate-900 text-white overflow-y-auto flex flex-col items-center justify-center">
               <div className="max-w-2xl w-full bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl space-y-6">
                 <div className="flex items-center gap-4 border-b border-slate-700 pb-4">
@@ -1063,7 +1390,7 @@ export function JournalArticleEditorPage() {
                     📦
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-white">Stage 8: Final Delivery Package</h2>
+                    <h2 className="text-xl font-bold text-white">{shortStage(article.current_stage) || 'Final Delivery Package'}</h2>
                     <p className="text-xs text-slate-400">All publication outputs have been generated, validated, and placed in the delivery folder.</p>
                   </div>
                 </div>
@@ -1260,6 +1587,232 @@ export function JournalArticleEditorPage() {
                 title="ELOG Document"
                 className="w-full h-full border-0"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PA 121 Rules Compliance Matrix Modal */}
+      {rulesModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-5xl w-full h-[88vh] shadow-2xl flex flex-col overflow-hidden text-slate-900">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="size-10 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center font-bold text-xl">
+                  📋
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold">PA 121 Editorial Rules Compliance Matrix</h3>
+                    {complianceReport && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-green-500/20 text-green-300 border border-green-500/30">
+                        {complianceReport.passed_count}/{complianceReport.total} Rules Passed ({Math.round((complianceReport.passed_count / complianceReport.total) * 100)}%)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Publishing Associates Complete Catalog: Part 1 Technical Points (#1–91) and Part 2 Language & Style (#92–121)
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={() => void fetchCompliance()} isLoading={loadingRules}>
+                  Refresh
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setRulesModalOpen(false)}
+                  className="size-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800"
+                >
+                  <X className="size-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Overview KPI Cards */}
+            {complianceReport && (
+              <div className="grid grid-cols-4 gap-3 p-4 bg-slate-50 border-b border-slate-200 text-xs">
+                <div className="p-3 rounded-xl bg-white border border-slate-200 shadow-2xs">
+                  <p className="text-[11px] font-semibold uppercase text-slate-500">Total Rules</p>
+                  <p className="text-xl font-bold text-slate-900 mt-1">{complianceReport.total}</p>
+                  <p className="text-[10px] text-slate-400">100% PA Specification</p>
+                </div>
+                <div className="p-3 rounded-xl bg-white border border-slate-200 shadow-2xs">
+                  <p className="text-[11px] font-semibold uppercase text-slate-500">Part 1: Technical (#1–91)</p>
+                  <p className="text-xl font-bold text-slate-900 mt-1">
+                    {complianceReport.rules.filter(r => r.part === 'Technical' && r.status === 'passed').length} / 91
+                  </p>
+                  <p className="text-[10px] text-slate-400">SI Units, Math, En-Dash, References</p>
+                </div>
+                <div className="p-3 rounded-xl bg-white border border-slate-200 shadow-2xs">
+                  <p className="text-[11px] font-semibold uppercase text-slate-500">Part 2: Language (#92–121)</p>
+                  <p className="text-xl font-bold text-slate-900 mt-1">
+                    {complianceReport.rules.filter(r => r.part === 'Language' && r.status === 'passed').length} / 30
+                  </p>
+                  <p className="text-[10px] text-slate-400">Grammar, Syntax, Style, AI Disclosures</p>
+                </div>
+                <div className="p-3 rounded-xl bg-white border border-slate-200 shadow-2xs">
+                  <p className="text-[11px] font-semibold uppercase text-slate-500">Flagged Exceptions</p>
+                  <p className={cn("text-xl font-bold mt-1", complianceReport.flagged_count > 0 ? "text-amber-600" : "text-green-600")}>
+                    {complianceReport.flagged_count} Rules
+                  </p>
+                  <p className="text-[10px] text-slate-400">
+                    {complianceReport.flagged_count > 0 ? "Require Auto-Fix or Review" : "Full Stage Compliance"}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Filter & Search Bar */}
+            <div className="px-6 py-2.5 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-600">Category:</span>
+                <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+                  {(['all', 'Technical', 'Language'] as const).map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setRulesPartFilter(p)}
+                      className={cn('px-3 py-1 font-semibold text-xs transition-colors',
+                        rulesPartFilter === p ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50')}
+                    >
+                      {p === 'all' ? 'All (121)' : p === 'Technical' ? 'Part 1: Technical (91)' : 'Part 2: Language (30)'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-600">Status:</span>
+                <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+                  {(['all', 'flagged', 'passed'] as const).map(st => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setRulesStatusFilter(st)}
+                      className={cn('px-3 py-1 font-semibold text-xs capitalize transition-colors',
+                        rulesStatusFilter === st ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50')}
+                    >
+                      {st === 'flagged' ? '🔴 Flagged Only' : st === 'passed' ? '🟢 Passed Only' : 'All'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="relative min-w-[240px]">
+                <Search className="size-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={rulesSearch}
+                  onChange={e => setRulesSearch(e.target.value)}
+                  placeholder="Filter by rule name or #..."
+                  className="h-8 w-full rounded-lg border border-slate-200 pl-8 pr-3 text-xs outline-none focus:border-slate-400"
+                />
+              </div>
+            </div>
+
+            {/* Rules Table */}
+            <div className="flex-1 overflow-y-auto">
+              {!complianceReport ? (
+                <div className="flex items-center justify-center h-48">
+                  <Loader2 className="size-6 animate-spin text-slate-400" />
+                </div>
+              ) : (
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 text-slate-600 font-semibold select-none">
+                    <tr>
+                      <th className="py-2.5 px-4 w-16">#</th>
+                      <th className="py-2.5 px-3 w-24">Part</th>
+                      <th className="py-2.5 px-3 w-36">Gate / Stage</th>
+                      <th className="py-2.5 px-3 w-36">Domain</th>
+                      <th className="py-2.5 px-4">Rule Name & Specification</th>
+                      <th className="py-2.5 px-3 w-28">Fix Mode</th>
+                      <th className="py-2.5 px-3 w-28">Status</th>
+                      <th className="py-2.5 px-4 w-28 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans">
+                    {complianceReport.rules
+                      .filter(r => rulesPartFilter === 'all' || r.part === rulesPartFilter)
+                      .filter(r => rulesStatusFilter === 'all' || r.status === rulesStatusFilter)
+                      .filter(r => !rulesSearch || `${r.id} ${r.name} ${r.domain} ${r.desc}`.toLowerCase().includes(rulesSearch.toLowerCase()))
+                      .map(r => (
+                        <tr key={r.id} className={cn('hover:bg-slate-50/80 transition-colors', r.status === 'flagged' ? 'bg-amber-50/30' : '')}>
+                          <td className="py-2.5 px-4 font-mono font-bold text-slate-700">#{r.id}</td>
+                          <td className="py-2.5 px-3">
+                            <span className={cn('px-2 py-0.5 rounded text-[10px] font-semibold',
+                              r.part === 'Technical' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-purple-50 text-purple-700 border border-purple-200')}>
+                              {r.part}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className={cn('px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap',
+                              r.gate === 1 ? 'bg-purple-50 text-purple-700 border border-purple-200' :
+                              r.gate === 2 ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                              r.gate === 3 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                              r.gate === 4 ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                              'bg-indigo-50 text-indigo-700 border border-indigo-200')}>
+                              {(r as any).gate_label || (r.part === 'Language' ? 'Stage 3: Language' : `Gate ${r.gate}`)}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500 font-medium">{r.domain}</td>
+                          <td className="py-2.5 px-4">
+                            <p className="font-semibold text-slate-900">{r.name}</p>
+                            <p className="text-[11px] text-slate-500 leading-relaxed mt-0.5">{r.desc}</p>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className={cn('px-2 py-0.5 rounded text-[10px] font-semibold inline-flex items-center gap-1',
+                              r.mode.includes('Auto') ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-700')}>
+                              {r.mode.includes('Auto') && <Zap className="size-2.5 text-amber-600" />}
+                              <span>{r.mode}</span>
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {r.status === 'flagged' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                <AlertCircle className="size-3 text-amber-600" />
+                                <span>{r.open_issues_count} open</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-50 text-green-700 border border-green-200">
+                                <CheckCircle2 className="size-3 text-green-600" />
+                                <span>Passed</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-4 text-right">
+                            {r.issues_count > 0 ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="text-[11px] h-7 px-2"
+                                onClick={() => {
+                                  setRulesModalOpen(false)
+                                  setQuery(`PA #${r.id}`)
+                                }}
+                              >
+                                View ({r.issues_count})
+                              </Button>
+                            ) : (
+                              <span className="text-slate-300 text-[11px]">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-6 py-3 bg-slate-50 border-t border-slate-200 text-xs">
+              <span className="text-slate-500">
+                Gate 2 (Structuring & References) · Gate 3 (Pre-Editing & Language) · Gate 4 (Final Delivery)
+              </span>
+              <Button size="sm" variant="primary" onClick={() => setRulesModalOpen(false)}>
+                Close Matrix
+              </Button>
             </div>
           </div>
         </div>

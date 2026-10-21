@@ -142,21 +142,15 @@ export function CreateJournalPage() {
             <>
               {workflow.description && <p className="text-sm text-muted">{workflow.description}</p>}
               <ol className="flex flex-wrap gap-2" aria-label="Workflow stages">
-                {ALL_STAGES.map((s, i) => {
-                  const included = workflow.stage_numbers.includes(i + 1)
-                  return (
-                    <li
-                      key={s}
-                      className={cn(
-                        'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs',
-                        included ? 'border-primary/40 bg-primary/10 text-primary font-medium' : 'border-border text-muted line-through',
-                      )}
-                    >
-                      {included && <Check className="size-3" />}
-                      <span className="font-mono">{i + 1}</span> {shortStage(s)}
-                    </li>
-                  )
-                })}
+                {(workflow.stages && workflow.stages.length > 0 ? workflow.stages : ALL_STAGES.filter((_, i) => workflow.stage_numbers.includes(i + 1))).map((s, i) => (
+                  <li
+                    key={s + i}
+                    className="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs border-primary/40 bg-primary/10 text-primary font-medium"
+                  >
+                    <Check className="size-3" />
+                    <span className="font-mono">{i + 1}</span> {shortStage(s)}
+                  </li>
+                ))}
               </ol>
             </>
           )}
