@@ -1054,16 +1054,16 @@ export function BodInternalPage() {
                   {datePreset === 'today' || datePreset === 'all'
                     ? 'Today Due'
                     : datePreset === 'tomorrow'
-                    ? 'Tomorrow Due'
-                    : datePreset === 'day_3'
-                    ? 'Day 3 Due'
-                    : datePreset === 'day_4'
-                    ? 'Day 4 Due'
-                    : datePreset === 'day_5'
-                    ? 'Day 5 Due'
-                    : datePreset === 'yesterday'
-                    ? 'Yesterday Due'
-                    : 'Period Due'}
+                      ? 'Tomorrow Due'
+                      : datePreset === 'day_3'
+                        ? 'Day 3 Due'
+                        : datePreset === 'day_4'
+                          ? 'Day 4 Due'
+                          : datePreset === 'day_5'
+                            ? 'Day 5 Due'
+                            : datePreset === 'yesterday'
+                              ? 'Yesterday Due'
+                              : 'Period Due'}
                 </span>
                 <div className="p-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded">
                   <Calendar size={12} />
@@ -1075,16 +1075,16 @@ export function BodInternalPage() {
                   {datePreset === 'today' || datePreset === 'all'
                     ? 'Due today'
                     : datePreset === 'tomorrow'
-                    ? 'Due tomorrow'
-                    : datePreset === 'day_3'
-                    ? 'Due Day 3'
-                    : datePreset === 'day_4'
-                    ? 'Due Day 4'
-                    : datePreset === 'day_5'
-                    ? 'Due Day 5'
-                    : datePreset === 'yesterday'
-                    ? 'Due yesterday'
-                    : 'Due in range'}
+                      ? 'Due tomorrow'
+                      : datePreset === 'day_3'
+                        ? 'Due Day 3'
+                        : datePreset === 'day_4'
+                          ? 'Due Day 4'
+                          : datePreset === 'day_5'
+                            ? 'Due Day 5'
+                            : datePreset === 'yesterday'
+                              ? 'Due yesterday'
+                              : 'Due in range'}
                 </span>
               </div>
             </div>
@@ -1606,7 +1606,7 @@ export function BodInternalPage() {
                     </th>
                     <th onClick={() => handleSort('created')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
                       <div className="flex items-center gap-1">
-                        <span className="truncate">Created</span>
+                        <span className="truncate">Received On</span>
                         {renderSortIcon('created')}
                       </div>
                     </th>
