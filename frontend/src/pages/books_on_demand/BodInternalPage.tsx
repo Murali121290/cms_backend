@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2 } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -1604,24 +1604,6 @@ export function BodInternalPage() {
                         {renderSortIcon('language')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[13%] overflow-hidden">
-                      <div className="flex items-center gap-1">
-                        <span className="truncate">Assignee</span>
-                        {renderSortIcon('assignee')}
-                      </div>
-                    </th>
-                    <th onClick={() => handleSort('status')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[11%] overflow-hidden">
-                      <div className="flex items-center gap-1">
-                        <span className="truncate">Status</span>
-                        {renderSortIcon('status')}
-                      </div>
-                    </th>
-                    <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[12%] overflow-hidden">
-                      <div className="flex items-center gap-1">
-                        <span className="truncate">Progress</span>
-                        {renderSortIcon('progress')}
-                      </div>
-                    </th>
                     <th onClick={() => handleSort('created')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Created</span>
@@ -1632,6 +1614,24 @@ export function BodInternalPage() {
                       <div className="flex items-center gap-1">
                         <span className="truncate">Due Date</span>
                         {renderSortIcon('dueDate')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[13%] overflow-hidden">
+                      <div className="flex items-center gap-1">
+                        <span className="truncate">Assignee</span>
+                        {renderSortIcon('assignee')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[12%] overflow-hidden">
+                      <div className="flex items-center gap-1">
+                        <span className="truncate">Progress</span>
+                        {renderSortIcon('progress')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('status')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[11%] overflow-hidden">
+                      <div className="flex items-center gap-1">
+                        <span className="truncate">Status</span>
+                        {renderSortIcon('status')}
                       </div>
                     </th>
                     <th className="px-1 py-2 text-center w-[6%]"></th>
@@ -1649,12 +1649,12 @@ export function BodInternalPage() {
                           value={colFilters.name}
                           onChange={(e) => setColFilters(prev => ({ ...prev, name: e.target.value }))}
                           placeholder="Filter..."
-                          className="w-full bg-background border border-border rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                          className="w-full h-[26px] bg-background/90 hover:bg-background border border-border/80 hover:border-primary/50 focus:border-primary rounded-md px-2 text-[11px] font-medium text-text placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all font-sans shadow-xs"
                         />
                         {colFilters.name && (
                           <button
                             onClick={() => setColFilters(prev => ({ ...prev, name: '' }))}
-                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted hover:text-text"
                             title="Clear"
                           >
                             <X size={10} />
@@ -1671,7 +1671,7 @@ export function BodInternalPage() {
                           value={colFilters.pages}
                           onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
                           placeholder="Pages"
-                          className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                          className="w-full h-[26px] bg-background/90 hover:bg-background border border-border/80 hover:border-primary/50 focus:border-primary rounded-md px-1 text-[11px] text-center font-medium text-text placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all font-sans shadow-xs"
                         />
                         {colFilters.pages && (
                           <button
@@ -1686,84 +1686,29 @@ export function BodInternalPage() {
                     </th>
 
                     {/* Type */}
-                    <th className="px-1.5 py-1 font-normal overflow-hidden">
-                      <select
+                    <th className="px-1.5 py-1 font-normal overflow-visible">
+                      <Dropdown
+                        options={[
+                          { value: 'all', label: 'All Types' },
+                          ...uniqueTypes.map(t => ({ value: t, label: t }))
+                        ]}
                         value={colFilters.type}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
-                        className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                      >
-                        <option value="all">All Types</option>
-                        {uniqueTypes.map(t => (
-                          <option key={t} value={t}>{t}</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setColFilters(prev => ({ ...prev, type: val }))}
+                        className="h-[26px] py-0 px-2 text-[11px] font-medium bg-background/90 hover:bg-background border-border/80 rounded-md shadow-xs truncate"
+                      />
                     </th>
 
                     {/* Language */}
-                    <th className="px-1.5 py-1 font-normal overflow-hidden">
-                      <select
+                    <th className="px-1.5 py-1 font-normal overflow-visible">
+                      <Dropdown
+                        options={[
+                          { value: 'all', label: 'All Langs' },
+                          ...uniqueLanguages.map(l => ({ value: l, label: l }))
+                        ]}
                         value={colFilters.language}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
-                        className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                      >
-                        <option value="all">All Langs</option>
-                        {uniqueLanguages.map(l => (
-                          <option key={l} value={l}>{l}</option>
-                        ))}
-                      </select>
-                    </th>
-
-                    {/* Assignee */}
-                    <th className="px-1.5 py-1 font-normal overflow-hidden">
-                      <select
-                        value={colFilters.assignee}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, assignee: e.target.value }))}
-                        className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                      >
-                        <option value="all">All Assignees</option>
-                        <option value="unassigned">Unassigned</option>
-                        {assigneeOptions.map(a => (
-                          <option key={a} value={a}>{getUserDisplayName(a)}</option>
-                        ))}
-                      </select>
-                    </th>
-
-                    {/* Status */}
-                    <th className="px-1.5 py-1 font-normal overflow-hidden">
-                      <select
-                        value={colFilters.status}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, status: e.target.value }))}
-                        className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                      >
-                        <option value="all">All Status</option>
-                        <option value="active">Active</option>
-                        <option value="fresh">Fresh</option>
-                        <option value="yts">YTS</option>
-                        <option value="in_progress">In-Progress</option>
-                        <option value="ready_to_dispatch">Ready to Dispatch</option>
-                        <option value="overdue">Overdue</option>
-                        <option value="tomorrow_due">Due Soon</option>
-                        <option value="completed">Completed (All)</option>
-                        <option value="completed_ahead">Completed (Ahead)</option>
-                        <option value="completed_ontime">Completed (On-time)</option>
-                        <option value="completed_delay">Completed (Delay)</option>
-                      </select>
-                    </th>
-
-                    {/* Progress (Stage) */}
-                    <th className="px-1.5 py-1 font-normal overflow-hidden">
-                      <select
-                        value={colFilters.stage}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, stage: e.target.value }))}
-                        className="w-full bg-background border border-border rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                      >
-                        <option value="all">All Stages</option>
-                        <option value="Add job">Add job</option>
-                        <option value="Production">Production</option>
-                        <option value="QC">QC</option>
-                        <option value="Ready to Dispatch">Ready to Dispatch</option>
-                        <option value="Completed">Completed</option>
-                      </select>
+                        onChange={(val) => setColFilters(prev => ({ ...prev, language: val }))}
+                        className="h-[26px] py-0 px-2 text-[11px] font-medium bg-background/90 hover:bg-background border-border/80 rounded-md shadow-xs truncate"
+                      />
                     </th>
 
                     {/* Created */}
@@ -1773,7 +1718,7 @@ export function BodInternalPage() {
                           type="date"
                           value={colFilters.created}
                           onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
-                          className="w-full bg-background border border-border rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                          className="w-full h-[26px] bg-background/90 hover:bg-background border border-border/80 hover:border-primary/50 focus:border-primary rounded-md px-1.5 text-[10px] font-medium text-text focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all font-sans shadow-xs"
                         />
                         {colFilters.created && (
                           <button
@@ -1794,7 +1739,7 @@ export function BodInternalPage() {
                           type="date"
                           value={colFilters.dueDate}
                           onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
-                          className="w-full bg-background border border-border rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                          className="w-full h-[26px] bg-background/90 hover:bg-background border border-border/80 hover:border-primary/50 focus:border-primary rounded-md px-1.5 text-[10px] font-medium text-text focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all font-sans shadow-xs"
                         />
                         {colFilters.dueDate && (
                           <button
@@ -1806,6 +1751,61 @@ export function BodInternalPage() {
                           </button>
                         )}
                       </div>
+                    </th>
+
+                    {/* Assignee */}
+                    <th className="px-1.5 py-1 font-normal overflow-visible">
+                      <Dropdown
+                        searchable
+                        searchPlaceholder="Filter assignees..."
+                        options={[
+                          { value: 'all', label: 'All Assignees' },
+                          { value: 'unassigned', label: 'Unassigned' },
+                          ...assigneeOptions.map(a => ({ value: a, label: getUserDisplayName(a) }))
+                        ]}
+                        value={colFilters.assignee}
+                        onChange={(val) => setColFilters(prev => ({ ...prev, assignee: val }))}
+                        className="h-[26px] py-0 px-2 text-[11px] font-medium bg-background/90 hover:bg-background border-border/80 rounded-md shadow-xs truncate"
+                      />
+                    </th>
+
+                    {/* Progress (Stage) */}
+                    <th className="px-1.5 py-1 font-normal overflow-visible">
+                      <Dropdown
+                        options={[
+                          { value: 'all', label: 'All Stages' },
+                          { value: 'Add job', label: 'Add job' },
+                          { value: 'Production', label: 'Production' },
+                          { value: 'QC', label: 'QC' },
+                          { value: 'Ready to Dispatch', label: 'Ready to Dispatch' },
+                          { value: 'Completed', label: 'Completed' },
+                        ]}
+                        value={colFilters.stage}
+                        onChange={(val) => setColFilters(prev => ({ ...prev, stage: val }))}
+                        className="h-[26px] py-0 px-2 text-[11px] font-medium bg-background/90 hover:bg-background border-border/80 rounded-md shadow-xs truncate"
+                      />
+                    </th>
+
+                    {/* Status */}
+                    <th className="px-1.5 py-1 font-normal overflow-visible">
+                      <Dropdown
+                        options={[
+                          { value: 'all', label: 'All Status' },
+                          { value: 'fresh', label: 'Fresh' },
+                          { value: 'yts', label: 'YTS' },
+                          { value: 'in_progress', label: 'In-Progress' },
+                          { value: 'ready_to_dispatch', label: 'Ready to Dispatch' },
+                          { value: 'overdue', label: 'Overdue' },
+                          { value: 'tomorrow_due', label: 'Due Soon' },
+                          { value: 'completed', label: 'Completed (All)' },
+                          { value: 'completed_ahead', label: 'Completed (Ahead)' },
+                          { value: 'completed_ontime', label: 'Completed (On-time)' },
+                          { value: 'completed_delay', label: 'Completed (Delay)' },
+                        ]}
+                        value={colFilters.status}
+                        onChange={(val) => setColFilters(prev => ({ ...prev, status: val }))}
+                        className="h-[26px] py-0 px-2 text-[11px] font-medium bg-background/90 hover:bg-background border-border/80 rounded-md shadow-xs truncate"
+                      />
                     </th>
 
                     {/* Clear action */}
@@ -1892,39 +1892,6 @@ export function BodInternalPage() {
                           <td className="px-1.5 py-2 text-xs text-muted font-medium truncate overflow-hidden" title={job.pdf_language || ''}>
                             {job.pdf_language ? job.pdf_language : '-'}
                           </td>
-                          <td className="px-1.5 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center gap-1 text-muted min-w-0">
-                              <User size={12} className="text-muted/70 shrink-0" />
-                              <div className="min-w-0 flex-1 truncate">
-                                <Dropdown
-                                  variant="inline"
-                                  searchable
-                                  searchPlaceholder="Search assignees..."
-                                  value={currentAssignee || ''}
-                                  onChange={(val) => assignUser(job.id, val)}
-                                  className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px] truncate"
-                                  options={assigneeOptions}
-                                />
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-1.5 py-2 overflow-hidden">
-                            <span className={`capitalize font-bold px-1.5 py-0.5 rounded text-[9px] border truncate inline-block max-w-full ${getStatusBadgeClass(job)}`}>
-                              {getStatusText(job)}
-                            </span>
-                          </td>
-                          <td className="px-1.5 py-2 overflow-hidden">
-                            <div className="flex items-center justify-between text-[9px] text-muted font-bold mb-1">
-                              <span className="truncate">{job.current_stage_name}</span>
-                              <span className="shrink-0 ml-1">{percent}%</span>
-                            </div>
-                            <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-primary transition-all duration-500 rounded-full"
-                                style={{ width: `${percent}%` }}
-                              />
-                            </div>
-                          </td>
                           <td className="px-1.5 py-2 text-[11px] text-muted font-medium overflow-hidden">
                             <p className="text-[11px] font-medium text-text m-0 truncate">{formatDate(job.created_at)}</p>
                             <p className="text-[9px] text-muted m-0 truncate">
@@ -1956,6 +1923,39 @@ export function BodInternalPage() {
                             ) : (
                               isManager ? <span className="text-primary text-[11px]">Set Date</span> : '-'
                             )}
+                          </td>
+                          <td className="px-1.5 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center gap-1 text-muted min-w-0">
+                              <User size={12} className="text-muted/70 shrink-0" />
+                              <div className="min-w-0 flex-1 truncate">
+                                <Dropdown
+                                  variant="inline"
+                                  searchable
+                                  searchPlaceholder="Search assignees..."
+                                  value={currentAssignee || ''}
+                                  onChange={(val) => assignUser(job.id, val)}
+                                  className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px] truncate"
+                                  options={assigneeOptions}
+                                />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-1.5 py-2 overflow-hidden">
+                            <div className="flex items-center justify-between text-[9px] text-muted font-bold mb-1">
+                              <span className="truncate">{job.current_stage_name}</span>
+                              <span className="shrink-0 ml-1">{percent}%</span>
+                            </div>
+                            <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary transition-all duration-500 rounded-full"
+                                style={{ width: `${percent}%` }}
+                              />
+                            </div>
+                          </td>
+                          <td className="px-1.5 py-2 overflow-hidden">
+                            <span className={`capitalize font-bold px-1.5 py-0.5 rounded text-[9px] border truncate inline-block max-w-full ${getStatusBadgeClass(job)}`}>
+                              {getStatusText(job)}
+                            </span>
                           </td>
                           <td className="px-1 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-center gap-1">
