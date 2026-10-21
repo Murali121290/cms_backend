@@ -34,14 +34,13 @@ export function BodInternalPage() {
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
-  type QuickFilter = 'all' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
+  type QuickFilter = 'all' | 'total_all' | 'total_intake' | 'total_backlog' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
   const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
 
   // Date Filter states
-  const [dateTarget, setDateTarget] = useState<'created' | 'due'>('created')
-  const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom'>('all')
+  const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'tomorrow' | 'day_3' | 'day_4' | 'day_5' | 'week' | 'month' | 'custom'>('today')
   const [customFromDate, setCustomFromDate] = useState('')
   const [customToDate, setCustomToDate] = useState('')
 
@@ -197,6 +196,15 @@ export function BodInternalPage() {
   // Calculate metrics
   const isJobCompleted = (job: any) => job.status === 'Completed' || job.current_stage_name === 'Archive'
 
+  const getCompletedDate = (job: any): string | null => {
+    const history = job.stage_history || {}
+    if (history['Archive']?.end_time) return history['Archive'].end_time
+    if (history['Archive']?.start_time) return history['Archive'].start_time
+    if (history['Ready to Dispatch']?.end_time) return history['Ready to Dispatch'].end_time
+    if (job.status === 'Completed' && job.updated_at) return job.updated_at
+    return null
+  }
+
   const parseSafeDate = (dateStr: string | null | undefined): Date | null => {
     if (!dateStr) return null
     if (/([+-]\d{2}:?\d{2}|Z)$/.test(dateStr)) {
@@ -205,13 +213,22 @@ export function BodInternalPage() {
     return new Date(dateStr + 'Z')
   }
 
-  const isOverdue = (dateStr: string | null | undefined) => {
+  const isOverdue = (dateStr: string | null | undefined, asOfDate?: Date) => {
+    const dueDate = parseSafeDate(dateStr)
+    if (!dueDate || isNaN(dueDate.getTime())) return false
+    const ref = asOfDate ? new Date(asOfDate) : new Date()
+    ref.setHours(0, 0, 0, 0)
+    dueDate.setHours(0, 0, 0, 0)
+    return dueDate < ref
+  }
+
+  const isDueToday = (dateStr: string | null | undefined) => {
     const dueDate = parseSafeDate(dateStr)
     if (!dueDate || isNaN(dueDate.getTime())) return false
     const now = new Date()
     now.setHours(0, 0, 0, 0)
     dueDate.setHours(0, 0, 0, 0)
-    return dueDate < now
+    return dueDate.getTime() === now.getTime()
   }
 
   const isDueTomorrow = (dateStr: string | null | undefined) => {
@@ -235,39 +252,30 @@ export function BodInternalPage() {
     return d >= now && d < tomorrow
   }
 
-  const matchesDateFilter = (job: any): boolean => {
-    if (datePreset === 'all' && !customFromDate && !customToDate) return true
-
-    const targetStr = dateTarget === 'created' ? job.created_at : job.due_date
-    if (!targetStr) return false
-
-    const d = parseSafeDate(targetStr)
+  const isDateInPreset = (dateStr: string | null | undefined, preset: string): boolean => {
+    if (!dateStr) return false
+    const d = parseSafeDate(dateStr)
     if (!d || isNaN(d.getTime())) return false
-
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
     const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
+    const startOfAfterTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 0, 0, 0, 0)
+    const startOfDay4 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3, 0, 0, 0, 0)
+    const startOfDay5 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 4, 0, 0, 0, 0)
+    const startOfDay6 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 5, 0, 0, 0, 0)
+    const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0)
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0, 0)
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 0, 0, 0, 0)
 
-    if (datePreset === 'today') {
-      return d >= startOfToday && d < startOfTomorrow
-    }
-
-    if (datePreset === 'yesterday') {
-      const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0)
-      return d >= startOfYesterday && d < startOfToday
-    }
-
-    if (datePreset === 'week') {
-      const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0, 0)
-      return d >= startOfWeek && d < startOfTomorrow
-    }
-
-    if (datePreset === 'month') {
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 0, 0, 0, 0)
-      return d >= startOfMonth && d < startOfTomorrow
-    }
-
-    if (datePreset === 'custom') {
+    if (preset === 'today') return d >= startOfToday && d < startOfTomorrow
+    if (preset === 'yesterday') return d >= startOfYesterday && d < startOfToday
+    if (preset === 'tomorrow') return d >= startOfTomorrow && d < startOfAfterTomorrow
+    if (preset === 'day_3') return d >= startOfAfterTomorrow && d < startOfDay4
+    if (preset === 'day_4') return d >= startOfDay4 && d < startOfDay5
+    if (preset === 'day_5') return d >= startOfDay5 && d < startOfDay6
+    if (preset === 'week') return d >= startOfWeek && d < startOfTomorrow
+    if (preset === 'month') return d >= startOfMonth && d < startOfTomorrow
+    if (preset === 'custom') {
       if (customFromDate) {
         const from = new Date(`${customFromDate}T00:00:00`)
         if (d < from) return false
@@ -278,8 +286,68 @@ export function BodInternalPage() {
       }
       return true
     }
-
     return true
+  }
+
+  const matchesDateFilter = (job: any): boolean => {
+    if (datePreset === 'all' && !customFromDate && !customToDate) return true
+
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+    const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
+    const startOfAfterTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 0, 0, 0, 0)
+    const startOfDay4 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3, 0, 0, 0, 0)
+    const startOfDay5 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 4, 0, 0, 0, 0)
+    const startOfDay6 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 5, 0, 0, 0, 0)
+    const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0)
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0, 0)
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 0, 0, 0, 0)
+
+    // Helper to test if a given date string falls within the selected preset
+    const dateMatchesPreset = (dateStr: string | null | undefined): boolean => {
+      if (!dateStr) return false
+      const d = parseSafeDate(dateStr)
+      if (!d || isNaN(d.getTime())) return false
+
+      if (datePreset === 'today') return d >= startOfToday && d < startOfTomorrow
+      if (datePreset === 'yesterday') return d >= startOfYesterday && d < startOfToday
+      if (datePreset === 'tomorrow') return d >= startOfTomorrow && d < startOfAfterTomorrow
+      if (datePreset === 'day_3') return d >= startOfAfterTomorrow && d < startOfDay4
+      if (datePreset === 'day_4') return d >= startOfDay4 && d < startOfDay5
+      if (datePreset === 'day_5') return d >= startOfDay5 && d < startOfDay6
+      if (datePreset === 'week') return d >= startOfWeek && d < startOfTomorrow
+      if (datePreset === 'month') return d >= startOfMonth && d < startOfTomorrow
+      if (datePreset === 'custom') {
+        if (customFromDate) {
+          const from = new Date(`${customFromDate}T00:00:00`)
+          if (d < from) return false
+        }
+        if (customToDate) {
+          const to = new Date(`${customToDate}T23:59:59.999`)
+          if (d > to) return false
+        }
+        return true
+      }
+      return true
+    }
+
+    if (datePreset === 'all' && !customFromDate && !customToDate) {
+      return true
+    }
+
+    // Active pipeline jobs (Fresh, Production, QC, Ready to Dispatch) are part of the daily operational floor
+    if (!isJobCompleted(job)) {
+      return true
+    }
+
+    // For tomorrow and future days, no jobs have been completed in the future
+    if (datePreset === 'tomorrow' || datePreset === 'day_3' || datePreset === 'day_4' || datePreset === 'day_5') {
+      return false
+    }
+
+    // Completed jobs are included only if they were completed/dispatched within the selected date window
+    const compDateStr = getCompletedDate(job)
+    return dateMatchesPreset(compDateStr) || dateMatchesPreset(job.created_at)
   }
 
   const isDateFilterActive = datePreset !== 'all' || Boolean(customFromDate || customToDate)
@@ -382,14 +450,6 @@ export function BodInternalPage() {
     return matchesSearch && matchesAssignee && matchesDate
   })
 
-  const getCompletedDate = (job: any): string | null => {
-    const history = job.stage_history || {}
-    if (history['Archive']?.end_time) return history['Archive'].end_time
-    if (history['Archive']?.start_time) return history['Archive'].start_time
-    if (history['Ready to Dispatch']?.end_time) return history['Ready to Dispatch'].end_time
-    if (job.status === 'Completed' && job.updated_at) return job.updated_at
-    return null
-  }
 
   const getCompletionTiming = (completedAtStr: string | null, dueDateStr: string | null): 'Ahead' | 'On-time' | 'Delay' => {
     if (!dueDateStr || !completedAtStr) return 'On-time'
@@ -405,6 +465,8 @@ export function BodInternalPage() {
 
   // Metric card counts computed dynamically from baseJobs
   const totalJobs = baseJobs.length
+  const totalIntakeJobs = baseJobs.filter(j => isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)).length
+  const totalBacklogJobs = baseJobs.filter(j => !isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)).length
   const completedJobs = baseJobs.filter(isJobCompleted).length
   const activeJobs = baseJobs.filter(j => !isJobCompleted(j))
   const completedAhead = baseJobs.filter(j => isJobCompleted(j) && getCompletionTiming(getCompletedDate(j), j.due_date) === 'Ahead').length
@@ -433,13 +495,60 @@ export function BodInternalPage() {
   const dispatchJobs = activeJobs.filter(j => j.current_stage_name === 'Ready to Dispatch')
   const dispatchTotal = dispatchJobs.length
 
-  // Overdue: crossed due date; Tomorrow Due: due soon (tomorrow)
+  // Determine the effective reference date for Overdue based on active date filter:
+  // e.g. for "today", reference is start of today.
+  // for "yesterday", reference is start of yesterday (jobs due before yesterday).
+  // for "tomorrow", overdue is 0 as we don't know future overdue.
+  // for "custom", if customFromDate is set, jobs due before customFromDate.
+  const getOverdueDateRef = (): Date | null => {
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    if (datePreset === 'tomorrow' || datePreset === 'day_3' || datePreset === 'day_4' || datePreset === 'day_5') {
+      return null // No overdue for future dates
+    }
+    if (datePreset === 'today' || datePreset === 'all') {
+      return now
+    }
+    if (datePreset === 'yesterday') {
+      const yest = new Date(now)
+      yest.setDate(yest.getDate() - 1)
+      return yest
+    }
+    if (datePreset === 'custom' && customFromDate) {
+      const from = new Date(`${customFromDate}T00:00:00`)
+      if (!isNaN(from.getTime())) return from
+    }
+    if (datePreset === 'week') {
+      const wk = new Date(now)
+      wk.setDate(wk.getDate() - 7)
+      return wk
+    }
+    if (datePreset === 'month') {
+      const m = new Date(now)
+      m.setDate(m.getDate() - 30)
+      return m
+    }
+    return now
+  }
+  const overdueRefDate = getOverdueDateRef()
+
+  // Overdue: crossed due date before selected date window (active jobs only); Today Due: all jobs due in selected date filter (active + completed); Tomorrow Due: due tomorrow
   let overdueJobs = 0
+  let todayDueJobs = 0
   let dueSoonJobs = 0
+  const activePreset = datePreset === 'all' ? 'today' : datePreset
+
   activeJobs.forEach(job => {
     if (job.due_date) {
-      if (isOverdue(job.due_date)) overdueJobs++
-      else if (isDueTomorrow(job.due_date)) dueSoonJobs++
+      if (overdueRefDate && isOverdue(job.due_date, overdueRefDate)) overdueJobs++
+      if (isDueTomorrow(job.due_date)) dueSoonJobs++
+    }
+  })
+
+  // Option A: Count ALL jobs due in the active preset/date range (including completed jobs)
+  baseJobs.forEach(job => {
+    if (job.due_date && isDateInPreset(job.due_date, activePreset)) {
+      todayDueJobs++
     }
   })
 
@@ -589,7 +698,13 @@ export function BodInternalPage() {
     const jobCompleted = isJobCompleted(j)
 
     let matchesFilter = true
-    if (cardFilter === 'fresh_all' || (cardFilter as any) === 'fresh') {
+    if (cardFilter === 'total_all' || cardFilter === 'all') {
+      matchesFilter = true
+    } else if (cardFilter === 'total_intake') {
+      matchesFilter = isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)
+    } else if (cardFilter === 'total_backlog') {
+      matchesFilter = !isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)
+    } else if (cardFilter === 'fresh_all' || (cardFilter as any) === 'fresh') {
       matchesFilter = !jobCompleted && j.current_stage_name === 'Add job'
     } else if (cardFilter === 'fresh_today') {
       matchesFilter = !jobCompleted && j.current_stage_name === 'Add job' && isCreatedToday(j.created_at)
@@ -610,7 +725,9 @@ export function BodInternalPage() {
     } else if (cardFilter === 'ready_to_dispatch') {
       matchesFilter = !jobCompleted && j.current_stage_name === 'Ready to Dispatch'
     } else if (cardFilter === 'overdue') {
-      matchesFilter = !jobCompleted && isOverdue(j.due_date)
+      matchesFilter = Boolean(overdueRefDate && !jobCompleted && isOverdue(j.due_date, overdueRefDate))
+    } else if (cardFilter === 'today_due') {
+      matchesFilter = isDateInPreset(j.due_date, datePreset === 'all' ? 'today' : datePreset)
     } else if (cardFilter === 'tomorrow_due') {
       matchesFilter = !jobCompleted && isDueTomorrow(j.due_date)
     } else if (cardFilter === 'completed' || cardFilter === 'completed_all') {
@@ -905,11 +1022,11 @@ export function BodInternalPage() {
             </span>
             {isDateFilterActive && (
               <span className="text-[9px] text-primary font-medium bg-primary/10 px-2 py-0.5 rounded-full">
-                Date filter active: {dateFilteredCount} matching job{dateFilteredCount !== 1 ? 's' : ''} ({dateTarget === 'created' ? 'Created' : 'Due'} Date)
+                Date filter active: {dateFilteredCount} matching job{dateFilteredCount !== 1 ? 's' : ''}
               </span>
             )}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
             {/* 1. Overdue */}
             <div
               onClick={() => setCardFilter(cardFilter === 'overdue' ? 'all' : 'overdue')}
@@ -927,7 +1044,52 @@ export function BodInternalPage() {
               </div>
             </div>
 
-            {/* 2. Date Filters Card */}
+            {/* 2. Today / Selected Date Due */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'today_due' ? 'all' : 'today_due')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'today_due' ? 'border-amber-500/60 ring-2 ring-amber-500/20 bg-amber-500/[0.04]' : 'border-border/80 hover:border-amber-500/40'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider truncate">
+                  {datePreset === 'today' || datePreset === 'all'
+                    ? 'Today Due'
+                    : datePreset === 'tomorrow'
+                    ? 'Tomorrow Due'
+                    : datePreset === 'day_3'
+                    ? 'Day 3 Due'
+                    : datePreset === 'day_4'
+                    ? 'Day 4 Due'
+                    : datePreset === 'day_5'
+                    ? 'Day 5 Due'
+                    : datePreset === 'yesterday'
+                    ? 'Yesterday Due'
+                    : 'Period Due'}
+                </span>
+                <div className="p-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded">
+                  <Calendar size={12} />
+                </div>
+              </div>
+              <div className="flex items-baseline justify-between mt-1">
+                <span className="text-lg font-bold text-amber-600 dark:text-amber-400 leading-none">{todayDueJobs}</span>
+                <span className="text-[8px] text-amber-600/80 dark:text-amber-400/80 truncate">
+                  {datePreset === 'today' || datePreset === 'all'
+                    ? 'Due today'
+                    : datePreset === 'tomorrow'
+                    ? 'Due tomorrow'
+                    : datePreset === 'day_3'
+                    ? 'Due Day 3'
+                    : datePreset === 'day_4'
+                    ? 'Due Day 4'
+                    : datePreset === 'day_5'
+                    ? 'Due Day 5'
+                    : datePreset === 'yesterday'
+                    ? 'Due yesterday'
+                    : 'Due in range'}
+                </span>
+              </div>
+            </div>
+
+            {/* 3. Date Filters Card */}
             <div
               className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs col-span-1 sm:col-span-2 lg:col-span-4 xl:col-span-4 min-h-[62px] ${isDateFilterActive ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.02]' : 'border-border/80 hover:border-primary/30'}`}
             >
@@ -937,26 +1099,6 @@ export function BodInternalPage() {
                     <Calendar size={11} />
                   </div>
                   <span className="text-[9px] font-bold text-primary uppercase tracking-wider">Date Filters</span>
-
-                  {/* Target Toggle: Created Date vs Due Date */}
-                  <div className="flex items-center bg-background/80 p-0.5 rounded border border-border/60 text-[8px] font-medium ml-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setDateTarget('created')}
-                      className={`px-1.5 py-0.5 rounded transition-colors ${dateTarget === 'created' ? 'bg-primary text-primary-foreground font-bold shadow-xs' : 'text-muted hover:text-text'}`}
-                      title="Filter jobs by when they were added/created"
-                    >
-                      Receipt Date
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDateTarget('due')}
-                      className={`px-1.5 py-0.5 rounded transition-colors ${dateTarget === 'due' ? 'bg-primary text-primary-foreground font-bold shadow-xs' : 'text-muted hover:text-text'}`}
-                      title="Filter jobs by due date"
-                    >
-                      Due Date
-                    </button>
-                  </div>
                 </div>
 
                 {isDateFilterActive && (
@@ -985,9 +1127,12 @@ export function BodInternalPage() {
                 <div className="flex items-center gap-1 flex-wrap">
                   {[
                     { id: 'all', label: 'All' },
-                    { id: 'today', label: 'Today' },
                     { id: 'yesterday', label: 'Yesterday' },
-                    { id: 'week', label: '7 Days' },
+                    { id: 'today', label: 'Today' },
+                    { id: 'tomorrow', label: 'Tomorrow' },
+                    { id: 'day_3', label: 'Day 3' },
+                    { id: 'day_4', label: 'Day 4' },
+                    { id: 'day_5', label: 'Day 5' },
                     { id: 'month', label: 'Month' },
                     { id: 'custom', label: 'Custom' },
                   ].map((p) => (
@@ -1113,21 +1258,62 @@ export function BodInternalPage() {
               Workflow Stages
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-9 gap-2">
-            {/* 1. Total */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-10 gap-2">
+            {/* 1. Total: subdivided into Today Intake and Backlogs */}
             <div
-              onClick={() => setCardFilter('all')}
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'all' && !hasActiveFilters ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.03]' : 'border-border/80 hover:border-primary/40'}`}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${(cardFilter === 'all' || cardFilter === 'total_all' || cardFilter === 'total_intake' || cardFilter === 'total_backlog') && hasActiveFilters ? 'border-primary/60 ring-2 ring-primary/20' : 'border-border/80 hover:border-primary/30'}`}
             >
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-muted font-bold uppercase tracking-wider">Total</span>
-                <div className="p-1 bg-primary/10 text-primary rounded">
-                  <Layers size={12} />
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div
+                  onClick={() => setCardFilter(cardFilter === 'total_all' || cardFilter === 'all' ? 'all' : 'total_all')}
+                  className="flex items-center gap-1 cursor-pointer select-none group/title"
+                  title="Show all jobs"
+                >
+                  <div className="p-0.5 bg-primary/10 text-primary rounded group-hover/title:bg-primary/20 transition-colors">
+                    <Layers size={11} />
+                  </div>
+                  <span className="text-[9px] font-bold text-primary uppercase tracking-wider group-hover/title:underline">Total</span>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'total_all' || cardFilter === 'all' ? 'all' : 'total_all')}
+                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors ${(cardFilter === 'total_all' || (cardFilter === 'all' && !hasActiveFilters)) ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
+                  title="Show all jobs"
+                >
+                  Total {totalJobs}
+                </button>
               </div>
-              <div className="flex items-baseline justify-between mt-1">
-                <span className="text-lg font-bold text-text leading-none">{totalJobs}</span>
-                <span className="text-[8px] text-muted truncate">{hasBaseFiltersActive && totalJobs !== jobs.length ? `${jobs.length} total` : 'All jobs'}</span>
+
+              <div className="grid grid-cols-2 gap-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'total_intake' ? 'all' : 'total_intake')}
+                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'total_intake' ? 'bg-primary/10 border-primary/40 ring-1 ring-primary/30' : 'bg-background/60 border-border/60 hover:border-primary/30 hover:bg-accent/40'}`}
+                  title={datePreset === 'yesterday' ? "Jobs received yesterday" : "New intake jobs"}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-primary flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+                      {datePreset === 'yesterday' ? 'Yesterday Intake' : datePreset === 'tomorrow' ? 'Tomorrow Intake' : datePreset === 'day_3' ? 'Day 3 Intake' : datePreset === 'day_4' ? 'Day 4 Intake' : datePreset === 'day_5' ? 'Day 5 Intake' : datePreset === 'today' ? 'Today Intake' : 'Intake'}
+                    </span>
+                    <span className="text-xs font-bold text-text">{totalIntakeJobs}</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'total_backlog' ? 'all' : 'total_backlog')}
+                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'total_backlog' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                  title="Active backlog from previous days"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600/80 dark:text-amber-400/80 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60"></span>
+                      Backlogs
+                    </span>
+                    <span className="text-xs font-bold text-text">{totalBacklogJobs}</span>
+                  </div>
+                </button>
               </div>
             </div>
 
