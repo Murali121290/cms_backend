@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
-import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle } from 'lucide-react'
+import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import * as XLSX from 'xlsx'
@@ -22,6 +22,68 @@ export function BodCustomerReportPage() {
   const [prodStatusFilter, setProdStatusFilter] = useState('all')
   const [qcStatusFilter, setQcStatusFilter] = useState('all')
   const [finalStatusFilter, setFinalStatusFilter] = useState('all')
+
+  // Table heading filters & sorting
+  const [colFilters, setColFilters] = useState({
+    job: '',
+    pages: '',
+    type: 'all',
+    language: 'all',
+    created: '',
+    dueDate: '',
+    prodStatus: 'all',
+    prodTiming: '',
+    qcStatus: 'all',
+    qcTiming: '',
+    finalStatus: 'all'
+  })
+  const [sortField, setSortField] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc')
+      } else {
+        setSortField(null)
+        setSortDirection('asc')
+      }
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <ArrowUpDown size={11} className="opacity-35 group-hover:opacity-100 transition-opacity ml-1 shrink-0" />
+    }
+    return sortDirection === 'asc' ? (
+      <ArrowUp size={11} className="text-primary font-bold ml-1 shrink-0" />
+    ) : (
+      <ArrowDown size={11} className="text-primary font-bold ml-1 shrink-0" />
+    )
+  }
+
+  const resetColFilters = () => {
+    setColFilters({
+      job: '',
+      pages: '',
+      type: 'all',
+      language: 'all',
+      created: '',
+      dueDate: '',
+      prodStatus: 'all',
+      prodTiming: '',
+      qcStatus: 'all',
+      qcTiming: '',
+      finalStatus: 'all'
+    })
+    setSortField(null)
+    setSortDirection('asc')
+  }
+
+  const hasActiveColFilters = Object.values(colFilters).some(v => v !== '' && v !== 'all')
 
   useEffect(() => {
     fetchReport()
@@ -70,11 +132,43 @@ export function BodCustomerReportPage() {
     return fmtUtcDateTime(dateStr)
   }
 
+  const getCompletedDate = (job: any): string | null => {
+    const history = job.stage_history || {}
+    if (history['Archive']?.end_time) return history['Archive'].end_time
+    if (history['Archive']?.start_time) return history['Archive'].start_time
+    if (history['Ready to Dispatch']?.end_time) return history['Ready to Dispatch'].end_time
+    if (job.status === 'Completed' && job.updated_at) return job.updated_at
+    return null
+  }
+
+  const getCompletionTiming = (completedAtStr: string | null, dueDateStr: string | null): 'Ahead' | 'On-time' | 'Delay' => {
+    if (!dueDateStr || !completedAtStr) return 'On-time'
+
+    const compDate = new Date(completedAtStr.endsWith('Z') || completedAtStr.includes('+') ? completedAtStr : `${completedAtStr}Z`)
+    const dueDate = new Date(dueDateStr.endsWith('Z') || dueDateStr.includes('+') ? dueDateStr : `${dueDateStr}Z`)
+
+    if (isNaN(compDate.getTime()) || isNaN(dueDate.getTime())) return 'On-time'
+
+    const compDay = compDate.toISOString().slice(0, 10)
+    const dueDay = dueDate.toISOString().slice(0, 10)
+
+    if (compDay < dueDay) {
+      return 'Ahead'
+    } else if (compDay === dueDay) {
+      return 'On-time'
+    } else {
+      return 'Delay'
+    }
+  }
+
   const getJobStatuses = (job: any) => {
     const history = job.stage_history || {}
     let finalStatus = 'YTS'
+    let completionTiming: 'Ahead' | 'On-time' | 'Delay' | null = null
+
     if (job.status === 'Completed' || job.current_stage === 'Archive') {
-      finalStatus = 'Completed'
+      completionTiming = getCompletionTiming(getCompletedDate(job), job.due_date)
+      finalStatus = completionTiming
     } else {
       if (job.current_stage === 'Production' || job.current_stage === 'QC') finalStatus = 'In-progress'
       if (job.due_date && new Date(job.due_date) < new Date()) {
@@ -90,7 +184,7 @@ export function BodCustomerReportPage() {
     let qcStatus = 'YTS'
     if (qcData.start_time) qcStatus = qcData.end_time ? 'Completed' : 'In-progress'
 
-    return { finalStatus, prodStatus, qcStatus, prodData, qcData }
+    return { finalStatus, prodStatus, qcStatus, prodData, qcData, completionTiming }
   }
 
   const filteredReport = report.filter(job => {
@@ -101,7 +195,9 @@ export function BodCustomerReportPage() {
 
     const prodMatch = prodStatusFilter === 'all' || prodStatus === prodStatusFilter
     const qcMatch = qcStatusFilter === 'all' || qcStatus === qcStatusFilter
-    const finalMatch = finalStatusFilter === 'all' || finalStatus === finalStatusFilter
+    const finalMatch = finalStatusFilter === 'all' ||
+      finalStatus === finalStatusFilter ||
+      (finalStatusFilter === 'Completed' && ['Ahead', 'On-time', 'Delay', 'Completed'].includes(finalStatus))
 
     return textMatch && prodMatch && qcMatch && finalMatch
   })
@@ -113,6 +209,9 @@ export function BodCustomerReportPage() {
   let qcCompleted = 0
   let qcInProgress = 0
   let overallCompleted = 0
+  let overallAhead = 0
+  let overallOnTime = 0
+  let overallDelay = 0
   let overallInProgress = 0
   let overallOverdue = 0
   let overallYts = 0
@@ -120,8 +219,18 @@ export function BodCustomerReportPage() {
   filteredReport.forEach(job => {
     const { finalStatus, prodStatus, qcStatus } = getJobStatuses(job)
 
-    if (finalStatus === 'Completed') overallCompleted++
-    else if (finalStatus === 'In-progress') overallInProgress++
+    if (finalStatus === 'Ahead') {
+      overallAhead++
+      overallCompleted++
+    } else if (finalStatus === 'On-time') {
+      overallOnTime++
+      overallCompleted++
+    } else if (finalStatus === 'Delay') {
+      overallDelay++
+      overallCompleted++
+    } else if (finalStatus === 'Completed') {
+      overallCompleted++
+    } else if (finalStatus === 'In-progress') overallInProgress++
     else if (finalStatus === 'Overdue') overallOverdue++
     else if (finalStatus === 'YTS') overallYts++
 
@@ -149,7 +258,7 @@ export function BodCustomerReportPage() {
   filteredReport.forEach(job => {
     const createdDate = getDateKey(job.created_at)
     const dueDate = getDateKey(job.due_date)
-    const completedDate = job.status === 'Completed' ? getDateKey(job.updated_at) : null
+    const completedDate = (job.status === 'Completed' || job.current_stage === 'Archive') ? getDateKey(getCompletedDate(job)) : null
 
     if (createdDate) {
       if (!chartDataMap.has(createdDate)) chartDataMap.set(createdDate, { date: createdDate, inflow: 0, due: 0, completed: 0, delay: 0 })
@@ -161,10 +270,11 @@ export function BodCustomerReportPage() {
       chartDataMap.get(dueDate)!.due += 1
 
       let delayed = false
-      if (job.status !== 'Completed') {
+      if (job.status !== 'Completed' && job.current_stage !== 'Archive') {
         if (new Date(job.due_date) < new Date()) delayed = true
       } else {
-        if (job.updated_at && new Date(job.updated_at) > new Date(job.due_date)) delayed = true
+        const comp = getCompletedDate(job)
+        if (comp && getDateKey(comp)! > getDateKey(job.due_date)!) delayed = true
       }
       if (delayed) {
         chartDataMap.get(dueDate)!.delay += 1
@@ -178,6 +288,151 @@ export function BodCustomerReportPage() {
   })
 
   const chartData = Array.from(chartDataMap.values()).sort((a, b) => a.date.localeCompare(b.date))
+
+  const uniqueTypes = Array.from(
+    new Set(report.map(j => (j.pdf_type || '').trim()).filter(Boolean))
+  ).sort()
+
+  const uniqueLanguages = Array.from(
+    new Set(report.map(j => (j.pdf_language || '').trim()).filter(Boolean))
+  ).sort()
+
+  const tableJobs = filteredReport.filter(job => {
+    const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
+
+    // 1. Job
+    if (colFilters.job.trim()) {
+      const q = colFilters.job.trim().toLowerCase()
+      const match = (job.pdf_filename && job.pdf_filename.toLowerCase().includes(q)) ||
+                    (job.client_name && job.client_name.toLowerCase().includes(q)) ||
+                    (job.epub_filename && job.epub_filename.toLowerCase().includes(q))
+      if (!match) return false
+    }
+
+    // 2. Pages
+    if (colFilters.pages.trim()) {
+      const q = colFilters.pages.trim()
+      const pages = job.pdf_page_count ?? 0
+      if (q.startsWith('>=')) {
+        const n = parseInt(q.slice(2), 10)
+        if (isNaN(n) || pages < n) return false
+      } else if (q.startsWith('>')) {
+        const n = parseInt(q.slice(1), 10)
+        if (isNaN(n) || pages <= n) return false
+      } else if (q.startsWith('<=')) {
+        const n = parseInt(q.slice(2), 10)
+        if (isNaN(n) || pages > n) return false
+      } else if (q.startsWith('<')) {
+        const n = parseInt(q.slice(1), 10)
+        if (isNaN(n) || pages >= n) return false
+      } else {
+        if (!String(job.pdf_page_count ?? '').includes(q)) return false
+      }
+    }
+
+    // 3. Type
+    if (colFilters.type !== 'all') {
+      if ((job.pdf_type || '').toLowerCase() !== colFilters.type.toLowerCase()) return false
+    }
+
+    // 4. Language
+    if (colFilters.language !== 'all') {
+      if ((job.pdf_language || '').toLowerCase() !== colFilters.language.toLowerCase()) return false
+    }
+
+    // 5. Created At
+    if (colFilters.created) {
+      if (getDateKey(job.created_at) !== colFilters.created) return false
+    }
+
+    // 6. Due Date
+    if (colFilters.dueDate) {
+      if (getDateKey(job.due_date) !== colFilters.dueDate) return false
+    }
+
+    // 7. Production Status
+    if (colFilters.prodStatus !== 'all') {
+      if (prodStatus !== colFilters.prodStatus) return false
+    }
+
+    // 8. Production Timing
+    if (colFilters.prodTiming.trim()) {
+      const q = colFilters.prodTiming.trim().toLowerCase()
+      const s = prodData.start_time ? formatDateTime(prodData.start_time).toLowerCase() : ''
+      const e = prodData.end_time ? formatDateTime(prodData.end_time).toLowerCase() : ''
+      if (!s.includes(q) && !e.includes(q)) return false
+    }
+
+    // 9. QC Status
+    if (colFilters.qcStatus !== 'all') {
+      if (qcStatus !== colFilters.qcStatus) return false
+    }
+
+    // 10. QC Timing
+    if (colFilters.qcTiming.trim()) {
+      const q = colFilters.qcTiming.trim().toLowerCase()
+      const s = qcData.start_time ? formatDateTime(qcData.start_time).toLowerCase() : ''
+      const e = qcData.end_time ? formatDateTime(qcData.end_time).toLowerCase() : ''
+      if (!s.includes(q) && !e.includes(q)) return false
+    }
+
+    // 11. Final Status
+    if (colFilters.finalStatus !== 'all') {
+      if (colFilters.finalStatus === 'Completed') {
+        if (!['Ahead', 'On-time', 'Delay', 'Completed'].includes(finalStatus)) return false
+      } else if (finalStatus !== colFilters.finalStatus) {
+        return false
+      }
+    }
+
+    return true
+  }).sort((a, b) => {
+    if (!sortField) return 0
+    const { finalStatus: finalA, prodStatus: prodA, qcStatus: qcA, prodData: pDataA, qcData: qDataA } = getJobStatuses(a)
+    const { finalStatus: finalB, prodStatus: prodB, qcStatus: qcB, prodData: pDataB, qcData: qDataB } = getJobStatuses(b)
+
+    let valA: any = ''
+    let valB: any = ''
+
+    if (sortField === 'job') {
+      valA = (a.pdf_filename || '').toLowerCase()
+      valB = (b.pdf_filename || '').toLowerCase()
+    } else if (sortField === 'pages') {
+      valA = a.pdf_page_count || 0
+      valB = b.pdf_page_count || 0
+    } else if (sortField === 'type') {
+      valA = (a.pdf_type || '').toLowerCase()
+      valB = (b.pdf_type || '').toLowerCase()
+    } else if (sortField === 'language') {
+      valA = (a.pdf_language || '').toLowerCase()
+      valB = (b.pdf_language || '').toLowerCase()
+    } else if (sortField === 'created') {
+      valA = a.created_at ? new Date(a.created_at).getTime() : 0
+      valB = b.created_at ? new Date(b.created_at).getTime() : 0
+    } else if (sortField === 'dueDate') {
+      valA = a.due_date ? new Date(a.due_date).getTime() : 0
+      valB = b.due_date ? new Date(b.due_date).getTime() : 0
+    } else if (sortField === 'prodStatus') {
+      valA = prodA
+      valB = prodB
+    } else if (sortField === 'prodTiming') {
+      valA = pDataA.start_time ? new Date(pDataA.start_time).getTime() : 0
+      valB = pDataB.start_time ? new Date(pDataB.start_time).getTime() : 0
+    } else if (sortField === 'qcStatus') {
+      valA = qcA
+      valB = qcB
+    } else if (sortField === 'qcTiming') {
+      valA = qDataA.start_time ? new Date(qDataA.start_time).getTime() : 0
+      valB = qDataB.start_time ? new Date(qDataB.start_time).getTime() : 0
+    } else if (sortField === 'finalStatus') {
+      valA = finalA
+      valB = finalB
+    }
+
+    if (valA < valB) return sortDirection === 'asc' ? -1 : 1
+    if (valA > valB) return sortDirection === 'asc' ? 1 : -1
+    return 0
+  })
 
   const downloadReport = () => {
     const headers = [
@@ -198,8 +453,9 @@ export function BodCustomerReportPage() {
       'Final Status'
     ]
     const data = [headers]
+    const dataToExport = tableJobs.length > 0 ? tableJobs : filteredReport
 
-    filteredReport.forEach(job => {
+    dataToExport.forEach(job => {
       const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
 
       const prodStart = prodData.start_time ? formatDateTime(prodData.start_time) : '-'
@@ -418,24 +674,33 @@ export function BodCustomerReportPage() {
           <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
             <div className="flex justify-between items-start">
               <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><RefreshCw size={14} className="text-primary" /> Overall Final</span>
-              <span className="text-xl font-bold text-text leading-none">{completionPercentage}%</span>
+              <span className="text-xs font-bold text-muted-foreground"><strong className="text-emerald-500">{overallCompleted}</strong> Done ({completionPercentage}%)</span>
             </div>
-            <div className="flex gap-4">
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-muted-foreground leading-tight">{overallYts}</span>
-                <span className="text-[10px] text-muted uppercase">YTS</span>
+            <div className="flex items-center gap-2.5 overflow-x-auto pb-0.5">
+              <div className="flex flex-col min-w-[28px]">
+                <span className="text-base font-bold text-muted-foreground leading-tight">{overallYts}</span>
+                <span className="text-[9px] text-muted uppercase">YTS</span>
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-amber-500 leading-tight">{overallInProgress}</span>
-                <span className="text-[10px] text-muted uppercase">In-Progress</span>
+              <div className="flex flex-col min-w-[36px]">
+                <span className="text-base font-bold text-amber-500 leading-tight">{overallInProgress}</span>
+                <span className="text-[9px] text-muted uppercase">In-Prog</span>
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-red-500 leading-tight">{overallOverdue}</span>
-                <span className="text-[10px] text-muted uppercase">Overdue</span>
+              <div className="flex flex-col min-w-[36px]">
+                <span className="text-base font-bold text-red-500 leading-tight">{overallOverdue}</span>
+                <span className="text-[9px] text-muted uppercase">Overdue</span>
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-emerald-500 leading-tight">{overallCompleted}</span>
-                <span className="text-[10px] text-muted uppercase">Completed</span>
+              <div className="h-6 w-[1px] bg-border/60 mx-0.5 shrink-0" />
+              <div className="flex flex-col min-w-[34px]">
+                <span className="text-base font-bold text-emerald-500 leading-tight">{overallAhead}</span>
+                <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold uppercase">Ahead</span>
+              </div>
+              <div className="flex flex-col min-w-[38px]">
+                <span className="text-base font-bold text-blue-500 leading-tight">{overallOnTime}</span>
+                <span className="text-[9px] text-blue-600 dark:text-blue-400 font-bold uppercase">On-time</span>
+              </div>
+              <div className="flex flex-col min-w-[30px]">
+                <span className="text-base font-bold text-rose-500 leading-tight">{overallDelay}</span>
+                <span className="text-[9px] text-rose-600 dark:text-rose-400 font-bold uppercase">Delay</span>
               </div>
             </div>
           </div>
@@ -508,44 +773,333 @@ export function BodCustomerReportPage() {
 
         {/* Data Table */}
         <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl">
+          <div className="flex items-center justify-between px-3.5 py-2 border-b border-border/50 bg-muted/15 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-muted font-medium">
+                Showing <strong className="text-text">{tableJobs.length}</strong> of {filteredReport.length} jobs
+              </span>
+              {hasActiveColFilters && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-semibold">
+                  Filtered
+                </span>
+              )}
+            </div>
+            {(hasActiveColFilters || sortField !== null) && (
+              <button
+                onClick={resetColFilters}
+                className="flex items-center gap-1 text-[11px] text-primary hover:underline font-semibold"
+              >
+                <X size={12} /> Reset sort & table filters
+              </button>
+            )}
+          </div>
+
           <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full min-w-[1150px] text-left border-collapse">
               <thead className="sticky top-0 z-10 shadow-sm bg-card">
+                {/* Header Row with Sort */}
                 <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Job</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Type</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Language</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Created At</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Production</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Production Timing</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">QC</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">QC Timing</th>
-                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Final Status</th>
+                  <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[18%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Job</span>
+                      {renderSortIcon('job')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('pages')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[6%]">
+                    <div className="flex items-center justify-center gap-0.5">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</span>
+                      {renderSortIcon('pages')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('type')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Type</span>
+                      {renderSortIcon('type')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('language')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Language</span>
+                      {renderSortIcon('language')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('created')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Created At</span>
+                      {renderSortIcon('created')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('dueDate')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</span>
+                      {renderSortIcon('dueDate')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('prodStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Production</span>
+                      {renderSortIcon('prodStatus')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('prodTiming')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[11%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Production Timing</span>
+                      {renderSortIcon('prodTiming')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('qcStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">QC</span>
+                      {renderSortIcon('qcStatus')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('qcTiming')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[11%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">QC Timing</span>
+                      {renderSortIcon('qcTiming')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('finalStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Final Status</span>
+                      {renderSortIcon('finalStatus')}
+                    </div>
+                  </th>
+                </tr>
+
+                {/* Filter Row */}
+                <tr className="border-b border-border/50 bg-muted/20 font-normal normal-case tracking-normal">
+                  {/* Job */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={colFilters.job}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, job: e.target.value }))}
+                        placeholder="Filter..."
+                        className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                      />
+                      {colFilters.job && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, job: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Pages */}
+                  <th className="px-1 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={colFilters.pages}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
+                        placeholder="e.g. >250"
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                      />
+                      {colFilters.pages && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, pages: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Type */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.type}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All Types</option>
+                      {uniqueTypes.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </th>
+
+                  {/* Language */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.language}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All Langs</option>
+                      {uniqueLanguages.map(l => (
+                        <option key={l} value={l}>{l}</option>
+                      ))}
+                    </select>
+                  </th>
+
+                  {/* Created At */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={colFilters.created}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
+                        style={{ colorScheme: 'light dark' }}
+                      />
+                      {colFilters.created && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, created: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Due Date */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={colFilters.dueDate}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
+                        style={{ colorScheme: 'light dark' }}
+                      />
+                      {colFilters.dueDate && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Production */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.prodStatus}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, prodStatus: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All</option>
+                      <option value="Completed">Completed</option>
+                      <option value="In-progress">In-progress</option>
+                      <option value="YTS">YTS</option>
+                    </select>
+                  </th>
+
+                  {/* Production Timing */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={colFilters.prodTiming}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, prodTiming: e.target.value }))}
+                        placeholder="Filter..."
+                        className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                      />
+                      {colFilters.prodTiming && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, prodTiming: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* QC */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.qcStatus}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, qcStatus: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All</option>
+                      <option value="Completed">Completed</option>
+                      <option value="In-progress">In-progress</option>
+                      <option value="YTS">YTS</option>
+                    </select>
+                  </th>
+
+                  {/* QC Timing */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={colFilters.qcTiming}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, qcTiming: e.target.value }))}
+                        placeholder="Filter..."
+                        className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                      />
+                      {colFilters.qcTiming && (
+                        <button
+                          onClick={() => setColFilters(prev => ({ ...prev, qcTiming: '' }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                          title="Clear"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Final Status */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.finalStatus}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, finalStatus: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All</option>
+                      <option value="Completed">Completed (All)</option>
+                      <option value="Ahead">Ahead</option>
+                      <option value="On-time">On-time</option>
+                      <option value="Delay">Delay</option>
+                      <option value="In-progress">In-progress</option>
+                      <option value="Overdue">Overdue</option>
+                      <option value="YTS">YTS</option>
+                    </select>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
                 {loading ? (
                   <tr>
-                    <td colSpan={10} className="px-6 py-12 text-center">
+                    <td colSpan={11} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center text-muted">
                         <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary" />
                         <p>Loading report data...</p>
                       </div>
                     </td>
                   </tr>
-                ) : filteredReport.length === 0 ? (
+                ) : tableJobs.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-6 py-12 text-center text-muted">
+                    <td colSpan={11} className="px-6 py-12 text-center text-muted">
                       No matching records found.
                     </td>
                   </tr>
                 ) : (
-                  filteredReport.map((job) => {
+                  tableJobs.map((job) => {
                     const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
 
                     const getStatusColor = (s: string) => {
+                      if (s === 'Ahead') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                      if (s === 'On-time') return 'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                      if (s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30'
                       if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
                       if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
                       if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
@@ -638,6 +1192,9 @@ export function BodCustomerReportPage() {
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
+                            {finalStatus === 'Ahead' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
+                            {finalStatus === 'On-time' && <CheckCircle2 size={10} className="mr-1 text-blue-500" />}
+                            {finalStatus === 'Delay' && <AlertCircle size={10} className="mr-1 text-rose-500" />}
                             {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1" />}
                             {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
                             {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
