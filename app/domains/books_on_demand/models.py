@@ -28,5 +28,8 @@ class BodJob(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     due_date = Column(DateTime, nullable=True)
     due_date_history = Column(JSON, nullable=False, default=list) # [{"date": "...", "reason": "...", "changed_by": "...", "timestamp": "..."}]
+    dispatched_by = Column(String(255), nullable=True)
+    dispatched_at = Column(DateTime, nullable=True)
+    is_fastrack = Column(Boolean, default=False, nullable=False)
 
 

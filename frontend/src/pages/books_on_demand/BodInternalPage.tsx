@@ -55,6 +55,7 @@ export function BodInternalPage() {
     stage: 'all',
     created: '',
     dueDate: '',
+    dispatchedDate: '',
   })
   const [sortField, setSortField] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
@@ -390,7 +391,8 @@ export function BodInternalPage() {
     (colFilters.status && colFilters.status !== 'all') ||
     (colFilters.stage && colFilters.stage !== 'all') ||
     colFilters.created ||
-    colFilters.dueDate
+    colFilters.dueDate ||
+    colFilters.dispatchedDate
   )
 
   const clearColFilters = () => {
@@ -404,6 +406,7 @@ export function BodInternalPage() {
       stage: 'all',
       created: '',
       dueDate: '',
+      dispatchedDate: '',
     })
   }
 
@@ -835,6 +838,18 @@ export function BodInternalPage() {
       if (dateStr !== colFilters.dueDate) return false
     }
 
+    if (colFilters.dispatchedDate) {
+      const dispDate = j.dispatched_at || getCompletedDate(j)
+      if (!dispDate) return false
+      const d = parseSafeDate(dispDate)
+      if (!d || isNaN(d.getTime())) return false
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      const dateStr = `${year}-${month}-${day}`
+      if (dateStr !== colFilters.dispatchedDate) return false
+    }
+
     return true
   }).sort((a, b) => {
     if (sortField) {
@@ -868,6 +883,11 @@ export function BodInternalPage() {
       } else if (sortField === 'dueDate') {
         valA = a.due_date ? new Date(a.due_date).getTime() : 0
         valB = b.due_date ? new Date(b.due_date).getTime() : 0
+      } else if (sortField === 'dispatchedDate') {
+        const dateA = a.dispatched_at || getCompletedDate(a)
+        const dateB = b.dispatched_at || getCompletedDate(b)
+        valA = dateA ? new Date(dateA).getTime() : 0
+        valB = dateB ? new Date(dateB).getTime() : 0
       }
 
       if (valA < valB) return sortDirection === 'asc' ? -1 : 1
@@ -1302,9 +1322,6 @@ export function BodInternalPage() {
                   </div>
                   <span className="text-[9px] font-bold text-primary uppercase tracking-wider">Total titles</span>
                 </div>
-                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors ${(cardFilter === 'total_all' || (cardFilter === 'all' && !hasActiveFilters)) ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'}`}>
-                  Total {totalJobs}
-                </span>
               </div>
               <div className="flex items-baseline justify-between mt-1 pt-0.5">
                 <span className="text-lg font-bold text-text leading-none">{totalJobs}</span>
@@ -1607,31 +1624,37 @@ export function BodInternalPage() {
                         {renderSortIcon('created')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('dueDate')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
+                    <th onClick={() => handleSort('dueDate')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[8%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Due Date</span>
                         {renderSortIcon('dueDate')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[13%] overflow-hidden">
+                    <th onClick={() => handleSort('dispatchedDate')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[9%] overflow-hidden">
+                      <div className="flex items-center gap-1">
+                        <span className="truncate">Dispatched Date</span>
+                        {renderSortIcon('dispatchedDate')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[12%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Assignee</span>
                         {renderSortIcon('assignee')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[12%] overflow-hidden">
+                    <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[11%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Progress</span>
                         {renderSortIcon('progress')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('status')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[11%] overflow-hidden">
+                    <th onClick={() => handleSort('status')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Status</span>
                         {renderSortIcon('status')}
                       </div>
                     </th>
-                    <th className="px-1 py-2 text-center w-[6%]"></th>
+                    <th className="px-1 py-2 text-center w-[5%]"></th>
                   </tr>
 
                   <tr className="border-b border-border bg-accent/20 font-normal normal-case tracking-normal">
@@ -1741,6 +1764,27 @@ export function BodInternalPage() {
                         {colFilters.dueDate && (
                           <button
                             onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                            title="Clear date"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Dispatched Date */}
+                    <th className="px-1 py-1 font-normal overflow-hidden">
+                      <div className="relative">
+                        <input
+                          type="date"
+                          value={colFilters.dispatchedDate}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, dispatchedDate: e.target.value }))}
+                          className="w-full h-[26px] bg-background/90 hover:bg-background border border-border/80 hover:border-primary/50 focus:border-primary rounded-md px-1.5 text-[10px] font-medium text-text focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all font-sans shadow-xs"
+                        />
+                        {colFilters.dispatchedDate && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, dispatchedDate: '' }))}
                             className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-text"
                             title="Clear date"
                           >
@@ -1920,6 +1964,22 @@ export function BodInternalPage() {
                             ) : (
                               isManager ? <span className="text-primary text-[11px]">Set Date</span> : '-'
                             )}
+                          </td>
+                          <td className="px-1.5 py-2 text-[11px] text-muted font-medium overflow-hidden">
+                            {(() => {
+                              const dispDate = job.dispatched_at || getCompletedDate(job)
+                              if (!dispDate) return <span className="text-muted/60">-</span>
+                              return (
+                                <div>
+                                  <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 m-0 truncate">
+                                    {formatDate(dispDate)}
+                                  </p>
+                                  <p className="text-[9px] text-muted m-0 truncate">
+                                    {parseUtcDate(dispDate)?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                  </p>
+                                </div>
+                              )
+                            })()}
                           </td>
                           <td className="px-1.5 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center gap-1 text-muted min-w-0">
