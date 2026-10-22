@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
-import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter } from 'lucide-react'
+import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
+import { toast } from '@/store/useToastStore'
 import * as XLSX from 'xlsx'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
 import { formatDateTime as fmtUtcDateTime } from '@/utils/dateUtils'
@@ -11,6 +12,7 @@ export function BodCustomerReportPage() {
   const navigate = useNavigate()
   const [report, setReport] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [togglingFastrackId, setTogglingFastrackId] = useState<number | null>(null)
 
   // Filters
   const [search, setSearch] = useState('')
@@ -34,7 +36,8 @@ export function BodCustomerReportPage() {
     prodTiming: '',
     qcStatus: 'all',
     qcTiming: '',
-    finalStatus: 'all'
+    finalStatus: 'all',
+    fastrack: 'all'
   })
   const [sortField, setSortField] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
@@ -76,7 +79,8 @@ export function BodCustomerReportPage() {
       prodTiming: '',
       qcStatus: 'all',
       qcTiming: '',
-      finalStatus: 'all'
+      finalStatus: 'all',
+      fastrack: 'all'
     })
     setSortField(null)
     setSortDirection('asc')
@@ -98,6 +102,22 @@ export function BodCustomerReportPage() {
       console.error(err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const toggleFastrack = async (e: React.MouseEvent, jobId: number, currentVal: boolean) => {
+    e.stopPropagation()
+    const nextVal = !currentVal
+    setTogglingFastrackId(jobId)
+    try {
+      await api.put(`/bod/jobs/${jobId}/fastrack`, { is_fastrack: nextVal })
+      setReport(prev => prev.map(j => j.id === jobId ? { ...j, is_fastrack: nextVal } : j))
+      toast.success(nextVal ? "Fastrack enabled" : "Fastrack disabled")
+    } catch (err: any) {
+      console.error(err)
+      toast.error(err.response?.data?.detail || "Failed to update Fastrack status")
+    } finally {
+      setTogglingFastrackId(null)
     }
   }
 
@@ -525,6 +545,13 @@ export function BodCustomerReportPage() {
       }
     }
 
+    // 12. Fastrack
+    if (colFilters.fastrack !== 'all') {
+      const isFast = Boolean(job.is_fastrack)
+      if (colFilters.fastrack === 'fastrack' && !isFast) return false
+      if (colFilters.fastrack === 'normal' && isFast) return false
+    }
+
     return true
   }).sort((a, b) => {
     if (!sortField) return 0
@@ -552,6 +579,9 @@ export function BodCustomerReportPage() {
     } else if (sortField === 'dueDate') {
       valA = a.due_date ? new Date(a.due_date).getTime() : 0
       valB = b.due_date ? new Date(b.due_date).getTime() : 0
+    } else if (sortField === 'fastrack') {
+      valA = a.is_fastrack ? 1 : 0
+      valB = b.is_fastrack ? 1 : 0
     } else if (sortField === 'prodStatus') {
       valA = prodA
       valB = prodB
@@ -578,6 +608,7 @@ export function BodCustomerReportPage() {
     const headers = [
       'Client',
       'Source PDF',
+      'Fastrack',
       'PDF Type',
       'PDF Language',
       'PDF Page Count',
@@ -607,6 +638,7 @@ export function BodCustomerReportPage() {
       data.push([
         job.client_name || '',
         job.pdf_filename || '',
+        job.is_fastrack ? 'Yes' : 'No',
         job.pdf_type || '-',
         job.pdf_language || '-',
         job.pdf_page_count || '-',
@@ -714,6 +746,31 @@ export function BodCustomerReportPage() {
 
           {/* Date Presets Toolbar */}
           <div className="flex items-center gap-2 flex-wrap ml-auto">
+            {/* Fastrack Filter Pills */}
+            <div className="flex items-center gap-1 bg-background/80 border border-border/80 rounded-lg p-1">
+              <div className="flex items-center gap-1 px-1.5 text-muted">
+                <Zap size={12} className="text-amber-500 fill-amber-500" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 hidden sm:inline">Fastrack:</span>
+              </div>
+              {[
+                { id: 'all', label: 'All' },
+                { id: 'fastrack', label: 'Fastrack' },
+                { id: 'normal', label: 'Normal' },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setColFilters(prev => ({ ...prev, fastrack: f.id }))}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all border ${colFilters.fastrack === f.id
+                    ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                    : 'bg-transparent border-transparent text-muted hover:text-text hover:bg-accent/50'
+                    }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
             <div className="flex items-center gap-1 bg-background/80 border border-border/80 rounded-lg p-1">
               <div className="flex items-center gap-1 px-1.5 text-muted">
                 <Calendar size={13} className="text-primary" />
@@ -1040,10 +1097,17 @@ export function BodCustomerReportPage() {
               <thead className="sticky top-0 z-10 shadow-sm bg-card">
                 {/* Header Row with Sort */}
                 <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
-                  <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[18%]">
+                  <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[16%]">
                     <div className="flex items-center gap-1">
                       <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Job</span>
                       {renderSortIcon('job')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('fastrack')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[9%]">
+                    <div className="flex items-center justify-center gap-0.5">
+                      <Zap size={10} className="text-amber-500 fill-amber-500" />
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Fastrack</span>
+                      {renderSortIcon('fastrack')}
                     </div>
                   </th>
                   <th onClick={() => handleSort('pages')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[6%]">
@@ -1106,6 +1170,19 @@ export function BodCustomerReportPage() {
                         </button>
                       )}
                     </div>
+                  </th>
+
+                  {/* Fastrack filter */}
+                  <th className="px-1.5 py-1.5 font-normal">
+                    <select
+                      value={colFilters.fastrack}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, fastrack: e.target.value }))}
+                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                    >
+                      <option value="all">All</option>
+                      <option value="fastrack">⚡ Fastrack</option>
+                      <option value="normal">Normal</option>
+                    </select>
                   </th>
 
                   {/* Pages */}
@@ -1224,7 +1301,7 @@ export function BodCustomerReportPage() {
               <tbody className="divide-y divide-border/50">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center">
+                    <td colSpan={8} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center text-muted">
                         <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary" />
                         <p>Loading report data...</p>
@@ -1233,7 +1310,7 @@ export function BodCustomerReportPage() {
                   </tr>
                 ) : tableJobs.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-muted">
+                    <td colSpan={8} className="px-6 py-12 text-center text-muted">
                       No matching records found.
                     </td>
                   </tr>
@@ -1275,6 +1352,44 @@ export function BodCustomerReportPage() {
                               </button>
                             </div>
                           )}
+                        </td>
+                        <td className="px-2 py-3 text-center">
+                          {(() => {
+                            const completed = isJobCompleted(job)
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  if (completed) return
+                                  toggleFastrack(e, job.id, Boolean(job.is_fastrack))
+                                }}
+                                disabled={completed || togglingFastrackId === job.id}
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-all shadow-xs select-none ${
+                                  completed
+                                    ? job.is_fastrack
+                                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                      : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                                    : job.is_fastrack
+                                      ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                      : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                                }`}
+                                title={
+                                  completed
+                                    ? "Job completed — Fastrack status is locked"
+                                    : job.is_fastrack
+                                      ? "Fastrack Enabled — Click to set Normal"
+                                      : "Normal — Click to enable Fastrack"
+                                }
+                              >
+                                {togglingFastrackId === job.id ? (
+                                  <Loader2 size={11} className="animate-spin text-amber-500" />
+                                ) : (
+                                  <Zap size={11} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                                )}
+                                <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
+                              </button>
+                            )
+                          })()}
                         </td>
                         <td className="px-2 py-3 text-[10px] text-muted text-center">
                           {job.pdf_page_count || '-'}
