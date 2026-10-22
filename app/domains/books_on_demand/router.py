@@ -57,6 +57,9 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "pdf_downloaded_at": prod_info.get("pdf_downloaded_at"),
             "ace_report_filepath": job.ace_report_filepath,
             "ace_report_filename": os.path.basename(job.ace_report_filepath) if job.ace_report_filepath else None,
+            "dispatched_by": job.dispatched_by,
+            "dispatched_at": job.dispatched_at,
+            "is_fastrack": bool(job.is_fastrack),
             "epubcheck_report_filepath": job.epubcheck_report_filepath,
             "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
         }
@@ -97,6 +100,9 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "pdf_downloaded_at": prod_info.get("pdf_downloaded_at"),
         "ace_report_filepath": job.ace_report_filepath,
         "ace_report_filename": os.path.basename(job.ace_report_filepath) if job.ace_report_filepath else None,
+        "dispatched_by": job.dispatched_by,
+        "dispatched_at": job.dispatched_at,
+        "is_fastrack": bool(job.is_fastrack),
         "epubcheck_report_filepath": job.epubcheck_report_filepath,
         "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
     }
@@ -717,6 +723,8 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
 
     # Update job's current assignee to the user who dispatched it
     job.current_assignee = dispatched_by
+    job.dispatched_by = dispatched_by
+    job.dispatched_at = datetime.now(timezone.utc)
     job.current_stage_index = archive_index
     job.current_stage_name = "Archive"
     job.status = "Completed"
@@ -943,6 +951,7 @@ def upload_epub(
 @router.post("/jobs")
 def create_job(
     file: UploadFile = File(...),
+    is_fastrack: bool = Form(False),
     db: Session = Depends(get_db)
 ):
     """Manually upload a PDF to create a Books on Demand job via the UI."""
@@ -1020,7 +1029,8 @@ def create_job(
         stage_history=initial_history,
         status="Active",
         created_at=now_utc,
-        due_date=calculate_bod_due_date(pdf_type, page_count, now_utc)
+        due_date=calculate_bod_due_date(pdf_type, page_count, now_utc),
+        is_fastrack=is_fastrack
     )
     db.add(new_job)
     db.commit()
