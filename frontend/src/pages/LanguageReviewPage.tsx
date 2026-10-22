@@ -45,6 +45,13 @@ import {
   type Occurrence
 } from '@/features/editor'
 import { useSessionStore } from '@/stores/sessionStore'
+import {
+  upperCase,
+  lowerCase,
+  toTitleCase,
+  applyCasePreservingStructure,
+} from '@/features/language_edit/caseTransforms'
+import { replaceOptionsFor } from '@/features/language_edit/replaceOptions'
 
 interface Finding {
   id: number
@@ -74,12 +81,6 @@ function parseTermMeta(message: string): { listName: string | null; alsoIn: stri
   const listName = m[1]?.trim() || null
   const alsoIn = m[2] ? m[2].split(',').map(s => s.trim()).filter(Boolean) : []
   return { listName, alsoIn }
-}
-
-// Title Case: capitalize each word's first letter, lowercase the rest.
-// Doesn't apply English small-word rules (and/of/the), which varies by house style.
-function toTitleCase(s: string): string {
-  return s.replace(/\p{L}[\p{L}\p{M}']*/gu, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
 }
 
 interface JobData {
@@ -116,7 +117,7 @@ export function LanguageReviewPage() {
   const [exporting, setExporting] = useState(false)
   const [job, setJob] = useState<JobData | null>(null)
   const [findings, setFindings] = useState<Finding[]>([])
-  const [fileName, setFileName] = useState<string>('manuscript.docx')
+  const [fileName, setFileName] = useState<string>('')
   const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null)
   const [editingFindingId, setEditingFindingId] = useState<number | null>(null)
 
@@ -145,6 +146,16 @@ export function LanguageReviewPage() {
   const commentCardRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const xhtmlQuery = useFileXhtmlQuery(normalizedFileId)
   const editorSave = useEditorSave(normalizedFileId)
+
+  // Read the TC toggle that lives inside WysiwygEditor at the moment of each
+  // replace. The TrackChanges extension writes `enabled` into the editor's
+  // shared storage on every toolbar click; reading it dynamically keeps the
+  // single source of truth (the TC button in the editor toolbar) and avoids
+  // a second toggle on this page.
+  const isTrackChangesEnabled = useCallback((): boolean => {
+    const ed = editorRef.current?.editor as any
+    return !!ed?.storage?.trackChanges?.enabled
+  }, [])
 
   const viewer = useSessionStore((s) => s.viewer)
   const currentUser = viewer?.username
@@ -262,6 +273,35 @@ export function LanguageReviewPage() {
     }
   }, [selectedCommentId])
 
+  // Fast, independent fetch of the uploaded filename for the header. Runs on
+  // mount (and whenever fileId changes) so the real filename appears without
+  // waiting for the heavy analyze pass. Separate from `initJob` so a slow or
+  // failing analyze never leaves a stale/generic title on screen.
+  useEffect(() => {
+    if (!parsedFileId) {
+      setFileName('')
+      return
+    }
+    // Reset before fetching so a previous document's name never leaks onto
+    // the next one while the new fetch is in flight.
+    setFileName('')
+    let cancelled = false
+    apiClient
+      .get(`/files/${parsedFileId}/language-edit/info`)
+      .then(res => {
+        if (!cancelled && res.data?.file_name) {
+          setFileName(res.data.file_name)
+        }
+      })
+      .catch(() => {
+        /* fall back to analyze's file_name below; header will keep showing
+           the File-# placeholder in the meantime. */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [parsedFileId])
+
   // Initialize analysis job
   const initJob = useCallback(async () => {
     if (!parsedFileId) return
@@ -269,7 +309,7 @@ export function LanguageReviewPage() {
     try {
       const res = await apiClient.post(`/files/${parsedFileId}/language-edit/analyze`)
       const jobId = res.data.job_id
-      setFileName(res.data.file_name || 'manuscript.docx')
+      if (res.data.file_name) setFileName(res.data.file_name)
       const findingsRes = await apiClient.get(`/language-edit/jobs/${jobId}/findings`)
       setJob(findingsRes.data.job)
       const fetchedFindings: Finding[] = findingsRes.data.findings || []
@@ -342,10 +382,17 @@ export function LanguageReviewPage() {
           category: finding.category
         }
         if (status === 'highlighted') {
-          editorRef.current.replaceOccurrence(occ, '', { highlightOnly: true })
+          editorRef.current.replaceOccurrence(occ, '', replaceOptionsFor('highlighted', false))
         } else if (status === 'accepted' || status === 'edited') {
           const repText = status === 'edited' ? editedText : (finding.suggestion || '')
-          editorRef.current.replaceOccurrence(occ, repText, { asTrackChanges: true })
+          // Honor the editor's TC toggle: ON ⇒ record a del+ins pair so the
+          // original stays visible as a tracked deletion and the new text is
+          // an identifiable insertion; OFF ⇒ plain in-place replace.
+          editorRef.current.replaceOccurrence(
+            occ,
+            repText,
+            replaceOptionsFor(status, isTrackChangesEnabled()),
+          )
         }
       }
 
@@ -423,7 +470,7 @@ export function LanguageReviewPage() {
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      const stem = fileName.replace(/\.[^/.]+$/, '')
+      const stem = (fileName || `file_${parsedFileId ?? ''}`).replace(/\.[^/.]+$/, '')
       link.setAttribute('download', `${stem}_redline.docx`)
       document.body.appendChild(link)
       link.click()
@@ -456,18 +503,43 @@ export function LanguageReviewPage() {
     }
   }
 
-  // Map findings to editor occurrences
+  // Map findings to editor occurrences.
+  //
+  // Decoration lifecycle, scoped per finding (per-finding — this is why we
+  // don't throw out the whole occurrence array when a single finding is
+  // resolved; term highlights and other unrelated findings keep their
+  // decorations because their `surface` is untouched):
+  //   * pending / highlighted → decorate the original word.
+  //   * edited → decorate the user's new text (the original is no longer in
+  //     the document). Without this swap OccurrenceHighlight can't locate
+  //     the surface and the user perceives the highlight as "disappeared"
+  //     even though the finding is still live.
+  //   * accepted → replaceOccurrence left `<del>` on the old span and
+  //     inserted `<ins>` for the new text; OccurrenceHighlight already
+  //     skips any range covered by `<del>`. We clear surface to make this
+  //     explicit (the plugin treats empty surfaces as "no decoration").
+  //   * rejected → user has dismissed this finding; clear surface so just
+  //     this one's decoration is removed, no index renumbering.
+  //
+  // We keep this array index-aligned with `findings`: the decoration's
+  // data-occ-index comes from this array's position, and handleOccurrenceClick
+  // looks up `findings[idx]` to find the matching card.
   const editorOccurrences = useMemo(() => {
-    return findings.map(
-      (f) =>
-        ({
-          para_index: f.para_index,
-          match_start: f.start_offset,
-          match_end: f.end_offset,
-          surface: f.original_text,
-          category: f.category,
-        }) as Occurrence,
-    )
+    return findings.map((f) => {
+      let surface = f.original_text
+      if (f.status === 'edited') {
+        surface = f.edited_text || f.suggestion || f.original_text
+      } else if (f.status === 'accepted' || f.status === 'rejected') {
+        surface = ''
+      }
+      return {
+        para_index: f.para_index,
+        match_start: f.start_offset,
+        match_end: f.end_offset,
+        surface,
+        category: f.category,
+      } as Occurrence
+    })
   }, [findings])
 
   const selectedOccurrenceIndex = useMemo(() => {
@@ -520,9 +592,17 @@ export function LanguageReviewPage() {
       surface: target.original_text,
       category: target.category,
     }
-    // Plain text replace — preserves surrounding marks, no track-changes marks,
-    // no persistent <mark> highlights. Dirties the editor via setIsDirty inside.
-    const ok = editorRef.current?.replaceOccurrence(occ, newText)
+    // Honor the editor's TC toggle: ON ⇒ record a del+ins pair (same as the
+    // sidebar Accept/Edit path and the editor's Backspace behavior), OFF ⇒
+    // plain in-place replace that preserves surrounding marks without new
+    // track-changes markup. The case-conversion buttons feed through this
+    // same path, so UPPERCASE/lowercase/Title Case replacements are tracked
+    // when TC is ON.
+    const ok = editorRef.current?.replaceOccurrence(
+      occ,
+      newText,
+      replaceOptionsFor('edited', isTrackChangesEnabled()),
+    )
     if (!ok) {
       toast.error('Could not locate the exact text to replace. The document may have changed.')
       closeInlinePopover()
@@ -536,10 +616,10 @@ export function LanguageReviewPage() {
       reviewer: 'editor',
     }).catch(err => console.warn('Failed to persist edit decision:', err))
 
-    // Drop the finding from local state so its decoration disappears and the
-    // card updates to the "edited" look. (OccurrenceHighlight would otherwise
-    // try to re-mount a decoration whose surface no longer exists at that
-    // offset, which gets dicey for repeated words.)
+    // Mark this finding `edited` and record the new text. editorOccurrences
+    // reads `edited_text` as the new decoration surface so the highlight
+    // tracks onto the replacement, preserving navigation + status while
+    // leaving unrelated findings' decorations untouched.
     setFindings(prev => prev.map(f => f.id === target.id
       ? { ...f, status: 'edited', edited_text: newText }
       : f
@@ -732,7 +812,12 @@ export function LanguageReviewPage() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-800 text-sm">{fileName}</span>
+              <span
+                className="font-semibold text-slate-800 text-sm"
+                title={fileName || undefined}
+              >
+                {fileName || (parsedFileId ? `File #${parsedFileId}` : 'Loading…')}
+              </span>
               <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-violet-100 text-violet-600">
                 Language Review
               </span>
@@ -843,6 +928,19 @@ export function LanguageReviewPage() {
                     saveLabel="Save Edits to DOCX"
                     documentTitle={fileName}
                     height="100%"
+                    // Track Changes defaults ON for every opened document so
+                    // Accept / Edit / popover Replace / case-conversion
+                    // produce visible red-strikethrough + green-highlight
+                    // revisions out of the box. The toolbar's TC toggle is
+                    // still the live source of truth — if the editor
+                    // switches it OFF, the plugin's storage.enabled follows
+                    // and subsequent replacements are plain in-place swaps.
+                    // The parent `key={editor-${parsedFileId}}` remounts the
+                    // editor whenever the file changes, so switching
+                    // documents (or chapters) resets the default back to ON
+                    // for the next document — a manual OFF never leaks past
+                    // the current document session.
+                    trackChangesEnabled={true}
                     occurrences={editorOccurrences}
                     selectedOccurrenceIndex={selectedOccurrenceIndex}
                     onOccurrenceClick={handleOccurrenceClick}
@@ -1459,17 +1557,23 @@ export function LanguageReviewPage() {
             <div className="flex flex-wrap gap-1 mt-2">
               <button
                 type="button"
-                onClick={() => setInlineInput(inlineInput.toUpperCase())}
+                onClick={() => setInlineInput(
+                  applyCasePreservingStructure(inlineInput, inlinePopover.originalText, upperCase),
+                )}
                 className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
               >UPPERCASE</button>
               <button
                 type="button"
-                onClick={() => setInlineInput(inlineInput.toLowerCase())}
+                onClick={() => setInlineInput(
+                  applyCasePreservingStructure(inlineInput, inlinePopover.originalText, lowerCase),
+                )}
                 className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
               >lowercase</button>
               <button
                 type="button"
-                onClick={() => setInlineInput(toTitleCase(inlineInput))}
+                onClick={() => setInlineInput(
+                  applyCasePreservingStructure(inlineInput, inlinePopover.originalText, toTitleCase),
+                )}
                 className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
               >Title Case</button>
             </div>

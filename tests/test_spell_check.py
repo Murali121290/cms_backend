@@ -379,3 +379,99 @@ def test_hyphenated_compound_not_flagged(sc):
     out = sc_mod.spell_check_paragraph(
         "The by-product was a co-op issue.", sc)
     assert all("-" not in f.original for f in out)
+
+
+# --- Typo findings stay in their own category ---------------------------
+
+def test_typo_category_is_distinct_from_spelling_category(sc):
+    """Req: house-style ('spelling') and UK/US findings must not be reclassified
+    as typos, and vice-versa. The spell checker only ever emits category='typo'."""
+    out = sc_mod.spell_check_paragraph("The patient recieve the drug.", sc)
+    categories = {f.category for f in out}
+    assert categories == {"typo"}, (
+        f"Spell check must only emit category='typo'; got {categories}"
+    )
+
+
+def test_typo_category_label_present_on_every_finding(sc):
+    """Every finding returned by `spell_check_paragraph` is tagged `typo` so
+    the UI can place it on the Typo chip, not the Spelling chip."""
+    out = sc_mod.spell_check_paragraph(
+        "The enviroment report was recieved on monday.", sc)
+    assert out, "fixture typos should have fired"
+    assert all(f.category == "typo" for f in out)
+
+
+def test_rule_id_prefix_namespaces_typos(sc):
+    """Every typo rule_id starts with `typo:` so decisions/analytics can
+    separate pyspellchecker findings from the house-style rule engine's."""
+    out = sc_mod.spell_check_paragraph("We should recieve it.", sc)
+    assert out
+    assert all(f.rule_id.startswith("typo:") for f in out)
+
+
+# --- MedSpl800 sampled terms (end-to-end, bundled dic) --------------------
+
+@pytest.fixture(scope="module")
+def medspl_dict():
+    """Load the bundled MedSpl800 dictionary once per test module. If the
+    bundle is missing (CI without the asset), the dependent tests skip."""
+    from app.processing.language_editing import custom_dict
+    custom_dict.load_all_custom_dicts.cache_clear()
+    try:
+        words = custom_dict.load_all_custom_dicts()
+    finally:
+        custom_dict.load_all_custom_dicts.cache_clear()
+    if not words or len(words) < 1000:
+        pytest.skip("MedSpl800 dic not bundled in this environment")
+    return words
+
+
+def test_medspl800_sampled_terms_not_flagged(sc, medspl_dict):
+    """A representative set of MedSpl800 terms — chosen to cover simple
+    lowercase, dual-form slash entries, and long technical names — must
+    pass the typo scanner once the dic is wired into the whitelist."""
+    whitelist = sc_mod.build_whitelist(extras=medspl_dict)
+    sampled = [
+        "cholecalciferol",   # vitamin D form, long lowercase single-token
+        "warfarin",          # anticoagulant
+        "metformin",         # diabetes drug
+        "ibuprofen",         # OTC analgesic
+        "aspirin",           # ubiquitous
+        "anterior",          # dual-form slash entry (anterior/posterior)
+        "posterior",         # same pair
+        "hydroxytryptamine", # alpha portion of 5-hydroxytryptamine
+    ]
+    # Build one paragraph that mentions each so we also exercise multi-token
+    # tokenisation + whitelist lookup in a single pass.
+    text = "The regimen includes " + ", ".join(sampled) + "."
+    findings = sc_mod.spell_check_paragraph(text, sc, whitelist=whitelist)
+    flagged = [f.original.lower() for f in findings]
+    for term in sampled:
+        # Skip terms that aren't actually in the bundled dic (makes the test
+        # robust to future dic rotations) — but assert the ones that ARE
+        # present pass.
+        if term in medspl_dict:
+            assert term not in flagged, (
+                f"MedSpl800 term '{term}' was flagged as a typo"
+            )
+
+
+def test_medspl800_shields_terms_while_real_typo_fires(sc, medspl_dict):
+    """Core user requirement: medical terminology from the supplied dic is
+    not flagged, but a genuine misspelling in the same paragraph still is."""
+    whitelist = sc_mod.build_whitelist(extras=medspl_dict)
+    text = ("Administer cholecalciferol with warfarin and metformin. "
+            "The patient recieve ibuprofen as needed.")
+    findings = sc_mod.spell_check_paragraph(text, sc, whitelist=whitelist)
+    flagged = [f.original.lower() for f in findings]
+    # Medical names shielded
+    for term in ("cholecalciferol", "warfarin", "metformin", "ibuprofen"):
+        if term in medspl_dict:
+            assert term not in flagged
+    # Genuine typo still caught
+    assert "recieve" in flagged
+    rec = next(f for f in findings if f.original == "recieve")
+    assert rec.suggestion == "receive"
+    assert rec.category == "typo"
+
