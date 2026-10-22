@@ -137,43 +137,94 @@ function buildBaseSchedule(
   return result
 }
 
-function buildChapterSchedule(
-  chId: number,
+function buildTrackSchedules(
+  trackChapters: Chapter[],
   orderedStages: WorkflowStage[],
   baseSlaMap: Map<string, number | null>,
   cellSlas: Record<number, Record<string, number | null>>,
-  projectCreatedAt: string,
-  chapter?: Chapter,
+  effectiveAnchor: string,
+  pageNormMap?: Map<string, number | null>,
+  projectCreatedAt?: string,
   dbDates?: Record<string, { start: Date; due: Date }>,
   checkCompleted?: (chapter: Chapter, stageName: string) => boolean,
-): StageSchedule[] {
-  const result: StageSchedule[] = []
-  const cursor = validDate(projectCreatedAt)
-  const chOverrides = cellSlas[chId] ?? {}
-  for (const ws of orderedStages) {
-    const isCompleted = chapter && checkCompleted ? checkCompleted(chapter, ws.stage_name) : false
-    const dbKey = chapter ? `${chapter.chapters}||${ws.stage_name}` : ''
-    const slaDays = ws.stage_name in chOverrides
-      ? chOverrides[ws.stage_name]
-      : (baseSlaMap.get(ws.stage_name) ?? null)
+  alreadyApproved?: boolean,
+  isAdjusting?: boolean,
+  plannedChapterNumbers?: Set<string>,
+): Map<number, StageSchedule[]> {
+  const result = new Map<number, StageSchedule[]>()
+  if (trackChapters.length === 0 || orderedStages.length === 0) return result
 
-    let start: Date
-    let due: Date
+  // Track the due date of the first stage across chapters so due dates stagger progressively
+  let prevFirstStageDue: Date | null = null
+  const sorted = [...trackChapters].sort(sortChapters)
 
-    if (isCompleted && dbDates && dbDates[dbKey]) {
-      start = new Date(dbDates[dbKey].start)
-      due = new Date(dbDates[dbKey].due)
-    } else {
-      start = new Date(cursor)
-      due = new Date(start)
-      if (slaDays) due.setDate(due.getDate() + slaDays)
+  for (const ch of sorted) {
+    const isUnplanned = alreadyApproved && plannedChapterNumbers && !plannedChapterNumbers.has(ch.chapters)
+    const anchor = isUnplanned
+      ? (ch.created_at || effectiveAnchor)
+      : (alreadyApproved && !isAdjusting ? (projectCreatedAt || effectiveAnchor) : effectiveAnchor)
+
+    const cursor = validDate(anchor)
+    const chOverrides = cellSlas[ch.id] ?? {}
+    const chPages = ch.manuscript_pages != null
+      ? ch.manuscript_pages
+      : (ch.word_count ? Math.ceil(ch.word_count / 250) : null)
+
+    const chSched: StageSchedule[] = []
+
+    for (let stageIdx = 0; stageIdx < orderedStages.length; stageIdx++) {
+      const ws = orderedStages[stageIdx]
+      const isCompleted = checkCompleted ? checkCompleted(ch, ws.stage_name) : false
+      const dbKey = `${ch.chapters}||${ws.stage_name}`
+      const pageNorm = pageNormMap ? pageNormMap.get(ws.stage_name) : null
+
+      // Individual chapter SLA based on page norm or master SLA
+      const pageBasedSla = (pageNorm && chPages != null && chPages > 0)
+        ? Math.max(1, Math.ceil(chPages / pageNorm))
+        : null
+
+      const slaDays = ws.stage_name in chOverrides
+        ? chOverrides[ws.stage_name]
+        : (pageBasedSla ?? baseSlaMap.get(ws.stage_name) ?? null)
+
+      let start: Date
+      let due: Date
+
+      if (isCompleted && dbDates && dbDates[dbKey]) {
+        start = new Date(dbDates[dbKey].start)
+        due = new Date(dbDates[dbKey].due)
+      } else {
+        if (stageIdx === 0) {
+          // Stage 1 (Job Initiation):
+          // ALL chapters start on Day 1 (anchor date)
+          start = new Date(cursor)
+          if (pageNorm != null && pageNorm > 0 && prevFirstStageDue) {
+            // Due date staggers progressively after the previous chapter finishes
+            due = new Date(prevFirstStageDue)
+            if (slaDays) due.setDate(due.getDate() + slaDays)
+          } else {
+            due = new Date(start)
+            if (slaDays) due.setDate(due.getDate() + slaDays)
+          }
+          prevFirstStageDue = new Date(due)
+        } else {
+          // Subsequent stages:
+          // Starts immediately the day after THIS chapter's preceding stage is due
+          start = new Date(cursor)
+          due = new Date(start)
+          if (slaDays) due.setDate(due.getDate() + slaDays)
+        }
+      }
+
+      chSched.push({ stageName: ws.stage_name, start, due, slaDays, pageNorm })
+      // Next stage for THIS chapter starts the day after this stage is due
+      cursor.setTime(due.getTime())
+      cursor.setDate(cursor.getDate() + 1)
     }
 
-    result.push({ stageName: ws.stage_name, start, due, slaDays })
-    // Next stage starts the day after this one is due, not on the same day.
-    cursor.setTime(due.getTime())
-    cursor.setDate(cursor.getDate() + 1)
+    result.set(ch.id, chSched)
   }
+
   return result
 }
 
@@ -484,6 +535,12 @@ export function ProjectPlanningPage() {
     return m
   }, [baseSchedule])
 
+  const pageNormMap = useMemo(() => {
+    const m = new Map<string, number | null>()
+    baseSchedule.forEach(s => m.set(s.stageName, s.pageNorm ?? null))
+    return m
+  }, [baseSchedule])
+
   const alreadyApproved = project?.status === 'Active' || project?.status === 'Completed'
   const isEditable = !alreadyApproved || isAdjusting
 
@@ -503,17 +560,95 @@ export function ProjectPlanningPage() {
     return s
   }, [dbDates])
 
-  const chapterSchedules = useMemo(() => {
-    if (!project || chapters.length === 0 || currentOrderedStages.length === 0) return new Map<number, StageSchedule[]>()
-    const result = new Map<number, StageSchedule[]>()
-    const activeChapters = activeTab === 'design' ? designChapters : activeTab === 'art' ? artChapters : manuscriptChapters
-    for (const ch of activeChapters) {
-      const isUnplanned = alreadyApproved && !plannedChapterNumbers.has(ch.chapters)
-      const anchor = isUnplanned ? (ch.created_at || project.created_at || '') : (project.created_at || '')
-      result.set(ch.id, buildChapterSchedule(ch.id, currentOrderedStages, baseSlaMap, cellSlas, anchor, ch, dbDates, isStageCompleted))
+  // Track-level schedules computed with staggered delivery windows across chapters
+  const allTrackSchedules = useMemo(() => {
+    if (!project || chapters.length === 0) return new Map<number, StageSchedule[]>()
+    const resultMap = new Map<number, StageSchedule[]>()
+    const anchor = project.created_at || new Date().toISOString()
+
+    // Manuscript track
+    const msStages = wfStagesMap[manuscriptChapters[0]?.workflow || project.workflow_name || ''] ?? []
+    const msBase = buildBaseSchedule(msStages, masterMap, previewComposition, anchor)
+    const msBaseSla = new Map<string, number | null>()
+    const msPageNorm = new Map<string, number | null>()
+    msBase.forEach(s => {
+      msBaseSla.set(s.stageName, s.slaDays)
+      msPageNorm.set(s.stageName, s.pageNorm ?? null)
+    })
+    const msScheds = buildTrackSchedules(
+      manuscriptChapters,
+      msStages,
+      msBaseSla,
+      cellSlas,
+      anchor,
+      msPageNorm,
+      project.created_at,
+      dbDates,
+      isStageCompleted,
+      alreadyApproved,
+      isAdjusting,
+      plannedChapterNumbers,
+    )
+    msScheds.forEach((v, k) => resultMap.set(k, v))
+
+    // Art track
+    if (artChapters.length > 0) {
+      const artStages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
+      const artBase = buildBaseSchedule(artStages, masterMap, previewComposition, anchor)
+      const artBaseSla = new Map<string, number | null>()
+      const artPageNorm = new Map<string, number | null>()
+      artBase.forEach(s => {
+        artBaseSla.set(s.stageName, s.slaDays)
+        artPageNorm.set(s.stageName, s.pageNorm ?? null)
+      })
+      const artScheds = buildTrackSchedules(
+        artChapters,
+        artStages,
+        artBaseSla,
+        cellSlas,
+        anchor,
+        artPageNorm,
+        project.created_at,
+        dbDates,
+        isStageCompleted,
+        alreadyApproved,
+        isAdjusting,
+        plannedChapterNumbers,
+      )
+      artScheds.forEach((v, k) => resultMap.set(k, v))
     }
-    return result
-  }, [project, chapters, currentOrderedStages, baseSlaMap, cellSlas, activeTab, designChapters, artChapters, manuscriptChapters, alreadyApproved, plannedChapterNumbers, dbDates, isStageCompleted])
+
+    // Design track
+    if (designChapters.length > 0) {
+      const designStages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
+      const designBase = buildBaseSchedule(designStages, masterMap, previewComposition, anchor)
+      const designBaseSla = new Map<string, number | null>()
+      const designPageNorm = new Map<string, number | null>()
+      designBase.forEach(s => {
+        designBaseSla.set(s.stageName, s.slaDays)
+        designPageNorm.set(s.stageName, s.pageNorm ?? null)
+      })
+      const designScheds = buildTrackSchedules(
+        designChapters,
+        designStages,
+        designBaseSla,
+        cellSlas,
+        anchor,
+        designPageNorm,
+        project.created_at,
+        dbDates,
+        isStageCompleted,
+        alreadyApproved,
+        isAdjusting,
+        plannedChapterNumbers,
+      )
+      designScheds.forEach((v, k) => resultMap.set(k, v))
+    }
+
+    return resultMap
+  }, [project, chapters, manuscriptChapters, artChapters, designChapters, wfStagesMap, masterMap, previewComposition, cellSlas, dbDates, isStageCompleted, alreadyApproved, isAdjusting, plannedChapterNumbers])
+
+  const chapterSchedules = allTrackSchedules
 
   function handleCellSlaChange(chId: number, stageName: string, raw: string) {
     if (raw === '') {
@@ -560,63 +695,38 @@ export function ProjectPlanningPage() {
   )
 
   const getScheduleForChapter = useCallback((ch: Chapter) => {
-    let trackWf = project?.workflow_name || ''
-    let ordered: WorkflowStage[] = []
-    if (ch.chapters === 'Design') {
-      trackWf = designChapters[0]?.workflow || project?.workflow_name || ''
-      ordered = wfStagesMap[trackWf] ?? []
-    } else if (ch.chapters.toLowerCase().includes('art')) {
-      trackWf = artChapters[0]?.workflow || project?.workflow_name || ''
-      ordered = wfStagesMap[trackWf] ?? []
-    } else {
-      trackWf = manuscriptChapters[0]?.workflow || project?.workflow_name || ''
-      ordered = wfStagesMap[trackWf] ?? []
-    }
+    return allTrackSchedules.get(ch.id) ?? []
+  }, [allTrackSchedules])
 
-    const baseSched = buildBaseSchedule(ordered, masterMap, previewComposition, project?.created_at || '')
-    const baseSlas = new Map<string, number | null>()
-    baseSched.forEach(s => baseSlas.set(s.stageName, s.slaDays))
-
-    const isUnplanned = alreadyApproved && !plannedChapterNumbers.has(ch.chapters)
-    const anchor = isUnplanned ? (ch.created_at || project?.created_at || '') : (project?.created_at || '')
-
-    return buildChapterSchedule(ch.id, ordered, baseSlas, cellSlas, anchor, ch, dbDates, isStageCompleted)
-  }, [project, designChapters, artChapters, manuscriptChapters, wfStagesMap, masterMap, previewComposition, cellSlas, alreadyApproved, plannedChapterNumbers, dbDates, isStageCompleted])
-
-  // Helper: compute the latest stage-end date across a set of chapters and their workflow
-  const getTrackFinalDue = useCallback((
-    trackChapters: Chapter[],
-    ordered: WorkflowStage[],
-  ): Date | null => {
-    if (trackChapters.length === 0 || ordered.length === 0) return null
-    const baseSchedule = buildBaseSchedule(ordered, masterMap, previewComposition, project?.created_at || '')
-    const baseSlas = new Map<string, number | null>()
-    baseSchedule.forEach(s => baseSlas.set(s.stageName, s.slaDays))
+  const manuscriptFinalDue = useMemo(() => {
     let max: Date | null = null
-    for (const ch of trackChapters) {
-      const isUnplanned = alreadyApproved && !plannedChapterNumbers.has(ch.chapters)
-      const anchor = isUnplanned ? (ch.created_at || project?.created_at || '') : (project?.created_at || '')
-      const sched = buildChapterSchedule(ch.id, ordered, baseSlas, cellSlas, anchor, ch, dbDates, isStageCompleted)
-      const last = sched.length > 0 ? sched[sched.length - 1].due : null
+    for (const ch of manuscriptChapters) {
+      const sched = allTrackSchedules.get(ch.id)
+      const last = sched && sched.length > 0 ? sched[sched.length - 1].due : null
       if (last && (!max || last > max)) max = last
     }
     return max
-  }, [project, masterMap, previewComposition, cellSlas, alreadyApproved, plannedChapterNumbers, dbDates, isStageCompleted])
-
-  const manuscriptFinalDue = useMemo(() => {
-    const stages = wfStagesMap[manuscriptChapters[0]?.workflow || project?.workflow_name || ''] ?? []
-    return getTrackFinalDue(manuscriptChapters, stages)
-  }, [manuscriptChapters, wfStagesMap, project, getTrackFinalDue])
+  }, [manuscriptChapters, allTrackSchedules])
 
   const artFinalDue = useMemo(() => {
-    const stages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
-    return getTrackFinalDue(artChapters, stages)
-  }, [artChapters, wfStagesMap, getTrackFinalDue])
+    let max: Date | null = null
+    for (const ch of artChapters) {
+      const sched = allTrackSchedules.get(ch.id)
+      const last = sched && sched.length > 0 ? sched[sched.length - 1].due : null
+      if (last && (!max || last > max)) max = last
+    }
+    return max
+  }, [artChapters, allTrackSchedules])
 
   const designFinalDue = useMemo(() => {
-    const stages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
-    return getTrackFinalDue(designChapters, stages)
-  }, [designChapters, wfStagesMap, getTrackFinalDue])
+    let max: Date | null = null
+    for (const ch of designChapters) {
+      const sched = allTrackSchedules.get(ch.id)
+      const last = sched && sched.length > 0 ? sched[sched.length - 1].due : null
+      if (last && (!max || last > max)) max = last
+    }
+    return max
+  }, [designChapters, allTrackSchedules])
 
   // Combined final due used for Approve (latest across all tracks)
   const finalDue = useMemo(() => {
@@ -804,6 +914,9 @@ export function ProjectPlanningPage() {
   // approval must show editable SLA inputs even while the rest of the project is locked.
   function renderChapterRow(ch: Chapter, editable: boolean) {
     const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
+    const chEffectivePages = ch.manuscript_pages != null
+      ? ch.manuscript_pages
+      : (ch.word_count ? Math.ceil(ch.word_count / 250) : null)
     return (
       <tr
         key={ch.id}
@@ -900,6 +1013,14 @@ export function ProjectPlanningPage() {
                       {s.slaDays != null && (
                         <span className="text-[10px] font-bold text-primary">{s.slaDays}d</span>
                       )}
+                      {s.pageNorm != null && chEffectivePages != null && chEffectivePages > 0 && (
+                        <span
+                          className="text-[9px] text-muted/70 ml-1 whitespace-nowrap"
+                          title={`${chEffectivePages} pages ÷ ${s.pageNorm} pgs/day norm = ${Math.ceil(chEffectivePages / s.pageNorm)}d`}
+                        >
+                          ({chEffectivePages}p ÷ {s.pageNorm})
+                        </span>
+                      )}
                       {delayDays > 0 && (
                         <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 ml-1">
                           +{delayDays}d
@@ -922,6 +1043,14 @@ export function ProjectPlanningPage() {
                           }`}
                       />
                       <span className="text-[10px] text-muted">d</span>
+                      {s.pageNorm != null && chEffectivePages != null && chEffectivePages > 0 && (
+                        <span
+                          className="text-[9px] text-muted/70 ml-0.5 whitespace-nowrap"
+                          title={`${chEffectivePages} pages ÷ ${s.pageNorm} pgs/day norm = ${Math.ceil(chEffectivePages / s.pageNorm)}d`}
+                        >
+                          ({chEffectivePages}p ÷ {s.pageNorm})
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1130,8 +1259,24 @@ export function ProjectPlanningPage() {
       </div>
 
       {!(activeTab === 'design' && designChapters.length === 0) && (
-        <div className="px-6 py-2 bg-surface border-b border-border text-xs text-muted flex items-center justify-between flex-shrink-0">
-          <span>Active Workflow: <strong>{activeWorkflowName || 'None'}</strong></span>
+        <div className="px-6 py-2 bg-surface border-b border-border text-xs text-muted flex items-center justify-between flex-shrink-0 gap-4 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span>Active Workflow: <strong>{activeWorkflowName || 'None'}</strong></span>
+            {activeTab === 'manuscript' && activeChapters.reduce((sum, ch) => sum + (ch.manuscript_pages || 0), 0) > 0 && (
+              <>
+                <span className="text-border">|</span>
+                <span>Total MS Pages: <strong className="text-text">{activeChapters.reduce((sum, ch) => sum + (ch.manuscript_pages || 0), 0).toLocaleString()} pgs</strong></span>
+                {baseSchedule.filter(s => s.pageNorm != null && s.pageNorm > 0).map(s => (
+                  <span key={s.stageName} className="flex items-center gap-1.5 text-primary font-medium">
+                    <span className="text-border">|</span>
+                    <span>
+                      {s.stageName}: <strong>{s.pageNorm} pgs/day</strong>
+                    </span>
+                  </span>
+                ))}
+              </>
+            )}
+          </div>
           <span>Chapters count: <strong>{activeChapters.length}</strong></span>
         </div>
       )}
