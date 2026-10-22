@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2 } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -34,10 +34,11 @@ export function BodInternalPage() {
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
-  type QuickFilter = 'all' | 'total_all' | 'total_intake' | 'total_backlog' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
+  type QuickFilter = 'all' | 'total_all' | 'fastrack' | 'total_intake' | 'total_backlog' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
   const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
+  const [togglingFastrackId, setTogglingFastrackId] = useState<number | null>(null)
 
   // Date Filter states
   const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'tomorrow' | 'day_3' | 'day_4' | 'day_5' | 'week' | 'month' | 'custom'>('today')
@@ -47,6 +48,7 @@ export function BodInternalPage() {
   // Table heading filters & sorting
   const [colFilters, setColFilters] = useState({
     name: '',
+    fastrack: 'all',
     pages: '',
     type: 'all',
     language: 'all',
@@ -168,6 +170,21 @@ export function BodInternalPage() {
       fetchJobs()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to delete job")
+    }
+  }
+
+  const toggleFastrack = async (e: React.MouseEvent, jobId: number, currentFastrack: boolean) => {
+    e.stopPropagation()
+    setTogglingFastrackId(jobId)
+    try {
+      const nextFastrack = !currentFastrack
+      await api.put(`/bod/jobs/${jobId}/fastrack`, { is_fastrack: nextFastrack })
+      toast.success(nextFastrack ? "Job marked as Fastrack" : "Job set to Normal")
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, is_fastrack: nextFastrack } : j))
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to update Fastrack status")
+    } finally {
+      setTogglingFastrackId(null)
     }
   }
 
@@ -384,6 +401,7 @@ export function BodInternalPage() {
 
   const hasColFilters = Boolean(
     colFilters.name ||
+    (colFilters.fastrack && colFilters.fastrack !== 'all') ||
     colFilters.pages ||
     (colFilters.type && colFilters.type !== 'all') ||
     (colFilters.language && colFilters.language !== 'all') ||
@@ -398,6 +416,7 @@ export function BodInternalPage() {
   const clearColFilters = () => {
     setColFilters({
       name: '',
+      fastrack: 'all',
       pages: '',
       type: 'all',
       language: 'all',
@@ -438,6 +457,7 @@ export function BodInternalPage() {
   const hasBaseFiltersActive = searchQuery.trim() !== '' || assigneeFilter !== 'all' || isDateFilterActive
 
   // Base jobs filtered by base filters (Search, Assignee, Date)
+  // When 'fastrack' card filter is selected, date filtering is bypassed because Fastrack is independent of the date filter
   const baseJobs = jobs.filter(j => {
     const query = searchQuery.trim().toLowerCase()
     const matchesSearch = !query
@@ -448,7 +468,7 @@ export function BodInternalPage() {
     const matchesAssignee = assigneeFilter === 'all'
       || (assigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === assigneeFilter)
 
-    const matchesDate = matchesDateFilter(j)
+    const matchesDate = cardFilter === 'fastrack' ? true : matchesDateFilter(j)
 
     return matchesSearch && matchesAssignee && matchesDate
   })
@@ -465,6 +485,9 @@ export function BodInternalPage() {
     if (compDay === dueDay) return 'On-time'
     return 'Delay'
   }
+
+  // Fastrack count: completely independent of date filter, counts active fastrack jobs
+  const fastrackJobsCount = jobs.filter(j => !isJobCompleted(j) && Boolean(j.is_fastrack)).length
 
   // Metric card counts computed dynamically from baseJobs
   const totalJobs = baseJobs.length
@@ -703,6 +726,8 @@ export function BodInternalPage() {
     let matchesFilter = true
     if (cardFilter === 'total_all' || cardFilter === 'all') {
       matchesFilter = true
+    } else if (cardFilter === 'fastrack') {
+      matchesFilter = !jobCompleted && Boolean(j.is_fastrack)
     } else if (cardFilter === 'total_intake') {
       matchesFilter = isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)
     } else if (cardFilter === 'total_backlog') {
@@ -751,6 +776,11 @@ export function BodInternalPage() {
       const matchName = (j.pdf_filename && j.pdf_filename.toLowerCase().includes(q)) ||
         (j.epub_filename && j.epub_filename.toLowerCase().includes(q))
       if (!matchName) return false
+    }
+
+    if (colFilters.fastrack && colFilters.fastrack !== 'all') {
+      if (colFilters.fastrack === 'fastrack' && !j.is_fastrack) return false
+      if (colFilters.fastrack === 'normal' && j.is_fastrack) return false
     }
 
     if (colFilters.pages) {
@@ -859,6 +889,9 @@ export function BodInternalPage() {
       if (sortField === 'name') {
         valA = (a.pdf_filename || '').toLowerCase()
         valB = (b.pdf_filename || '').toLowerCase()
+      } else if (sortField === 'fastrack') {
+        valA = a.is_fastrack ? 1 : 0
+        valB = b.is_fastrack ? 1 : 0
       } else if (sortField === 'pages') {
         valA = Number(a.pdf_page_count) || 0
         valB = Number(b.pdf_page_count) || 0
@@ -1310,78 +1343,101 @@ export function BodInternalPage() {
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
-            {/* 1. Total: Intake + Backlogs (Aligns under Overdue = 1 col) */}
-            <div
-              onClick={() => setCardFilter(cardFilter === 'total_all' || cardFilter === 'all' ? 'all' : 'total_all')}
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${(cardFilter === 'total_all' || (cardFilter === 'all' && !hasActiveFilters)) ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.03]' : 'border-border/80 hover:border-primary/40'}`}
-            >
-              <div className="flex items-center justify-between pb-1 border-b border-border/50">
-                <div className="flex items-center gap-1">
-                  <div className="p-0.5 bg-primary/10 text-primary rounded">
-                    <Layers size={11} />
+            {/* Group the first 3 columns (spans 3 cols to align under Overdue + Today Due + Today Receipt = 3 cols) */}
+            <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-12 gap-2">
+              {/* 1. Total titles (reduced width: 3 of 12 cols = 25%) */}
+              <div
+                onClick={() => setCardFilter(cardFilter === 'total_all' || cardFilter === 'all' ? 'all' : 'total_all')}
+                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${(cardFilter === 'total_all' || (cardFilter === 'all' && !hasActiveFilters)) ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.03]' : 'border-border/80 hover:border-primary/40'}`}
+              >
+                <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                  <div className="flex items-center gap-1">
+                    <div className="p-0.5 bg-primary/10 text-primary rounded">
+                      <Layers size={11} />
+                    </div>
+                    <span className="text-[9px] font-bold text-primary uppercase tracking-wider truncate">Total titles</span>
                   </div>
-                  <span className="text-[9px] font-bold text-primary uppercase tracking-wider">Total titles</span>
+                </div>
+                <div className="flex items-baseline justify-between mt-1 pt-0.5">
+                  <span className="text-lg font-bold text-text leading-none">{totalJobs}</span>
                 </div>
               </div>
-              <div className="flex items-baseline justify-between mt-1 pt-0.5">
-                <span className="text-lg font-bold text-text leading-none">{totalJobs}</span>
-              </div>
-            </div>
 
-            {/* 2. Job Analysis (Aligns under Today Due + Today Receipt = 2 cols) */}
-            <div
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter.startsWith('fresh') ? 'border-amber-500/60 ring-2 ring-amber-500/20' : 'border-border/80 hover:border-amber-500/30'}`}
-            >
-              <div className="flex items-center justify-between pb-1 border-b border-border/50">
-                <div
-                  onClick={() => setCardFilter(cardFilter === 'fresh_all' ? 'all' : 'fresh_all')}
-                  className="flex items-center gap-1 cursor-pointer select-none group/title"
-                  title="Show all Fresh jobs"
-                >
-                  <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded group-hover/title:bg-amber-500/20 transition-colors">
-                    <Plus size={11} />
+              {/* 2. Job Analysis (increased width: 6 of 12 cols = 50%) */}
+              <div
+                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-6 min-h-[62px] ${cardFilter.startsWith('fresh') ? 'border-amber-500/60 ring-2 ring-amber-500/20' : 'border-border/80 hover:border-amber-500/30'}`}
+              >
+                <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                  <div
+                    onClick={() => setCardFilter(cardFilter === 'fresh_all' ? 'all' : 'fresh_all')}
+                    className="flex items-center gap-1 cursor-pointer select-none group/title"
+                    title="Show all Fresh jobs"
+                  >
+                    <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded group-hover/title:bg-amber-500/20 transition-colors">
+                      <Plus size={11} />
+                    </div>
+                    <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider group-hover/title:underline truncate">Job Analysis</span>
                   </div>
-                  <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider group-hover/title:underline truncate">Job Analysis</span>
+                  <button
+                    type="button"
+                    onClick={() => setCardFilter(cardFilter === 'fresh_all' ? 'all' : 'fresh_all')}
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'fresh_all' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'}`}
+                    title="Show all Fresh (Add job) jobs"
+                  >
+                    Total {freshTotal}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setCardFilter(cardFilter === 'fresh_all' ? 'all' : 'fresh_all')}
-                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'fresh_all' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'}`}
-                  title="Show all Fresh (Add job) jobs"
-                >
-                  Total {freshTotal}
-                </button>
+
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setCardFilter(cardFilter === 'fresh_previous' ? 'all' : 'fresh_previous')}
+                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'fresh_previous' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                    title="Fresh jobs added in previous days"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600/80 dark:text-amber-400/80 flex items-center gap-1 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 shrink-0"></span>
+                        Backlog
+                      </span>
+                      <span className="text-xs font-bold text-text shrink-0">{freshPreviousJobs}</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCardFilter(cardFilter === 'fresh_today' ? 'all' : 'fresh_today')}
+                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'fresh_today' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                    title="Fresh jobs added today"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+                        Today
+                      </span>
+                      <span className="text-xs font-bold text-text shrink-0">{freshTodayJobs}</span>
+                    </div>
+                  </button>
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-1 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setCardFilter(cardFilter === 'fresh_previous' ? 'all' : 'fresh_previous')}
-                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'fresh_previous' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
-                  title="Fresh jobs added in previous days"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600/80 dark:text-amber-400/80 flex items-center gap-1 truncate">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 shrink-0"></span>
-                      Backlog
-                    </span>
-                    <span className="text-xs font-bold text-text">{freshPreviousJobs}</span>
+              {/* 3. Fastrack (3 of 12 cols = 25%, independent of date filter) */}
+              <div
+                onClick={() => setCardFilter(cardFilter === 'fastrack' ? 'all' : 'fastrack')}
+                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${cardFilter === 'fastrack' ? 'border-amber-500/60 ring-2 ring-amber-500/20 bg-amber-500/[0.04]' : 'border-border/80 hover:border-amber-500/40'}`}
+                title="Click to view all active Fastrack jobs (independent of date filter)"
+              >
+                <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                  <div className="flex items-center gap-1">
+                    <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded">
+                      <Zap size={11} className="fill-amber-500 text-amber-500" />
+                    </div>
+                    <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider truncate">Fastrack</span>
                   </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCardFilter(cardFilter === 'fresh_today' ? 'all' : 'fresh_today')}
-                  className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'fresh_today' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
-                  title="Fresh jobs added today"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1 truncate">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
-                      Today Receipt
-                    </span>
-                    <span className="text-xs font-bold text-text">{freshTodayJobs}</span>
-                  </div>
-                </button>
+                </div>
+                <div className="flex items-baseline justify-between mt-1 pt-0.5">
+                  <span className="text-lg font-bold text-amber-600 dark:text-amber-400 leading-none">{fastrackJobsCount}</span>
+                  <span className="text-[8px] text-amber-600/80 dark:text-amber-400/80 truncate">Active</span>
+                </div>
               </div>
             </div>
 
@@ -1594,10 +1650,17 @@ export function BodInternalPage() {
                         className="w-3.5 h-3.5 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                       />
                     </th>
-                    <th onClick={() => handleSort('name')} className="px-2 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[18%] overflow-hidden">
+                    <th onClick={() => handleSort('name')} className="px-2 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[17%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Job Name</span>
                         {renderSortIcon('name')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('fastrack')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[7%] text-center overflow-hidden">
+                      <div className="flex items-center justify-center gap-0.5">
+                        <Zap size={10} className="text-amber-500 fill-amber-500" />
+                        <span className="truncate">Fastrack</span>
+                        {renderSortIcon('fastrack')}
                       </div>
                     </th>
                     <th onClick={() => handleSort('pages')} className="px-1 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[5%] text-center overflow-hidden">
@@ -1606,13 +1669,13 @@ export function BodInternalPage() {
                         {renderSortIcon('pages')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('type')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[8%] overflow-hidden">
+                    <th onClick={() => handleSort('type')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[7%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Type</span>
                         {renderSortIcon('type')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('language')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[8%] overflow-hidden">
+                    <th onClick={() => handleSort('language')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[7%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Language</span>
                         {renderSortIcon('language')}
@@ -1654,7 +1717,7 @@ export function BodInternalPage() {
                         {renderSortIcon('status')}
                       </div>
                     </th>
-                    <th className="px-1 py-2 text-center w-[5%]"></th>
+                    <th className="px-1 py-2 text-center w-[4%]"></th>
                   </tr>
 
                   <tr className="border-b border-border bg-accent/20 font-normal normal-case tracking-normal">
@@ -1681,6 +1744,20 @@ export function BodInternalPage() {
                           </button>
                         )}
                       </div>
+                    </th>
+
+                    {/* Fastrack filter */}
+                    <th className="px-1 py-1 font-normal overflow-visible">
+                      <Dropdown
+                        options={[
+                          { value: 'all', label: 'All' },
+                          { value: 'fastrack', label: '⚡ Fastrack' },
+                          { value: 'normal', label: 'Normal' },
+                        ]}
+                        value={colFilters.fastrack}
+                        onChange={(val) => setColFilters(prev => ({ ...prev, fastrack: val }))}
+                        className="h-[26px] py-0 px-1 text-[11px] font-medium bg-background/90 hover:bg-background border-border/80 rounded-md shadow-xs truncate"
+                      />
                     </th>
 
                     {/* Pages */}
@@ -1866,7 +1943,7 @@ export function BodInternalPage() {
                 <tbody className="divide-y divide-border/60">
                   {filteredJobs.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="text-center py-16 text-muted">
+                      <td colSpan={12} className="text-center py-16 text-muted">
                         <p className="text-xs font-medium">No jobs match the current filters</p>
                         <button
                           onClick={clearFilters}
@@ -1891,6 +1968,8 @@ export function BodInternalPage() {
                       if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
                         assigneeOptions.push({ value: currentAssignee, label: getUserDisplayName(currentAssignee) })
                       }
+
+                      const completed = isJobCompleted(job)
 
                       return (
                         <tr
@@ -1923,6 +2002,39 @@ export function BodInternalPage() {
                                 {job.epub_filename}
                               </p>
                             )}
+                          </td>
+                          <td className="px-1.5 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                if (completed) return
+                                toggleFastrack(e, job.id, Boolean(job.is_fastrack))
+                              }}
+                              disabled={completed || togglingFastrackId === job.id}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all select-none ${
+                                completed
+                                  ? job.is_fastrack
+                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                    : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                                  : job.is_fastrack
+                                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                    : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                              }`}
+                              title={
+                                completed
+                                  ? "Job completed — Fastrack status is locked"
+                                  : job.is_fastrack
+                                    ? "Fastrack Enabled — Click to set Normal"
+                                    : "Normal — Click to enable Fastrack"
+                              }
+                            >
+                              {togglingFastrackId === job.id ? (
+                                <Loader2 size={10} className="animate-spin text-amber-500" />
+                              ) : (
+                                <Zap size={10} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                              )}
+                              <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
+                            </button>
                           </td>
                           <td className="px-1 py-2 text-center text-xs text-muted font-mono overflow-hidden">
                             {job.pdf_page_count || '-'}
@@ -2163,6 +2275,37 @@ export function BodInternalPage() {
                         />
                       </div>
                       <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            if (isJobCompleted(job)) return
+                            toggleFastrack(e, job.id, Boolean(job.is_fastrack))
+                          }}
+                          disabled={isJobCompleted(job) || togglingFastrackId === job.id}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all select-none ${
+                            isJobCompleted(job)
+                              ? job.is_fastrack
+                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                              : job.is_fastrack
+                                ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                          }`}
+                          title={
+                            isJobCompleted(job)
+                              ? "Job completed — Fastrack status is locked"
+                              : job.is_fastrack
+                                ? "Fastrack Enabled — Click to set Normal"
+                                : "Normal — Click to enable Fastrack"
+                          }
+                        >
+                          {togglingFastrackId === job.id ? (
+                            <Loader2 size={10} className="animate-spin text-amber-500" />
+                          ) : (
+                            <Zap size={10} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                          )}
+                          <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
+                        </button>
                         <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${getStatusBadgeClass(job)}`}>
                           {getStatusText(job)}
                         </span>
