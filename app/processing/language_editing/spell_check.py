@@ -317,6 +317,37 @@ def spell_check_paragraph(
         (re.compile(r"(.+)ness$"), r"\1"),      # happiness -> happy
         (re.compile(r"(.+)tion$"), r"\1te"),    # traumatization -> traumatize
         (re.compile(r"(.+)ization$"), r"\1ize"),# traumatization -> traumatize
+        # Nominalizing / adjectival suffixes. pyspellchecker's small base
+        # dictionary is lemma-oriented and misses many perfectly valid
+        # morphological derivations (`expectance`, `obstinance`, `dependence`,
+        # `impermissible`, etc.) that then get surfaced as false-positive
+        # typos. Stripping the suffix lets us recognise the derivation when
+        # the ROOT is known — plus the common `-ance ↔ -ancy` /
+        # `-ence ↔ -ency` noun pairs, which pyspellchecker's base dict
+        # tends to carry only one half of.
+        (re.compile(r"(.+)ance$"), r"\1"),      # expectance -> expect
+        (re.compile(r"(.+)ence$"), r"\1"),      # dependence -> depend
+        (re.compile(r"(.+)ancy$"), r"\1"),      # expectancy -> expect
+        (re.compile(r"(.+)ency$"), r"\1"),      # dependency -> depend
+        (re.compile(r"(.+)ance$"), r"\1ancy"),  # expectance <-> expectancy
+        (re.compile(r"(.+)ancy$"), r"\1ance"),  # expectancy <-> expectance
+        (re.compile(r"(.+)ence$"), r"\1ency"),  # dependence <-> dependency
+        (re.compile(r"(.+)ency$"), r"\1ence"),  # dependency <-> dependence
+        (re.compile(r"(.+)ance$"), r"\1ate"),   # obstinance -> obstinate
+        (re.compile(r"(.+)ency$"), r"\1ent"),   # frequency -> frequent
+        (re.compile(r"(.+)ity$"), r"\1"),       # density -> dens(e)
+        (re.compile(r"(.+)ive$"), r"\1"),       # extensive -> extens(e)
+        (re.compile(r"(.+)able$"), r"\1"),      # readable -> read
+        (re.compile(r"(.+)ible$"), r"\1"),      # visible -> vis
+        (re.compile(r"(.+)ment$"), r"\1"),      # payment -> pay
+        (re.compile(r"(.+)ship$"), r"\1"),      # friendship -> friend
+        (re.compile(r"(.+)ful$"), r"\1"),       # helpful -> help
+        (re.compile(r"(.+)less$"), r"\1"),      # helpless -> help
+        (re.compile(r"(.+)ous$"), r"\1"),       # dangerous -> danger
+        (re.compile(r"(.+)ist$"), r"\1"),       # artist -> art
+        (re.compile(r"(.+)ism$"), r"\1"),       # modernism -> modern
+        (re.compile(r"(.+)ate$"), r"\1"),       # formulate -> formul(a)
+        (re.compile(r"(.+)al$"), r"\1"),        # digital -> digit
     ]
 
     def _morph_variants(w: str) -> list[str]:

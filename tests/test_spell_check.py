@@ -475,3 +475,115 @@ def test_medspl800_shields_terms_while_real_typo_fires(sc, medspl_dict):
     assert rec.suggestion == "receive"
     assert rec.category == "typo"
 
+
+
+# --- Valid but less-common English words must NOT be flagged ---------------
+
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        # User-reported: `expectance` is a valid English noun (M-W) that
+        # pyspellchecker's small base dict misses, so it was falling through
+        # to .candidates() and being flagged with `expectancy`. The morph-
+        # variant pass now strips `-ance`/`-ancy` and sees the root `expect`
+        # is known — so the token passes.
+        ("Our expectance of success grew.", "expectance"),
+        # Same shape, inverse spelling. Should also pass (and in fact is in
+        # pyspell's base dict directly).
+        ("Our expectancy of success grew.", "expectancy"),
+        # Other legitimate derivations the small base dict can miss.
+        ("Her obstinance was clear.", "obstinance"),
+        ("A dependence on the drug formed.", "dependence"),
+        ("A frequency of two per day.", "frequency"),
+        ("The extensive review was ready.", "extensive"),
+        ("An impermissible move was blocked.", "impermissible"),
+        ("Highly intelligible speech was heard.", "intelligible"),
+        ("A reusable syringe.", "reusable"),
+        ("A dangerous situation.", "dangerous"),
+        ("A workmanship issue.", "workmanship"),
+    ],
+)
+def test_valid_rare_derivation_not_flagged(sc, sentence, word):
+    """Valid English derivation of a known root — must NOT be classified as
+    a typo even if pyspellchecker's small base dict doesn't list it."""
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word not in flagged, (
+        f"valid English word {word!r} was flagged in {sentence!r}; findings: {flagged}"
+    )
+
+
+def test_do_not_suggest_alternative_for_valid_word_only_because_more_common(sc):
+    """Core user requirement — pyspellchecker's `.candidates()` for
+    `expectance` returns `expectancy`, which would wrongly swap a valid rare
+    word for a more common form. The morph-variant pass must prevent the
+    finding from ever being emitted, so no suggestion appears at all."""
+    out = sc_mod.spell_check_paragraph("Our expectance of a result.", sc)
+    assert all(f.original != "expectance" for f in out), (
+        "valid English `expectance` must not be converted to `expectancy`"
+    )
+
+
+# --- Genuine misspellings are still detected ------------------------------
+
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        ("Please recieve the shipment.", "recieve"),
+        ("The enviroment was clean.", "enviroment"),
+        ("teh dog was asleep.", "teh"),
+    ],
+)
+def test_genuine_typo_still_flagged(sc, sentence, word):
+    """Guard the fix doesn't become a blanket suppression. Classic typos
+    whose edit distance to a dictionary word is small AND whose root isn't
+    a known valid English stem must still fire as `typo` findings."""
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word in flagged, (
+        f"genuine typo {word!r} was not caught in {sentence!r}; findings: {flagged}"
+    )
+    # And the finding is in the typo category (not the house-style spelling
+    # category), so it stays on the Typo chip.
+    rec = next(f for f in out if f.original.lower() == word)
+    assert rec.category == "typo"
+
+
+def test_ichill_still_flagged_with_chill_candidate(sc):
+    """Explicit user example: `ichill` is a genuine typo (nonsense leading
+    `i` prefix) and should flag with `chill` among the candidates where the
+    engine supports a suggestion."""
+    out = sc_mod.spell_check_paragraph("The patient had an ichill reaction.", sc)
+    assert any(f.original == "ichill" for f in out)
+    rec = next(f for f in out if f.original == "ichill")
+    # pyspellchecker's distance-2 candidate set for `ichill` includes `chill`.
+    # We don't assert ordering (frequency-driven) — just that it's a plausible
+    # correction surfaced to the user.
+    assert "chill" in {rec.suggestion.lower(), *[s.strip().lower() for s in rec.message.split(":")[-1].split(",")]} \
+        or rec.suggestion.lower() == "chill"
+
+
+# --- Medical dic terms still shielded alongside the new morph rules -------
+
+def test_medical_term_still_shielded_after_morph_rules_added():
+    """Make sure the new suffix rules don't accidentally dismiss a shielded
+    medical term as "just a -ity derivation of some root". The whitelist
+    layer runs first and should still win."""
+    from app.processing.language_editing import custom_dict
+    custom_dict.load_all_custom_dicts.cache_clear()
+    try:
+        dic_words = custom_dict.load_all_custom_dicts()
+    finally:
+        custom_dict.load_all_custom_dicts.cache_clear()
+    if not dic_words:
+        pytest.skip("MedSpl800 dic not bundled in this environment")
+
+    local_sc = sc_mod.get_spell_checker(custom_words=dic_words)
+    if local_sc is None:
+        pytest.skip("pyspellchecker not installed")
+    wl = sc_mod.build_whitelist(extras=dic_words)
+    text = "Administer cholecalciferol and metformin daily."
+    out = sc_mod.spell_check_paragraph(text, local_sc, whitelist=wl)
+    flagged = [f.original.lower() for f in out]
+    assert "cholecalciferol" not in flagged
+    assert "metformin" not in flagged
