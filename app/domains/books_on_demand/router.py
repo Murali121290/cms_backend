@@ -232,7 +232,8 @@ def get_customer_report(
             "updated_at": job.updated_at,
             "due_date": customer_due,
             "internal_due_date": job.due_date,
-            "customer_due_date": customer_due
+            "customer_due_date": customer_due,
+            "is_fastrack": bool(job.is_fastrack)
         })
     return {"jobs": report}
 
@@ -266,6 +267,27 @@ def delete_job(job_id: int, db: Session = Depends(get_db), current_user = Depend
                 print(f"Error removing {project_dir}: {e}")
             
     return {"status": "success"}
+
+
+class BodFastrackToggleRequest(BaseModel):
+    is_fastrack: bool
+
+
+@router.put("/jobs/{job_id}/fastrack")
+def toggle_fastrack(
+    job_id: int,
+    payload: BodFastrackToggleRequest,
+    db: Session = Depends(get_db)
+):
+    """Enable or disable fastrack status for a BOD job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job.is_fastrack = bool(payload.is_fastrack)
+    db.commit()
+    db.refresh(job)
+    return {"status": "success", "job_id": job.id, "is_fastrack": bool(job.is_fastrack)}
 
 
 class BodDueDateRequest(BaseModel):
