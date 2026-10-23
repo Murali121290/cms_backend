@@ -1516,8 +1516,9 @@ export function ProjectWorkflow() {
     <div className="flex flex-col min-h-full relative">
 
       {/* ── Page Header ── */}
-      <div className="px-6 py-4 border-b border-border bg-background flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+      <div className="px-4 sm:px-6 py-3 border-b border-border bg-background flex items-center justify-between gap-4">
+        {/* Left section: back arrow + title & metadata */}
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
             onClick={() => {
               if (clientId) {
@@ -1526,67 +1527,72 @@ export function ProjectWorkflow() {
                 navigate('/clients')
               }
             }}
-            className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors mt-0.5 flex-shrink-0"
+            className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors flex-shrink-0"
           >
             <ArrowLeft size={18} />
           </button>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-lg font-bold text-text">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <h1
+                className="text-base sm:text-lg font-bold text-text truncate shrink min-w-0"
+                title={project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
+              >
                 {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
               </h1>
               {project.status && (
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${statusMeta(project.status).cls}`}>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border shrink-0 ${statusMeta(project.status).cls}`}>
                   {project.status}
                 </span>
               )}
               {project.priority === 'Fast Track' && (
-                <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 shrink-0">
                   <Zap size={10} /> Fast Track
                 </span>
               )}
-              <button
-                onClick={() => setIsInfoOpen(true)}
-                title="View project info"
-                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-2"
-              >
-                <Info size={14} />
-              </button>
-              <button
-                onClick={() => setIsEditOpen(true)}
-                title="Edit project"
-                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
-              >
-                <Edit2 size={14} />
-              </button>
-              <button
-                onClick={() => {
-                  if (project.project_manager !== viewer?.username && !canAccess(['admin'])) {
-                    toast.error('Only the assigned Project Manager can open planning.')
-                    return
-                  }
-                  const contentChapters = chapters.filter(c => c.chapters !== 'Design' && c.chapters !== 'CE support')
-                  if (contentChapters.length === 0) {
-                    navigate(`/projects/${id}/mapping`)
-                  } else {
-                    navigate(`/projects/${id}/planning`)
-                  }
-                }}
-                title="Project planning"
-                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
-              >
-                <Calendar size={14} />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => setIsInfoOpen(true)}
+                  title="View project info"
+                  className="p-1 rounded text-muted hover:text-primary hover:bg-surface transition-colors"
+                >
+                  <Info size={14} />
+                </button>
+                <button
+                  onClick={() => setIsEditOpen(true)}
+                  title="Edit project"
+                  className="p-1 rounded text-muted hover:text-primary hover:bg-surface transition-colors"
+                >
+                  <Edit2 size={14} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (project.project_manager !== viewer?.username && !canAccess(['admin'])) {
+                      toast.error('Only the assigned Project Manager can open planning.')
+                      return
+                    }
+                    const contentChapters = chapters.filter(c => c.chapters !== 'Design' && c.chapters !== 'CE support')
+                    if (contentChapters.length === 0) {
+                      navigate(`/projects/${id}/mapping`)
+                    } else {
+                      navigate(`/projects/${id}/planning`)
+                    }
+                  }}
+                  title="Project planning"
+                  className="p-1 rounded text-muted hover:text-primary hover:bg-surface transition-colors"
+                >
+                  <Calendar size={14} />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-3 mt-1 flex-wrap text-xs text-muted">
-              {(project.code || project.project_code) && <span>{project.code || project.project_code}</span>}
+            <div className="flex items-center gap-2 sm:gap-3 mt-0.5 truncate text-xs text-muted">
+              {(project.code || project.project_code) && <span className="font-medium shrink-0">{project.code || project.project_code}</span>}
               {project.workflow_name && (
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 truncate shrink-0">
                   <Layers size={11} /> {project.workflow_name}
                 </span>
               )}
               {project.project_manager && (
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 truncate shrink-0">
                   <User size={11} /> PM: {getUserDisplayName(project.project_manager, users)}
                 </span>
               )}
@@ -1594,19 +1600,21 @@ export function ProjectWorkflow() {
           </div>
         </div>
 
-        {/* Chapter counts + Stylesheets button */}
-        <div className="flex items-center gap-3 flex-shrink-0 text-xs text-muted">
-          <span className="flex items-center gap-1">
-            <BookOpen size={12} /> {summary.total} chapters
-          </span>
-          {summary.complete > 0 && (
-            <span className="flex items-center gap-1 text-emerald-600">
-              <CheckCircle2 size={12} /> {summary.complete} done
+        {/* Right section: chapter counts + action buttons */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 text-xs text-muted whitespace-nowrap">
+          <div className="hidden sm:flex items-center gap-2 shrink-0">
+            <span className="flex items-center gap-1">
+              <BookOpen size={12} /> {summary.total} chapters
             </span>
-          )}
+            {summary.complete > 0 && (
+              <span className="flex items-center gap-1 text-emerald-600">
+                <CheckCircle2 size={12} /> {summary.complete} done
+              </span>
+            )}
+          </div>
           <button
             onClick={openAddChapter}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors shrink-0"
           >
             <Plus size={12} />
             New Chapter
@@ -1614,7 +1622,7 @@ export function ProjectWorkflow() {
           <button
             onClick={() => navigate(uiPaths.projectStylesheets(id))}
             title={activeStylesheet ? `Active: ${activeStylesheet.name}` : 'No active stylesheet'}
-            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
           >
             <BookMarked size={12} />
             Stylesheets
@@ -1628,7 +1636,7 @@ export function ProjectWorkflow() {
           <button
             onClick={() => navigate(uiPaths.projectRules(id))}
             title="Language-editing rules for this project"
-            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
           >
             <BookMarked size={12} />
             Rules
@@ -1636,7 +1644,7 @@ export function ProjectWorkflow() {
           <button
             onClick={() => navigate(uiPaths.projectTermLists(id))}
             title="Term lists assigned to this project — highlighted during Language Editing"
-            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
           >
             <BookMarked size={12} />
             Term Lists
