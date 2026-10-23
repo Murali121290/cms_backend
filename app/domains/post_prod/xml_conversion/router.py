@@ -1,5 +1,6 @@
 import os
 import shutil
+import requests
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -159,38 +160,130 @@ def get_source_pdf(project_id: int, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=404, detail="Source PDF not found")
     return FileResponse(project.filepath, media_type="application/pdf")
 
+def _extract_and_save_pdf2xml_zip(zip_bytes: bytes, out_dir: str, base_name: str, target_format: str = "XML") -> dict:
+    """
+    Extracts ZIP returned by PDF2XML API (return_xml=all) containing:
+      - 30_canonical.xml (raw S4C XML)
+      - 41_jats.xml
+      - 40_bits.xml
+    Saves them as:
+      - {base_name}_raw.xml (canonical rawxml)
+      - {base_name}_jats.xml
+      - {base_name}_bits.xml
+      - {base_name}_final.xml (copy of target_format: JATS, BITS, or rawxml)
+    Returns dict mapping keys to filepaths and contents.
+    """
+    import io
+    import zipfile
+
+    raw_xml = ""
+    jats_xml = ""
+    bits_xml = ""
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        for name in z.namelist():
+            lower_name = name.lower()
+            content = z.read(name).decode("utf-8", errors="replace")
+            if "canonical" in lower_name or "raw" in lower_name:
+                raw_xml = content
+            elif "jats" in lower_name:
+                jats_xml = content
+            elif "bits" in lower_name:
+                bits_xml = content
+            elif lower_name.endswith(".xml") and not raw_xml:
+                raw_xml = content
+
+    raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
+    jats_filepath = os.path.join(out_dir, f"{base_name}_jats.xml")
+    bits_filepath = os.path.join(out_dir, f"{base_name}_bits.xml")
+
+    if raw_xml:
+        with open(raw_filepath, "w", encoding="utf-8") as f:
+            f.write(raw_xml)
+    if jats_xml:
+        with open(jats_filepath, "w", encoding="utf-8") as f:
+            f.write(jats_xml)
+    if bits_xml:
+        with open(bits_filepath, "w", encoding="utf-8") as f:
+            f.write(bits_xml)
+
+    # Determine final XML based on target_format
+    fmt = (target_format or "XML").upper()
+    if fmt == "BITS" and bits_xml:
+        final_xml = bits_xml
+    elif fmt == "JATS" and jats_xml:
+        final_xml = jats_xml
+    else:
+        final_xml = jats_xml or bits_xml or raw_xml
+
+    final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+    if final_xml:
+        with open(final_filepath, "w", encoding="utf-8") as f:
+            f.write(final_xml)
+
+    return {
+        "raw_xml": raw_xml,
+        "raw_filepath": raw_filepath,
+        "jats_xml": jats_xml,
+        "jats_filepath": jats_filepath,
+        "bits_xml": bits_xml,
+        "bits_filepath": bits_filepath,
+        "final_xml": final_xml,
+        "final_filepath": final_filepath,
+    }
+
+
+def _call_pdf2xml_api(filepath: str, return_xml: str = "all") -> requests.Response:
+    url = os.environ.get("PDF2XML_API_URL")
+    if not url:
+        raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
+
+    params = {
+        "engine": "docling",
+        "targets": "json,xml,jats,bits",
+        "return_xml": return_xml
+    }
+
+    with open(filepath, 'rb') as f:
+        files = {'file': (os.path.basename(filepath), f, 'application/pdf')}
+        response = requests.post(url, params=params, files=files)
+
+    return response
+
+
 @router.post("/projects/{project_id}/s4c-convert")
 def s4c_convert(project_id: int, db: Session = Depends(database.get_db)):
     project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    import requests
-    url = os.environ.get("PDF2XML_API_URL")
-    if not url:
-        raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
-    params = {
-        "engine": "docling",
-        "targets": "json,xml,jats,bits",
-        "return_xml": "rawxml"
-    }
-    
-    with open(project.filepath, 'rb') as f:
-        files = {'file': (os.path.basename(project.filepath), f, 'application/pdf')}
-        response = requests.post(url, params=params, files=files)
-        
-    if response.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"PDF2XML API Error: {response.text}")
-        
-    xml_content = response.text
-    
     out_dir = os.path.dirname(project.filepath)
     base_name = os.path.splitext(os.path.basename(project.filepath))[0]
-    raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
-    
-    with open(raw_filepath, "w", encoding="utf-8") as f:
-        f.write(xml_content)
-        
+
+    response = _call_pdf2xml_api(project.filepath, return_xml="all")
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"PDF2XML API Error: {response.text}")
+
+    content_type = response.headers.get("Content-Type", "")
+    if "zip" in content_type or response.content[:4] == b"PK\x03\x04":
+        saved = _extract_and_save_pdf2xml_zip(
+            response.content,
+            out_dir,
+            base_name,
+            target_format=project.target_format or "XML"
+        )
+        xml_content = saved["raw_xml"]
+        raw_filepath = saved["raw_filepath"]
+        if saved.get("final_filepath") and os.path.exists(saved["final_filepath"]):
+            project.final_xml_status = "Completed"
+            project.result_filepath = saved["final_filepath"]
+    else:
+        # Fallback if server returned plain xml
+        xml_content = response.text
+        raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
+        with open(raw_filepath, "w", encoding="utf-8") as f:
+            f.write(xml_content)
+
     project.raw_xml_status = "Completed"
     if project.conversion_status == "YTS":
         project.conversion_status = "In-progress"
@@ -205,35 +298,48 @@ def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(
         raise HTTPException(status_code=404, detail="Project not found")
         
     project.target_format = format
-        
     out_dir = os.path.dirname(project.filepath)
     base_name = os.path.splitext(os.path.basename(project.filepath))[0]
-    import requests
-    url = os.environ.get("PDF2XML_API_URL")
-    if not url:
-        raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
-    return_xml_val = "rawxml" if format.upper() == "XML" else format.lower()
-    params = {
-        "engine": "docling",
-        "targets": "json,xml,jats,bits",
-        "return_xml": return_xml_val
-    }
-    
+    final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+
+    # Check if this format was already extracted and saved from the ZIP
+    fmt_lower = format.lower()
+    specific_filepath = os.path.join(out_dir, f"{base_name}_{fmt_lower}.xml")
+    if os.path.exists(specific_filepath):
+        with open(specific_filepath, "r", encoding="utf-8") as f:
+            xml_content = f.read()
+        with open(final_filepath, "w", encoding="utf-8") as f:
+            f.write(xml_content)
+        project.final_xml_status = "Completed"
+        project.result_filepath = final_filepath
+        db.commit()
+        return {"xml": xml_content, "final_filepath": final_filepath}
+
+    # If not already present on disk, call API
     try:
-        with open(project.filepath, 'rb') as f:
-            files = {'file': (os.path.basename(project.filepath), f, 'application/pdf')}
-            response = requests.post(url, params=params, files=files)
-            
+        response = _call_pdf2xml_api(project.filepath, return_xml="all")
         if response.status_code != 200:
             raise HTTPException(status_code=500, detail=f"PDF2XML API Error: {response.text}")
-            
-        xml_content = response.text
+
+        content_type = response.headers.get("Content-Type", "")
+        if "zip" in content_type or response.content[:4] == b"PK\x03\x04":
+            saved = _extract_and_save_pdf2xml_zip(
+                response.content,
+                out_dir,
+                base_name,
+                target_format=format
+            )
+            xml_content = saved["final_xml"]
+            final_filepath = saved["final_filepath"]
+        else:
+            xml_content = response.text
+            with open(final_filepath, "w", encoding="utf-8") as f:
+                f.write(xml_content)
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to convert to target format: {str(e)}")
-    final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
-    
-    with open(final_filepath, "w", encoding="utf-8") as f:
-        f.write(xml_content)
         
     project.final_xml_status = "Completed"
     project.result_filepath = final_filepath
@@ -244,21 +350,43 @@ def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(
 
 
 @router.get("/projects/{project_id}/xml")
-def get_xml_content(project_id: int, db: Session = Depends(database.get_db)):
+def get_xml_content(project_id: int, format: str = None, db: Session = Depends(database.get_db)):
     project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    # Check if final exists first
     out_dir = os.path.dirname(project.filepath) if project.filepath else ""
     if out_dir:
         base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+
+        if format:
+            req_fmt = format.lower()
+            if req_fmt in ("raw", "s4c", "xml"):
+                candidate = os.path.join(out_dir, f"{base_name}_raw.xml")
+                if os.path.exists(candidate):
+                    with open(candidate, "r", encoding="utf-8") as f:
+                        return {"xml": f.read(), "type": "s4c"}
+            else:
+                candidate = os.path.join(out_dir, f"{base_name}_{req_fmt}.xml")
+                if os.path.exists(candidate):
+                    with open(candidate, "r", encoding="utf-8") as f:
+                        return {"xml": f.read(), "type": req_fmt}
+
+        # Check if final exists first
         final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
         raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
+        jats_filepath = os.path.join(out_dir, f"{base_name}_jats.xml")
+        bits_filepath = os.path.join(out_dir, f"{base_name}_bits.xml")
         
         if os.path.exists(final_filepath):
             with open(final_filepath, "r", encoding="utf-8") as f:
                 return {"xml": f.read(), "type": "final"}
+        elif os.path.exists(jats_filepath):
+            with open(jats_filepath, "r", encoding="utf-8") as f:
+                return {"xml": f.read(), "type": "jats"}
+        elif os.path.exists(bits_filepath):
+            with open(bits_filepath, "r", encoding="utf-8") as f:
+                return {"xml": f.read(), "type": "bits"}
         elif os.path.exists(raw_filepath):
             with open(raw_filepath, "r", encoding="utf-8") as f:
                 return {"xml": f.read(), "type": "s4c"}
@@ -344,7 +472,7 @@ def _run_xslt_transform(xml_data_no_dtd: str, xslt_path: str) -> str:
 
 
 @router.get("/projects/{project_id}/html")
-def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
+def get_html_preview(project_id: int, format: str = None, db: Session = Depends(database.get_db)):
     project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -352,15 +480,43 @@ def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
     out_dir = os.path.dirname(project.filepath) if project.filepath else ""
     if out_dir:
         base_name = os.path.splitext(os.path.basename(project.filepath))[0]
-        final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
         
-        if os.path.exists(final_filepath):
+        target_file = None
+        xslt_file = "xml_preview.xsl"
+
+        if format:
+            fmt_l = format.lower()
+            if fmt_l in ("raw", "s4c", "xml"):
+                candidate = os.path.join(out_dir, f"{base_name}_raw.xml")
+                if os.path.exists(candidate):
+                    target_file = candidate
+                    xslt_file = "rawxml.xsl"
+            else:
+                candidate = os.path.join(out_dir, f"{base_name}_{fmt_l}.xml")
+                if os.path.exists(candidate):
+                    target_file = candidate
+                    xslt_file = "xml_preview.xsl"
+
+        if not target_file:
+            final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+            if os.path.exists(final_filepath):
+                target_file = final_filepath
+            else:
+                for candidate_fmt in ("jats", "bits", "raw"):
+                    candidate = os.path.join(out_dir, f"{base_name}_{candidate_fmt}.xml")
+                    if os.path.exists(candidate):
+                        target_file = candidate
+                        if candidate_fmt == "raw":
+                            xslt_file = "rawxml.xsl"
+                        break
+
+        if target_file and os.path.exists(target_file):
             try:
                 import re
-                xslt_path = os.path.join(os.path.dirname(__file__), "xml_preview.xsl")
+                xslt_path = os.path.join(os.path.dirname(__file__), xslt_file)
                 
                 # Strip DOCTYPE to bypass JAXP entity expansion limits
-                with open(final_filepath, "r", encoding="utf-8") as f:
+                with open(target_file, "r", encoding="utf-8") as f:
                     xml_data = f.read()
                 xml_data_no_dtd = re.sub(r"<!DOCTYPE[^>]+>", "", xml_data, flags=re.IGNORECASE)
                 
@@ -378,7 +534,7 @@ def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
             except Exception as e:
                 return {"html": f"<div style='color:red; padding: 20px;'>Error generating preview: {str(e)}</div>"}
                 
-    return {"html": "<div style='color:gray; padding: 20px;'>No final XML available for preview.</div>"}
+    return {"html": "<div style='color:gray; padding: 20px;'>No XML available for preview.</div>"}
 
 @router.get("/projects/{project_id}/s4c-html")
 def get_s4c_html_preview(project_id: int, db: Session = Depends(database.get_db)):

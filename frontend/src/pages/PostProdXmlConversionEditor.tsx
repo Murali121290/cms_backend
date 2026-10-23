@@ -18,7 +18,7 @@ export function PostProdXmlConversionEditor() {
   const [isS4cConverting, setIsS4cConverting] = useState(false)
   const [isTargetConverting, setIsTargetConverting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [targetFormat, setTargetFormat] = useState('XML')
+  const [targetFormat, setTargetFormat] = useState('JATS')
   const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false)
   const [xmlType, setXmlType] = useState<'s4c' | 'final' | null>(null)
 
@@ -42,10 +42,10 @@ export function PostProdXmlConversionEditor() {
       const found = res.data.find((p: any) => p.id === Number(projectId))
       if (found) {
         setProject(found)
-        if (found.target_format) {
-          setTargetFormat(found.target_format)
+        if (found.target_format && (found.target_format.toUpperCase() === 'BITS' || found.target_format.toUpperCase() === 'JATS')) {
+          setTargetFormat(found.target_format.toUpperCase())
         } else {
-          setTargetFormat('XML')
+          setTargetFormat('JATS')
         }
         // Also fetch the existing XML if any
         try {
@@ -81,49 +81,85 @@ export function PostProdXmlConversionEditor() {
     }
   }
 
-  const handleS4cConversion = async () => {
+  const loadFormatXml = async (fmt: string) => {
+    try {
+      const xmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/xml?format=${fmt.toLowerCase()}`)
+      if (xmlRes.data?.xml) {
+        setXmlContent(xmlRes.data.xml)
+        const newType = (fmt === 'XML' || fmt === 'S4C') ? 's4c' : fmt.toLowerCase()
+        setXmlType(newType as any)
+
+        const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html?format=${fmt.toLowerCase()}`)
+        if (htmlRes.data?.html && htmlRes.data.html.indexOf('No XML available') === -1) {
+          setHtmlContent(htmlRes.data.html)
+        }
+        setHasUnsavedChanges(false)
+        return true
+      }
+    } catch (err) {
+      console.error("Failed to load format XML", err)
+    }
+    return false
+  }
+
+  const handleSelectFormat = async (fmt: string) => {
+    setTargetFormat(fmt)
+    setIsFormatDropdownOpen(false)
+    // Directly show the selected format if already converted/extracted
+    const loaded = await loadFormatXml(fmt)
+    if (!loaded) {
+      toast.info(`${fmt} XML not found on disk. Click "Run" to convert/generate it.`)
+    }
+  }
+
+  const handleSelectS4c = async () => {
+    // If S4C XML is already on disk, view it directly without re-running
+    const loaded = await loadFormatXml('s4c')
+    if (!loaded) {
+      // If not yet converted, trigger conversion
+      await handleRunS4c()
+    }
+  }
+
+  const handleRunS4c = async () => {
     setIsS4cConverting(true)
     try {
       const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/s4c-convert`)
       setXmlContent(res.data.xml)
       setXmlType('s4c')
 
-      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/s4c-html`)
+      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html?format=s4c`)
       if (htmlRes.data?.html) {
         setHtmlContent(htmlRes.data.html)
         setViewMode('html')
       }
 
-      toast.success('Converted to S4C XML successfully')
+      toast.success('Converted and extracted all XMLs (S4C, JATS, BITS) successfully')
     } catch (err) {
       console.error(err)
-      toast.error('Failed to run S4C conversion')
+      toast.error('Failed to run conversion')
     } finally {
       setIsS4cConverting(false)
     }
   }
 
   const handleTargetConversion = async () => {
-    if (!xmlContent) {
-      toast.error('Please run S4C conversion first')
-      return
-    }
     setIsTargetConverting(true)
     try {
       const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/target-convert?format=${targetFormat}`)
       setXmlContent(res.data.xml)
-      setXmlType('final')
-      setProject(prev => prev ? { ...prev, target_format: targetFormat } : prev)
+      setXmlType(targetFormat.toLowerCase() as any)
+      setProject((prev: any) => prev ? { ...prev, target_format: targetFormat } : prev)
 
-      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html`)
+      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html?format=${targetFormat.toLowerCase()}`)
       if (htmlRes.data?.html) {
         setHtmlContent(htmlRes.data.html)
         setViewMode('html')
       }
-      toast.success('Converted to Target XML successfully')
+      toast.success(`Converted ${targetFormat} XML successfully`)
     } catch (err) {
       console.error(err)
-      toast.error('Failed to run Target conversion')
+      toast.error(`Failed to run ${targetFormat} conversion`)
     } finally {
       setIsTargetConverting(false)
     }
@@ -135,12 +171,7 @@ export function PostProdXmlConversionEditor() {
       await api.post(`/post-prod/xml-conversion/projects/${projectId}/xml`, { xml: xmlContent, type: xmlType })
 
       // Update HTML preview if possible
-      let htmlRes;
-      if (xmlType === 's4c') {
-        htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/s4c-html`)
-      } else {
-        htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html`)
-      }
+      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html?format=${xmlType || targetFormat.toLowerCase()}`)
       if (htmlRes.data?.html) {
         setHtmlContent(htmlRes.data.html)
       }
@@ -193,7 +224,8 @@ export function PostProdXmlConversionEditor() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const fileName = project?.filename ? project.filename.replace(/\.pdf$/i, '_final.xml') : 'final.xml';
+    const ext = xmlType === 's4c' ? '_raw.xml' : `_${targetFormat.toLowerCase()}.xml`;
+    const fileName = project?.filename ? project.filename.replace(/\.pdf$/i, ext) : (xmlType === 's4c' ? 'raw.xml' : `${targetFormat.toLowerCase()}.xml`);
     a.download = fileName;
     document.body.appendChild(a);
     a.click();
@@ -234,7 +266,7 @@ export function PostProdXmlConversionEditor() {
             <h1 className="text-sm font-bold text-text m-0 flex items-center gap-2">
               {project.project_name}
               <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary border border-primary/20">
-                {project.target_format || 'XML'}
+                {targetFormat || project.target_format || 'S4C'}
               </span>
             </h1>
             <p className="text-[11px] text-muted">{project.filename}</p>
@@ -258,19 +290,35 @@ export function PostProdXmlConversionEditor() {
               </button>
             </div>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleS4cConversion}
-            disabled={isS4cConverting}
-            className="text-xs h-8"
-          >
-            {isS4cConverting ? (
-              <span className="flex items-center gap-1.5"><div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> Converting...</span>
-            ) : (
-              <span className="flex items-center gap-1.5"><Code size={14} /> S4C XML Conversion</span>
-            )}
-          </Button>
+          <div className="relative flex items-center bg-white dark:bg-[#202020] border border-gray-200 dark:border-white/10 rounded-md overflow-visible">
+            <button
+              onClick={handleSelectS4c}
+              disabled={isS4cConverting}
+              className={`px-3 h-8 text-xs font-medium flex items-center gap-1.5 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${xmlType === 's4c' ? 'text-primary font-semibold' : 'text-text dark:text-gray-200'}`}
+              title="View S4C XML"
+            >
+              <Code size={14} className={xmlType === 's4c' ? 'text-primary' : 'text-muted'} />
+              <span>S4C XML</span>
+            </button>
+
+            <div className="w-px h-5 bg-gray-200 dark:bg-white/10" />
+
+            <button
+              onClick={handleRunS4c}
+              disabled={isS4cConverting}
+              className="px-2.5 h-8 text-xs hover:bg-primary/10 transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed group"
+              title="Run S4C XML Conversion"
+            >
+              {isS4cConverting ? (
+                <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <Play size={13} className="text-primary group-hover:scale-110 transition-transform" />
+                  <span className="font-medium text-primary hidden sm:inline">Run</span>
+                </>
+              )}
+            </button>
+          </div>
 
           {xmlContent && viewMode === 'xml' && (
             <Button
@@ -308,10 +356,7 @@ export function PostProdXmlConversionEditor() {
                   {['JATS', 'BITS'].map((fmt) => (
                     <button
                       key={fmt}
-                      onClick={() => {
-                        setTargetFormat(fmt)
-                        setIsFormatDropdownOpen(false)
-                      }}
+                      onClick={() => handleSelectFormat(fmt)}
                       className={`w-full px-3 py-2 text-left text-xs transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ${targetFormat === fmt ? 'font-semibold text-primary' : 'text-text dark:text-gray-300'}`}
                     >
                       {fmt}
@@ -327,7 +372,7 @@ export function PostProdXmlConversionEditor() {
               onClick={handleTargetConversion}
               disabled={isTargetConverting || !xmlContent}
               className="px-3 h-8 text-xs hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed group relative"
-              title="Convert Target XML"
+              title={`Run ${targetFormat} XML Conversion`}
             >
               {isTargetConverting ? (
                 <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -352,7 +397,7 @@ export function PostProdXmlConversionEditor() {
             </Button>
           )}
 
-          {xmlContent && xmlType === 'final' && (
+          {xmlContent && xmlType !== 's4c' && (
             <Button
               variant="outline"
               size="sm"
@@ -386,7 +431,15 @@ export function PostProdXmlConversionEditor() {
           <div className="h-9 bg-[#2d2d2d] flex items-center px-3 border-b border-black/40">
             <div className="flex items-center gap-1.5 text-[#cccccc] text-xs font-mono">
               <Code size={13} className="text-[#569cd6]" />
-              {xmlContent ? (viewMode === 'xml' ? (project?.filename ? project.filename.replace(/\.pdf$/i, xmlType === 's4c' ? '_raw.xml' : '_final.xml') : (xmlType === 's4c' ? 'raw.xml' : 'final.xml')) : (project?.filename ? project.filename.replace(/\.pdf$/i, '_preview.html') : 'preview.html')) : 'No output yet'}
+              {xmlContent ? (
+                viewMode === 'xml' ? (
+                  project?.filename
+                    ? project.filename.replace(/\.pdf$/i, xmlType === 's4c' ? '_raw.xml' : `_${(xmlType || targetFormat).toLowerCase()}.xml`)
+                    : (xmlType === 's4c' ? 'raw.xml' : `${(xmlType || targetFormat).toLowerCase()}.xml`)
+                ) : (
+                  project?.filename ? project.filename.replace(/\.pdf$/i, '_preview.html') : 'preview.html'
+                )
+              ) : 'No output yet'}
             </div>
           </div>
 
