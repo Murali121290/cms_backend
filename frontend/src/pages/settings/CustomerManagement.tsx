@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   ArrowLeft, Plus, Search, Filter, Download, Eye, Edit2,
-  RefreshCw, Building2, ChevronUp, ChevronDown,
+  RefreshCw, Building2, ChevronUp, ChevronDown, Upload, Image as ImageIcon, Trash2, Check,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { clientsApi, type Client, type ClientPayload } from '@/api/clients'
@@ -107,6 +107,16 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
   const [saving, setSaving] = useState(false)
   const isEdit = !!editCustomer
 
+  const [availableLogos, setAvailableLogos] = useState<string[]>([])
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [logoPickerOpen, setLogoPickerOpen] = useState(false)
+
+  useEffect(() => {
+    if (isOpen) {
+      clientsApi.getLogos().then(setAvailableLogos).catch(() => {})
+    }
+  }, [isOpen])
+
   useEffect(() => {
     if (!isOpen) return
     setErrors({})
@@ -136,6 +146,7 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
         phone_main: editCustomer.phone_main ?? undefined,
         phone_additional: editCustomer.phone_additional ?? undefined,
         active_status: editCustomer.active_status,
+        logo_url: editCustomer.logo_url ?? undefined,
       })
     } else {
       try {
@@ -154,6 +165,23 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
   function set<K extends keyof ClientPayload>(key: K, value: ClientPayload[K]) {
     setForm(f => ({ ...f, [key]: value }))
     setErrors(e => { const n = { ...e }; delete n[key]; return n })
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingLogo(true)
+    try {
+      const res = await clientsApi.uploadLogo(file)
+      set('logo_url', res.logo_url)
+      setAvailableLogos(prev => prev.includes(res.logo_url) ? prev : [res.logo_url, ...prev])
+      toast.success('Logo uploaded successfully')
+    } catch {
+      toast.error('Failed to upload logo')
+    } finally {
+      setUploadingLogo(false)
+      e.target.value = ''
+    }
   }
 
   async function handleSave() {
@@ -188,7 +216,7 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
             className="px-4 py-2 text-sm font-medium text-muted hover:text-text border border-border rounded-lg hover:bg-background transition-colors">
             Cancel
           </button>
-          <Button onClick={() => handleSave()} disabled={saving}>
+          <Button onClick={() => handleSave()} disabled={saving || uploadingLogo}>
             {saving ? <><Spinner size="sm" /> Saving…</> : isEdit ? 'Update Customer' : 'Save Customer'}
           </Button>
         </div>
@@ -231,8 +259,124 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
             value={form.department ?? ''} onChange={e => set('department', e.target.value)} placeholder="Department" />
         </SectionCard>
 
-        {/* Section 2 — Contact Information */}
-        <SectionCard title="2. Contact Information" accent="bg-green-50">
+        {/* Section 2 — Customer Logo */}
+        <SectionCard title="2. Customer Logo" accent="bg-teal-50">
+          <div className="sm:col-span-2 space-y-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 border border-border rounded-xl bg-background/50">
+              {/* Preview Box */}
+              <div className="w-20 h-20 rounded-xl border border-border bg-card flex items-center justify-center p-2 overflow-hidden shrink-0 shadow-sm">
+                {form.logo_url ? (
+                  <img
+                    src={form.logo_url}
+                    alt="Logo Preview"
+                    className="w-full h-full object-contain"
+                    onError={() => {}}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-muted/60">
+                    <ImageIcon size={28} />
+                    <span className="text-[10px] mt-1">No Logo</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 cursor-pointer transition-colors shadow-sm">
+                    {uploadingLogo ? <Spinner size="sm" /> : <Upload size={13} />}
+                    {uploadingLogo ? 'Uploading…' : 'Upload Logo'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={uploadingLogo}
+                      onChange={handleFileUpload}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setLogoPickerOpen(p => !p)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-text text-xs font-medium hover:bg-surface transition-colors"
+                  >
+                    <ImageIcon size={13} />
+                    {logoPickerOpen ? 'Hide Existing Logos' : 'Choose Existing Logo'}
+                  </button>
+                  {form.logo_url && (
+                    <button
+                      type="button"
+                      onClick={() => set('logo_url', null)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-600 text-xs font-medium hover:bg-red-100 transition-colors"
+                      title="Remove logo"
+                    >
+                      <Trash2 size={13} />
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted">
+                  Upload a PNG, JPG, or SVG image (saved to <code className="px-1 py-0.5 bg-muted/10 rounded font-mono text-[10px]">app/static/logos</code>) or choose from previously uploaded logos.
+                </p>
+                {form.logo_url && (
+                  <p className="text-xs text-text font-mono truncate max-w-md">
+                    Selected: <span className="font-semibold text-primary">{form.logo_url}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Existing logos picker drawer */}
+            {logoPickerOpen && (
+              <div className="p-3 border border-border rounded-xl bg-card space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-text">Select from existing logos ({availableLogos.length}):</span>
+                  <button
+                    type="button"
+                    onClick={() => clientsApi.getLogos().then(setAvailableLogos)}
+                    className="text-xs text-muted hover:text-primary flex items-center gap-1"
+                  >
+                    <RefreshCw size={11} /> Refresh
+                  </button>
+                </div>
+                {availableLogos.length === 0 ? (
+                  <p className="text-xs text-muted py-2">No logos found in storage yet. Upload a new logo above.</p>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1">
+                    {availableLogos.map(logo => {
+                      const isSelected = form.logo_url === logo
+                      const filename = logo.replace('/logos/', '')
+                      return (
+                        <div
+                          key={logo}
+                          onClick={() => set('logo_url', logo)}
+                          className={`relative border rounded-lg p-2 cursor-pointer flex flex-col items-center gap-1 transition-all ${
+                            isSelected
+                              ? 'border-primary bg-primary/5 ring-2 ring-primary/30'
+                              : 'border-border bg-background hover:bg-surface'
+                          }`}
+                          title={filename}
+                        >
+                          <div className="w-12 h-12 flex items-center justify-center overflow-hidden">
+                            <img src={logo} alt={filename} className="max-w-full max-h-full object-contain" />
+                          </div>
+                          <span className="text-[10px] text-muted truncate w-full text-center">{filename}</span>
+                          {isSelected && (
+                            <span className="absolute top-1 right-1 bg-primary text-white rounded-full p-0.5">
+                              <Check size={10} />
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </SectionCard>
+
+        {/* Section 3 — Contact Information */}
+        <SectionCard title="3. Contact Information" accent="bg-green-50">
           <Input label="Email" required type="email"
             value={form.email ?? ''} onChange={e => set('email', e.target.value)}
             error={errors.email} placeholder="email@company.com" />
@@ -247,8 +391,8 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
             value={form.phone_additional ?? ''} onChange={e => set('phone_additional', e.target.value)} placeholder="+1 555 000 0001" />
         </SectionCard>
 
-        {/* Section 3 — Address Information */}
-        <SectionCard title="3. Address Information" accent="bg-purple-50">
+        {/* Section 4 — Address Information */}
+        <SectionCard title="4. Address Information" accent="bg-purple-50">
           <div className="sm:col-span-2">
             <Input label="Address Line 1"
               value={form.address1 ?? ''} onChange={e => set('address1', e.target.value)} placeholder="Street address" />
@@ -268,8 +412,8 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
             value={form.zip_code ?? ''} onChange={e => set('zip_code', e.target.value)} placeholder="ZIP code" />
         </SectionCard>
 
-        {/* Section 4 — Additional Information */}
-        <SectionCard title="4. Additional Information" accent="bg-orange-50">
+        {/* Section 5 — Additional Information */}
+        <SectionCard title="5. Additional Information" accent="bg-orange-50">
           <div className="sm:col-span-2">
             <Input label="Sub Specialisation"
               value={form.sub_specialisation ?? ''} onChange={e => set('sub_specialisation', e.target.value)} placeholder="Specialisation area" />
@@ -324,6 +468,17 @@ function ViewCustomerModal({ isOpen, onClose, customer, onEdit }: {
     >
       <div className="space-y-5">
         <ViewSection title="1. Customer Information" accent="bg-blue-50">
+          {customer.logo_url && (
+            <div className="col-span-2 flex items-center gap-3 p-3 bg-background rounded-lg border border-border">
+              <div className="w-16 h-16 rounded-lg border border-border bg-white flex items-center justify-center p-1 overflow-hidden shrink-0">
+                <img src={customer.logo_url} alt={getDisplayName(customer)} className="w-full h-full object-contain" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold text-muted uppercase tracking-wide">Customer Logo</p>
+                <p className="text-xs text-text font-mono truncate">{customer.logo_url}</p>
+              </div>
+            </div>
+          )}
           <Field label="Category Type" value={customer.category_type === 'person' ? 'Person' : 'Organization'} />
           <Field label="Contact Type" value={customer.contact_type} />
           {customer.category_type === 'person' ? (
@@ -582,7 +737,7 @@ export function CustomerManagement() {
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2.5">
                             <div
-                              className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                              className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold overflow-hidden border border-border/50"
                               style={{
                                 backgroundColor: c.category_type === 'person'
                                   ? 'color-mix(in srgb, var(--color-primary) 12%, white)'
@@ -592,9 +747,21 @@ export function CustomerManagement() {
                                   : 'var(--color-success)',
                               }}
                             >
-                              {c.category_type === 'person'
-                                ? getDisplayName(c).charAt(0).toUpperCase()
-                                : <Building2 size={14} />}
+                              {c.logo_url ? (
+                                <img
+                                  src={c.logo_url}
+                                  alt={getDisplayName(c)}
+                                  className="w-full h-full object-contain p-0.5 bg-white"
+                                  onError={e => {
+                                    // Hide broken image on error and fall back
+                                    (e.target as HTMLElement).style.display = 'none'
+                                  }}
+                                />
+                              ) : c.category_type === 'person' ? (
+                                getDisplayName(c).charAt(0).toUpperCase()
+                              ) : (
+                                <Building2 size={14} />
+                              )}
                             </div>
                             <div className="min-w-0">
                               <p className="font-medium text-text truncate max-w-[130px]">{getDisplayName(c)}</p>
