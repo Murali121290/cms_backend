@@ -293,6 +293,7 @@ def _serialize_project_summary(project: Project):
         isbn_no=getattr(project, "isbn_no", None),
         billing_location=getattr(project, "billing_location", None),
         due_date=due,
+        due_date_history=getattr(project, "due_date_history", None) or [],
         file_details=getattr(project, "file_details", None),
         created_at=cat,
         updated_at=uat,
@@ -2181,14 +2182,42 @@ def api_v2_update_project(
             setattr(project, _f, _v)
 
     if payload.due_date is not None:
+        from datetime import date as _date, datetime as _datetime, timezone as _timezone
+        from sqlalchemy.orm.attributes import flag_modified
+        old_due_str = project.due_date.isoformat() if project.due_date else None
+        new_due_str = payload.due_date if payload.due_date else None
+        new_date_obj = None
+
         if payload.due_date:
             try:
-                from datetime import date as _date
-                project.due_date = _date.fromisoformat(payload.due_date)
+                new_date_obj = _date.fromisoformat(payload.due_date)
             except ValueError:
-                pass
-        else:
-            project.due_date = None
+                new_date_obj = None
+
+        if old_due_str != new_due_str:
+            project.due_date = new_date_obj
+
+            # Determine who changed it
+            user_full_name = None
+            if hasattr(viewer, "first_name") or hasattr(viewer, "username"):
+                fn = (getattr(viewer, "first_name", "") or "").strip()
+                ln = (getattr(viewer, "last_name", "") or "").strip()
+                user_full_name = f"{fn} {ln}".strip() or getattr(viewer, "username", None) or getattr(viewer, "user_name", "Unknown")
+            else:
+                user_full_name = str(viewer)
+
+            history_list = list(project.due_date_history) if project.due_date_history else []
+            history_list.append({
+                "from_date": old_due_str,
+                "to_date": new_due_str,
+                "old_date": old_due_str,
+                "new_date": new_due_str,
+                "changed_by": user_full_name,
+                "reason": payload.reason or None,
+                "timestamp": _datetime.now(_timezone.utc).isoformat(),
+            })
+            project.due_date_history = history_list
+            flag_modified(project, "due_date_history")
 
     db.commit()
     db.refresh(project)

@@ -34,6 +34,7 @@ class Project(Base):
     isbn_no          = Column(String(20),  nullable=True)
     billing_location = Column(String(255), nullable=True)
     due_date         = Column(Date,        nullable=True)
+    due_date_history = Column(JSON,        nullable=False, server_default='[]', default=list)
     file_details     = Column(JSON,        nullable=True)
     created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
