@@ -133,6 +133,7 @@ class ProjectSummary(BaseModel):
     isbn_no: str | None = None
     billing_location: str | None = None
     due_date: str | None = None
+    due_date_history: list | None = None
     file_details: dict | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -1066,6 +1067,7 @@ class ProjectUpdateRequest(BaseModel):
     sales_person: str | None = None
     isbn_no: str | None = None
     billing_location: str | None = None
+    reason: str | None = None
 
 
 class UploadZipChapterEntry(BaseModel):
