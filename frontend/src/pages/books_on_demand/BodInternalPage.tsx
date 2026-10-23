@@ -1345,7 +1345,27 @@ export function BodInternalPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
             {/* Group the first 3 columns (spans 3 cols to align under Overdue + Today Due + Today Receipt = 3 cols) */}
             <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-12 gap-2">
-              {/* 1. Total titles (reduced width: 3 of 12 cols = 25%) */}
+              {/* 1. Fastrack (3 of 12 cols = 25%, independent of date filter) */}
+              <div
+                onClick={() => setCardFilter(cardFilter === 'fastrack' ? 'all' : 'fastrack')}
+                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${cardFilter === 'fastrack' ? 'border-amber-500/60 ring-2 ring-amber-500/20 bg-amber-500/[0.04]' : 'border-border/80 hover:border-amber-500/40'}`}
+                title="Click to view all active Fastrack jobs (independent of date filter)"
+              >
+                <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                  <div className="flex items-center gap-1">
+                    <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded">
+                      <Zap size={11} className="fill-amber-500 text-amber-500" />
+                    </div>
+                    <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider truncate">Fastrack</span>
+                  </div>
+                </div>
+                <div className="flex items-baseline justify-between mt-1 pt-0.5">
+                  <span className="text-lg font-bold text-amber-600 dark:text-amber-400 leading-none">{fastrackJobsCount}</span>
+                  <span className="text-[8px] text-amber-600/80 dark:text-amber-400/80 truncate">Active</span>
+                </div>
+              </div>
+
+              {/* 2. Total titles (reduced width: 3 of 12 cols = 25%) */}
               <div
                 onClick={() => setCardFilter(cardFilter === 'total_all' || cardFilter === 'all' ? 'all' : 'total_all')}
                 className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${(cardFilter === 'total_all' || (cardFilter === 'all' && !hasActiveFilters)) ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.03]' : 'border-border/80 hover:border-primary/40'}`}
@@ -1363,7 +1383,7 @@ export function BodInternalPage() {
                 </div>
               </div>
 
-              {/* 2. Job Analysis (increased width: 6 of 12 cols = 50%) */}
+              {/* 3. Job Analysis (increased width: 6 of 12 cols = 50%) */}
               <div
                 className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-6 min-h-[62px] ${cardFilter.startsWith('fresh') ? 'border-amber-500/60 ring-2 ring-amber-500/20' : 'border-border/80 hover:border-amber-500/30'}`}
               >
@@ -1417,26 +1437,6 @@ export function BodInternalPage() {
                       <span className="text-xs font-bold text-text shrink-0">{freshTodayJobs}</span>
                     </div>
                   </button>
-                </div>
-              </div>
-
-              {/* 3. Fastrack (3 of 12 cols = 25%, independent of date filter) */}
-              <div
-                onClick={() => setCardFilter(cardFilter === 'fastrack' ? 'all' : 'fastrack')}
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${cardFilter === 'fastrack' ? 'border-amber-500/60 ring-2 ring-amber-500/20 bg-amber-500/[0.04]' : 'border-border/80 hover:border-amber-500/40'}`}
-                title="Click to view all active Fastrack jobs (independent of date filter)"
-              >
-                <div className="flex items-center justify-between pb-1 border-b border-border/50">
-                  <div className="flex items-center gap-1">
-                    <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded">
-                      <Zap size={11} className="fill-amber-500 text-amber-500" />
-                    </div>
-                    <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider truncate">Fastrack</span>
-                  </div>
-                </div>
-                <div className="flex items-baseline justify-between mt-1 pt-0.5">
-                  <span className="text-lg font-bold text-amber-600 dark:text-amber-400 leading-none">{fastrackJobsCount}</span>
-                  <span className="text-[8px] text-amber-600/80 dark:text-amber-400/80 truncate">Active</span>
                 </div>
               </div>
             </div>
