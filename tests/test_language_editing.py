@@ -274,6 +274,67 @@ def test_spell_check_bundled_medspl800_integration():
     assert "recieve" in flagged
 
 
+# ---------------------------------------------------------------------------
+# GP009 hyphen-stripping rule — documents the shape of the suggestion so the
+# frontend's `applyCasePreservingStructure` has a stable target.
+# ---------------------------------------------------------------------------
+
+def _run_profile_on(text: str, profile_key: str):
+    """Run the full engine against `text` using one of the bundled profiles."""
+    import json
+    from pathlib import Path
+    from app.processing.language_editing import engine, segmenter, rules
+
+    profile_path = (
+        Path(__file__).resolve().parent.parent
+        / "app"
+        / "processing"
+        / "language_editing"
+        / "config"
+        / "profiles"
+        / f"{profile_key}.json"
+    )
+    with profile_path.open("r", encoding="utf-8") as fh:
+        profile = json.load(fh)
+    rs = rules.load_rules_from_dict(profile.get("rules", []))
+    hs = rules.load_house_style_from_dict(profile.get("variant_to_canonical", {}))
+    sents = segmenter.sentences(text)
+    return engine.analyze(text, rs, hs, sents)
+
+
+@pytest.mark.parametrize("profile_key", ["uk", "us"])
+@pytest.mark.parametrize(
+    "word,expected_suggestion",
+    [
+        ("non-nurturing", "nonnurturing"),
+        ("anti-anxiety", "antianxiety"),
+        ("pre-intervention", "preintervention"),
+        ("post-intervention", "postintervention"),
+        ("multi-step", "multistep"),
+        ("sub-field", "subfield"),
+    ],
+)
+def test_gp009_strips_hyphen_in_suggestion(profile_key, word, expected_suggestion):
+    """GP009 (`non|pre|post|anti|multi|sub` + hyphen + base) emits a
+    hyphen-free suggestion. The frontend's popover case controls are what
+    restore the hyphen when the user applies UPPERCASE / lowercase / Title
+    Case — this test locks in the backend shape they consume."""
+    text = f"The {word} environment was studied."
+    findings = _run_profile_on(text, profile_key)
+    gp009 = [f for f in findings if f.rule_id == "GP009" and f.original == word]
+    assert gp009, (
+        f"GP009 did not fire on {word!r} with profile {profile_key!r}; "
+        f"findings: {[(f.rule_id, f.original) for f in findings]}"
+    )
+    f = gp009[0]
+    assert f.suggestion == expected_suggestion
+    # Original keeps the hyphen; the frontend uses this field to re-hydrate
+    # structure when the user asks for a case transform.
+    assert "-" in f.original
+    # And the finding is categorised as grammar / house-style, not as a typo.
+    assert f.category == "grammar"
+
+
 def test_spell_check_preserves_case_of_document():
     """The dic is lowercased internally but documents keep their own case."""
     sc = spell_check.get_spell_checker(custom_words={"cholecalciferol"})

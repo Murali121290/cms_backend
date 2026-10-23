@@ -379,3 +379,349 @@ def test_hyphenated_compound_not_flagged(sc):
     out = sc_mod.spell_check_paragraph(
         "The by-product was a co-op issue.", sc)
     assert all("-" not in f.original for f in out)
+
+
+# --- Typo findings stay in their own category ---------------------------
+
+def test_typo_category_is_distinct_from_spelling_category(sc):
+    """Req: house-style ('spelling') and UK/US findings must not be reclassified
+    as typos, and vice-versa. The spell checker only ever emits category='typo'."""
+    out = sc_mod.spell_check_paragraph("The patient recieve the drug.", sc)
+    categories = {f.category for f in out}
+    assert categories == {"typo"}, (
+        f"Spell check must only emit category='typo'; got {categories}"
+    )
+
+
+def test_typo_category_label_present_on_every_finding(sc):
+    """Every finding returned by `spell_check_paragraph` is tagged `typo` so
+    the UI can place it on the Typo chip, not the Spelling chip."""
+    out = sc_mod.spell_check_paragraph(
+        "The enviroment report was recieved on monday.", sc)
+    assert out, "fixture typos should have fired"
+    assert all(f.category == "typo" for f in out)
+
+
+def test_rule_id_prefix_namespaces_typos(sc):
+    """Every typo rule_id starts with `typo:` so decisions/analytics can
+    separate pyspellchecker findings from the house-style rule engine's."""
+    out = sc_mod.spell_check_paragraph("We should recieve it.", sc)
+    assert out
+    assert all(f.rule_id.startswith("typo:") for f in out)
+
+
+# --- MedSpl800 sampled terms (end-to-end, bundled dic) --------------------
+
+@pytest.fixture(scope="module")
+def medspl_dict():
+    """Load the bundled MedSpl800 dictionary once per test module. If the
+    bundle is missing (CI without the asset), the dependent tests skip."""
+    from app.processing.language_editing import custom_dict
+    custom_dict.load_all_custom_dicts.cache_clear()
+    try:
+        words = custom_dict.load_all_custom_dicts()
+    finally:
+        custom_dict.load_all_custom_dicts.cache_clear()
+    if not words or len(words) < 1000:
+        pytest.skip("MedSpl800 dic not bundled in this environment")
+    return words
+
+
+def test_medspl800_sampled_terms_not_flagged(sc, medspl_dict):
+    """A representative set of MedSpl800 terms — chosen to cover simple
+    lowercase, dual-form slash entries, and long technical names — must
+    pass the typo scanner once the dic is wired into the whitelist."""
+    whitelist = sc_mod.build_whitelist(extras=medspl_dict)
+    sampled = [
+        "cholecalciferol",   # vitamin D form, long lowercase single-token
+        "warfarin",          # anticoagulant
+        "metformin",         # diabetes drug
+        "ibuprofen",         # OTC analgesic
+        "aspirin",           # ubiquitous
+        "anterior",          # dual-form slash entry (anterior/posterior)
+        "posterior",         # same pair
+        "hydroxytryptamine", # alpha portion of 5-hydroxytryptamine
+    ]
+    # Build one paragraph that mentions each so we also exercise multi-token
+    # tokenisation + whitelist lookup in a single pass.
+    text = "The regimen includes " + ", ".join(sampled) + "."
+    findings = sc_mod.spell_check_paragraph(text, sc, whitelist=whitelist)
+    flagged = [f.original.lower() for f in findings]
+    for term in sampled:
+        # Skip terms that aren't actually in the bundled dic (makes the test
+        # robust to future dic rotations) — but assert the ones that ARE
+        # present pass.
+        if term in medspl_dict:
+            assert term not in flagged, (
+                f"MedSpl800 term '{term}' was flagged as a typo"
+            )
+
+
+def test_medspl800_shields_terms_while_real_typo_fires(sc, medspl_dict):
+    """Core user requirement: medical terminology from the supplied dic is
+    not flagged, but a genuine misspelling in the same paragraph still is."""
+    whitelist = sc_mod.build_whitelist(extras=medspl_dict)
+    text = ("Administer cholecalciferol with warfarin and metformin. "
+            "The patient recieve ibuprofen as needed.")
+    findings = sc_mod.spell_check_paragraph(text, sc, whitelist=whitelist)
+    flagged = [f.original.lower() for f in findings]
+    # Medical names shielded
+    for term in ("cholecalciferol", "warfarin", "metformin", "ibuprofen"):
+        if term in medspl_dict:
+            assert term not in flagged
+    # Genuine typo still caught
+    assert "recieve" in flagged
+    rec = next(f for f in findings if f.original == "recieve")
+    assert rec.suggestion == "receive"
+    assert rec.category == "typo"
+
+
+
+# --- Valid but less-common English words must NOT be flagged ---------------
+
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        # User-reported: `expectance` is a valid English noun (M-W) that
+        # pyspellchecker's small base dict misses, so it was falling through
+        # to .candidates() and being flagged with `expectancy`. The morph-
+        # variant pass now strips `-ance`/`-ancy` and sees the root `expect`
+        # is known — so the token passes.
+        ("Our expectance of success grew.", "expectance"),
+        # Same shape, inverse spelling. Should also pass (and in fact is in
+        # pyspell's base dict directly).
+        ("Our expectancy of success grew.", "expectancy"),
+        # Other legitimate derivations the small base dict can miss.
+        ("Her obstinance was clear.", "obstinance"),
+        ("A dependence on the drug formed.", "dependence"),
+        ("A frequency of two per day.", "frequency"),
+        ("The extensive review was ready.", "extensive"),
+        ("An impermissible move was blocked.", "impermissible"),
+        ("Highly intelligible speech was heard.", "intelligible"),
+        ("A reusable syringe.", "reusable"),
+        ("A dangerous situation.", "dangerous"),
+        ("A workmanship issue.", "workmanship"),
+    ],
+)
+def test_valid_rare_derivation_not_flagged(sc, sentence, word):
+    """Valid English derivation of a known root — must NOT be classified as
+    a typo even if pyspellchecker's small base dict doesn't list it."""
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word not in flagged, (
+        f"valid English word {word!r} was flagged in {sentence!r}; findings: {flagged}"
+    )
+
+
+def test_do_not_suggest_alternative_for_valid_word_only_because_more_common(sc):
+    """Core user requirement — pyspellchecker's `.candidates()` for
+    `expectance` returns `expectancy`, which would wrongly swap a valid rare
+    word for a more common form. The morph-variant pass must prevent the
+    finding from ever being emitted, so no suggestion appears at all."""
+    out = sc_mod.spell_check_paragraph("Our expectance of a result.", sc)
+    assert all(f.original != "expectance" for f in out), (
+        "valid English `expectance` must not be converted to `expectancy`"
+    )
+
+
+# --- Genuine misspellings are still detected ------------------------------
+
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        ("Please recieve the shipment.", "recieve"),
+        ("The enviroment was clean.", "enviroment"),
+        ("teh dog was asleep.", "teh"),
+    ],
+)
+def test_genuine_typo_still_flagged(sc, sentence, word):
+    """Guard the fix doesn't become a blanket suppression. Classic typos
+    whose edit distance to a dictionary word is small AND whose root isn't
+    a known valid English stem must still fire as `typo` findings."""
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word in flagged, (
+        f"genuine typo {word!r} was not caught in {sentence!r}; findings: {flagged}"
+    )
+    # And the finding is in the typo category (not the house-style spelling
+    # category), so it stays on the Typo chip.
+    rec = next(f for f in out if f.original.lower() == word)
+    assert rec.category == "typo"
+
+
+def test_ichill_still_flagged_with_chill_candidate(sc):
+    """Explicit user example: `ichill` is a genuine typo (nonsense leading
+    `i` prefix) and should flag with `chill` among the candidates where the
+    engine supports a suggestion."""
+    out = sc_mod.spell_check_paragraph("The patient had an ichill reaction.", sc)
+    assert any(f.original == "ichill" for f in out)
+    rec = next(f for f in out if f.original == "ichill")
+    # pyspellchecker's distance-2 candidate set for `ichill` includes `chill`.
+    # We don't assert ordering (frequency-driven) — just that it's a plausible
+    # correction surfaced to the user.
+    assert "chill" in {rec.suggestion.lower(), *[s.strip().lower() for s in rec.message.split(":")[-1].split(",")]} \
+        or rec.suggestion.lower() == "chill"
+
+
+# --- Medical dic terms still shielded alongside the new morph rules -------
+
+def test_medical_term_still_shielded_after_morph_rules_added():
+    """Make sure the new suffix rules don't accidentally dismiss a shielded
+    medical term as "just a -ity derivation of some root". The whitelist
+    layer runs first and should still win."""
+    from app.processing.language_editing import custom_dict
+    custom_dict.load_all_custom_dicts.cache_clear()
+    try:
+        dic_words = custom_dict.load_all_custom_dicts()
+    finally:
+        custom_dict.load_all_custom_dicts.cache_clear()
+    if not dic_words:
+        pytest.skip("MedSpl800 dic not bundled in this environment")
+
+    local_sc = sc_mod.get_spell_checker(custom_words=dic_words)
+    if local_sc is None:
+        pytest.skip("pyspellchecker not installed")
+    wl = sc_mod.build_whitelist(extras=dic_words)
+    text = "Administer cholecalciferol and metformin daily."
+    out = sc_mod.spell_check_paragraph(text, local_sc, whitelist=wl)
+    flagged = [f.original.lower() for f in out]
+    assert "cholecalciferol" not in flagged
+    assert "metformin" not in flagged
+
+
+# --- User-reported false positives in production -------------------------
+#
+# Observed in the Language Editor: valid English words were being flagged
+# because pyspellchecker's small base dict missed them and its
+# `.candidates()` happily returned a nearest-neighbour word. These tests
+# reproduce the three screenshot cases + similar classes and lock in the
+# fix. The underlying mechanisms are: (1) adjective↔noun suffix pairs for
+# `-ic/-ics/-ical`, (2) compound-of-known-halves recognition, (3) a tiny
+# set of common-tech words directly in the extras.
+
+
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        # Screenshot 1: pyspell only knows the noun `psychodynamics`, not
+        # the adjective. The `-ic → -ics` suffix pair now resolves it.
+        ("The psychodynamic approach is useful.", "psychodynamic"),
+        # Same mechanism, generalises to any -ic adjective paired with its
+        # -ics noun form.
+        ("The hydrodynamic flow was modeled.", "hydrodynamic"),
+        ("Thermodynamic equilibrium was reached.", "thermodynamic"),
+        # Screenshot 2: valid closed-form compound. Resolves via
+        # `well` + `being` both in base dict.
+        ("Her wellbeing improved last week.", "wellbeing"),
+        # Other compound closed-form words that resolve the same way.
+        ("The healthcare worker arrived.", "healthcare"),
+        ("A policymaker spoke.", "policymaker"),
+        # Screenshot 3: `app`/`apps` stem is missing from pyspell's base
+        # English dict and can't be rescued by morphology. Direct extras.
+        ("Install five apps on the device.", "apps"),
+        ("Open the app and sign in.", "app"),
+    ],
+)
+def test_screenshot_false_positives_no_longer_flagged(sc, sentence, word):
+    """Each sentence contains the word that WAS being incorrectly flagged.
+    After the fix, the Spell Check pass must emit no finding for that word."""
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word not in flagged, (
+        f"valid English {word!r} must not be flagged; findings: {flagged}"
+    )
+
+
+def test_do_not_suggest_plural_as_correction_for_valid_singular(sc):
+    """Core regression: pyspell's `.candidates('psychodynamic')` returns
+    `['psychodynamics']` because only the plural is in the base dict. The
+    pipeline must NOT turn that suggestion into a finding — the token is
+    a valid English adjective, period."""
+    out = sc_mod.spell_check_paragraph("The psychodynamic approach.", sc)
+    for f in out:
+        assert f.original.lower() != "psychodynamic", (
+            f"`psychodynamic` must never be swapped for `psychodynamics` "
+            f"(suggestion was {f.suggestion!r})"
+        )
+
+
+def test_do_not_suggest_unrelated_word_for_valid_compound(sc):
+    """Core regression: pyspell's `.candidates('wellbeing')` returns
+    `['welling']` — a semantically unrelated verb form. Suggesting it as
+    a spelling correction is wrong; `wellbeing` is a valid compound of two
+    known halves and must be accepted as correct."""
+    out = sc_mod.spell_check_paragraph("Her wellbeing improved.", sc)
+    for f in out:
+        assert f.original.lower() != "wellbeing", (
+            f"`wellbeing` must never be swapped for `welling` "
+            f"(suggestion was {f.suggestion!r})"
+        )
+
+
+def test_do_not_suggest_edit_distance_1_substitution_for_valid_short_word(sc):
+    """Core regression: pyspell's `.candidates('apps')` includes `apes`
+    (one letter substitution). The pipeline must NOT turn a valid common
+    plural into a nearest-neighbour spelling suggestion."""
+    out = sc_mod.spell_check_paragraph("Install five apps.", sc)
+    for f in out:
+        assert f.original.lower() != "apps", (
+            f"`apps` must never be swapped for `apes` "
+            f"(suggestion was {f.suggestion!r})"
+        )
+
+
+# --- Compound-of-known-halves rule guards --------------------------------
+
+def test_compound_rule_does_not_mask_genuine_typo(sc):
+    """Guard: the compound-of-known-halves recognition requires BOTH halves
+    to be known AND each ≥3 letters. Genuine typos like `recieve`,
+    `enviroment`, `ichill`, `teh` have no clean split into two known
+    halves — they must still fire."""
+    for text, word in [
+        ("recieve the shipment", "recieve"),
+        ("the enviroment is clean", "enviroment"),
+        ("an ichill reaction", "ichill"),
+        ("teh dog ran", "teh"),
+    ]:
+        out = sc_mod.spell_check_paragraph(text, sc)
+        flagged = [f.original.lower() for f in out]
+        assert word in flagged, (
+            f"compound rule must not have masked typo {word!r}; "
+            f"flagged={flagged}"
+        )
+
+
+def test_compound_rule_rejects_single_letter_prefix_split(sc):
+    """`ichill` would split as `i` + `chill` — but `i` is only one letter
+    and the compound rule requires each half ≥3. So `ichill` still ends
+    up unknown → flagged."""
+    out = sc_mod.spell_check_paragraph("an ichill reaction", sc)
+    assert any(f.original == "ichill" for f in out)
+
+
+def test_compound_rule_rejects_two_letter_prefix_split(sc):
+    """`recieve` would split as `re` + `cieve`, but `re` is only two
+    letters and `cieve` isn't a word — both barriers hold."""
+    out = sc_mod.spell_check_paragraph("recieve this", sc)
+    assert any(f.original == "recieve" for f in out)
+
+
+# --- Category isolation ----------------------------------------------------
+
+def test_screenshot_false_positives_do_not_leak_into_other_categories(sc):
+    """The fix must not re-route the dropped findings into Grammar,
+    Spelling, Terms, or any other category. These sentences simply should
+    produce ZERO Spell Check findings."""
+    for text in (
+        "The psychodynamic approach is useful.",
+        "Her wellbeing improved.",
+        "Install five apps.",
+    ):
+        out = sc_mod.spell_check_paragraph(text, sc)
+        for f in out:
+            # The screenshot words themselves must not be in any finding;
+            # unrelated words in the same sentence could still legitimately
+            # fire for other reasons, but these three must not.
+            assert f.original.lower() not in {"psychodynamic", "wellbeing", "apps"}, (
+                f"finding for {f.original!r} leaked into {f.category!r}"
+            )

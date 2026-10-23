@@ -85,6 +85,38 @@ def compile_term_list(list_id: int, list_name: str, terms: Iterable[tuple[int, s
     )
 
 
+def _expand_to_hyphenated_compound(text: str, start: int, end: int) -> tuple[int, int]:
+    """If ``[start, end)`` is a component of a hyphenated compound word in
+    ``text`` (e.g. ``self`` inside ``self-awareness``), return the span that
+    covers the full compound. Otherwise return ``(start, end)`` unchanged.
+
+    The expansion walks outward one hyphen-connected letter/digit run at a
+    time, so standalone ``self`` stays at length 4, but ``self`` inside
+    ``self-respect-again`` grows to the full 18 characters. Spaces,
+    punctuation other than ``-``, and non-ASCII separators are hard walls so
+    the match never crosses word boundaries.
+    """
+    # Walk left while the preceding char is `-` followed (further left) by
+    # a letter/digit — i.e. we are at the start of a non-initial component
+    # of a hyphenated compound.
+    s = start
+    while s > 1 and text[s - 1] == "-" and text[s - 2].isascii() and (text[s - 2].isalnum()):
+        new_s = s - 2
+        while new_s > 0 and text[new_s - 1].isascii() and text[new_s - 1].isalnum():
+            new_s -= 1
+        s = new_s
+
+    # Walk right while the next char is `-` followed by letter/digit.
+    e = end
+    while e < len(text) - 1 and text[e] == "-" and text[e + 1].isascii() and text[e + 1].isalnum():
+        new_e = e + 2
+        while new_e < len(text) and text[new_e].isascii() and text[new_e].isalnum():
+            new_e += 1
+        e = new_e
+
+    return s, e
+
+
 def find_term_matches(text: str, compiled_lists: list[CompiledTermList]) -> list[dict]:
     """Scan ``text`` against each compiled list; return deduplicated match dicts.
 
@@ -93,6 +125,13 @@ def find_term_matches(text: str, compiled_lists: list[CompiledTermList]) -> list
     finding is emitted — attributed to the first list that matched, with
     additional lists recorded in ``also_in_list_ids`` / ``also_in_list_names``
     for tooltip attribution if the UI wants to show them.
+
+    Hyphenated-compound expansion: when a term matches a component of a
+    hyphenated compound (``self`` inside ``self-awareness``), the match range
+    is widened to cover the whole compound so the sidebar card, document
+    highlight, and click-to-navigate all point at the complete word. This
+    also naturally dedupes "term A matches part 1 and term B matches part 2
+    of the same compound" into a single finding by sharing the span key.
 
     Each returned dict has: ``start, end, matched_text, term_list_id,
     term_list_name, term_id, also_in_list_ids, also_in_list_names``.
@@ -106,22 +145,29 @@ def find_term_matches(text: str, compiled_lists: list[CompiledTermList]) -> list
         if cl.regex is None:
             continue
         for m in cl.regex.finditer(text):
-            key = (m.start(), m.end())
-            matched = m.group(0)
+            original_matched = m.group(0)
+            start, end = _expand_to_hyphenated_compound(text, m.start(), m.end())
+            key = (start, end)
             if key in span_map:
-                # Already captured by an earlier list; just note the overlap.
+                # Already captured by an earlier list or an earlier term in
+                # the same list (via compound expansion); just note the
+                # cross-list attribution.
                 existing = span_map[key]
                 if cl.list_id not in existing["also_in_list_ids"] and cl.list_id != existing["term_list_id"]:
                     existing["also_in_list_ids"].append(cl.list_id)
                     existing["also_in_list_names"].append(cl.list_name)
                 continue
+            matched_surface = text[start:end]
             span_map[key] = {
-                "start": m.start(),
-                "end": m.end(),
-                "matched_text": matched,
+                "start": start,
+                "end": end,
+                "matched_text": matched_surface,
                 "term_list_id": cl.list_id,
                 "term_list_name": cl.list_name,
-                "term_id": cl.term_lookup.get(matched.lower()),
+                # term_id uses the ORIGINAL matched text (e.g. "self"),
+                # not the expanded surface — so the finding still links to
+                # the exact Term row that triggered it.
+                "term_id": cl.term_lookup.get(original_matched.lower()),
                 "also_in_list_ids": [],
                 "also_in_list_names": [],
             }
