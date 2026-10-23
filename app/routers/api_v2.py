@@ -8900,6 +8900,59 @@ def _filter_clients_for_user(clients_list: list, user) -> list:
         if (c.company in allowed or c.division in allowed or (getattr(c, 'name_company', None) in allowed))
     ]
 
+@router.get("/clients/logos", response_model=List[str])
+def api_v2_list_client_logos(user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    logos_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "logos")
+    if not os.path.exists(logos_dir):
+        return []
+    allowed_exts = {".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"}
+    files = [
+        f"/logos/{f}"
+        for f in sorted(os.listdir(logos_dir))
+        if os.path.splitext(f)[1].lower() in allowed_exts
+    ]
+    return files
+
+@router.post("/clients/upload-logo")
+async def api_v2_upload_client_logo(
+    file: UploadFile = FastAPIFile(...),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    # Target directory in backend: app/static/logos
+    logos_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "logos")
+    os.makedirs(logos_dir, exist_ok=True)
+
+    # Sanitize filename
+    orig_name = os.path.basename(file.filename or "logo.png")
+    name_clean = re.sub(r'[^a-zA-Z0-9_.-]', '_', orig_name)
+    target_path = os.path.join(logos_dir, name_clean)
+
+    # Write file to app/static/logos
+    content = await file.read()
+    with open(target_path, "wb") as f:
+        f.write(content)
+
+    # Also sync to frontend public/logos and dist/logos if present
+    frontend_public = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "public", "logos"))
+    if os.path.exists(frontend_public):
+        try:
+            with open(os.path.join(frontend_public, name_clean), "wb") as f:
+                f.write(content)
+        except Exception:
+            pass
+
+    frontend_dist = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist", "logos"))
+    if os.path.exists(frontend_dist):
+        try:
+            with open(os.path.join(frontend_dist, name_clean), "wb") as f:
+                f.write(content)
+        except Exception:
+            pass
+
+    return {"logo_url": f"/logos/{name_clean}", "filename": name_clean}
+
 @router.post("/clients", response_model=V2ClientListResponse, status_code=status.HTTP_201_CREATED)
 def api_v2_create_client(client: V2ClientCreate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
     _require_cookie_user(user)

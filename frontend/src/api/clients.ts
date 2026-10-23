@@ -75,5 +75,16 @@ export const clientsApi = {
 
   setStatus: (id: number, active_status: boolean) =>
     api.patch<Client>(`/clients/${id}/status`, { active_status }).then(r => r.data),
+
+  getLogos: () =>
+    api.get<string[]>('/clients/logos').then(r => r.data),
+
+  uploadLogo: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<{ logo_url: string; filename: string }>('/clients/upload-logo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
 }
 
