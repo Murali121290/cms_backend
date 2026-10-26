@@ -10,6 +10,8 @@ export interface User {
   role: string
   designation: string
   team: string
+  additional_roles?: string[]
+  additional_teams?: string[]
   customer_access: string[]
   access_level?: string
 }
@@ -23,6 +25,7 @@ export interface CreateUserPayload {
   role?: string
   designation?: string
   team: string
+  additional_roles?: string[]
   customer_access: string[]
   active_status?: boolean
   access_level?: string
@@ -36,6 +39,7 @@ export interface UpdateUserPayload {
   password?: string
   customer_access?: string[]
   team?: string
+  additional_roles?: string[]
   active_status?: boolean
   access_level?: string
 }
@@ -62,6 +66,8 @@ const mapUser = (u: any): User => {
     role: roleVal,
     designation: u.designation ?? '',
     team: u.team ?? '',
+    additional_roles: u.additional_roles ?? [],
+    additional_teams: u.additional_teams ?? [],
     customer_access: u.customer_access ?? [],
     access_level: lvl,
   }
@@ -80,6 +86,7 @@ export const usersApi = {
       role: data.role,
       designation: data.designation,
       team: data.team,
+      additional_roles: data.additional_roles || [],
       customer_access: data.customer_access,
       active_status: data.active_status ?? true,
     })
@@ -91,6 +98,7 @@ export const usersApi = {
     if (data.role !== undefined) payload.role = data.role
     if (data.designation !== undefined) payload.designation = data.designation
     if (data.team) payload.team = data.team
+    if (data.additional_roles !== undefined) payload.additional_roles = data.additional_roles
     if (data.password) payload.password = data.password
     if (data.customer_access !== undefined) payload.customer_access = data.customer_access
     if (data.active_status !== undefined) payload.active_status = data.active_status

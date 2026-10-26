@@ -12,16 +12,19 @@ const VIEW_RE = /^\/clients\/\d+\/projects\/\d+\/chapters\/\d+\/view(\/.*)?$/
 export function AppLayout() {
   const { pathname } = useLocation()
   const { setCollapsed } = useSidebarStore()
-  const { viewer } = useRBAC()
+  const { viewer, hasPermission } = useRBAC()
   const { showWarning, extendSession, forceLogout } = useAutoLogout()
 
-  const isAccessibilityUser =
-    viewer?.team === 'Accessibility Team' ||
-    Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
-    Boolean((viewer as any)?.roles && (viewer as any).roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
-
-  if (isAccessibilityUser && (pathname === '/' || pathname === '/dashboard' || pathname === '/workspace' || pathname === '/clients')) {
-    return <Navigate to="/post-production" replace />
+  // If user does not have permission to view books dashboard or production,
+  // redirect them to their primary accessible hub (e.g. Backlist Hub, BOD Report)
+  const isBookProductionRoute = pathname === '/' || pathname === '/dashboard' || pathname === '/workspace' || pathname === '/clients'
+  if (isBookProductionRoute && !hasPermission('view_books_dashboard') && !hasPermission('access_books_production')) {
+    if (hasPermission('access_post_production')) {
+      return <Navigate to="/post-production" replace />
+    }
+    if (hasPermission('access_bod')) {
+      return <Navigate to="/bod/report" replace />
+    }
   }
 
   // Keep sidebar expanded only on the root page (/), collapse on all other pages
