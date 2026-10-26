@@ -172,8 +172,10 @@ def _serialize_admin_user(user: models.User):
         first_name=getattr(user, "first_name", None),
         last_name=getattr(user, "last_name", None),
         is_active=user.is_active,
-        roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles] if role_val else [],
+        roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles] if (role_val or getattr(user, "additional_roles", None)) else [],
         team=user.team,
+        additional_roles=getattr(user, "additional_roles", None) or [],
+        additional_teams=getattr(user, "additional_teams", None) or [],
         customer_access=user.customer_access or [],
         designation=user.designation,
         role=role_val or None,
@@ -183,6 +185,7 @@ def _serialize_admin_user(user: models.User):
 
 def _serialize_viewer(user: models.User):
     from app.domains.auth.user_service import determine_access_level
+    from app.domains.auth.rbac_config import get_user_permissions
     role_val = getattr(user, "role", None) or ""
     raw_level = determine_access_level(role_val) if role_val else None
     return schemas_v2.Viewer(
@@ -191,11 +194,15 @@ def _serialize_viewer(user: models.User):
         email=user.email,
         first_name=getattr(user, "first_name", None),
         last_name=getattr(user, "last_name", None),
-        roles=[role.name for role in user.roles] if role_val else [],
+        roles=[role.name for role in user.roles] if (role_val or getattr(user, "additional_roles", None)) else [],
+        role=role_val or None,
+        additional_roles=getattr(user, "additional_roles", None) or [],
+        additional_teams=getattr(user, "additional_teams", None) or [],
         is_active=user.is_active,
         team=user.team,
         designation=user.designation,
         access_level=raw_level,
+        permissions=get_user_permissions(user),
     )
 
 
@@ -7868,6 +7875,19 @@ def api_v2_update_user(
         db_user.access_level = determine_access_level(assigned_role)
         if role_record and role_record.team:
             db_user.team = role_record.team
+
+    if payload.additional_roles is not None:
+        from app.domains.workflow.models import RolesMaster
+        db_user.additional_roles = payload.additional_roles
+        extra_teams = []
+        if payload.additional_roles:
+            role_records = db.query(RolesMaster).filter(
+                RolesMaster.role_name.in_(payload.additional_roles)
+            ).all()
+            for r in role_records:
+                if r.team and r.team not in extra_teams:
+                    extra_teams.append(r.team)
+        db_user.additional_teams = extra_teams
 
     # Other updates
     if payload.designation is not None:

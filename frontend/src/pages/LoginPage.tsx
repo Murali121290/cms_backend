@@ -130,26 +130,21 @@ export function LoginPage() {
 
   if (sessionQuery.data?.authenticated) {
     const v = sessionQuery.data.viewer
-    const isAccessUser =
-      v?.team === 'Accessibility Team' ||
-      Boolean((v as any)?.role && String((v as any).role).toLowerCase().includes('accessibility')) ||
-      Boolean(v?.roles && (v.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
-
-    const isCustomerUser =
-      v?.team === 'Customer Team' ||
-      Boolean((v as any)?.role && String((v as any).role).toLowerCase().includes('customer')) ||
-      Boolean(v?.roles && (v.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('customer')))
-
-    const hasBodCustomerAccess = Boolean(
-      (v as any)?.customer_access && 
-      Array.isArray((v as any).customer_access) && 
-      (v as any).customer_access.includes('BOD')
-    )
+    const perms: string[] = (v as any)?.permissions || []
 
     let destination = from
     if (from === '/' || from === '/dashboard') {
-      if (isAccessUser) destination = '/post-production'
-      else if (isCustomerUser && hasBodCustomerAccess) destination = '/bod/report'
+      if (perms.includes('view_books_dashboard') || (v as any)?.access_level === 'Admin') {
+        destination = '/'
+      } else if (perms.includes('access_post_production')) {
+        destination = '/post-production'
+      } else if (perms.includes('access_bod')) {
+        destination = '/bod/report'
+      } else if (perms.includes('view_workspace')) {
+        destination = '/workspace'
+      } else {
+        destination = '/'
+      }
     }
 
     return <Navigate replace to={destination} />

@@ -21,10 +21,14 @@ class Viewer(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     roles: list[str]
+    role: str | None = None
+    additional_roles: list[str] = []
+    additional_teams: list[str] = []
     is_active: bool
     team: str | None = None
     designation: str | None = None
     access_level: str | None = "standard"
+    permissions: list[str] = []
 
 
 class SessionAuth(BaseModel):
@@ -368,6 +372,8 @@ class AdminUser(BaseModel):
     is_active: bool
     roles: list[AdminUserRole]
     team: str | None = None
+    additional_roles: list[str] = []
+    additional_teams: list[str] = []
     customer_access: list[str] = []
     designation: str | None = None
     role: str | None = None
@@ -397,6 +403,8 @@ class UserCreate(BaseModel):
     role: str | None = None
     designation: str | None = None
     team: str
+    additional_roles: list[str] = []
+    additional_teams: list[str] = []
     customer_access: list[str] = []
     active_status: bool | None = True
 
@@ -405,6 +413,8 @@ class UserUpdate(BaseModel):
     role: str | None = None
     designation: str | None = None
     team: str | None = None
+    additional_roles: list[str] | None = None
+    additional_teams: list[str] | None = None
     password: str | None = None
     customer_access: list[str] | None = None
     active_status: bool | None = None

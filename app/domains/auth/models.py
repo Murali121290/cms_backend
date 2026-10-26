@@ -61,6 +61,8 @@ class User(Base):
     role            = Column(String(50),   nullable=True)
     designation     = Column(String(50),   nullable=True)
     team            = Column(String(50),   nullable=True)
+    additional_roles = Column(DialectJSONB, nullable=False, default=list)
+    additional_teams = Column(DialectJSONB, nullable=False, default=list)
     customer_access = Column(DialectJSONB,  nullable=False, default=list)
     access_level    = Column(String(50),   nullable=True, default="standard")
     active_status   = Column(Boolean,      nullable=False, default=True)
@@ -71,15 +73,22 @@ class User(Base):
 
     @property
     def roles(self):
+        items = []
         effective_role = self.role or self.designation
-        if not effective_role:
-            return CompatibilityRolesList()
-        cap_role = map_role_to_capitalized(effective_role)
-        role_id = 1
-        if effective_role.lower() == "admin":
-            role_id = 4
-        elif effective_role.lower() == "viewer":
+        if effective_role:
+            cap_role = map_role_to_capitalized(effective_role)
             role_id = 1
-        elif effective_role.lower() == "manager":
-            role_id = 3
-        return CompatibilityRolesList([CompatibilityRoleItem(cap_role, role_id)])
+            if effective_role.lower() == "admin":
+                role_id = 4
+            elif effective_role.lower() == "viewer":
+                role_id = 1
+            elif effective_role.lower() == "manager":
+                role_id = 3
+            items.append(CompatibilityRoleItem(cap_role, role_id))
+
+        if self.additional_roles and isinstance(self.additional_roles, list):
+            for extra in self.additional_roles:
+                if extra and isinstance(extra, str) and extra.strip():
+                    items.append(CompatibilityRoleItem(extra.strip(), 1))
+
+        return CompatibilityRolesList(items)
