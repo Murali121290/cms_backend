@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -25,6 +25,7 @@ export function BodInternalJobPage() {
   const [loading, setLoading] = useState(true)
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [isOpeningValidator, setIsOpeningValidator] = useState(false)
   const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate'>('stage')
   const [aceFile, setAceFile] = useState<File | null>(null)
   const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
@@ -124,6 +125,27 @@ export function BodInternalJobPage() {
       toast.error(err.response?.data?.detail || "Failed to dispatch job to FTP")
     } finally {
       setIsDispatching(false)
+    }
+  }
+
+  const openInEpubValidator = async () => {
+    if (!job) return
+    if (!job.epub_filename) {
+      toast.error("No processed EPUB found. Please upload or produce an EPUB first.")
+      return
+    }
+
+    setIsOpeningValidator(true)
+    try {
+      const { data } = await api.post(`/bod/jobs/${job.id}/sync-validator`)
+      toast.success("Opening in EPUB Validator...")
+      const projectId = data.project_id || data.project?.id || data.folder_name
+      navigate(`/post-production/epub-validator/${projectId}?from=bod&bodJobId=${job.id}`)
+    } catch (err: any) {
+      console.error("Failed to sync to EPUB Validator", err)
+      toast.error(err.response?.data?.detail || "Failed to open in EPUB Validator")
+    } finally {
+      setIsOpeningValidator(false)
     }
   }
 
@@ -373,6 +395,18 @@ export function BodInternalJobPage() {
               rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}
             >
               {isAdvancing ? 'Proceeding...' : 'Proceed to Production'}
+            </Button>
+          )}
+
+          {!isCompleted && job.epub_filename && (
+            <Button
+              variant="outline"
+              onClick={openInEpubValidator}
+              disabled={isOpeningValidator}
+              className="text-primary hover:text-primary-hover border-primary/30 hover:border-primary"
+              leftIcon={isOpeningValidator ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+            >
+              {isOpeningValidator ? 'Opening Validator...' : 'Open in EPUB Validator'}
             </Button>
           )}
 
