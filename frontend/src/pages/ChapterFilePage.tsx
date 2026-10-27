@@ -906,7 +906,7 @@ export function ChapterFilePage({
 
   // Open docx viewer (full-screen viewer page)
   function openEditor(row: FileRow) {
-    if (!resolvedIsAssigned) return
+    if (!resolvedIsAssigned && activeFolder !== 'backup') return
     if (row.db_id && /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(row.file_name)) {
       // Pass the current folder so the editor rail is scoped to the same
       // Originals-vs-Converted split the user is viewing here.
@@ -1065,7 +1065,7 @@ export function ChapterFilePage({
               <span className="w-4" />
             )}
             <FolderIcon name={icon} size={14} color={color} />
-            {fid ? (
+            {fid && activeFolder !== 'backup' ? (
               <button
                 type="button"
                 disabled={!resolvedIsAssigned}
@@ -1151,15 +1151,16 @@ export function ChapterFilePage({
       },
     }),
     ...dynamicCols,
-    ...(activeFolder !== 'backup' ? [col.display({
+    col.display({
       id: 'actions', header: () => <div className="text-center">Actions</div>, size: 130,
       cell: i => {
         const r = i.row.original
         const fid = r.db_id
+        const isBackup = activeFolder === 'backup'
         const hideEdit = /\.(xlsx?|indd)$/i.test(r.file_name)
         return (
           <div className="flex items-center justify-center gap-1">
-            {resolvedIsAssigned && !hideEdit && (
+            {resolvedIsAssigned && !hideEdit && !isBackup && (
               <IconTooltipButton
                 title="Edit"
                 onClick={() => {
@@ -1186,7 +1187,7 @@ export function ChapterFilePage({
                 </a>
               </IconTooltipButton>
             )}
-            {isAdminUser && (
+            {isAdminUser && !isBackup && (
               <IconTooltipButton
                 title="Delete"
                 onClick={() => handleDelete(r)}
@@ -1198,7 +1199,7 @@ export function ChapterFilePage({
           </div>
         )
       },
-    })] : []),
+    }),
     col.display({
       id: 'history', header: 'History', size: 70,
       cell: ({ row }) => (

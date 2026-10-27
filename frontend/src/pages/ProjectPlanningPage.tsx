@@ -155,13 +155,17 @@ function buildTrackSchedules(
   if (trackChapters.length === 0 || orderedStages.length === 0) return result
 
   // Track the due date of the first stage across chapters so due dates stagger progressively
+  // Track the due date of the first stage across planned chapters so due dates stagger progressively
   let prevFirstStageDue: Date | null = null
+  // Separate stagger tracker for unplanned/new/revised chapters added after project creation
+  let prevUnplannedFirstStageDue: Date | null = null
   const sorted = [...trackChapters].sort(sortChapters)
 
   for (const ch of sorted) {
     const isUnplanned = alreadyApproved && plannedChapterNumbers && !plannedChapterNumbers.has(ch.chapters)
+    // Any chapter pending planning (unapproved / revised) starts fresh on the day planning is being reviewed/approved (today)
     const anchor = isUnplanned
-      ? (ch.created_at || effectiveAnchor)
+      ? new Date().toISOString()
       : (alreadyApproved && !isAdjusting ? (projectCreatedAt || effectiveAnchor) : effectiveAnchor)
 
     const cursor = validDate(anchor)
@@ -198,15 +202,20 @@ function buildTrackSchedules(
           // Stage 1 (Job Initiation):
           // ALL chapters start on Day 1 (anchor date)
           start = new Date(cursor)
-          if (pageNorm != null && pageNorm > 0 && prevFirstStageDue) {
+          const prevStagger = isUnplanned ? prevUnplannedFirstStageDue : prevFirstStageDue
+          if (pageNorm != null && pageNorm > 0 && prevStagger) {
             // Due date staggers progressively after the previous chapter finishes
-            due = new Date(prevFirstStageDue)
+            due = new Date(prevStagger)
             if (slaDays) due.setDate(due.getDate() + slaDays)
           } else {
             due = new Date(start)
             if (slaDays) due.setDate(due.getDate() + slaDays)
           }
-          prevFirstStageDue = new Date(due)
+          if (isUnplanned) {
+            prevUnplannedFirstStageDue = new Date(due)
+          } else {
+            prevFirstStageDue = new Date(due)
+          }
         } else {
           // Subsequent stages:
           // Starts immediately the day after THIS chapter's preceding stage is due
@@ -923,7 +932,14 @@ export function ProjectPlanningPage() {
         className="border-b border-border hover:bg-accent transition-colors group bg-card"
       >
         <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
-          {ch.chapters === 'FM' ? 'Front matter' : ch.chapters === 'BM' ? 'Back matter' : /^[A-Za-z]$/.test(ch.chapters) ? `Appendix ${ch.chapters}` : /^\d+$/.test(ch.chapters) ? `Chapter ${ch.chapters}` : ch.chapters}
+          <div className="flex items-center gap-1.5">
+            <span>{ch.chapters === 'FM' ? 'Front matter' : ch.chapters === 'BM' ? 'Back matter' : /^[A-Za-z]$/.test(ch.chapters) ? `Appendix ${ch.chapters}` : /^\d+$/.test(ch.chapters) ? `Chapter ${ch.chapters}` : ch.chapters}</span>
+            {(ch.revision ?? 1) > 1 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                Rev {ch.revision}
+              </span>
+            )}
+          </div>
         </td>
         <td className={`px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors ${activeTab === 'design' ? 'shadow-[inset_-2px_0_0_var(--color-border)]' : 'shadow-[inset_-1px_0_0_var(--color-border)]'
           }`}>

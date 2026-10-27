@@ -238,6 +238,7 @@ class ChapterInfoBase(BaseModel):
     manuscript_pages: Optional[int] = None
     word_count: Optional[int] = None
     priority: str = "Normal"
+    revision: int = 1
     delayed_stages: Optional[Dict[str, int]] = None
 
     @field_validator("due_date", mode="before")
@@ -321,6 +322,7 @@ class ChapterInfoUpdate(BaseModel):
     remarks: Optional[str] = None
     manuscript_pages: Optional[int] = None
     priority: Optional[str] = None
+    revision: Optional[int] = None
     delayed_stages: Optional[Dict[str, int]] = None
 
     @field_validator("due_date", mode="before")

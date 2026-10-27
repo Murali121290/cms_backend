@@ -306,28 +306,40 @@ async def download_backup_or_folder_file(
         raise HTTPException(status_code=404, detail="Chapter not found")
         
     # Resolve file path on disk:
-    # 1. If subfolder is Backup, look in the FileVersion table matching the filename
+    # 1. If subfolder is Backup, look in models.File or FileVersion table matching the filename
     if subfolder == "Backup":
-        version_entry = db.query(models.FileVersion).join(
-            models.File, models.FileVersion.file_id == models.File.id
-        ).filter(
+        backup_file_rec = db.query(models.File).filter(
             models.File.chapter_id == chapter.id,
-            models.FileVersion.path.like(f"%/{file_name}")
+            models.File.category == "Backup",
+            models.File.filename == file_name
         ).first()
-        if not version_entry or not version_entry.path or not os.path.exists(version_entry.path):
-            found_path = None
-            chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
-            if os.path.exists(chapter_dir):
-                for cat_folder in os.listdir(chapter_dir):
-                    archive_path = os.path.join(chapter_dir, cat_folder, "Archive", file_name)
-                    if os.path.exists(archive_path):
-                        found_path = archive_path
-                        break
-            if not found_path:
-                raise HTTPException(status_code=404, detail="Backup file not found")
-            file_path = found_path
+        if backup_file_rec and backup_file_rec.path and os.path.exists(backup_file_rec.path):
+            file_path = backup_file_rec.path
         else:
-            file_path = version_entry.path
+            version_entry = db.query(models.FileVersion).join(
+                models.File, models.FileVersion.file_id == models.File.id
+            ).filter(
+                models.File.chapter_id == chapter.id,
+                models.FileVersion.path.like(f"%/{file_name}")
+            ).first()
+            if not version_entry or not version_entry.path or not os.path.exists(version_entry.path):
+                found_path = None
+                chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
+                if os.path.exists(chapter_dir):
+                    backup_dir = os.path.join(chapter_dir, "Backup", file_name)
+                    if os.path.exists(backup_dir):
+                        found_path = backup_dir
+                    else:
+                        for cat_folder in os.listdir(chapter_dir):
+                            archive_path = os.path.join(chapter_dir, cat_folder, "Archive", file_name)
+                            if os.path.exists(archive_path):
+                                found_path = archive_path
+                                break
+                if not found_path:
+                    raise HTTPException(status_code=404, detail="Backup file not found")
+                file_path = found_path
+            else:
+                file_path = version_entry.path
     else:
         file_record = db.query(models.File).filter(
             models.File.project_id == project_id,

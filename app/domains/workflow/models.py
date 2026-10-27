@@ -164,6 +164,7 @@ class ChapterInfo(Base):
     manuscript_pages       = Column(Integer,     nullable=True)
     word_count             = Column(Integer,     nullable=True)
     priority               = Column(String(20),  nullable=False, default="Normal")
+    revision               = Column(Integer,     nullable=False, default=1, server_default='1')
     delayed_stages         = Column(String,      nullable=True)  # JSON stored as text
     created_at             = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at             = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
