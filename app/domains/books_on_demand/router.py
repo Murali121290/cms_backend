@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 import os
+import re
 import shutil
 import logging
 from datetime import datetime, timezone, timedelta
@@ -1063,3 +1064,260 @@ def create_job(
         send_bod_new_job_email(settings.BOD_MANAGER_EMAIL, new_job.project_name, file.filename)
     
     return {"message": "Job created successfully", "job": new_job}
+
+
+@router.post("/jobs/{job_id}/sync-validator")
+def sync_job_to_validator(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_from_cookie)
+):
+    """
+    Sync/export the BOD job's EPUB and PDF into the Post-Prod EPUB Validator workspace
+    under client='Books on Demand', client_code='BOD'.
+    Returns the EPUB Validator project details so the frontend can redirect directly.
+    """
+    import zipfile
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR, EXTRACT_DIR
+    from app.domains.post_prod.epub_validator.services import ev_projects_db
+    from app.domains.post_prod.epub_validator.models import EvProject
+
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job.epub_filepath or not os.path.exists(job.epub_filepath):
+        raise HTTPException(status_code=400, detail="Processed EPUB not found for this job. Please ensure EPUB is uploaded first.")
+
+    folder_name = job.project_name or (job.pdf_filename.rsplit('.', 1)[0] if job.pdf_filename else f"bod_job_{job.id}")
+    folder_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', folder_name)
+
+    project_dir = os.path.join(UPLOAD_DIR, folder_name)
+    extract_folder = os.path.join(project_dir, EXTRACT_DIR)
+    os.makedirs(extract_folder, exist_ok=True)
+
+    # Copy EPUB file to extract folder
+    dest_epub_path = os.path.join(extract_folder, job.epub_filename or os.path.basename(job.epub_filepath))
+    try:
+        shutil.copy2(job.epub_filepath, dest_epub_path)
+    except Exception as e:
+        logger.error(f"Error copying EPUB to validator folder: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to copy EPUB: {str(e)}")
+
+    # Copy PDF file if available
+    if job.pdf_filepath and os.path.exists(job.pdf_filepath):
+        dest_pdf_path = os.path.join(extract_folder, job.pdf_filename or os.path.basename(job.pdf_filepath))
+        try:
+            shutil.copy2(job.pdf_filepath, dest_pdf_path)
+        except Exception as e:
+            logger.warning(f"Could not copy PDF to validator folder: {e}")
+
+    # Extract EPUB contents into extract/epub/
+    epub_extract_path = os.path.join(extract_folder, "epub")
+    if os.path.exists(epub_extract_path):
+        shutil.rmtree(epub_extract_path, ignore_errors=True)
+    os.makedirs(epub_extract_path, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(dest_epub_path, "r") as epub_ref:
+            epub_ref.extractall(epub_extract_path)
+    except Exception as e:
+        logger.error(f"Failed to unzip EPUB {dest_epub_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to unpack EPUB: {str(e)}")
+
+    total_files = sum(len(files) for _, _, files in os.walk(epub_extract_path))
+
+    # Extract eisbn if present in filename
+    eisbn_extracted = None
+    m = re.search(r'(\d{10,13})', job.epub_filename or "")
+    if m:
+        eisbn_extracted = m.group(1)
+
+    user_id = current_user.get("id") if isinstance(current_user, dict) else getattr(current_user, "id", None)
+    username = current_user.get("username") if isinstance(current_user, dict) else getattr(current_user, "username", None)
+    assignee_to_set = username or job.current_assignee or None
+
+    # Check if project already exists in ev_projects
+    existing_proj = db.query(EvProject).filter(
+        EvProject.folder_name == folder_name,
+        EvProject.is_deleted == False
+    ).first()
+
+    if existing_proj:
+        existing_proj.epub_path = dest_epub_path
+        existing_proj.total_files = total_files
+        existing_proj.client = "Books on Demand"
+        existing_proj.client_code = "BOD"
+        existing_proj.updated_at = datetime.now(timezone.utc)
+        if assignee_to_set:
+            existing_proj.assignee = assignee_to_set
+        if eisbn_extracted:
+            existing_proj.eisbn = eisbn_extracted
+        db.commit()
+        db.refresh(existing_proj)
+        proj_data = ev_projects_db._serialize(existing_proj)
+    else:
+        proj_data = ev_projects_db.create_project(
+            db,
+            client="Books on Demand",
+            client_code="BOD",
+            project_name=job.project_name or folder_name,
+            folder_name=folder_name,
+            epub_path=dest_epub_path,
+            total_files=total_files,
+            user_id=user_id,
+            assignee=assignee_to_set,
+            eisbn=eisbn_extracted,
+        )
+
+    return {
+        "status": True,
+        "message": "Job synced to EPUB Validator successfully",
+        "project": proj_data,
+        "project_id": proj_data.get("id"),
+        "folder_name": folder_name
+    }
+
+
+@router.post("/jobs/{job_id}/sync-qc-reports-and-complete")
+def sync_qc_reports_and_complete(
+    job_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_from_cookie)
+):
+    """
+    Syncs the latest validated EPUB, ACE report, and EPUBCheck report from EPUB Validator
+    into the BOD project folder, backs up existing files to _before, and advances QC stage.
+    """
+    import zipfile
+    import io
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+    from app.domains.post_prod.epub_validator.services.epubcheck_service import get_cached_epubcheck_report, generate_epubcheck_txt_report
+    from app.domains.post_prod.epub_validator.services.ace_service import get_ace_report_zip_path, html_report_dir
+
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    folder_name = job.project_name or (job.pdf_filename.rsplit('.', 1)[0] if job.pdf_filename else f"bod_job_{job.id}")
+    folder_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', folder_name)
+
+    validator_project_dir = os.path.join(UPLOAD_DIR, folder_name)
+    epub_source_dir = os.path.join(validator_project_dir, "extract", "epub")
+
+    if not os.path.exists(epub_source_dir):
+        raise HTTPException(status_code=404, detail=f"Validated EPUB source directory not found for '{folder_name}'")
+
+    settings = get_settings()
+    bod_upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_project_dir = os.path.join(bod_upload_dir, "bod", "BOD", job.project_name or folder_name)
+    os.makedirs(bod_project_dir, exist_ok=True)
+
+    # 1. Prepare _before folder to archive current files
+    before_dir = os.path.join(bod_project_dir, "_before")
+    os.makedirs(before_dir, exist_ok=True)
+
+    timestamp_suffix = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    # Move current EPUB to _before if exists
+    if job.epub_filepath and os.path.exists(job.epub_filepath):
+        old_epub_name = os.path.basename(job.epub_filepath)
+        dest_before_epub = os.path.join(before_dir, f"{old_epub_name}.{timestamp_suffix}")
+        try:
+            shutil.copy2(job.epub_filepath, dest_before_epub)
+        except Exception as e:
+            logger.warning(f"Could not backup existing EPUB: {e}")
+
+    # Move current ACE report to _before if exists
+    if job.ace_report_filepath and os.path.exists(job.ace_report_filepath):
+        old_ace_name = os.path.basename(job.ace_report_filepath)
+        dest_before_ace = os.path.join(before_dir, f"{old_ace_name}.{timestamp_suffix}")
+        try:
+            shutil.copy2(job.ace_report_filepath, dest_before_ace)
+        except Exception as e:
+            logger.warning(f"Could not backup existing ACE report: {e}")
+
+    # Move current Epubcheck report to _before if exists
+    if job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath):
+        old_check_name = os.path.basename(job.epubcheck_report_filepath)
+        dest_before_check = os.path.join(before_dir, f"{old_check_name}.{timestamp_suffix}")
+        try:
+            shutil.copy2(job.epubcheck_report_filepath, dest_before_check)
+        except Exception as e:
+            logger.warning(f"Could not backup existing Epubcheck report: {e}")
+
+    # 2. Package the latest EPUB from validator into bod_project_dir
+    target_epub_filename = job.epub_filename or f"{folder_name}.epub"
+    target_epub_path = os.path.join(bod_project_dir, target_epub_filename)
+
+    with zipfile.ZipFile(target_epub_path, "w") as zf:
+        mimetype_path = os.path.join(epub_source_dir, "mimetype")
+        if os.path.isfile(mimetype_path):
+            zf.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
+        else:
+            info = zipfile.ZipInfo("mimetype")
+            info.compress_type = zipfile.ZIP_STORED
+            zf.writestr(info, "application/epub+zip")
+        for root, _, files in os.walk(epub_source_dir):
+            for file in files:
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, epub_source_dir)
+                if rel_path != "mimetype":
+                    zf.write(full_path, rel_path, compress_type=zipfile.ZIP_DEFLATED)
+
+    job.epub_filename = target_epub_filename
+    job.epub_filepath = target_epub_path
+
+    # 3. Locate or generate ACE Report ZIP
+    try:
+        h_dir = html_report_dir(folder_name)
+        if h_dir.is_dir():
+            ace_zip_source = get_ace_report_zip_path(folder_name)
+            if ace_zip_source.is_file():
+                ace_filename = f"{job.project_name or folder_name}_ace_report.zip"
+                ace_dest_path = os.path.join(bod_project_dir, ace_filename)
+                shutil.copy2(str(ace_zip_source), ace_dest_path)
+                job.ace_report_filepath = ace_dest_path
+    except Exception as e:
+        logger.warning(f"ACE report sync skipped: {e}")
+
+    # 4. Locate or generate EPUBCheck Report TXT
+    try:
+        cached_epubcheck = get_cached_epubcheck_report(folder_name)
+        if cached_epubcheck and cached_epubcheck.get("status") != "fatal":
+            txt_content, txt_fn, _ = generate_epubcheck_txt_report(folder_name, db)
+            epubcheck_filename = f"{job.project_name or folder_name}_log.txt"
+            epubcheck_dest_path = os.path.join(bod_project_dir, epubcheck_filename)
+            with open(epubcheck_dest_path, "w", encoding="utf-8") as f:
+                f.write(txt_content)
+            job.epubcheck_report_filepath = epubcheck_dest_path
+    except Exception as e:
+        logger.warning(f"EPUBCheck report sync skipped: {e}")
+
+    db.commit()
+    db.refresh(job)
+
+    # 5. Advance stage to Ready to Dispatch if in QC & unassign
+    if job.current_stage_name == "QC":
+        _advance_job_logic(job, background_tasks, db)
+    else:
+        job.current_assignee = None
+        db.commit()
+        db.refresh(job)
+
+    # Also unassign the EPUB Validator project record
+    from app.domains.post_prod.epub_validator.models import EvProject
+    ev_proj = db.query(EvProject).filter(
+        EvProject.folder_name == folder_name,
+        EvProject.is_deleted == False
+    ).first()
+    if ev_proj:
+        ev_proj.assignee = None
+        db.commit()
+
+    return {
+        "status": True,
+        "message": "EPUB and QC reports updated to BOD folder, old files archived to _before, stage moved to Ready to Dispatch, and job unassigned.",
+        "job": job
+    }

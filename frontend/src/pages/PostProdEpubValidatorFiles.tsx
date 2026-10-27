@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -45,6 +45,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { toast } from '@/store/useToastStore';
 import { useSessionStore } from '@/stores/sessionStore';
+import api from '@/api/client';
 import {
   getFiles,
   validateFolder,
@@ -139,7 +140,21 @@ function SkeletonGrid() {
 
 export function PostProdEpubValidatorFiles() {
   const params = useParams<{ projectId?: string; folderName?: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const fromSource = searchParams.get('from');
+  const bodJobId = searchParams.get('bodJobId');
+
+  const handleBack = () => {
+    if (fromSource === 'bod' && bodJobId) {
+      navigate(`/bod/internal/${bodJobId}`);
+    } else if (fromSource === 'bod') {
+      navigate('/bod/internal');
+    } else {
+      navigate('/post-production/epub-validator');
+    }
+  };
+
   const { data: projects = [], isLoading: isLoadingProjects } = useQuery<EvProject[]>({
     queryKey: ['epub-projects'],
     queryFn: listProjects,
@@ -314,6 +329,7 @@ export function PostProdEpubValidatorFiles() {
   );
 
   const fileMappings = project?.file_mappings || {};
+  const isClassificationSetupRequired = !isLoading && xhtmlFiles.length > 0 && (!project?.file_mappings || Object.keys(project.file_mappings).length === 0);
   const frontMatterFiles = useMemo(() => xhtmlFiles.filter(f => fileMappings[f.file_name] === "Front Matter"), [xhtmlFiles, fileMappings]);
   const chapterFiles = useMemo(() => xhtmlFiles.filter(f => fileMappings[f.file_name] === "Chapters"), [xhtmlFiles, fileMappings]);
   const backMatterFiles = useMemo(() => xhtmlFiles.filter(f => fileMappings[f.file_name] === "Back Matter"), [xhtmlFiles, fileMappings]);
@@ -944,6 +960,23 @@ export function PostProdEpubValidatorFiles() {
   const handleExport = () => doExport(false);
   const handleExportConfirmed = () => { setExportConfirmMsg(null); doExport(true); };
 
+  const [isCompletingBod, setIsCompletingBod] = useState(false);
+
+  const completeBodQC = async () => {
+    if (!bodJobId) return;
+    setIsCompletingBod(true);
+    try {
+      await api.post(`/bod/jobs/${bodJobId}/sync-qc-reports-and-complete`);
+      toast.success("QC completed & reports synced! Job moved to Ready to Dispatch.");
+      navigate('/bod/internal');
+    } catch (err: any) {
+      console.error("Failed to complete BOD QC", err);
+      toast.error(err.response?.data?.detail || "Failed to sync reports and complete QC");
+    } finally {
+      setIsCompletingBod(false);
+    }
+  };
+
   // ── Preview modal state ─────────────────────────────────────────────────────
   const [selectedFile, setSelectedFile] = useState<XHTMLFile | null>(null);
   const [modalInitialTab, setModalInitialTab] = useState<ModalTab>('result');
@@ -1212,7 +1245,7 @@ export function PostProdEpubValidatorFiles() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigate('/post-production/epub-validator')}
+              onClick={handleBack}
               className="shrink-0 h-9 w-9 p-0 rounded-lg mt-0.5"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -1275,171 +1308,189 @@ export function PostProdEpubValidatorFiles() {
             </div>
           </div>
 
-          <div className="flex flex-col items-start sm:items-end gap-2 font-sans ml-auto">
-            {/* Main top action buttons */}
-            <div className="flex items-center gap-2 flex-wrap sm:justify-end">
-              <button
-                onClick={() => setActiveCategoryTab('summary')}
-                className={cn(
-                  "inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border transition-all shadow-xs shrink-0 whitespace-nowrap",
-                  activeCategoryTab === 'summary'
-                    ? "bg-primary text-white border-primary"
-                    : "bg-card border-border hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary"
-                )}
-              >
-                <BookMarked className="w-4 h-4 shrink-0" />
-                <span className="whitespace-nowrap">Analysis Report</span>
-              </button>
+          {!isClassificationSetupRequired && (
+            <div className="flex flex-col items-start sm:items-end gap-2 font-sans ml-auto">
+              {/* Main top action buttons */}
+              <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+                <button
+                  onClick={() => setActiveCategoryTab('summary')}
+                  className={cn(
+                    "inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border transition-all shadow-xs shrink-0 whitespace-nowrap",
+                    activeCategoryTab === 'summary'
+                      ? "bg-primary text-white border-primary"
+                      : "bg-card border-border hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary"
+                  )}
+                >
+                  <BookMarked className="w-4 h-4 shrink-0" />
+                  <span className="whitespace-nowrap">Analysis Report</span>
+                </button>
 
-              <DropdownMenu.Root>
-                <DropdownMenu.Trigger asChild>
-                  <button
-                    disabled={isValidating || isLoading}
-                    className="inline-flex items-center gap-2 px-3 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-muted text-foreground transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  >
-                    <span className="truncate max-w-[140px]">
-                      {validationCategory ? validationCategory : 'All Categories'}
-                    </span>
-                    <ChevronDown className="w-3.5 h-3.5 opacity-50 shrink-0" />
-                  </button>
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content
-                    align="start"
-                    sideOffset={4}
-                    className="z-50 w-48 bg-card border border-border/80 rounded-lg shadow-lg overflow-hidden font-sans p-1 animate-in fade-in zoom-in-95"
-                  >
-                    <DropdownMenu.Item
-                      onClick={() => setValidationCategory('')}
-                      className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer outline-none data-[highlighted]:bg-primary/10 data-[highlighted]:text-primary transition-colors text-foreground font-medium"
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild>
+                    <button
+                      disabled={isValidating || isLoading}
+                      className="inline-flex items-center gap-2 px-3 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-muted text-foreground transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     >
-                      <span className="flex-1">All Categories</span>
-                      {validationCategory === '' && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
-                    </DropdownMenu.Item>
-                    
-                    {availableCategories.length > 0 && <DropdownMenu.Separator className="h-px bg-border/60 my-1 mx-1" />}
-                    
-                    {availableCategories.map((cat) => (
+                      <span className="truncate max-w-[140px]">
+                        {validationCategory ? validationCategory : 'All Categories'}
+                      </span>
+                      <ChevronDown className="w-3.5 h-3.5 opacity-50 shrink-0" />
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content
+                      align="start"
+                      sideOffset={4}
+                      className="z-50 w-48 bg-card border border-border/80 rounded-lg shadow-lg overflow-hidden font-sans p-1 animate-in fade-in zoom-in-95"
+                    >
                       <DropdownMenu.Item
-                        key={cat}
-                        onClick={() => setValidationCategory(cat)}
-                        className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer outline-none data-[highlighted]:bg-primary/10 data-[highlighted]:text-primary transition-colors text-foreground"
+                        onClick={() => setValidationCategory('')}
+                        className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer outline-none data-[highlighted]:bg-primary/10 data-[highlighted]:text-primary transition-colors text-foreground font-medium"
                       >
-                        <span className="flex-1 truncate">{cat}</span>
-                        {validationCategory === cat && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                        <span className="flex-1">All Categories</span>
+                        {validationCategory === '' && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
                       </DropdownMenu.Item>
-                    ))}
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Root>
+                      
+                      {availableCategories.length > 0 && <DropdownMenu.Separator className="h-px bg-border/60 my-1 mx-1" />}
+                      
+                      {availableCategories.map((cat) => (
+                        <DropdownMenu.Item
+                          key={cat}
+                          onClick={() => setValidationCategory(cat)}
+                          className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer outline-none data-[highlighted]:bg-primary/10 data-[highlighted]:text-primary transition-colors text-foreground"
+                        >
+                          <span className="flex-1 truncate">{cat}</span>
+                          {validationCategory === cat && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                        </DropdownMenu.Item>
+                      ))}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
 
-              <button
-                onClick={handleValidateAll}
-                disabled={isValidating || isLoading}
-                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-              >
-                {!isValidating && (
-                  <Play className="w-4 h-4 shrink-0 text-white fill-white" />
-                )}
-                <span className="whitespace-nowrap text-white">
-                  {isValidating
-                    ? 'Validating…'
-                    : hasValidated ? 'Re-run validation' : 'Validate all'}
-                </span>
-              </button>
-
-              <button
-                onClick={handleRunEpubCheck}
-                disabled={isEpubCheckRunning || isLoading || isValidating}
-                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-              >
-                {isEpubCheckRunning ? (
-                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                ) : (
-                  <CheckSquare className="w-4 h-4 shrink-0" />
-                )}
-                <span className="whitespace-nowrap">
-                  {isEpubCheckRunning ? `EPUBCheck… ${fmtElapsed(epubCheckElapsed)}` : epubCheckReport ? 'Re-run EPUBCheck' : 'Run EPUBCheck'}
-                </span>
-              </button>
-
-              <button
-                onClick={handleRunAce}
-                disabled={isAceRunning || isLoading || isValidating}
-                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-              >
-                {isAceRunning ? (
-                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                ) : (
-                  <ShieldCheck className="w-4 h-4 shrink-0" />
-                )}
-                <span className="whitespace-nowrap">
-                  {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run accessibility' : 'Accessibility check'}
-                </span>
-              </button>
-
-            </div>
-
-            {/* Secondary row below: View report options & Export */}
-            <div className="flex items-center gap-2 flex-wrap text-xs pt-0.5 sm:justify-end w-full">
-              {aceReport && !isAceRunning && (
                 <button
-                  onClick={() => setAceModalOpen(true)}
-                  disabled={isValidating}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+                  onClick={handleValidateAll}
+                  disabled={isValidating || isLoading}
+                  className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
                 >
-                  <Eye className="w-3.5 h-3.5 shrink-0" />
-                  <span>View Accessibility Report</span>
+                  {!isValidating && (
+                    <Play className="w-4 h-4 shrink-0 text-white fill-white" />
+                  )}
+                  <span className="whitespace-nowrap text-white">
+                    {isValidating
+                      ? 'Validating…'
+                      : hasValidated ? 'Re-run validation' : 'Validate all'}
+                  </span>
                 </button>
-              )}
 
-              {epubCheckReport && !isEpubCheckRunning && (
                 <button
-                  onClick={() => setEpubCheckModalOpen(true)}
-                  disabled={isValidating}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+                  onClick={handleRunEpubCheck}
+                  disabled={isEpubCheckRunning || isLoading || isValidating}
+                  className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
                 >
-                  <Eye className="w-3.5 h-3.5 shrink-0" />
-                  <span>View EPUBCheck Report</span>
+                  {isEpubCheckRunning ? (
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  ) : (
+                    <CheckSquare className="w-4 h-4 shrink-0" />
+                  )}
+                  <span className="whitespace-nowrap">
+                    {isEpubCheckRunning ? `EPUBCheck… ${fmtElapsed(epubCheckElapsed)}` : epubCheckReport ? 'Re-run EPUBCheck' : 'Run EPUBCheck'}
+                  </span>
                 </button>
-              )}
 
-              <button
-                onClick={handleExport}
-                disabled={isExporting || isLoading || isValidating}
-                className="inline-flex flex-row items-center justify-center gap-2 px-3 py-1.5 h-8 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-              >
-                {isExporting ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                ) : (
-                  <Download className="w-3.5 h-3.5 shrink-0" />
-                )}
-                <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
-              </button>
-
-              {validationData?.customer === 'GWP000' && (
                 <button
-                  onClick={async () => {
-                    try {
-                      setIsExporting(true);
-                      const result = await exportQaReport(folderName);
-                      triggerDownload(result.blob, result.filename);
-                      toast.success('QA Report downloaded');
-                    } catch (err) {
-                      toast.error(err instanceof Error ? err.message : 'Failed to download report');
-                    } finally {
-                      setIsExporting(false);
-                    }
-                  }}
+                  onClick={handleRunAce}
+                  disabled={isAceRunning || isLoading || isValidating}
+                  className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+                >
+                  {isAceRunning ? (
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4 shrink-0" />
+                  )}
+                  <span className="whitespace-nowrap">
+                    {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run accessibility' : 'Accessibility check'}
+                  </span>
+                </button>
+
+              </div>
+
+              {/* Secondary row below: View report options & Export */}
+              <div className="flex items-center gap-2 flex-wrap text-xs pt-0.5 sm:justify-end w-full">
+                {aceReport && !isAceRunning && (
+                  <button
+                    onClick={() => setAceModalOpen(true)}
+                    disabled={isValidating}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+                  >
+                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                    <span>View Accessibility Report</span>
+                  </button>
+                )}
+
+                {epubCheckReport && !isEpubCheckRunning && (
+                  <button
+                    onClick={() => setEpubCheckModalOpen(true)}
+                    disabled={isValidating}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+                  >
+                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                    <span>View EPUBCheck Report</span>
+                  </button>
+                )}
+
+                {fromSource === 'bod' && bodJobId && (
+                  <button
+                    onClick={completeBodQC}
+                    disabled={isCompletingBod || isValidating || isAceRunning || isEpubCheckRunning}
+                    className="inline-flex flex-row items-center justify-center gap-2 px-3.5 py-1.5 h-8 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+                    title="Update latest EPUB, ACE report, and EPUBCheck to BOD folder, archive previous files to _before, and move job to Dispatch"
+                  >
+                    {isCompletingBod ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span className="whitespace-nowrap">{isCompletingBod ? 'Completing QC…' : 'Complete QC & Return to BOD'}</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={handleExport}
                   disabled={isExporting || isLoading || isValidating}
-                  className="inline-flex flex-row items-center justify-center gap-2 px-3 py-1.5 h-8 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-green-500/10 text-green-700 hover:border-green-500/40 hover:text-green-600 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+                  className="inline-flex flex-row items-center justify-center gap-2 px-3 py-1.5 h-8 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
                 >
-                  <Download className="w-3.5 h-3.5 shrink-0" />
-                  <span className="whitespace-nowrap">Download QA Report</span>
+                  {isExporting ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
                 </button>
-              )}
+
+                {validationData?.customer === 'GWP000' && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        setIsExporting(true);
+                        const result = await exportQaReport(folderName);
+                        triggerDownload(result.blob, result.filename);
+                        toast.success('QA Report downloaded');
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : 'Failed to download report');
+                      } finally {
+                        setIsExporting(false);
+                      }
+                    }}
+                    disabled={isExporting || isLoading || isValidating}
+                    className="inline-flex flex-row items-center justify-center gap-2 px-3 py-1.5 h-8 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-green-500/10 text-green-700 hover:border-green-500/40 hover:text-green-600 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+                  >
+                    <Download className="w-3.5 h-3.5 shrink-0" />
+                    <span className="whitespace-nowrap">Download QA Report</span>
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* ── Content ────────────────────────────────────────────────────────── */}
