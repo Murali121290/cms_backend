@@ -88,7 +88,7 @@ export const FOLDER_CONFIG: Record<string, FolderConfig> = {
   proof:      { label:'Proof',      icon:'ClipboardCheck',allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','reviewer','reviewStatus','size','uploadedBy','uploadedOn'] },
   xml:        { label:'XML',        icon:'Code2',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','xmlType','validationStatus','size','uploadedBy','uploadedOn'] },
   misc:       { label:'Final delivery', icon:'FolderOpen',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
-  backup:     { label:'Backup',     icon:'Archive',       allowUpload:false, allowDownload:true,  columns:['fileName','fileType','size','uploadedOn'] },
+  backup:     { label:'Backup',     icon:'Archive',       allowUpload:false, allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
 }
 
 export const DESIGN_FOLDER_CONFIG: Record<string, FolderConfig> = {

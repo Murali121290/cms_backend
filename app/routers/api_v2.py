@@ -1522,6 +1522,16 @@ def api_v2_chapter_files(
             message="Chapter not found.",
         )
 
+    try:
+        chapter_service.sync_chapter_backup_files(
+            db,
+            project=project,
+            chapter=chapter,
+            upload_dir=file_service.UPLOAD_DIR,
+        )
+    except Exception:
+        pass
+
     files = db.query(models.File).filter(models.File.chapter_id == chapter_id).all()
     return schemas_v2.ChapterFilesResponse(
         project=_serialize_project_summary(project),
@@ -8230,6 +8240,7 @@ def api_v2_create_chapter_with_manuscript(
     project_id: int,
     number: str = Form(...),
     file: UploadFile = FastAPIFile(...),
+    allow_revision: bool = Form(False),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -8256,42 +8267,55 @@ def api_v2_create_chapter_with_manuscript(
             message="Only .docx files are supported.",
         )
 
-    existing_numbers = sorted(
-        int(ci.chapters) for ci in
-        db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+    all_cis = db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+    existing_by_num = {
+        ci.chapters: ci for ci in all_cis
         if ci.chapters and ci.chapters.isdigit()
-    )
+    }
+    existing_numbers = sorted(int(num) for num in existing_by_num.keys())
     new_number = int(raw_number)
-    if new_number in existing_numbers:
+    number_padded = f"{new_number:02d}"
+
+    existing_chapter = existing_by_num.get(number_padded) or existing_by_num.get(str(new_number))
+    if existing_chapter and not allow_revision:
         return _error_response(
             status_code=status.HTTP_409_CONFLICT,
             code="CHAPTER_NUMBER_DUPLICATE",
-            message=f"Chapter {raw_number.zfill(2)} already exists.",
+            message=f"Chapter {number_padded} already exists.",
         )
 
-    expected_next = (existing_numbers[-1] + 1) if existing_numbers else 1
-    if new_number != expected_next:
-        return _error_response(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="CHAPTER_NUMBER_NOT_SEQUENTIAL",
-            message=f"Chapter numbers must be sequential. Expected {expected_next:02d}, got {raw_number.zfill(2)}.",
-        )
-
-    number_padded = f"{new_number:02d}"
+    if not existing_chapter:
+        expected_next = (existing_numbers[-1] + 1) if existing_numbers else 1
+        if new_number != expected_next:
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="CHAPTER_NUMBER_NOT_SEQUENTIAL",
+                message=f"Chapter numbers must be sequential. Expected {expected_next:02d}, got {number_padded}.",
+            )
 
     title = Path(os.path.basename(file.filename)).stem.strip() if file.filename else f"Chapter {number_padded}"
 
-    result = chapter_service.create_chapter(
-        db,
-        project_id=project_id,
-        number=number_padded,
-        title=title,
-        upload_dir=file_service.UPLOAD_DIR,
-        # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
-        # until this chapter is planned and approved on the Planning page.
-        status="Received",
-    )
-    new_chapter = result["chapter"]
+    if existing_chapter and allow_revision:
+        result = chapter_service.reset_chapter_for_revision(
+            db,
+            project_id=project_id,
+            chapter_id=existing_chapter.id,
+            upload_dir=file_service.UPLOAD_DIR,
+            title=title,
+        )
+        new_chapter = result["chapter"]
+    else:
+        result = chapter_service.create_chapter(
+            db,
+            project_id=project_id,
+            number=number_padded,
+            title=title,
+            upload_dir=file_service.UPLOAD_DIR,
+            # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
+            # until this chapter is planned and approved on the Planning page.
+            status="Received",
+        )
+        new_chapter = result["chapter"]
     if not new_chapter:
         return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
 
@@ -8489,6 +8513,7 @@ def api_v2_create_chapters_with_manuscript_zip(
     project_id: int,
     file: UploadFile = FastAPIFile(...),
     workflow_name: str | None = Form(None),
+    allow_revision: bool = Form(False),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -8518,8 +8543,9 @@ def api_v2_create_chapters_with_manuscript_zip(
             message="Only .zip files are supported.",
         )
 
-    existing_numbers = {
-        ci.chapters for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+    all_cis = db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+    existing_by_num = {
+        ci.chapters: ci for ci in all_cis
         if ci.chapters and ci.chapters.isdigit()
     }
 
@@ -8552,21 +8578,33 @@ def api_v2_create_chapters_with_manuscript_zip(
                 if not number_padded:
                     skipped.append({"filename": fname, "reason": "Could not determine a chapter number from the file name."})
                     continue
-                if number_padded in existing_numbers:
+
+                existing_chapter = existing_by_num.get(number_padded) or (existing_by_num.get(str(int(number_padded))) if number_padded.isdigit() else None)
+                if existing_chapter and not allow_revision:
                     skipped.append({"filename": fname, "reason": f"Chapter {number_padded} already exists."})
                     continue
 
                 title = Path(os.path.basename(fname)).stem.strip() if fname else f"Chapter {number_padded}"
 
-                result = chapter_service.create_chapter(
-                    db,
-                    project_id=project_id,
-                    number=number_padded,
-                    title=title,
-                    upload_dir=file_service.UPLOAD_DIR,
-                    status="Received",
-                    workflow_name=workflow_name,
-                )
+                if existing_chapter and allow_revision:
+                    result = chapter_service.reset_chapter_for_revision(
+                        db,
+                        project_id=project_id,
+                        chapter_id=existing_chapter.id,
+                        upload_dir=file_service.UPLOAD_DIR,
+                        title=title,
+                        workflow_name=workflow_name,
+                    )
+                else:
+                    result = chapter_service.create_chapter(
+                        db,
+                        project_id=project_id,
+                        number=number_padded,
+                        title=title,
+                        upload_dir=file_service.UPLOAD_DIR,
+                        status="Received",
+                        workflow_name=workflow_name,
+                    )
                 new_chapter = result["chapter"]
                 if not new_chapter:
                     skipped.append({"filename": fname, "reason": "Project not found."})
@@ -8616,7 +8654,7 @@ def api_v2_create_chapters_with_manuscript_zip(
                     )
                 db.commit()
 
-                existing_numbers.add(number_padded)
+                existing_by_num[number_padded] = new_chapter
                 db.refresh(new_chapter)
                 created.append(new_chapter)
     finally:
@@ -8633,6 +8671,7 @@ def api_v2_create_chapters_with_art_zip(
     project_id: int,
     file: UploadFile = FastAPIFile(...),
     workflow_name: str | None = Form(None),
+    allow_revision: bool = Form(False),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -8667,8 +8706,8 @@ def api_v2_create_chapters_with_art_zip(
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
         if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
     ]
-    existing_art_numbers = {
-        int(_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters).group(1)) for ci in existing_art_chapters
+    existing_art_by_num: dict[int, ChapterInfo] = {
+        int(_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters).group(1)): ci for ci in existing_art_chapters
     }
     existing_art_workflow = next((ci.workflow for ci in existing_art_chapters if ci.workflow), None)
 
@@ -8716,20 +8755,31 @@ def api_v2_create_chapters_with_art_zip(
 
         for new_num, files_list in sorted(ch_files.items()):
             art_chapter_name = f"Ch {new_num:02d} - Art"
-            if new_num in existing_art_numbers:
+            existing_ch = existing_art_by_num.get(new_num)
+            if existing_ch and not allow_revision:
                 for fname, _ in files_list:
                     skipped.append({"filename": fname, "reason": f"Art chapter {art_chapter_name} already exists."})
                 continue
 
-            result = chapter_service.create_chapter(
-                db,
-                project_id=project_id,
-                number=art_chapter_name,
-                title=f"Chapter {new_num:02d} Art",
-                upload_dir=file_service.UPLOAD_DIR,
-                status="Received",
-                workflow_name=workflow_name,
-            )
+            if existing_ch and allow_revision:
+                result = chapter_service.reset_chapter_for_revision(
+                    db,
+                    project_id=project_id,
+                    chapter_id=existing_ch.id,
+                    upload_dir=file_service.UPLOAD_DIR,
+                    title=f"Chapter {new_num:02d} Art",
+                    workflow_name=workflow_name,
+                )
+            else:
+                result = chapter_service.create_chapter(
+                    db,
+                    project_id=project_id,
+                    number=art_chapter_name,
+                    title=f"Chapter {new_num:02d} Art",
+                    upload_dir=file_service.UPLOAD_DIR,
+                    status="Received",
+                    workflow_name=workflow_name,
+                )
             new_chapter = result["chapter"]
             if not new_chapter:
                 for fname, _ in files_list:
@@ -8760,7 +8810,7 @@ def api_v2_create_chapters_with_art_zip(
                     uploaded_by_id=viewer.id,
                 ))
 
-            existing_art_numbers.add(new_num)
+            existing_art_by_num[new_num] = new_chapter
             db.commit()
             db.refresh(new_chapter)
             created.append(new_chapter)

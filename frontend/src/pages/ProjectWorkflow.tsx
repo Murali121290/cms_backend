@@ -642,7 +642,14 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
       <div className="px-4 pt-3.5 pb-2.5">
         <div className="flex items-start justify-between gap-2 mb-1">
           <div className="min-w-0 cursor-pointer" onClick={() => onViewDetails(chapter)}>
-            <p className="text-xs font-bold text-primary uppercase tracking-wide hover:underline">{chapter.chapters}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs font-bold text-primary uppercase tracking-wide hover:underline">{chapter.chapters}</p>
+              {(chapter.revision ?? 1) > 1 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                  Rev {chapter.revision}
+                </span>
+              )}
+            </div>
             <p className="text-sm font-medium text-text mt-0.5 line-clamp-2 leading-snug hover:text-primary transition-colors">
               {chapter.chapter_title || chapter.chapters}
             </p>
@@ -918,6 +925,7 @@ export function ProjectWorkflow() {
   const [selectedTrackWf, setSelectedTrackWf] = useState('')
   const [allWorkflowNames, setAllWorkflowNames] = useState<string[]>([])
   const [newChapterCategory, setNewChapterCategory] = useState('indesign')
+  const [allowRevision, setAllowRevision] = useState(true)
 
   const DESIGN_UPLOAD_CATEGORIES = [
     { key: 'indesign', label: 'InDesign' },
@@ -1394,14 +1402,15 @@ export function ProjectWorkflow() {
       }
 
       if (activeTab === 'art') {
-        const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName)
-        setChapters(prev => [...prev, ...result.created])
+        const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName, allowRevision)
+        const refreshed = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+        setChapters(refreshed)
         setIsAddChapterOpen(false)
 
         if (result.created.length > 0 && result.skipped.length > 0) {
-          toast.success(`${result.created.length} Art chapter(s) created, ${result.skipped.length} chapter(s) already exist`)
+          toast.success(`${result.created.length} Art chapter(s) processed, ${result.skipped.length} chapter(s) skipped`)
         } else if (result.created.length > 0) {
-          toast.success(`${result.created.length} Art chapter(s) created successfully`)
+          toast.success(`${result.created.length} Art chapter(s) uploaded successfully`)
         } else if (result.skipped.length > 0) {
           const firstReason = result.skipped[0]?.reason || ''
           if (firstReason.includes('already exist')) {
@@ -1416,14 +1425,15 @@ export function ProjectWorkflow() {
         return
       }
 
-      const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName)
-      setChapters(prev => [...prev, ...result.created])
+      const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName, allowRevision)
+      const refreshed = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+      setChapters(refreshed)
       setIsAddChapterOpen(false)
 
       if (result.created.length > 0 && result.skipped.length > 0) {
-        toast.success(`${result.created.length} chapter(s) created, ${result.skipped.length} chapter(s) already exist`)
+        toast.success(`${result.created.length} chapter(s) processed, ${result.skipped.length} chapter(s) skipped`)
       } else if (result.created.length > 0) {
-        toast.success(`${result.created.length} chapter(s) created successfully`)
+        toast.success(`${result.created.length} chapter(s) uploaded successfully`)
       } else if (result.skipped.length > 0) {
         const firstReason = result.skipped[0]?.reason || ''
         if (firstReason.includes('already exist')) {
@@ -2018,7 +2028,14 @@ export function ProjectWorkflow() {
                   return (
                     <div key={ch.id} onClick={() => openChapter(ch)}
                       className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''} ${cardBorderCls(ch).replace('border-l-4', 'border-l-[3px]')}`}>
-                      <span className="text-xs font-bold text-primary uppercase w-8 flex-shrink-0">{ch.chapters}</span>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <span className="text-xs font-bold text-primary uppercase w-8">{ch.chapters}</span>
+                        {(ch.revision ?? 1) > 1 && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                            Rev {ch.revision}
+                          </span>
+                        )}
+                      </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-text truncate">{ch.chapter_title || ch.chapters}</p>
                       </div>
@@ -2058,7 +2075,16 @@ export function ProjectWorkflow() {
                       const { due, delayed } = getEffectiveDue(ch, plannedDueDates)
                       return (
                         <tr key={ch.id} onClick={() => openChapter(ch)} className={`cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''}`}>
-                          <td className="px-4 py-3 font-bold text-primary text-xs uppercase">{ch.chapters}</td>
+                          <td className="px-4 py-3 font-bold text-primary text-xs uppercase">
+                            <div className="flex items-center gap-1.5">
+                              <span>{ch.chapters}</span>
+                              {(ch.revision ?? 1) > 1 && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                                  Rev {ch.revision}
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 font-semibold text-text max-w-xs truncate">{ch.chapter_title || ch.chapters}</td>
                           <td className="px-4 py-3 text-xs">
                             {ch.stage_name
@@ -2681,6 +2707,27 @@ export function ProjectWorkflow() {
               label={newChapterFile ? newChapterFile.name : undefined}
             />
           </div>
+
+          {(activeTab === 'manuscript' || activeTab === 'art') && (
+            <div className="flex items-start gap-2.5 p-3 rounded-lg bg-surface border border-border">
+              <input
+                id="allow-revision-checkbox"
+                type="checkbox"
+                checked={allowRevision}
+                onChange={e => setAllowRevision(e.target.checked)}
+                disabled={addingChapter}
+                className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary/40 cursor-pointer"
+              />
+              <label htmlFor="allow-revision-checkbox" className="text-xs cursor-pointer select-none">
+                <span className="font-semibold text-text block">
+                  Upload as new revision if chapter already exists
+                </span>
+                <span className="text-[11px] text-muted block mt-0.5">
+                  Backs up existing chapter files (e.g. <code>_old_v1</code>), resets chapter to starting stage for planning approval, and increments revision count.
+                </span>
+              </label>
+            </div>
+          )}
 
           {addChapterError && (
             <p className="text-xs text-danger flex items-center gap-1.5">
