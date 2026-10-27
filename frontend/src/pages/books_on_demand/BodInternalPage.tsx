@@ -40,6 +40,11 @@ export function BodInternalPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
   const [togglingFastrackId, setTogglingFastrackId] = useState<number | null>(null)
 
+  // Fastrack modal state
+  const [fastrackModalJob, setFastrackModalJob] = useState<any | null>(null)
+  const [fastrackExpectedDate, setFastrackExpectedDate] = useState('')
+  const [savingFastrack, setSavingFastrack] = useState(false)
+
   // Date Filter states
   const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'tomorrow' | 'day_3' | 'day_4' | 'day_5' | 'week' | 'month' | 'custom'>('today')
   const [customFromDate, setCustomFromDate] = useState('')
@@ -173,18 +178,62 @@ export function BodInternalPage() {
     }
   }
 
-  const toggleFastrack = async (e: React.MouseEvent, jobId: number, currentFastrack: boolean) => {
+  const handleFastrackClick = (e: React.MouseEvent, job: any) => {
     e.stopPropagation()
+    if (job.is_fastrack) {
+      toggleFastrackOff(job.id)
+    } else {
+      setFastrackModalJob(job)
+      const now = new Date()
+      setFastrackExpectedDate(now.toISOString().slice(0, 10))
+    }
+  }
+
+  const toggleFastrackOff = async (jobId: number) => {
     setTogglingFastrackId(jobId)
     try {
-      const nextFastrack = !currentFastrack
-      await api.put(`/bod/jobs/${jobId}/fastrack`, { is_fastrack: nextFastrack })
-      toast.success(nextFastrack ? "Job marked as Fastrack" : "Job set to Normal")
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, is_fastrack: nextFastrack } : j))
+      await api.put(`/bod/jobs/${jobId}/fastrack`, { is_fastrack: false })
+      toast.success("Job set to Normal")
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, is_fastrack: false, fastrack_requested_date: null } : j))
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to update Fastrack status")
     } finally {
       setTogglingFastrackId(null)
+    }
+  }
+
+  const submitFastrackEnable = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!fastrackModalJob || !fastrackExpectedDate) return
+
+    if (fastrackModalJob.due_date) {
+      const maxDate = new Date(fastrackModalJob.due_date.endsWith('Z') ? fastrackModalJob.due_date : fastrackModalJob.due_date + 'Z')
+      const chosenDate = new Date(`${fastrackExpectedDate}T23:59:59`)
+      if (chosenDate.getTime() > maxDate.getTime() + 60000) {
+        toast.error(`Expected date must be on or before the due date (${formatDate(fastrackModalJob.due_date)})`)
+        return
+      }
+    }
+
+    setSavingFastrack(true)
+    const finalDateStr = fastrackExpectedDate // e.g. "2026-10-30"
+
+    try {
+      const { data } = await api.put(`/bod/jobs/${fastrackModalJob.id}/fastrack`, {
+        is_fastrack: true,
+        fastrack_requested_date: finalDateStr
+      })
+      toast.success("Job marked as Fastrack with expected completion date")
+      setJobs(prev => prev.map(j => j.id === fastrackModalJob.id ? {
+        ...j,
+        is_fastrack: true,
+        fastrack_requested_date: data.fastrack_requested_date || finalDateStr
+      } : j))
+      setFastrackModalJob(null)
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to enable Fastrack")
+    } finally {
+      setSavingFastrack(false)
     }
   }
 
@@ -2004,37 +2053,56 @@ export function BodInternalPage() {
                             )}
                           </td>
                           <td className="px-1.5 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                if (completed) return
-                                toggleFastrack(e, job.id, Boolean(job.is_fastrack))
-                              }}
-                              disabled={completed || togglingFastrackId === job.id}
-                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all select-none ${
-                                completed
-                                  ? job.is_fastrack
-                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
-                                    : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
-                                  : job.is_fastrack
-                                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
-                                    : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
-                              }`}
-                              title={
-                                completed
-                                  ? "Job completed — Fastrack status is locked"
-                                  : job.is_fastrack
-                                    ? "Fastrack Enabled — Click to set Normal"
-                                    : "Normal — Click to enable Fastrack"
-                              }
-                            >
-                              {togglingFastrackId === job.id ? (
-                                <Loader2 size={10} className="animate-spin text-amber-500" />
-                              ) : (
-                                <Zap size={10} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                            <div className="flex flex-col items-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  if (completed) return
+                                  handleFastrackClick(e, job)
+                                }}
+                                disabled={completed || togglingFastrackId === job.id}
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all select-none ${
+                                  completed
+                                    ? job.is_fastrack
+                                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                      : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                                    : job.is_fastrack
+                                      ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                      : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                                }`}
+                                title={
+                                  completed
+                                    ? "Job completed — Fastrack status is locked"
+                                    : job.is_fastrack
+                                      ? "Fastrack Enabled — Click to disable"
+                                      : "Normal — Click to enable Fastrack and set target date"
+                                }
+                              >
+                                {togglingFastrackId === job.id ? (
+                                  <Loader2 size={10} className="animate-spin text-amber-500" />
+                                ) : (
+                                  <Zap size={10} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                                )}
+                                <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
+                              </button>
+                              {job.is_fastrack && job.fastrack_requested_date && (
+                                <span
+                                  className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-0.5 whitespace-nowrap"
+                                  title={`Expected by customer: ${formatDateTime(job.fastrack_requested_date)}`}
+                                >
+                                  <Clock size={8} className="shrink-0" />
+                                  {(() => {
+                                    const raw = String(job.fastrack_requested_date).split('T')[0]
+                                    const parts = raw.split('-')
+                                    if (parts.length === 3) {
+                                      const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+                                      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+                                    }
+                                    return raw
+                                  })()}
+                                </span>
                               )}
-                              <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
-                            </button>
+                            </div>
                           </td>
                           <td className="px-1 py-2 text-center text-xs text-muted font-mono overflow-hidden">
                             {job.pdf_page_count || '-'}
@@ -2275,37 +2343,48 @@ export function BodInternalPage() {
                         />
                       </div>
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            if (isJobCompleted(job)) return
-                            toggleFastrack(e, job.id, Boolean(job.is_fastrack))
-                          }}
-                          disabled={isJobCompleted(job) || togglingFastrackId === job.id}
-                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all select-none ${
-                            isJobCompleted(job)
-                              ? job.is_fastrack
-                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
-                                : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
-                              : job.is_fastrack
-                                ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
-                                : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
-                          }`}
-                          title={
-                            isJobCompleted(job)
-                              ? "Job completed — Fastrack status is locked"
-                              : job.is_fastrack
-                                ? "Fastrack Enabled — Click to set Normal"
-                                : "Normal — Click to enable Fastrack"
-                          }
-                        >
-                          {togglingFastrackId === job.id ? (
-                            <Loader2 size={10} className="animate-spin text-amber-500" />
-                          ) : (
-                            <Zap size={10} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                        <div className="flex flex-col items-end gap-0.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              if (isJobCompleted(job)) return
+                              handleFastrackClick(e, job)
+                            }}
+                            disabled={isJobCompleted(job) || togglingFastrackId === job.id}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all select-none ${
+                              isJobCompleted(job)
+                                ? job.is_fastrack
+                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                  : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                                : job.is_fastrack
+                                  ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                  : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                            }`}
+                            title={
+                              isJobCompleted(job)
+                                ? "Job completed — Fastrack status is locked"
+                                : job.is_fastrack
+                                  ? "Fastrack Enabled — Click to disable"
+                                  : "Normal — Click to enable Fastrack and set target date"
+                            }
+                          >
+                            {togglingFastrackId === job.id ? (
+                              <Loader2 size={10} className="animate-spin text-amber-500" />
+                            ) : (
+                              <Zap size={10} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                            )}
+                            <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
+                          </button>
+                          {job.is_fastrack && job.fastrack_requested_date && (
+                            <span
+                              className="text-[8px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-0.5 whitespace-nowrap"
+                              title={`Expected by customer: ${formatDate(job.fastrack_requested_date)}`}
+                            >
+                              <Clock size={8} className="shrink-0" />
+                              {formatDate(job.fastrack_requested_date)}
+                            </span>
                           )}
-                          <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
-                        </button>
+                        </div>
                         <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${getStatusBadgeClass(job)}`}>
                           {getStatusText(job)}
                         </span>
@@ -2568,6 +2647,85 @@ export function BodInternalPage() {
                     className="px-3.5 py-1.5 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-colors text-xs disabled:opacity-70"
                   >
                     {savingDueDate ? 'Saving...' : 'Save Date'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Fastrack Expected Date Modal */}
+      {
+        fastrackModalJob && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+            <div className="bg-card w-full max-w-sm rounded-xl shadow-2xl border border-border flex flex-col p-5 gap-4">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                    <Zap size={16} className="fill-amber-500 text-amber-500" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-text text-sm m-0">Enable Fastrack</h3>
+                    <p className="text-[10px] text-muted m-0 truncate max-w-[200px]" title={fastrackModalJob.pdf_filename}>
+                      {fastrackModalJob.pdf_filename}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFastrackModalJob(null)}
+                  className="text-muted hover:text-text transition-colors p-1 rounded-md"
+                >
+                  <XCircle size={16} />
+                </button>
+              </div>
+
+              <form onSubmit={submitFastrackEnable} className="flex flex-col gap-4">
+                <div className="bg-muted/30 border border-border/60 rounded-lg p-2.5 text-xs text-muted flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-text">Current Due Date:</span>
+                    <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
+                      {fastrackModalJob.due_date ? formatDate(fastrackModalJob.due_date) : 'No due date set'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground m-0">
+                    Set the target date this Fastrack job should be completed by (on or before current due date).
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-text flex items-center gap-1">
+                    <Calendar size={12} className="text-amber-500" />
+                    Expected Completion Date
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={fastrackExpectedDate}
+                    max={fastrackModalJob.due_date ? new Date(fastrackModalJob.due_date.endsWith('Z') ? fastrackModalJob.due_date : fastrackModalJob.due_date + 'Z').toISOString().slice(0, 10) : undefined}
+                    onChange={(e) => setFastrackExpectedDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-text focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all shadow-xs"
+                    style={{ colorScheme: 'light dark' }}
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2 border-t border-border/60">
+                  <button
+                    type="button"
+                    onClick={() => setFastrackModalJob(null)}
+                    disabled={savingFastrack}
+                    className="px-3 py-1.5 bg-background border border-border hover:bg-muted/50 text-text font-semibold rounded-lg transition-colors text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingFastrack || !fastrackExpectedDate}
+                    className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg transition-colors flex items-center gap-1.5 text-xs shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {savingFastrack && <Loader2 size={12} className="animate-spin" />}
+                    Confirm & Enable Fastrack
                   </button>
                 </div>
               </form>

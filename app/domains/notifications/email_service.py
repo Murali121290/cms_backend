@@ -1,5 +1,6 @@
 import smtplib
 from email.message import EmailMessage
+from typing import Optional
 import logging
 from app.core.config import get_settings
 
@@ -165,3 +166,53 @@ S4Carlisle Inkflow Automated System
     </html>
     """
     send_email(manager_email, subject, text_body, html_body)
+
+
+def send_bod_fastrack_alert_email(
+    manager_email: str,
+    project_name: str,
+    pdf_filename: str,
+    expected_date: str,
+    due_date: Optional[str] = None
+):
+    subject = f"Action Required: Books on Demand Project Marked as Fastrack [{project_name or pdf_filename}]"
+    
+    text_body = f"""Hello,
+
+The customer has enabled Fastrack priority for the following Books on Demand project.
+
+Project Details:
+- Project Name: {project_name or '-'}
+- Source PDF: {pdf_filename}
+- Fastrack Requested Date: {expected_date}
+- Due Date: {due_date or 'Not specified'}
+
+Please prioritize production and QC to meet the customer's expected date.
+
+Best regards,
+S4Carlisle Inkflow Automated System
+"""
+
+    html_body = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #2c3e50;">Project Marked as Fastrack</h2>
+        <p>Hello,</p>
+        <p>The customer has enabled <strong>Fastrack</strong> priority for the following Books on Demand project.</p>
+        
+        <div style="background-color: #f8f9fa; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+            <p style="margin: 0 0 10px 0;"><strong>Project Name:</strong> {project_name or '-'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Source PDF:</strong> {pdf_filename}</p>
+            <p style="margin: 0 0 10px 0; color: #b45309;"><strong>Fastrack Requested Date:</strong> {expected_date}</p>
+            <p style="margin: 0;"><strong>Due Date:</strong> {due_date or 'Not specified'}</p>
+        </div>
+        
+        <p>Please review the job on the Inkflow BOD dashboard and coordinate with the team to meet the requested timeline.</p>
+        
+        <hr style="border: none; border-top: 1px solid #eaeaea; margin: 30px 0 20px 0;">
+        <p style="font-size: 12px; color: #777; margin: 0;">Best regards,<br><strong>S4Carlisle Inkflow Automated System</strong></p>
+      </body>
+    </html>
+    """
+    send_email(manager_email, subject, text_body, html_body)
+

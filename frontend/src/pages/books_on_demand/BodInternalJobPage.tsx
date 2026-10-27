@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -362,6 +362,20 @@ export function BodInternalJobPage() {
               }`}>
               {job.status}
             </span>
+            {job.is_fastrack && (
+              <span
+                className="inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-md text-[10px] bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-400 tracking-wider shadow-xs"
+                title={job.fastrack_requested_date ? `Fastrack expected by customer: ${formatDateTime(job.fastrack_requested_date)}` : 'Fastrack enabled'}
+              >
+                <Zap size={11} className="fill-amber-500 text-amber-500" />
+                Fastrack
+                {job.fastrack_requested_date && (
+                  <span className="font-mono text-[9px] opacity-90">
+                    ({formatDateTime(job.fastrack_requested_date).split(' ')[0]})
+                  </span>
+                )}
+              </span>
+            )}
           </h1>
           <div className="flex items-center gap-4 mt-1.5">
             <p className="text-sm text-muted m-0">{job.client_name} • Stage: <strong className="text-text">{job.current_stage_name}</strong></p>
@@ -584,10 +598,24 @@ export function BodInternalJobPage() {
               </div>
 
               <div className="bg-background/70 border border-border/60 rounded-lg p-3">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Due Date</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Due Date</span>
+                  {job.is_fastrack && (
+                    <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.2 rounded flex items-center gap-0.5">
+                      <Zap size={9} className="fill-amber-500" />
+                      Fastrack
+                    </span>
+                  )}
+                </div>
                 <p className="text-base font-bold text-text mt-1 m-0">
                   {job.due_date ? formatDateTime(job.due_date) : <span className="text-muted font-normal italic">No date set</span>}
                 </p>
+                {job.is_fastrack && job.fastrack_requested_date && (
+                  <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mt-1 m-0 flex items-center gap-1">
+                    <Clock size={11} className="shrink-0" />
+                    Target: {formatDateTime(job.fastrack_requested_date)}
+                  </p>
+                )}
               </div>
             </div>
           ) : (
