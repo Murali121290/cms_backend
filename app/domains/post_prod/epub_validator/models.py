@@ -31,6 +31,7 @@ class EvProject(Base):
     total_files = Column(Integer, nullable=False, default=0)
     eisbn = Column(String(100), nullable=True)            # optional eISBN
     copyright_year = Column(String(50), nullable=True)    # optional copyright year
+    language = Column(String(50), nullable=True)          # e.g., 'en', 'de', detected from content.opf
 
     # Lifecycle status
     # "uploaded" → "validated" | "failed"

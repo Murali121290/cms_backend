@@ -21,7 +21,7 @@
       "rule_config": {
         "opf_name": "isbn",
         "css_folder": "css",
-        "css_file": "epub.css",
+        "css_file": "stylesheet.css",
         "xhtml_folder": "xhtml",
         "images_folder": "images",
         "nav_file": "nav.xhtml",
@@ -36,14 +36,6 @@
       "scope": "book",
       "enabled": true,
       "category": "Structure Check"
-    },
-    {
-      "id": "CSS002",
-      "name": "CSS File Validation",
-      "target_path": "OEBPS/css",
-      "enabled": true,
-      "file_name_pattern": "*.css",
-      "category": "CSS Check"
     },
     {
       "id": "XHTML001",
@@ -196,7 +188,7 @@
     },
     {
       "id": "BOD-IMG-003",
-      "name": "Aspen: <img> alt attribute must not be empty",
+      "name": "<img> alt attribute must not be empty",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true,
