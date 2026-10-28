@@ -46,6 +46,14 @@
       "category": "XHTML Check"
     },
     {
+      "id": "CSS002",
+      "name": "CSS File Validation",
+      "target_path": "OEBPS/css",
+      "enabled": true,
+      "file_name_pattern": "*.css",
+      "category": "CSS Check"
+    },
+    {
       "id": "URL001",
       "name": "Internal Link Check",
       "target_path": "OEBPS/xhtml",
@@ -229,6 +237,7 @@
   },
   "category_order": [
     "STRUCTURE CHECK",
+    "CSS CHECK",
     "XHTML CHECK",
     "IMAGE CHECK",
     "LINK CHECK",
