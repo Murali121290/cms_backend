@@ -8,7 +8,6 @@ from PIL import Image
 from ..engine.registry import rule
 from ._common import find_opf
 
-_MAX_PIXELS = 4_000_000
 _ALLOWED_EXT = {".jpg", ".jpeg"}
 
 
@@ -120,13 +119,21 @@ def validate_no_empty_alt(file_details, rule_config=None):
 
 
 @rule("ASP-IMG-003")
+@rule("BOD-IMG-002")
 def validate_image_dimensions(file_details, rule_config=None):
-    """No image may exceed 4,000,000 pixels (width × height), except cover.jpg."""
+    """Validate image dimensions against configurable limits (max pixels, min width or height, etc.)."""
     file_path = file_details.get("file_path", "")
     full_path = file_details.get("full_path", "")
 
-    # Skip cover.jpg
-    if os.path.basename(file_path).lower() == "cover.jpg":
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    max_pixels = cfg.get("max_pixels")
+    min_dimension = cfg.get("min_dimension") or cfg.get("min_width_or_height")
+    min_width = cfg.get("min_width")
+    min_height = cfg.get("min_height")
+    exclude_files = [f.lower() for f in cfg.get("exclude_files", ["cover.jpg"])]
+
+    # Skip excluded files
+    if os.path.basename(file_path).lower() in exclude_files:
         return {"issues_count": 0, "issues": []}
 
     if not full_path or not os.path.exists(full_path):
@@ -136,15 +143,47 @@ def validate_image_dimensions(file_details, rule_config=None):
     try:
         with Image.open(full_path) as img:
             w, h = img.size
-            if w * h > _MAX_PIXELS:
+
+            # 1. Check max total pixels budget
+            if max_pixels is not None and (w * h > max_pixels):
                 issues.append({
                     "type": "image_over_pixel_budget",
                     "message": (
-                        f"Image is {w}x{h} = {w*h:,} pixels; max allowed is {_MAX_PIXELS:,}"
+                        f"Image is {w}x{h} = {w*h:,} pixels; max allowed is {max_pixels:,} pixels."
                     ),
                     "category": "Warning",
                     "file_path": file_path,
                 })
+
+            # 2. Check min dimension (e.g. at least min_dimension in width OR height)
+            if min_dimension is not None:
+                if max(w, h) < min_dimension:
+                    issues.append({
+                        "type": "image_dimension_too_small",
+                        "message": (
+                            f"Image dimensions are {w}x{h} px. Images must have a minimum of {min_dimension} px "
+                            f"in width or height."
+                        ),
+                        "category": "Error",
+                        "file_path": file_path,
+                    })
+
+            # 3. Optional specific min_width / min_height checks
+            if min_width is not None and w < min_width:
+                issues.append({
+                    "type": "image_width_too_small",
+                    "message": f"Image width is {w} px (minimum required is {min_width} px).",
+                    "category": "Error",
+                    "file_path": file_path,
+                })
+            if min_height is not None and h < min_height:
+                issues.append({
+                    "type": "image_height_too_small",
+                    "message": f"Image height is {h} px (minimum required is {min_height} px).",
+                    "category": "Error",
+                    "file_path": file_path,
+                })
+
     except Exception:
         pass
 
@@ -445,6 +484,7 @@ def validate_all_images_in_opf(file_details, rule_config=None):
 
 
 @rule("IMG-001")
+@rule("BOD-IMG-001")
 def validate_body_image_dpi(file_details, rule_config=None):
     """Every body image (not just the cover) must be exactly 300 DPI."""
     file_path = file_details.get("file_path", "")

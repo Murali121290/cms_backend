@@ -923,7 +923,15 @@ def validate_bare_url_text(file_details, rule_config=None):
     url_pattern = re.compile(
         r'https?://[^\s<>"\']*|'
         r'www\.[^\s<>"\']+\.[^\s<>"\']{2,}|'
-        r'\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|dev|store|tech|ai|online|site|xyz)\b(?:/[^\s<>"\']*)?',
+        r'\b(?:[a-zA-Z0-9-]+\.)+(?:'
+        r'com|org|net|edu|gov|info|biz|dev|store|shop|tech|online|site|xyz|'
+        r'eu|'
+        r'uk|fr|de|nl|be|lu|ie|ch|at|dk|se|no|fi|is|'
+        r'es|it|pt|gr|cy|mt|ad|mc|sm|va|'
+        r'pl|cz|sk|hu|ro|bg|si|hr|ba|rs|me|mk|al|li|'
+        r'ee|lv|lt|ua|by|md|ru|tr|ge|az|am|xk|'
+        r'in|co|io|ai|us|ca|jp|au'
+        r')\b(?:/[^\s<>"\']*)?',
         re.IGNORECASE
     )
 

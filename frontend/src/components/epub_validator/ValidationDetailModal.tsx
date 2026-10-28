@@ -222,7 +222,7 @@ function DiffText({ expected, actual, type }: { expected: string; actual: string
   );
 }
 
-const URL_PATTERN = /https?:\/\/[^\s<>"\']*|www\.[^\s<>"\']+\.[^\s<>"\']{2,}|\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|dev|store|tech|ai|online|site|xyz)\b(?:\/[^\s<>"\']*)?/i;
+const URL_PATTERN = /https?:\/\/[^\s<>"\']*|www\.[^\s<>"\']+\.[^\s<>"\']{2,}|\b(?:[a-zA-Z0-9-]+\.)+(?:com|org|net|edu|gov|info|biz|dev|store|shop|tech|online|site|xyz|eu|uk|fr|de|nl|be|lu|ie|ch|at|dk|se|no|fi|is|es|it|pt|gr|cy|mt|ad|mc|sm|va|pl|cz|sk|hu|ro|bg|si|hr|ba|rs|me|mk|al|li|ee|lv|lt|ua|by|md|ru|tr|ge|az|am|xk|in|co|io|ai|us|ca|jp|au)\b(?:\/[^\s<>"\']*)?/i;
 
 // ─── Issue row in right panel ────────────────────────────────────────────────
 
