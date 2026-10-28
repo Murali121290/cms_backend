@@ -149,6 +149,7 @@ async def create_project(
         user_id=user.id if user else None,
         eisbn=result.get("eisbn_extracted") or eisbn,
         copyright_year=copyright_year,
+        language=result.get("language"),
     )
     return {"message": "Project created successfully", "project": project}
 
@@ -157,6 +158,7 @@ class ProjectUpdateRequest(BaseModel):
     assignee: Optional[str] = None
     eisbn: Optional[str] = None
     copyright_year: Optional[str] = None
+    language: Optional[str] = None
 
 
 @router.put("/projects/{project_id}")
@@ -172,6 +174,7 @@ def update_project(
         assignee=body.assignee,
         eisbn=body.eisbn,
         copyright_year=body.copyright_year,
+        language=body.language,
         user_id=getattr(user, "id", None),
         username=get_user_full_name(user) or getattr(user, "username", None) or getattr(user, "user_name", None),
     )
@@ -418,6 +421,38 @@ def get_file_mappings(folder_name: str, db: Session = Depends(get_db)):
     if project.file_mappings:
         return {"status": True, "mappings": project.file_mappings}
         
+    # If language was not detected during upload, try detecting from OPF now
+    if not project.language:
+        try:
+            import glob
+            import xml.etree.ElementTree as ET
+            # Search in epub_path if it's a directory, or search the project folder / extract folder
+            search_dirs = []
+            if project.epub_path:
+                if os.path.isdir(project.epub_path):
+                    search_dirs.append(project.epub_path)
+                else:
+                    search_dirs.append(os.path.dirname(project.epub_path))
+            proj_root = os.path.join(UPLOAD_DIR, folder_name)
+            if os.path.exists(proj_root):
+                search_dirs.append(proj_root)
+
+            opf_matches = []
+            for s_dir in search_dirs:
+                opf_matches = glob.glob(os.path.join(s_dir, "**", "*.opf"), recursive=True)
+                if opf_matches:
+                    break
+
+            if opf_matches:
+                tree = ET.parse(opf_matches[0])
+                for elem in tree.getroot().iter():
+                    if elem.tag.endswith("language") and elem.text and elem.text.strip():
+                        project.language = elem.text.strip()
+                        db.commit()
+                        break
+        except Exception:
+            pass
+
     import json
     current_dir = os.path.dirname(os.path.abspath(__file__))
     classification_path = os.path.join(current_dir, "rules", "general", "classification.json")
@@ -425,8 +460,19 @@ def get_file_mappings(folder_name: str, db: Session = Depends(get_db)):
         with open(classification_path, "r", encoding="utf-8") as f:
             classification = json.load(f)
     except FileNotFoundError:
-        classification = {"heuristics": []}
-        
+        classification = {}
+
+    # Determine language key (e.g. 'de' from 'de-DE' or 'de_AT')
+    lang_code = (project.language or "en").strip().lower()
+    short_lang = lang_code.split("-")[0].split("_")[0]
+
+    # Support structured "languages" format with fallback to "en" or legacy "heuristics"
+    if "languages" in classification:
+        lang_dict = classification["languages"]
+        heuristics = lang_dict.get(short_lang) or lang_dict.get(lang_code) or lang_dict.get("en", [])
+    else:
+        heuristics = classification.get("heuristics", [])
+
     files = get_extract_files(folder_name)
     mappings = {}
     for f in files.get("files", []):
@@ -436,9 +482,9 @@ def get_file_mappings(folder_name: str, db: Session = Depends(get_db)):
             continue
         if name == 'nav.xhtml' or name == 'nav.html' or name == 'nav.htm' or name == 'nav' or path.endswith('/nav.xhtml'):
             continue
-            
+
         matched_category = "Not found"
-        for heuristic in classification.get("heuristics", []):
+        for heuristic in heuristics:
             if any(pattern in name for pattern in heuristic.get("patterns", [])):
                 matched_category = heuristic.get("category", "Not found")
                 break

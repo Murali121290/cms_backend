@@ -29,6 +29,7 @@ def _serialize(p: EvProject) -> dict[str, Any]:
         "assignee": p.assignee,
         "eisbn": getattr(p, "eisbn", None),
         "copyright_year": getattr(p, "copyright_year", None),
+        "language": getattr(p, "language", None),
         "uploaded_by_id": p.uploaded_by_id,
         "uploaded_at": _iso_utc(p.uploaded_at),
         "updated_at": _iso_utc(p.updated_at),
@@ -37,11 +38,12 @@ def _serialize(p: EvProject) -> dict[str, Any]:
 
 
 def _ensure_columns_exist(db: Session) -> None:
-    """Ensure eisbn and copyright_year columns exist on post_prod_ev_projects table."""
+    """Ensure eisbn, copyright_year, and language columns exist on post_prod_ev_projects table."""
     try:
         from sqlalchemy import text
         db.execute(text("ALTER TABLE post_prod_ev_projects ADD COLUMN IF NOT EXISTS eisbn VARCHAR(100);"))
         db.execute(text("ALTER TABLE post_prod_ev_projects ADD COLUMN IF NOT EXISTS copyright_year VARCHAR(50);"))
+        db.execute(text("ALTER TABLE post_prod_ev_projects ADD COLUMN IF NOT EXISTS language VARCHAR(50);"))
         db.commit()
     except Exception:
         db.rollback()
@@ -89,6 +91,7 @@ def create_project(
     assignee: Optional[str] = None,
     eisbn: Optional[str] = None,
     copyright_year: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> dict[str, Any]:
     _ensure_columns_exist(db)
     # Purge any old soft-deleted project records matching folder_name or project_name
@@ -109,6 +112,7 @@ def create_project(
         assignee=assignee,
         eisbn=eisbn,
         copyright_year=copyright_year,
+        language=language,
         uploaded_by_id=user_id,
         uploaded_at=now,
         updated_at=now,
@@ -126,6 +130,7 @@ def update_project(
     assignee: Optional[str] = None,
     eisbn: Optional[str] = None,
     copyright_year: Optional[str] = None,
+    language: Optional[str] = None,
     user_id: Optional[int] = None,
     username: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
@@ -155,6 +160,8 @@ def update_project(
         p.eisbn = eisbn.strip() if eisbn.strip() else None
     if copyright_year is not None:
         p.copyright_year = copyright_year.strip() if copyright_year.strip() else None
+    if language is not None:
+        p.language = language.strip() if language.strip() else None
     db.commit()
     db.refresh(p)
     return _serialize(p)

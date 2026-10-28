@@ -66,7 +66,6 @@ def validate_images_are_jpeg(file_details, rule_config=None):
 
 
 @rule("ASP-IMG-002")
-@rule("BOD-IMG-003")
 def validate_no_empty_alt(file_details, rule_config=None):
     """<img> elements must not have empty alt attributes."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
@@ -118,6 +117,98 @@ def validate_no_empty_alt(file_details, rule_config=None):
             issues.append(issue)
     return {"issues_count": len(issues), "issues": issues}
 
+@rule("BOD-IMG-003")
+def validate_bod_alt(file_details, rule_config=None):
+    """<img> elements must not have empty alt attributes (unless decorative or captioned)."""
+    with open(file_details["full_path"], "r", encoding="utf-8") as f:
+        content = f.read()
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
+    issues = []
+
+    for img in soup.find_all("img"):
+        alt = img.get("alt")
+        # Missing alt attribute is always invalid (images MUST have an alt attribute)
+        if alt is None:
+            is_invalid = True
+        elif alt.strip() == "":
+            # Empty alt (alt="") is valid ONLY for:
+            # 1. Decorative images: role="presentation", role="none", or aria-hidden="true"
+            role = img.get("role", "")
+            if isinstance(role, list):
+                role = " ".join(role)
+            is_decorative = role.lower() in ("presentation", "none") or img.get("aria-hidden", "").lower() == "true"
+
+            # 2. Images with captions that function as alt tags:
+            # - inside <figure> with <figcaption> containing text
+            # - referenced by aria-labelledby or aria-describedby with matching non-empty element
+            # - adjacent sibling or parent containing a caption class (e.g. class="caption", "fig-caption", "image-caption")
+            has_caption = False
+            figure_parent = img.find_parent("figure")
+            if figure_parent:
+                figcaption = figure_parent.find("figcaption")
+                if figcaption and figcaption.get_text(strip=True):
+                    has_caption = True
+
+            if not has_caption:
+                for attr in ("aria-labelledby", "aria-describedby"):
+                    ref_id = img.get(attr)
+                    if ref_id:
+                        ref_elem = soup.find(id=ref_id)
+                        if ref_elem and ref_elem.get_text(strip=True):
+                            has_caption = True
+                            break
+
+            if not has_caption:
+                # Check parent or direct adjacent sibling element with caption class
+                parent = img.parent
+                if parent:
+                    # check sibling caption tags or elements with class containing 'caption'
+                    caption_sibling = parent.find(lambda el: el != img and (
+                        el.name == "figcaption" or
+                        any("caption" in c.lower() for c in el.get("class", []))
+                    ))
+                    if caption_sibling and caption_sibling.get_text(strip=True):
+                        has_caption = True
+
+            is_invalid = not (is_decorative or has_caption)
+        else:
+            is_invalid = False
+
+        if is_invalid:
+            src = img.get("src", "")
+            line_num = None
+            if hasattr(img, 'sourceline') and img.sourceline:
+                line_num = img.sourceline
+            else:
+                for idx, line in enumerate(lines, 1):
+                    if "src=" in line and src in line:
+                        line_num = idx
+                        break
+
+            import re
+            extract_text = str(img)
+            if line_num and line_num <= len(lines):
+                raw_line = lines[line_num - 1]
+                img_match = re.search(r'<img[^>]*>', raw_line, re.IGNORECASE)
+                if img_match:
+                    img_tag = img_match.group(0)
+                    alt_match = re.search(r'alt\s*=\s*["\'][^"\']*["\']|alt\b', img_tag, re.IGNORECASE)
+                    extract_text = alt_match.group(0) if alt_match else img_tag
+
+            msg = f"<img src='{src}'> is missing alt attribute" if alt is None else f"<img src='{src}'> has empty alt attribute without caption or decorative role"
+            issue = {
+                "type": "empty_alt_text",
+                "message": msg,
+                "category": "Error",
+                "href": src,
+                "extract": extract_text,
+            }
+            if line_num:
+                issue["line_number"] = line_num
+            issues.append(issue)
+    return {"issues_count": len(issues), "issues": issues}
 
 @rule("ASP-IMG-003")
 @rule("BOD-IMG-002")
