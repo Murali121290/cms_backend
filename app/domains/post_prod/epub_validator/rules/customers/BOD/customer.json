@@ -401,14 +401,6 @@
       "category": "Metadata Check"
     },
     {
-      "id": "ASP-IMG-002",
-      "name": "<img> alt attribute must not be empty",
-      "target_path": "OEBPS/xhtml",
-      "file_name_pattern": "*.xhtml",
-      "enabled": true,
-      "category": "Image Check"
-    },
-    {
       "id": "BOD-IMG-001",
       "name": "All body images must be exactly 300 DPI",
       "target_path": "OEBPS/images",
@@ -434,6 +426,14 @@
           "cover.jpg"
         ]
       },
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-IMG-003",
+      "name": "Aspen: <img> alt attribute must not be empty",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
       "category": "Image Check"
     },
     {

@@ -66,6 +66,7 @@ def validate_images_are_jpeg(file_details, rule_config=None):
 
 
 @rule("ASP-IMG-002")
+@rule("BOD-IMG-003")
 def validate_no_empty_alt(file_details, rule_config=None):
     """<img> elements must not have empty alt attributes."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
