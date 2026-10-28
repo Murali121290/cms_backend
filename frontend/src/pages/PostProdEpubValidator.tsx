@@ -397,7 +397,13 @@ export function PostProdEpubValidator() {
   const fetchProjects = useCallback(async () => {
     try {
       const data = await listProjects();
-      setProjects(data);
+      // Hide BOD jobs from general EPUB Validator UI; they are only accessed directly through BOD pages
+      const nonBodProjects = data.filter(
+        (p) =>
+          (p.client_code ?? '').toUpperCase() !== 'BOD' &&
+          (p.client ?? '').toLowerCase() !== 'books on demand'
+      );
+      setProjects(nonBodProjects);
     } catch {
       /* silent */
     } finally {

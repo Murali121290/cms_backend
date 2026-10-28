@@ -31,5 +31,6 @@ class BodJob(Base):
     dispatched_by = Column(String(255), nullable=True)
     dispatched_at = Column(DateTime, nullable=True)
     is_fastrack = Column(Boolean, default=False, nullable=False)
+    fastrack_requested_date = Column(DateTime, nullable=True)
 
 

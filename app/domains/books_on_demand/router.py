@@ -12,7 +12,12 @@ from app.database import get_db, SessionLocal
 from app.domains.books_on_demand.models import BodJob
 from app.domains.books_on_demand.services.ftp_service import BodFtpService
 from app.domains.books_on_demand.utils import calculate_bod_due_date
-from app.domains.notifications.email_service import send_bod_qc_ready_email, send_bod_new_job_email, send_bod_job_completed_email
+from app.domains.notifications.email_service import (
+    send_bod_qc_ready_email,
+    send_bod_new_job_email,
+    send_bod_job_completed_email,
+    send_bod_fastrack_alert_email
+)
 from pydantic import BaseModel
 from app.domains.auth.security import get_current_user_from_cookie
 from app.core.config import get_settings
@@ -61,6 +66,7 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "dispatched_by": job.dispatched_by,
             "dispatched_at": job.dispatched_at,
             "is_fastrack": bool(job.is_fastrack),
+            "fastrack_requested_date": job.fastrack_requested_date,
             "epubcheck_report_filepath": job.epubcheck_report_filepath,
             "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
         }
@@ -104,6 +110,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "dispatched_by": job.dispatched_by,
         "dispatched_at": job.dispatched_at,
         "is_fastrack": bool(job.is_fastrack),
+        "fastrack_requested_date": job.fastrack_requested_date,
         "epubcheck_report_filepath": job.epubcheck_report_filepath,
         "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
     }
@@ -234,7 +241,8 @@ def get_customer_report(
             "due_date": customer_due,
             "internal_due_date": job.due_date,
             "customer_due_date": customer_due,
-            "is_fastrack": bool(job.is_fastrack)
+            "is_fastrack": bool(job.is_fastrack),
+            "fastrack_requested_date": job.fastrack_requested_date
         })
     return {"jobs": report}
 
@@ -272,6 +280,7 @@ def delete_job(job_id: int, db: Session = Depends(get_db), current_user = Depend
 
 class BodFastrackToggleRequest(BaseModel):
     is_fastrack: bool
+    fastrack_requested_date: Optional[str] = None
 
 
 @router.put("/jobs/{job_id}/fastrack")
@@ -286,9 +295,47 @@ def toggle_fastrack(
         raise HTTPException(status_code=404, detail="Job not found")
 
     job.is_fastrack = bool(payload.is_fastrack)
+    if job.is_fastrack:
+        if payload.fastrack_requested_date:
+            try:
+                # Handle pure date "YYYY-MM-DD"
+                clean_date = payload.fastrack_requested_date.split('T')[0]
+                parsed_date = datetime.strptime(clean_date, "%Y-%m-%d")
+                job.fastrack_requested_date = parsed_date
+            except Exception as e:
+                logger.error(f"Error parsing fastrack_requested_date {payload.fastrack_requested_date}: {e}")
+                job.fastrack_requested_date = None
+        else:
+            job.fastrack_requested_date = None
+    else:
+        job.fastrack_requested_date = None
+
     db.commit()
     db.refresh(job)
-    return {"status": "success", "job_id": job.id, "is_fastrack": bool(job.is_fastrack)}
+
+    # Notify BOD Manager if Fastrack is enabled
+    if job.is_fastrack and job.fastrack_requested_date:
+        settings = get_settings()
+        if settings.BOD_MANAGER_EMAIL:
+            try:
+                formatted_expected = job.fastrack_requested_date.strftime("%d %b %Y")
+                formatted_due = job.due_date.strftime("%d %b %Y, %I:%M %p") if job.due_date else "Not set"
+                send_bod_fastrack_alert_email(
+                    manager_email=settings.BOD_MANAGER_EMAIL,
+                    project_name=job.project_name or "",
+                    pdf_filename=job.pdf_filename,
+                    expected_date=formatted_expected,
+                    due_date=formatted_due
+                )
+            except Exception as e:
+                logger.error(f"Failed to send fastrack notification email to {settings.BOD_MANAGER_EMAIL}: {e}")
+
+    return {
+        "status": "success",
+        "job_id": job.id,
+        "is_fastrack": bool(job.is_fastrack),
+        "fastrack_requested_date": job.fastrack_requested_date.strftime("%Y-%m-%d") if job.fastrack_requested_date else None
+    }
 
 
 class BodDueDateRequest(BaseModel):

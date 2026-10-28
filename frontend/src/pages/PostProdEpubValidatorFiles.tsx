@@ -790,9 +790,11 @@ export function PostProdEpubValidatorFiles() {
         }
       }
 
-      if (!isBookScope && (entry.result.issues.length > 0 || entryHasErrors || entryHasWarnings || entryHasInfos)) {
-        item.files.add(fname);
+      if (!isBookScope) {
         item.hasFileEntries = true;
+        if (entry.result.issues.length > 0 || entryHasErrors || entryHasWarnings || entryHasInfos) {
+          item.files.add(fname);
+        }
       }
 
       targetMap.set(key, item);
@@ -1738,7 +1740,9 @@ export function PostProdEpubValidatorFiles() {
                                 ruleSummary.customer,
                                 (r) => () => toggleRuleFilter(r.rule_id || r.rule_name),
                                 (r, ruleKey) => selectedRuleFilter === ruleKey,
-                                (r) => r.hasFileEntries ? `${r.files.size} file${r.files.size !== 1 ? 's' : ''} affected` : 'Book-scope rule',
+                                (r) => r.hasFileEntries
+                                  ? (r.files.size > 0 ? `${r.files.size} file${r.files.size !== 1 ? 's' : ''} affected` : 'Passed')
+                                  : 'Book-scope rule',
                                 'bg-primary/10 border-primary/40 ring-1 ring-primary/30 text-primary font-bold shadow-xs',
                                 'hover:bg-primary/5 hover:border-primary/30 hover:text-primary',
                                 'text-primary/80 bg-primary/10'
