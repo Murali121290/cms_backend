@@ -1795,7 +1795,12 @@ def resolve_track_workflow(
                 if ci_track == track and ci.workflow:
                     matching_wf = ci.workflow
                     break
-        target_wf = matching_wf or project.workflow_name or ""
+        if track == "art":
+            target_wf = matching_wf or track_wfs.get("art") or ""
+        elif track == "design":
+            target_wf = matching_wf or track_wfs.get("design") or ""
+        else:
+            target_wf = matching_wf or track_wfs.get("manuscript") or project.workflow_name or ""
 
     first_stage = None
     if target_wf:

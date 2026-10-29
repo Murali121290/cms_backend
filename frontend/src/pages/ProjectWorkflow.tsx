@@ -1072,9 +1072,14 @@ export function ProjectWorkflow() {
 
   // Get active workflow and stages based on the selected tab
   const activeWorkflowName = useMemo(() => {
-    if (activeTab === 'design') return designChapters[0]?.workflow || project?.workflow_name || ''
-    if (activeTab === 'art') return artChapters[0]?.workflow || project?.workflow_name || ''
-    return manuscriptChapters[0]?.workflow || project?.workflow_name || ''
+    const trackWorkflows = ((project?.file_details as Record<string, unknown> | null)?.track_workflows as Record<string, string> | undefined) || {}
+    if (activeTab === 'design') {
+      return designChapters[0]?.workflow || trackWorkflows.design || ''
+    }
+    if (activeTab === 'art') {
+      return artChapters[0]?.workflow || trackWorkflows.art || ''
+    }
+    return manuscriptChapters[0]?.workflow || trackWorkflows.manuscript || project?.workflow_name || ''
   }, [activeTab, designChapters, artChapters, manuscriptChapters, project])
 
   const orderedStages = useMemo(() => {
