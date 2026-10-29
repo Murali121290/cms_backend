@@ -133,6 +133,12 @@ export const chaptersApi = {
   bulkTransitionExecute: (payload: BulkTransitionExecutePayload) => {
     return api.post<{ status: string; transitioned_count: number }>('/chapters/bulk-transition', payload).then(r => r.data)
   },
+
+  delete: (projectId: number, chapterId: number) => {
+    return api.delete<{ deleted: { project_id: number; chapter_id: number; chapter_number: string } }>(
+      `/projects/${projectId}/chapters/${chapterId}`
+    ).then(r => r.data)
+  },
 }
 
 export interface BulkTransitionItemPreview {

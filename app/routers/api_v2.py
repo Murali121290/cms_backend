@@ -2623,6 +2623,12 @@ def api_v2_delete_chapter(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
+    if not _has_admin_role(viewer):
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="ADMIN_REQUIRED",
+            message="Admin access required to delete chapters.",
+        )
 
     chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
     chapter_number = chapter.number if chapter else ""
@@ -9727,7 +9733,7 @@ def api_v2_resume_mapping(
     saved_zip_path = os.path.join(project_dir, f"{project_code}_mapping.zip")
 
     if not os.path.exists(saved_zip_path):
-        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="ZIP_NOT_FOUND", message="No saved mapping ZIP found for this project.")
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="ZIP_NOT_FOUND", message="No chapters found in this project. Please add chapters first.")
 
     session_id = str(uuid.uuid4())
     temp_dir = os.path.join(file_service.UPLOAD_DIR, "staging", session_id)
@@ -9998,6 +10004,17 @@ def api_v2_finalize_mapping(
         pass
 
     shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # Clean up the staging mapping zip file now that mapping is finalized
+    try:
+        project_code = project.project_code or f"PRJ-{project.id}"
+        client_name = project.client_name or "unknown"
+        project_dir = os.path.join(file_service.UPLOAD_DIR, client_name, project_code)
+        saved_zip_path = os.path.join(project_dir, f"{project_code}_mapping.zip")
+        if os.path.exists(saved_zip_path):
+            os.remove(saved_zip_path)
+    except Exception:
+        pass
 
     # Count actual chapters created
     total_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()

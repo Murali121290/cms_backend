@@ -42,8 +42,8 @@ export function FileMappingPage() {
         setSessionId(res.session_id)
         setFiles(res.files)
       } catch (err) {
-        toast.error('No mapping data found or zip missing.')
-        navigate(-1)
+        toast.info('No chapters found in this project. Please add chapters first.')
+        navigate(`/projects/${id}`, { replace: true })
       } finally {
         setLoading(false)
       }

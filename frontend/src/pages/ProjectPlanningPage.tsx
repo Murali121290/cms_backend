@@ -385,7 +385,10 @@ export function ProjectPlanningPage() {
           : Promise.resolve([]),
       ])
 
-      if (chsRaw.filter(c => c.chapters !== 'Design').length === 0) {
+      // Only redirect to mapping if project is still in Planning status AND has no chapters.
+      // If the project is already Active or Completed and chapters were deleted, stay on the planning page.
+      const isAlreadyApproved = proj.status === 'Active' || proj.status === 'Completed'
+      if (!isAlreadyApproved && chsRaw.filter(c => c.chapters !== 'Design').length === 0) {
         navigate(`/projects/${id}/mapping`, { replace: true })
         return
       }

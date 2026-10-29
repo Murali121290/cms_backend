@@ -33,6 +33,8 @@ import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import { ArtValidationModal } from '@/components/ArtValidationModal'
+import { Modal } from '@/components/ui/Modal'
+import { chaptersApi } from '@/api/chapters'
 import { LanguageEditReviewModal } from '@/features/language_edit/LanguageEditReviewModal'
 import { useStageActionsStore } from '@/store/useStageActionsStore'
 
@@ -767,6 +769,25 @@ export function ChapterFilePage({
   }, [activeFolderConfig])
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const [deleteChapterModalOpen, setDeleteChapterModalOpen] = useState(false)
+  const [deletingChapter, setDeletingChapter] = useState(false)
+
+  const handleDeleteChapter = async () => {
+    if (!pid || !cid) return
+    setDeletingChapter(true)
+    try {
+      await chaptersApi.delete(pid, cid)
+      toast.success(`Chapter ${resolvedChapterName} deleted successfully`)
+      if (cliId) {
+        navigate(`/clients/${cliId}/projects/${pid}`)
+      } else {
+        navigate(`/projects/${pid}`)
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || err.message || 'Failed to delete chapter')
+      setDeletingChapter(false)
+    }
+  }
   const activeFolderParam = searchParams.get('folder') as FolderKey | null
   const activeFolder: FolderKey = useMemo(() => {
     return activeFolderParam && activeFolderParam in activeFolderConfig
@@ -1565,6 +1586,19 @@ export function ChapterFilePage({
           </button>
         )}
 
+        {/* Delete Chapter — Admin only */}
+        {isAdminUser && (
+          <button
+            type="button"
+            onClick={() => setDeleteChapterModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors shadow-sm"
+            title="Delete Chapter"
+          >
+            <Trash2 size={13} />
+            <span>Delete Chapter</span>
+          </button>
+        )}
+
         {/* Proceed */}
         {onProceed && (
           <button
@@ -1865,6 +1899,17 @@ export function ChapterFilePage({
           projectId={pid}
         />
       )}
+
+      {/* ── Delete Chapter Confirmation Modal ──────────────────────────── */}
+      <Modal
+        isOpen={deleteChapterModalOpen}
+        onClose={() => { if (!deletingChapter) setDeleteChapterModalOpen(false) }}
+        onConfirm={handleDeleteChapter}
+        title="Delete Chapter"
+        description={`Are you sure you want to delete chapter "${resolvedChapterName}"? All associated files, pipeline artifacts, and workflow records will be permanently removed.`}
+        confirmLabel={deletingChapter ? "Deleting..." : "Delete"}
+        loading={deletingChapter}
+      />
     </div>
   )
 }

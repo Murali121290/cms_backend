@@ -294,33 +294,75 @@ def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upl
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
 
+    # 1. Clean up physical files on disk for all files belonging to this chapter
+    from app.domains.processing.service import resolve_physical_file_path
+    from app.domains.workflow.models import StageDetail
+    from app.models import File, ProcessingJob
+
+    files = db.query(File).filter(File.chapter_id == chapter.id).all()
+    for f in files:
+        phys_path = f.path
+        if phys_path:
+            if not os.path.isabs(phys_path) or not os.path.exists(phys_path):
+                phys_path = resolve_physical_file_path(phys_path, upload_dir)
+            if phys_path and os.path.exists(phys_path):
+                try:
+                    dir_name = os.path.dirname(phys_path)
+                    base_name = os.path.splitext(os.path.basename(phys_path))[0]
+                    xhtml_path = os.path.join(dir_name, "xhtml", f"{base_name}.html")
+                    if os.path.exists(xhtml_path):
+                        try:
+                            os.remove(xhtml_path)
+                        except Exception:
+                            pass
+                    if os.path.isfile(phys_path):
+                        os.remove(phys_path)
+                except Exception:
+                    pass
+
+    # Also remove chapter directory if it exists
     chapter_dir = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.chapters}"
     if os.path.exists(chapter_dir):
-        shutil.rmtree(chapter_dir)
+        shutil.rmtree(chapter_dir, ignore_errors=True)
 
+    # 2. Delete non-FK workflow stage details for this project & chapter
+    db.query(StageDetail).filter(
+        StageDetail.project == (project.project_code or project.code or ""),
+        StageDetail.chapters == chapter.chapters,
+    ).delete(synchronize_session=False)
+
+    # 3. Clean up any ProcessingJob entries associated with this project and chapter
+    db.query(ProcessingJob).filter(
+        ProcessingJob.project_code == (project.project_code or project.code or ""),
+        ProcessingJob.chapter_number == chapter.chapters,
+    ).delete(synchronize_session=False)
+
+    # 4. Delete the chapter (CASCADE will delete File rows, FileVersion, Comments, etc.)
     db.delete(chapter)
     if project.chapter_count is not None and project.chapter_count > 0:
         project.chapter_count -= 1
+
+    # 5. Check if project has any remaining manuscript chapters.
+    # If no chapters remain, remove any leftover mapping zip so it doesn't resurrect deleted chapter files in mapping.
+    remaining_chapters = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == (project.project_code or project.code or ""),
+        models.ChapterInfo.id != chapter.id
+    ).all()
+    non_virtual = [c for c in remaining_chapters if c.chapters not in ("Design", "CE support")]
+    if len(non_virtual) == 0:
+        proj_dir = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}"
+        mapping_zip = os.path.join(proj_dir, f"{project.code}_mapping.zip")
+        if os.path.exists(mapping_zip):
+            try:
+                os.remove(mapping_zip)
+            except Exception:
+                pass
+
     db.commit()
     db.refresh(project)
     return {"project": project, "chapter": chapter}
 
 
 def delete_chapter_secondary(db: Session, *, project_id: int, chapter_id: int, upload_dir: str):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
-
-    if not chapter or not project:
-        return {"project": project, "chapter": chapter}
-
-    chapter_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.chapters}"
-    if os.path.exists(chapter_path):
-        shutil.rmtree(chapter_path, ignore_errors=True)
-
-    db.delete(chapter)
-    if project.chapter_count is not None and project.chapter_count > 0:
-        project.chapter_count -= 1
-    db.commit()
-    db.refresh(project)
-    return {"project": project, "chapter": chapter}
+    return delete_chapter_primary(db, project_id=project_id, chapter_id=chapter_id, upload_dir=upload_dir)
 
