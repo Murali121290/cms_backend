@@ -1,7 +1,7 @@
 {
   "publisher": {
-    "description": "Default / Wolters Kluwer / BEP style shortcut mapping (referencing publisherstyles.json)",
-    "client_label": "Publisher / Wolters Kluwer / BEP",
+    "description": "Default / Wolters Kluwer style shortcut mapping (referencing publisherstyles.json)",
+    "client_label": "Publisher / Wolters Kluwer",
     "tagset": "publisher",
     "paragraph_shortcuts": [
       {
@@ -560,6 +560,125 @@
         "shortcut": "Alt+Shift+0",
         "label": "Clear Character Style",
         "type": "character"
+      }
+    ]
+  },
+  "bep": {
+    "description": "Business Expert Press (BEP) style shortcut mapping (referencing bepstyles.json)",
+    "client_label": "BEP",
+    "tagset": "bep",
+    "paragraph_shortcuts": [
+      {
+        "action": "heading_1",
+        "style": "H1",
+        "shortcut": "Alt+1",
+        "label": "Heading 1",
+        "type": "paragraph",
+        "badgeColor": "#1C1A17"
+      },
+      {
+        "action": "heading_2",
+        "style": "H2",
+        "shortcut": "Alt+2",
+        "label": "Heading 2",
+        "type": "paragraph",
+        "badgeColor": "#A66A12"
+      },
+      {
+        "action": "heading_3",
+        "style": "H3",
+        "shortcut": "Alt+3",
+        "label": "Heading 3",
+        "type": "paragraph",
+        "badgeColor": "#B45309"
+      },
+      {
+        "action": "heading_4",
+        "style": "H4",
+        "shortcut": "Alt+4",
+        "label": "Heading 4",
+        "type": "paragraph",
+        "badgeColor": "#92400E"
+      },
+      {
+        "action": "body_text",
+        "style": "TX",
+        "shortcut": "Alt+5",
+        "label": "Body Paragraph",
+        "type": "paragraph",
+        "badgeColor": "#64748b"
+      },
+      {
+        "action": "txt_last",
+        "style": "TXL",
+        "shortcut": "Alt+6",
+        "label": "Last Paragraph",
+        "type": "paragraph",
+        "badgeColor": "#334155"
+      },
+      {
+        "action": "table_caption",
+        "style": "TT",
+        "shortcut": "Alt+7",
+        "label": "Table Caption",
+        "type": "paragraph",
+        "badgeColor": "#1D4ED8"
+      },
+      {
+        "action": "table_colhead",
+        "style": "TCH1",
+        "shortcut": "Alt+8",
+        "label": "Table Column Head",
+        "type": "paragraph",
+        "badgeColor": "#2563EB"
+      },
+      {
+        "action": "table_body",
+        "style": "TB",
+        "shortcut": "Alt+9",
+        "label": "Table Body",
+        "type": "paragraph",
+        "badgeColor": "#3B82F6"
+      },
+      {
+        "action": "table_note",
+        "style": "TFN",
+        "shortcut": "Alt+0",
+        "label": "Table Note",
+        "type": "paragraph",
+        "badgeColor": "#0284C7"
+      },
+      {
+        "action": "figure_legend",
+        "style": "FGC",
+        "shortcut": "Alt+F11",
+        "label": "Figure Caption",
+        "type": "paragraph",
+        "badgeColor": "#059669"
+      },
+      {
+        "action": "figure_source",
+        "style": "FGS",
+        "shortcut": "Alt+F12",
+        "label": "Figure Source",
+        "type": "paragraph",
+        "badgeColor": "#047857"
+      },
+      {
+        "action": "chapter_title",
+        "style": "CT",
+        "shortcut": "Ctrl+Alt+T",
+        "label": "Chapter Title",
+        "type": "paragraph",
+        "badgeColor": "#7C3AED"
+      },
+      {
+        "action": "extract",
+        "style": "EXT",
+        "shortcut": "Ctrl+Alt+E",
+        "label": "Extract / Blockquote",
+        "type": "paragraph",
+        "badgeColor": "#9333EA"
       }
     ]
   }

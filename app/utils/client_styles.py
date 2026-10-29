@@ -6,6 +6,7 @@ from typing import Optional, List
 logger = logging.getLogger("app.utils.client_styles")
 
 _SPRINGER_STYLES_CACHE: Optional[List[str]] = None
+_BEP_STYLES_CACHE: Optional[List[str]] = None
 
 
 def get_springer_styles() -> List[str]:
@@ -33,10 +34,45 @@ def get_springer_styles() -> List[str]:
     return []
 
 
+def get_bep_styles() -> List[str]:
+    """Load and cache BEP paragraph styles from bepstyles.json."""
+    global _BEP_STYLES_CACHE
+    if _BEP_STYLES_CACHE is not None:
+        return _BEP_STYLES_CACHE
+
+    json_paths = [
+        os.path.abspath("app/services/scripts/bepstyles.json"),
+        os.path.abspath("services/scripts/bepstyles.json"),
+        os.path.join(os.path.dirname(__file__), "../services/scripts/bepstyles.json"),
+        os.path.join(os.path.dirname(__file__), "bepstyles.json"),
+    ]
+
+    for path in json_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    styles = (
+                        data.get("bep_styles")
+                        or data.get("allowed_styles")
+                        or data.get("paragraph_styles")
+                        or []
+                    )
+                    if isinstance(styles, list) and styles:
+                        _BEP_STYLES_CACHE = sorted(list(set(styles)))
+                        return _BEP_STYLES_CACHE
+            except Exception as e:
+                logger.error(f"Error reading bepstyles.json at {path}: {e}")
+
+    # Fallback if json not found or invalid
+    return []
+
+
 def get_paragraph_styles_for_client(client_name: Optional[str] = None) -> List[str]:
     """
     Return paragraph styles based on client_name.
     - If client_name contains 'springer' (case-insensitive), return springerstyles.json styles.
+    - If client_name contains 'bep' (case-insensitive), return bepstyles.json styles.
     - For all other clients / default, return PUBLISHER_STYLES from inject_styles.py.
     """
     from app.utils.inject_styles import PUBLISHER_STYLES
@@ -47,5 +83,9 @@ def get_paragraph_styles_for_client(client_name: Optional[str] = None) -> List[s
             springer_styles = get_springer_styles()
             if springer_styles:
                 return springer_styles
+        elif "bep" in c_lower:
+            bep_styles = get_bep_styles()
+            if bep_styles:
+                return bep_styles
 
     return sorted(list(set(PUBLISHER_STYLES)))

@@ -190,6 +190,8 @@ def build_review_page_state(
                     or getattr(proj.client, "name_company", None)
                     or getattr(proj.client, "division", None)
                 )
+    if not client_name and file_record and file_record.project:
+        client_name = getattr(file_record.project, "client_name", None)
 
     client_styles = get_paragraph_styles_for_client(client_name)
     styles = set(client_styles)
@@ -240,7 +242,13 @@ def build_review_page_state(
         f"&lang=en"
     )
 
-    tag_set = "springer" if (client_name and ("springer" in str(client_name).lower() or "spr" in str(client_name).lower())) else "publisher"
+    tag_set = (
+        "springer"
+        if (client_name and ("springer" in str(client_name).lower() or "spr" in str(client_name).lower()))
+        else "bep"
+        if (client_name and "bep" in str(client_name).lower())
+        else "publisher"
+    )
 
     return {
         "status": "ok",

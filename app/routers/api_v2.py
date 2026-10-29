@@ -7677,17 +7677,20 @@ def api_v2_get_paragraph_styles(
     client_name = client
     if not client_name and file_id:
         file_obj = db.query(models.File).filter(models.File.id == file_id).first()
-        if file_obj and file_obj.chapter:
-            ch = file_obj.chapter
-            client_name = getattr(ch, "client", None)
-            if not client_name or not isinstance(client_name, str):
-                proj = getattr(ch, "project_rel", None)
-                if proj and proj.client:
-                    client_name = (
-                        getattr(proj.client, "company", None)
-                        or getattr(proj.client, "name_company", None)
-                        or getattr(proj.client, "division", None)
-                    )
+        if file_obj:
+            if file_obj.chapter:
+                ch = file_obj.chapter
+                client_name = getattr(ch, "client", None)
+                if not client_name or not isinstance(client_name, str):
+                    proj = getattr(ch, "project_rel", None)
+                    if proj and proj.client:
+                        client_name = (
+                            getattr(proj.client, "company", None)
+                            or getattr(proj.client, "name_company", None)
+                            or getattr(proj.client, "division", None)
+                        )
+            if not client_name and file_obj.project:
+                client_name = getattr(file_obj.project, "client_name", None)
 
     return get_paragraph_styles_for_client(client_name)
 

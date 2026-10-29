@@ -167,6 +167,25 @@ def build_file_response_payload(
     import logging
     wopi_logger = logging.getLogger("app.wopi")
 
+    def _resolve_client_name(rec):
+        if not rec:
+            return None
+        if getattr(rec, "project", None) and rec.project.client_name:
+            return rec.project.client_name
+        if getattr(rec, "chapter", None):
+            ch = rec.chapter
+            c_name = getattr(ch, "client", None)
+            if c_name and isinstance(c_name, str):
+                return c_name
+            proj = getattr(ch, "project_rel", None)
+            if proj and getattr(proj, "client", None):
+                return (
+                    getattr(proj.client, "company", None)
+                    or getattr(proj.client, "name_company", None)
+                    or getattr(proj.client, "division", None)
+                )
+        return None
+
     if mode == "structuring":
         file_record = get_file_record(db, file_id=file_id, detail=None, bare_404=True)
         file_path, filename = _ensure_target_exists(
@@ -176,8 +195,9 @@ def build_file_response_payload(
             bare_404=True,
         )
         try:
-            wopi_logger.info(f"Injecting publisher styles into structuring file: {file_path}")
-            inject_publisher_styles(file_path)
+            c_name = _resolve_client_name(file_record)
+            wopi_logger.info(f"Injecting styles (client: {c_name}) into structuring file: {file_path}")
+            inject_publisher_styles(file_path, client_name=c_name)
         except Exception as e:
             wopi_logger.warning(f"Failed to inject styles into {file_path}: {e}")
         return {"path": file_path, "filename": filename}
@@ -191,8 +211,9 @@ def build_file_response_payload(
         missing_detail="File not found",
     )
     try:
-        wopi_logger.info(f"Injecting publisher styles into original file: {file_path}")
-        inject_publisher_styles(file_path)
+        c_name = _resolve_client_name(file_record)
+        wopi_logger.info(f"Injecting styles (client: {c_name}) into original file: {file_path}")
+        inject_publisher_styles(file_path, client_name=c_name)
     except Exception as e:
         wopi_logger.warning(f"Failed to inject styles into {file_path}: {e}")
     return {"path": file_path, "filename": filename}
