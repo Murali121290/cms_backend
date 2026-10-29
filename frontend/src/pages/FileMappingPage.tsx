@@ -9,6 +9,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { motion } from 'framer-motion'
 
 const CATEGORIES = [
+  { value: 'Book', label: 'Book' },
   { value: 'Front Matter', label: 'Front Matter' },
   { value: 'Chapters', label: 'Chapter' },
   { value: 'Appendix', label: 'Appendix' },
@@ -65,7 +66,8 @@ export function FileMappingPage() {
   const handleCategoryChange = (index: number, newCategory: string) => {
     const newFiles = [...files]
     newFiles[index].category = newCategory
-    if (newCategory === 'Front Matter') newFiles[index].chapter_number = 'FM'
+    if (newCategory === 'Book') newFiles[index].chapter_number = '00'
+    else if (newCategory === 'Front Matter') newFiles[index].chapter_number = 'FM'
     else if (newCategory === 'Back Matter') newFiles[index].chapter_number = 'BM'
     else if (newCategory === 'Not Found') newFiles[index].chapter_number = null
     setFiles(newFiles)
@@ -244,7 +246,7 @@ export function FileMappingPage() {
                               value={file.chapter_number || ''}
                               onChange={(e) => handleNumberChange(idx, e.target.value)}
                               placeholder="e.g. 01, A"
-                              disabled={file.category === 'Front Matter' || file.category === 'Back Matter' || file.category === 'Not Found'}
+                              disabled={file.category === 'Book' || file.category === 'Front Matter' || file.category === 'Back Matter' || file.category === 'Not Found'}
                             />
                           </div>
                         </div>

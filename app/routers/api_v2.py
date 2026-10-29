@@ -9697,6 +9697,7 @@ def api_v2_preview_zip(
             else:
                 chapter_num = file_service.extract_chapter_number_from_filename(fname)
 
+        if matched_cat == "Book": chapter_num = "00"
         if matched_cat == "Front Matter": chapter_num = "FM"
         if matched_cat == "Back Matter": chapter_num = "BM"
 
@@ -9714,6 +9715,17 @@ def api_v2_preview_zip(
                 "chapter_number": str(num) if num else None,
                 "file_type": ftype
             })
+
+    # If the zip has a Book manuscript (00), group all Art files under 00 as well
+    has_book_manuscript = any(
+        f.get("file_type") == "Manuscript" and (f.get("category") == "Book" or f.get("chapter_number") == "00")
+        for f in files_result
+    )
+    if has_book_manuscript:
+        for f in files_result:
+            if f.get("file_type") == "Art":
+                f["category"] = "Book"
+                f["chapter_number"] = "00"
 
     return {"session_id": session_id, "files": files_result}
 
@@ -9799,6 +9811,7 @@ def api_v2_resume_mapping(
             else:
                 chapter_num = file_service.extract_chapter_number_from_filename(fname)
 
+        if matched_cat == "Book": chapter_num = "00"
         if matched_cat == "Front Matter": chapter_num = "FM"
         if matched_cat == "Back Matter": chapter_num = "BM"
 
@@ -9816,6 +9829,17 @@ def api_v2_resume_mapping(
                 "chapter_number": str(num) if num else None,
                 "file_type": ftype
             })
+
+    # If the zip has a Book manuscript (00), group all Art files under 00 as well
+    has_book_manuscript = any(
+        f.get("file_type") == "Manuscript" and (f.get("category") == "Book" or f.get("chapter_number") == "00")
+        for f in files_result
+    )
+    if has_book_manuscript:
+        for f in files_result:
+            if f.get("file_type") == "Art":
+                f["category"] = "Book"
+                f["chapter_number"] = "00"
 
     return {"session_id": session_id, "files": files_result}
 
@@ -9875,19 +9899,31 @@ def api_v2_finalize_mapping(
             db.refresh(chapter)
         return chapter
 
+    # Check if this mapping contains a Book manuscript (00)
+    has_book_mapping = any(
+        m.chapter_number == "00" or m.category == "Book"
+        for m in request.mappings
+        if m.file_type == "Manuscript"
+    )
+
     created_count = 0
     for mapping in request.mappings:
         if mapping.category == "Not Found" or not mapping.chapter_number:
             continue
 
         ch_num = mapping.chapter_number
-        if mapping.file_type == "Art" and ch_num and ch_num.isdigit():
-            ch_num = f"Ch {ch_num.zfill(2)} - Art"
+        if mapping.file_type == "Art":
+            if ch_num == "00" or has_book_mapping:
+                ch_num = "Book 00 - Art"
+            elif ch_num and ch_num.isdigit():
+                ch_num = f"Ch {ch_num.zfill(2)} - Art"
             
         if ch_num == "FM":
             ch_title = "Front matter"
         elif ch_num == "BM":
             ch_title = "Back matter"
+        elif ch_num == "Book 00 - Art":
+            ch_title = "Book 00 Art"
         elif ch_num.endswith(" - Art"):
             digits = ch_num.replace("Ch ", "").replace(" - Art", "")
             ch_title = f"Chapter {digits} Art"
