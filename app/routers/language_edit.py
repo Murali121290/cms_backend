@@ -309,6 +309,31 @@ def export_project_rules_xlsx(
     )
 
 
+@router.get("/files/{file_id}/language-edit/info")
+def get_language_edit_file_info(
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_from_cookie),
+):
+    """Lightweight metadata lookup for the Language Editor header.
+
+    Returns the real uploaded filename + project/chapter identifiers so the
+    editor header can render immediately on mount, without waiting for the
+    (slow) analyze pass to finish. Separate from `analyze` so switching
+    between documents never leaves a stale title on screen.
+    """
+    _require_language_user(current_user)
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail=f"File ID {file_id} not found.")
+    return {
+        "file_id": file_record.id,
+        "file_name": file_record.filename or "",
+        "project_id": file_record.project_id,
+        "chapter_id": file_record.chapter_id,
+    }
+
+
 @router.post("/files/{file_id}/language-edit/analyze")
 def start_language_edit_analysis(
     file_id: int,

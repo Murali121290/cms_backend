@@ -71,7 +71,18 @@ _EXTRA_KNOWN_WORDS: frozenset[str] = frozenset({
     # Prefix-adverbs commonly used standalone in academic/scientific writing
     "pre", "multi", "intra",
     # Common dictionary words sometimes missed by small base dicts
-    "ok", "etc",
+    "ok", "okay", "etc",
+    # Common modern/tech English pyspellchecker's base dict omits. These are
+    # all in current Merriam-Webster / Oxford — the gap is in the lexicon
+    # we ship, not in the language. Expanding this short list is the only
+    # reliable way to protect tokens whose stem is itself missing from the
+    # base dict (`app` is missing, so stripping `-s` from `apps` wouldn't
+    # recover it; a compound split doesn't help either).
+    "app", "apps", "blog", "blogs", "email", "emails",
+    "online", "offline", "podcast", "podcasts",
+    "wellbeing",   # also valid as `well-being`
+    "biomarker", "biomarkers",
+    "comorbid", "comorbidity",
 })
 
 # Common English prefixes used both as bound morphemes and as standalone
@@ -317,6 +328,44 @@ def spell_check_paragraph(
         (re.compile(r"(.+)ness$"), r"\1"),      # happiness -> happy
         (re.compile(r"(.+)tion$"), r"\1te"),    # traumatization -> traumatize
         (re.compile(r"(.+)ization$"), r"\1ize"),# traumatization -> traumatize
+        # Nominalizing / adjectival suffixes. pyspellchecker's small base
+        # dictionary is lemma-oriented and misses many perfectly valid
+        # morphological derivations (`expectance`, `obstinance`, `dependence`,
+        # `impermissible`, etc.) that then get surfaced as false-positive
+        # typos. Stripping the suffix lets us recognise the derivation when
+        # the ROOT is known — plus the common `-ance ↔ -ancy` /
+        # `-ence ↔ -ency` noun pairs, which pyspellchecker's base dict
+        # tends to carry only one half of.
+        (re.compile(r"(.+)ance$"), r"\1"),      # expectance -> expect
+        (re.compile(r"(.+)ence$"), r"\1"),      # dependence -> depend
+        (re.compile(r"(.+)ancy$"), r"\1"),      # expectancy -> expect
+        (re.compile(r"(.+)ency$"), r"\1"),      # dependency -> depend
+        (re.compile(r"(.+)ance$"), r"\1ancy"),  # expectance <-> expectancy
+        (re.compile(r"(.+)ancy$"), r"\1ance"),  # expectancy <-> expectance
+        (re.compile(r"(.+)ence$"), r"\1ency"),  # dependence <-> dependency
+        (re.compile(r"(.+)ency$"), r"\1ence"),  # dependency <-> dependence
+        (re.compile(r"(.+)ance$"), r"\1ate"),   # obstinance -> obstinate
+        (re.compile(r"(.+)ency$"), r"\1ent"),   # frequency -> frequent
+        (re.compile(r"(.+)ity$"), r"\1"),       # density -> dens(e)
+        (re.compile(r"(.+)ive$"), r"\1"),       # extensive -> extens(e)
+        (re.compile(r"(.+)able$"), r"\1"),      # readable -> read
+        (re.compile(r"(.+)ible$"), r"\1"),      # visible -> vis
+        (re.compile(r"(.+)ment$"), r"\1"),      # payment -> pay
+        (re.compile(r"(.+)ship$"), r"\1"),      # friendship -> friend
+        (re.compile(r"(.+)ful$"), r"\1"),       # helpful -> help
+        (re.compile(r"(.+)less$"), r"\1"),      # helpless -> help
+        (re.compile(r"(.+)ous$"), r"\1"),       # dangerous -> danger
+        (re.compile(r"(.+)ist$"), r"\1"),       # artist -> art
+        (re.compile(r"(.+)ism$"), r"\1"),       # modernism -> modern
+        (re.compile(r"(.+)ate$"), r"\1"),       # formulate -> formul(a)
+        (re.compile(r"(.+)al$"), r"\1"),        # digital -> digit
+        # Adjective ↔ noun pair for `-ic` science/academic words. pyspell
+        # often knows only one side (`psychodynamics` but not
+        # `psychodynamic`, or `historic` but not `historical`).
+        (re.compile(r"(.+)ic$"), r"\1ics"),     # psychodynamic -> psychodynamics
+        (re.compile(r"(.+)ics$"), r"\1ic"),     # psychodynamics -> psychodynamic
+        (re.compile(r"(.+)ic$"), r"\1ical"),    # historic -> historical
+        (re.compile(r"(.+)ical$"), r"\1ic"),    # historical -> historic
     ]
 
     def _morph_variants(w: str) -> list[str]:
@@ -343,9 +392,35 @@ def spell_check_paragraph(
         for v in _morph_variants(lw):
             variants.add(v)
     known_set = sc.known(lc_words) | sc.known(variants)
+
+    # Compound-of-known-halves: `wellbeing` = `well` + `being`, both ≥3-letter
+    # words in the base dict. This catches closed-form compounds that
+    # pyspellchecker's lemma-oriented dict happens to carry only as the
+    # open or hyphenated form (`well-being`, `well being`), without us having
+    # to enumerate every compound. The 3-char minimum per half keeps noise
+    # like `ichill` (i + chill) and `recieve` (re + cieve) OUT — single
+    # letters, prepositions, and genuine typos still get flagged.
+    _COMPOUND_MIN_PART = 3
+    _COMPOUND_CACHE: dict[str, bool] = {}
+
+    def _is_compound_of_known(w: str) -> bool:
+        if w in _COMPOUND_CACHE:
+            return _COMPOUND_CACHE[w]
+        if len(w) < _COMPOUND_MIN_PART * 2:
+            _COMPOUND_CACHE[w] = False
+            return False
+        for i in range(_COMPOUND_MIN_PART, len(w) - _COMPOUND_MIN_PART + 1):
+            left, right = w[:i], w[i:]
+            if sc.known([left]) and sc.known([right]):
+                _COMPOUND_CACHE[w] = True
+                return True
+        _COMPOUND_CACHE[w] = False
+        return False
+
     unknown = {w for w in lc_words
                if w not in known_set
-               and not any(v in known_set for v in _morph_variants(w))}
+               and not any(v in known_set for v in _morph_variants(w))
+               and not _is_compound_of_known(w)}
     if not unknown:
         return []
 
