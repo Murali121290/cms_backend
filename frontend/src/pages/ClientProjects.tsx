@@ -324,10 +324,10 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
       <div className="px-5 py-4 border-b border-border">
         <div className="flex items-start justify-between gap-2 mb-3">
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-text truncate">{projectLabel(project)}</p>
+            <p className="font-semibold text-text truncate">{project.project_code || project.project_title || `Project #${project.id}`}</p>
             <div className="flex items-center gap-1.5 mt-0.5">
-              {project.project_code && project.project_title && (
-                <span className="text-xs text-muted">{project.project_code}</span>
+              {project.project_title && (
+                <span className="text-xs text-muted truncate max-w-[200px]" title={project.project_title}>{project.project_title}</span>
               )}
               <button
                 onClick={e => { e.stopPropagation(); onViewInfo() }}
