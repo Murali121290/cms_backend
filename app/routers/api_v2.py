@@ -5348,13 +5348,19 @@ def _resolve_art_directory(file_path: str, db: Session = None, file_record: mode
                 if any(f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.pdf')) and not f.lower().endswith('.converted.png') for f in os.listdir(af_dir)):
                     return af_dir
 
-    # 1. Project-level explicit chapter art folder candidates (e.g. Ch 03 - Art/Art, Ch 03/Art)
+    # 1. Project-level explicit chapter art folder candidates (e.g. Ch 03 - Art/Art, Ch 03/Art, Book 00 - Art/Art)
     if ch_num is not None and os.path.exists(project_dir):
         ch_art_candidates = [
             os.path.join(project_dir, f"Ch {ch_num:02d} - Art", "Art"),
             os.path.join(project_dir, f"Ch {ch_num} - Art", "Art"),
             os.path.join(project_dir, f"Ch {ch_num:02d} - Art"),
             os.path.join(project_dir, f"Ch {ch_num} - Art"),
+            os.path.join(project_dir, f"Book {ch_num:02d} - Art", "Art"),
+            os.path.join(project_dir, f"Book {ch_num} - Art", "Art"),
+            os.path.join(project_dir, f"Book {ch_num:02d} - Art"),
+            os.path.join(project_dir, f"Book {ch_num} - Art"),
+            os.path.join(project_dir, "Book 00 - Art", "Art"),
+            os.path.join(project_dir, "Book 00 - Art"),
             os.path.join(project_dir, f"Ch{ch_num:02d}", "Art"),
             os.path.join(project_dir, f"Ch{ch_num}", "Art"),
             os.path.join(project_dir, f"Chapter {ch_num:02d}", "Art"),

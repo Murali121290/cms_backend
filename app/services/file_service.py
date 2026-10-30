@@ -42,6 +42,80 @@ def extract_chapter_number_from_filename(name: str) -> str | None:
         return f"{int(m.group(1)):02d}"
     return None
 
+
+def resolve_chapter_art_folder(project_dir: str, chapter_dir: str, chapter_number: str) -> str | None:
+    """Find the directory containing art files for a given chapter or complete book ('00').
+
+    Searches:
+    1. Direct chapter folders: <chapter_dir>/Art, <chapter_dir>/art, <chapter_dir>/Links, etc.
+    2. Project-level chapter art folder names:
+       - 'Ch {ch_num} - Art', 'Chapter {ch_num} - Art'
+       - 'Book {ch_num} - Art', 'Book 00 - Art', 'Book - Art', 'Book Art'
+       - 'Ch {ch_num}', 'Chapter {ch_num}', '{ch_num} - Art'
+    3. Fallback for whole-book jobs ('00', '0', or 'book'): any project subfolder with 'book' and 'art'.
+    """
+    ch_num = (chapter_number or "").strip()
+    ch_num_clean = ch_num.lstrip("0") if ch_num.lstrip("0") else "0"
+    ch_num_padded = ch_num.zfill(2)
+
+    img_exts = (".eps", ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".pdf")
+
+    # 1. Candidate folders inside chapter_dir
+    if chapter_dir and os.path.exists(chapter_dir):
+        for sub in ["Art", "art", "Links", "links", "ART"]:
+            c = os.path.join(chapter_dir, sub)
+            if os.path.exists(c) and os.path.isdir(c) and len(os.listdir(c)) > 0:
+                return c
+
+    if not project_dir or not os.path.exists(project_dir):
+        return None
+
+    # 2. Known project-level naming patterns
+    possible_names = [
+        f"Ch {ch_num} - Art", f"Ch {ch_num_clean} - Art", f"Ch {ch_num_padded} - Art",
+        f"Ch_{ch_num}_Art", f"Ch_{ch_num_clean}_Art", f"Ch_{ch_num_padded}_Art",
+        f"Chapter {ch_num} - Art", f"Chapter {ch_num_clean} - Art", f"Chapter {ch_num_padded} - Art",
+        f"Book {ch_num} - Art", f"Book {ch_num_clean} - Art", f"Book {ch_num_padded} - Art",
+        f"Book {ch_num}- Art", f"Book {ch_num_clean}- Art", f"Book {ch_num_padded}- Art",
+        f"Book_{ch_num}_Art", f"Book_{ch_num_clean}_Art", f"Book_{ch_num_padded}_Art",
+        f"Book {ch_num} Art", f"Book {ch_num_clean} Art", f"Book {ch_num_padded} Art",
+        "Book 00 - Art", "Book 0 - Art", "Book - Art", "Book- Art", "Book_Art", "Book Art",
+        f"Ch {ch_num}", f"Ch {ch_num_clean}", f"Ch {ch_num_padded}",
+        f"Chapter {ch_num}", f"Chapter {ch_num_clean}", f"Chapter {ch_num_padded}",
+        f"{ch_num} - Art", f"{ch_num_clean} - Art", f"{ch_num_padded} - Art",
+        f"{ch_num}_Art", f"{ch_num_clean}_Art", f"{ch_num_padded}_Art",
+        "Art", "art", "Links", "links",
+    ]
+    possible_names_lower = {n.lower() for n in possible_names}
+
+    for entry in os.listdir(project_dir):
+        entry_path = os.path.join(project_dir, entry)
+        if os.path.isdir(entry_path):
+            if entry.lower() in possible_names_lower:
+                for sub in ["Art", "art", "Links", "links", "ART"]:
+                    sub_path = os.path.join(entry_path, sub)
+                    if os.path.exists(sub_path) and os.path.isdir(sub_path) and len(os.listdir(sub_path)) > 0:
+                        return sub_path
+                if any(f.lower().endswith(img_exts) for f in os.listdir(entry_path)):
+                    return entry_path
+
+    # 3. Fallback for book-level manuscripts (00 or 0 or 'book' in ch_num)
+    if ch_num in ("00", "0") or "book" in ch_num.lower():
+        for entry in os.listdir(project_dir):
+            entry_path = os.path.join(project_dir, entry)
+            if os.path.isdir(entry_path):
+                el = entry.lower()
+                if "book" in el and "art" in el:
+                    for sub in ["Art", "art", "Links", "links", "ART"]:
+                        sub_path = os.path.join(entry_path, sub)
+                        if os.path.exists(sub_path) and os.path.isdir(sub_path) and len(os.listdir(sub_path)) > 0:
+                            return sub_path
+                    if any(f.lower().endswith(img_exts) for f in os.listdir(entry_path)):
+                        return entry_path
+
+    return None
+
+
 def save_upload_file(upload_file: UploadFile, destination: str):
     try:
         with open(destination, "wb") as buffer:
