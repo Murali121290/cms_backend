@@ -1795,7 +1795,12 @@ def resolve_track_workflow(
                 if ci_track == track and ci.workflow:
                     matching_wf = ci.workflow
                     break
-        target_wf = matching_wf or project.workflow_name or ""
+        if track == "art":
+            target_wf = matching_wf or track_wfs.get("art") or ""
+        elif track == "design":
+            target_wf = matching_wf or track_wfs.get("design") or ""
+        else:
+            target_wf = matching_wf or track_wfs.get("manuscript") or project.workflow_name or ""
 
     first_stage = None
     if target_wf:
@@ -2622,6 +2627,12 @@ def api_v2_delete_chapter(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="AUTH_REQUIRED",
             message="Authentication required.",
+        )
+    if not _has_admin_role(viewer):
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="ADMIN_REQUIRED",
+            message="Admin access required to delete chapters.",
         )
 
     chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
@@ -9689,6 +9700,7 @@ def api_v2_preview_zip(
             else:
                 chapter_num = file_service.extract_chapter_number_from_filename(fname)
 
+        if matched_cat == "Book": chapter_num = "00"
         if matched_cat == "Front Matter": chapter_num = "FM"
         if matched_cat == "Back Matter": chapter_num = "BM"
 
@@ -9706,6 +9718,17 @@ def api_v2_preview_zip(
                 "chapter_number": str(num) if num else None,
                 "file_type": ftype
             })
+
+    # If the zip has a Book manuscript (00), group all Art files under 00 as well
+    has_book_manuscript = any(
+        f.get("file_type") == "Manuscript" and (f.get("category") == "Book" or f.get("chapter_number") == "00")
+        for f in files_result
+    )
+    if has_book_manuscript:
+        for f in files_result:
+            if f.get("file_type") == "Art":
+                f["category"] = "Book"
+                f["chapter_number"] = "00"
 
     return {"session_id": session_id, "files": files_result}
 
@@ -9730,7 +9753,7 @@ def api_v2_resume_mapping(
     saved_zip_path = os.path.join(project_dir, f"{project_code}_mapping.zip")
 
     if not os.path.exists(saved_zip_path):
-        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="ZIP_NOT_FOUND", message="No saved mapping ZIP found for this project.")
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="ZIP_NOT_FOUND", message="No chapters found in this project. Please add chapters first.")
 
     session_id = str(uuid.uuid4())
     temp_dir = os.path.join(file_service.UPLOAD_DIR, "staging", session_id)
@@ -9791,6 +9814,7 @@ def api_v2_resume_mapping(
             else:
                 chapter_num = file_service.extract_chapter_number_from_filename(fname)
 
+        if matched_cat == "Book": chapter_num = "00"
         if matched_cat == "Front Matter": chapter_num = "FM"
         if matched_cat == "Back Matter": chapter_num = "BM"
 
@@ -9808,6 +9832,17 @@ def api_v2_resume_mapping(
                 "chapter_number": str(num) if num else None,
                 "file_type": ftype
             })
+
+    # If the zip has a Book manuscript (00), group all Art files under 00 as well
+    has_book_manuscript = any(
+        f.get("file_type") == "Manuscript" and (f.get("category") == "Book" or f.get("chapter_number") == "00")
+        for f in files_result
+    )
+    if has_book_manuscript:
+        for f in files_result:
+            if f.get("file_type") == "Art":
+                f["category"] = "Book"
+                f["chapter_number"] = "00"
 
     return {"session_id": session_id, "files": files_result}
 
@@ -9867,19 +9902,31 @@ def api_v2_finalize_mapping(
             db.refresh(chapter)
         return chapter
 
+    # Check if this mapping contains a Book manuscript (00)
+    has_book_mapping = any(
+        m.chapter_number == "00" or m.category == "Book"
+        for m in request.mappings
+        if m.file_type == "Manuscript"
+    )
+
     created_count = 0
     for mapping in request.mappings:
         if mapping.category == "Not Found" or not mapping.chapter_number:
             continue
 
         ch_num = mapping.chapter_number
-        if mapping.file_type == "Art" and ch_num and ch_num.isdigit():
-            ch_num = f"Ch {ch_num.zfill(2)} - Art"
+        if mapping.file_type == "Art":
+            if ch_num == "00" or has_book_mapping:
+                ch_num = "Book 00 - Art"
+            elif ch_num and ch_num.isdigit():
+                ch_num = f"Ch {ch_num.zfill(2)} - Art"
             
         if ch_num == "FM":
             ch_title = "Front matter"
         elif ch_num == "BM":
             ch_title = "Back matter"
+        elif ch_num == "Book 00 - Art":
+            ch_title = "Book 00 Art"
         elif ch_num.endswith(" - Art"):
             digits = ch_num.replace("Ch ", "").replace(" - Art", "")
             ch_title = f"Chapter {digits} Art"
@@ -10001,6 +10048,17 @@ def api_v2_finalize_mapping(
         pass
 
     shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # Clean up the staging mapping zip file now that mapping is finalized
+    try:
+        project_code = project.project_code or f"PRJ-{project.id}"
+        client_name = project.client_name or "unknown"
+        project_dir = os.path.join(file_service.UPLOAD_DIR, client_name, project_code)
+        saved_zip_path = os.path.join(project_dir, f"{project_code}_mapping.zip")
+        if os.path.exists(saved_zip_path):
+            os.remove(saved_zip_path)
+    except Exception:
+        pass
 
     # Count actual chapters created
     total_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()

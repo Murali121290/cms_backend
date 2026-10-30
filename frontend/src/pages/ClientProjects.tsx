@@ -263,7 +263,11 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
   useEffect(() => {
     if (!project.project_code) { setChLoading(false); return }
     chaptersApi.getByProject(project.project_code)
-      .then(setChapters)
+      .then(chs => setChapters((chs || []).filter(c => 
+        c.chapters !== 'Design' && 
+        c.chapters !== 'CE support' && 
+        !c.chapters.toLowerCase().includes('art')
+      )))
       .catch(() => { })
       .finally(() => setChLoading(false))
   }, [project.project_code])

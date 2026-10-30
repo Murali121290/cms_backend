@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Search
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Search, Trash2
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -621,9 +621,11 @@ interface ChapterCardProps {
   stageRolesMap: Map<string, string[]>
   onAssigneeChange: (chapter: Chapter, val: string) => Promise<boolean>
   onViewDetails: (chapter: Chapter) => void
+  onDelete?: (chapter: Chapter) => void
+  canDelete?: boolean
 }
 
-function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigneeChange, onViewDetails }: ChapterCardProps) {
+function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigneeChange, onViewDetails, onDelete, canDelete }: ChapterCardProps) {
   const [updating, setUpdating] = useState(false)
 
   const status = statusMeta(chapter.status)
@@ -662,6 +664,16 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
                 </span>
               )}
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${status.cls}`}>{status.label}</span>
+              {canDelete && onDelete && (
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); onDelete(chapter) }}
+                  title="Delete chapter"
+                  className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors ml-0.5"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
             </div>
             {delayed && (
               <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
@@ -891,6 +903,10 @@ export function ProjectWorkflow() {
   const [batchSelectedChapterIds, setBatchSelectedChapterIds] = useState<Set<number>>(new Set())
   const [batchTemplateId, setBatchTemplateId] = useState<number | ''>('')
 
+  // Chapter Deletion state
+  const [chapterToDelete, setChapterToDelete] = useState<Chapter | null>(null)
+  const [deletingChapter, setDeletingChapter] = useState(false)
+
   useEffect(() => {
     if (!groupProceedModalOpen || !groupProceedStage || selectedGroupProceedChapterIds.size === 0) {
       setGroupProceedConfig(null)
@@ -1056,9 +1072,14 @@ export function ProjectWorkflow() {
 
   // Get active workflow and stages based on the selected tab
   const activeWorkflowName = useMemo(() => {
-    if (activeTab === 'design') return designChapters[0]?.workflow || project?.workflow_name || ''
-    if (activeTab === 'art') return artChapters[0]?.workflow || project?.workflow_name || ''
-    return manuscriptChapters[0]?.workflow || project?.workflow_name || ''
+    const trackWorkflows = ((project?.file_details as Record<string, unknown> | null)?.track_workflows as Record<string, string> | undefined) || {}
+    if (activeTab === 'design') {
+      return designChapters[0]?.workflow || trackWorkflows.design || ''
+    }
+    if (activeTab === 'art') {
+      return artChapters[0]?.workflow || trackWorkflows.art || ''
+    }
+    return manuscriptChapters[0]?.workflow || trackWorkflows.manuscript || project?.workflow_name || ''
   }, [activeTab, designChapters, artChapters, manuscriptChapters, project])
 
   const orderedStages = useMemo(() => {
@@ -1472,6 +1493,39 @@ export function ProjectWorkflow() {
     const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num, 10).toString()) ?? cmsChapterIdMap.get(num.padStart(2, '0')) ?? null
     if (!cmsId) { toast.error(`Chapter "${num}" has no files yet.`); return }
     navigate(`${clientId ? `/clients/${clientId}/projects/${projectId}` : `/projects/${projectId}`}/chapters/${cmsId}`)
+  }
+
+  async function handleDeleteChapter() {
+    if (!chapterToDelete || !id) return
+    const targetCmsId = cmsChapterIdMap.get(chapterToDelete.chapters) ??
+      cmsChapterIdMap.get(parseInt(chapterToDelete.chapters, 10).toString()) ??
+      cmsChapterIdMap.get(chapterToDelete.chapters.padStart(2, '0')) ??
+      chapterToDelete.id
+
+    setDeletingChapter(true)
+    try {
+      await chaptersApi.delete(id, targetCmsId)
+      toast.success(`Chapter ${chapterToDelete.chapters} deleted successfully`)
+      // Refresh chapters from backend
+      const refreshed = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+      setChapters(refreshed)
+      // Refresh CMS chapter mappings
+      const refreshedCms = await projectsApi.getProjectChapters(id).catch(() => ({ project: null, chapters: [] }))
+      const m = new Map<string, number>()
+      for (const ch of refreshedCms.chapters || []) {
+        if (ch.number != null && ch.id != null) {
+          m.set(ch.number, ch.id)
+          m.set(ch.number.padStart(2, '0'), ch.id)
+          m.set(parseInt(ch.number, 10).toString(), ch.id)
+        }
+      }
+      setCmsChapterIdMap(m)
+      setChapterToDelete(null)
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || err.message || 'Failed to delete chapter')
+    } finally {
+      setDeletingChapter(false)
+    }
   }
 
   async function handleOpenCombineModal() {
@@ -1980,7 +2034,9 @@ export function ProjectWorkflow() {
                     plannedDueDates={plannedDueDates}
                     stageRolesMap={stageRolesMap}
                     onAssigneeChange={handleAssigneeChange}
-                    onViewDetails={openChapter} />
+                    onViewDetails={openChapter}
+                    canDelete={canAccess(['admin'])}
+                    onDelete={setChapterToDelete} />
                 ))}
               </div>
             )}
@@ -1995,7 +2051,19 @@ export function ProjectWorkflow() {
                     <div key={ch.id} onClick={() => openChapter(ch)} className={`bg-card rounded-xl border border-border shadow-sm hover:shadow-md transition-all flex flex-col gap-1.5 p-3 cursor-pointer ${cardBorderCls(ch)}`}>
                       <div className="flex items-center justify-between gap-1">
                         <span className="text-xs font-bold text-primary uppercase">{ch.chapters}</span>
-                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
+                        <div className="flex items-center gap-1">
+                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
+                          {canAccess(['admin']) && (
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); setChapterToDelete(ch) }}
+                              title="Delete chapter"
+                              className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <p className="text-xs font-medium text-text line-clamp-2 leading-snug">{ch.chapter_title || ch.chapters}</p>
                       {ch.stage_name && <span className="text-[9px] bg-primary/10 text-primary rounded px-1.5 py-0.5 w-fit font-semibold">{ch.stage_name}</span>}
@@ -2051,6 +2119,16 @@ export function ProjectWorkflow() {
                         stageRolesMap={stageRolesMap}
                       />
                       <span className={`text-xs flex-shrink-0 ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</span>
+                      {canAccess(['admin']) && (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setChapterToDelete(ch) }}
+                          title="Delete chapter"
+                          className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors flex-shrink-0"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                       <ChevronRight size={14} className="text-muted flex-shrink-0" />
                     </div>
                   )
@@ -2064,7 +2142,7 @@ export function ProjectWorkflow() {
                 <table className="w-full text-sm border-collapse min-w-max">
                   <thead>
                     <tr className="border-b border-border bg-surface">
-                      {['#', 'Title', 'Stage', 'Status', 'Assignee', 'Due Date', 'MS Pages', 'Delayed'].map(h => (
+                      {['#', 'Title', 'Stage', 'Status', 'Assignee', 'Due Date', 'MS Pages', 'Delayed', ...(canAccess(['admin']) ? ['Action'] : [])].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -2104,6 +2182,18 @@ export function ProjectWorkflow() {
                               ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">Delayed</span>
                               : <span className="text-[10px] text-muted">—</span>}
                           </td>
+                          {canAccess(['admin']) && (
+                            <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => setChapterToDelete(ch)}
+                                title="Delete chapter"
+                                className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       )
                     })}
@@ -2854,6 +2944,17 @@ export function ProjectWorkflow() {
 
         </div>
       </Modal>
+
+      {/* Delete Chapter Confirmation Modal */}
+      <Modal
+        isOpen={chapterToDelete !== null}
+        onClose={() => { if (!deletingChapter) setChapterToDelete(null) }}
+        onConfirm={handleDeleteChapter}
+        title="Delete Chapter"
+        description={`Are you sure you want to delete chapter "${chapterToDelete?.chapters}"? All associated files, pipeline artifacts, and workflow records will be permanently removed.`}
+        confirmLabel={deletingChapter ? "Deleting..." : "Delete"}
+        loading={deletingChapter}
+      />
 
     </div>
   )

@@ -1036,6 +1036,8 @@ async def delete_chapter(
     db: Session = Depends(database.get_db)
 ):
     if not user: return RedirectResponse(url="/login", status_code=302)
+    if "Admin" not in [r.name for r in user.roles]:
+        raise HTTPException(status_code=403, detail="Admin access required to delete chapters")
 
     chapter_result = chapter_service.delete_chapter_primary(
         db,

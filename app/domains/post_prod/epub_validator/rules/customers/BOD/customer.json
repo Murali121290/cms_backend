@@ -46,6 +46,14 @@
       "category": "XHTML Check"
     },
     {
+      "id": "CSS002",
+      "name": "CSS File Validation",
+      "target_path": "OEBPS/css",
+      "enabled": true,
+      "file_name_pattern": "*.css",
+      "category": "CSS Check"
+    },
+    {
       "id": "URL001",
       "name": "Internal Link Check",
       "target_path": "OEBPS/xhtml",
@@ -219,6 +227,129 @@
       "file_name_pattern": "*Contents.xhtml",
       "enabled": true,
       "category": "TOC Check"
+    },
+    {
+      "id": "COM-META-006",
+      "name": "accessMode Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "textual",
+          "visual"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-007",
+      "name": "accessModeSufficient Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "textual",
+          "textual,visual"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-008",
+      "name": "accessibilityFeature Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "pageBreakMarkers",
+          "alternativeText",
+          "ARIA",
+          "displayTransformability",
+          "readingOrder",
+          "structuralNavigation",
+          "highContrastDisplay",
+          "tableOfContents"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-011",
+      "name": "dcterms:conformsTo Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_text": "EPUB Accessibility 1.1 - WCAG 2.2 Level AA"
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-012",
+      "name": "a11y:certifiedBy Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_text": "Books on Demand",
+        "require_id": false
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-010",
+      "name": "accessibilityHazard Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "none"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-009",
+      "name": "accessibilitySummary Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_summary": "Dieses E-Book wurde gemäß der W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit geprüft. Es genügt den Anforderungen an Barrierefreiheit zu Inhaltsstruktur, semantischer Auszeichnung und Alternativtexten.",
+        "is_required": true
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-014",
+      "name": "tdm:reservation Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_value": "1"
+      },
+      "category": "Metadata Check"
     }
   ],
   "export": {
@@ -229,6 +360,8 @@
   },
   "category_order": [
     "STRUCTURE CHECK",
+    "METADATA CHECK",
+    "CSS CHECK",
     "XHTML CHECK",
     "IMAGE CHECK",
     "LINK CHECK",
