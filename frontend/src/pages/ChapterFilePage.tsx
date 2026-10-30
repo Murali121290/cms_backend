@@ -807,6 +807,7 @@ export function ChapterFilePage({
   const [globalFilter, setGlobalFilter] = useState('')
   const [showBulkUpload, setShowBulkUpload] = useState(false)
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<FileRow | null>(null)
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [generatingFigurePdf, setGeneratingFigurePdf] = useState(false)
   const [generatingAssessment, setGeneratingAssessment] = useState(false)
@@ -951,6 +952,37 @@ export function ChapterFilePage({
       void filesQuery.refetch()
     } catch {
       toast.error(`Failed to delete '${deleteConfirmRow.file_name}'`)
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  async function confirmBulkDelete() {
+    const targets = selectedRows.filter(r => r.db_id)
+    if (targets.length === 0) return
+    setDeleteLoading(true)
+    let successCount = 0
+    let failCount = 0
+    try {
+      await Promise.all(
+        targets.map(async r => {
+          try {
+            await deleteFile(r.db_id!)
+            successCount++
+          } catch {
+            failCount++
+          }
+        })
+      )
+      if (successCount > 0) {
+        toast.success(`${successCount} file${successCount > 1 ? 's' : ''} deleted successfully`)
+      }
+      if (failCount > 0) {
+        toast.error(`Failed to delete ${failCount} file${failCount > 1 ? 's' : ''}`)
+      }
+      setBulkDeleteConfirmOpen(false)
+      setRowSelection({})
+      void filesQuery.refetch()
     } finally {
       setDeleteLoading(false)
     }
@@ -1575,6 +1607,18 @@ export function ChapterFilePage({
           </button>
         )}
 
+        {/* Bulk Delete */}
+        {isAdminUser && activeFolder !== 'backup' && selectedCount > 0 && (
+          <button
+            onClick={() => setBulkDeleteConfirmOpen(true)}
+            disabled={deleteLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg transition-colors shadow-sm"
+          >
+            {deleteLoading ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+            Bulk Delete ({selectedCount})
+          </button>
+        )}
+
         {/* Refresh */}
         {filesQuery.data && (
           <button
@@ -1586,18 +1630,7 @@ export function ChapterFilePage({
           </button>
         )}
 
-        {/* Delete Chapter — Admin only */}
-        {isAdminUser && (
-          <button
-            type="button"
-            onClick={() => setDeleteChapterModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors shadow-sm"
-            title="Delete Chapter"
-          >
-            <Trash2 size={13} />
-            <span>Delete Chapter</span>
-          </button>
-        )}
+
 
         {/* Proceed */}
         {onProceed && (
@@ -1860,6 +1893,47 @@ export function ChapterFilePage({
               >
                 {deleteLoading ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete confirmation dialog */}
+      {bulkDeleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => !deleteLoading && setBulkDeleteConfirmOpen(false)}>
+          <div className="bg-card border border-border rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                <Trash2 size={16} className="text-red-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-text text-sm">Delete {selectedRows.length} files?</p>
+                <p className="text-xs text-muted mt-0.5">This action cannot be undone.</p>
+              </div>
+            </div>
+            <div className="max-h-48 overflow-y-auto mb-5 bg-surface rounded-lg p-2.5 space-y-1 divide-y divide-border/40 text-xs">
+              {selectedRows.map(r => (
+                <div key={r.file_id || r.file_name} className="py-1 px-1 font-mono text-text truncate">
+                  {r.file_name}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setBulkDeleteConfirmOpen(false)}
+                disabled={deleteLoading}
+                className="px-4 py-1.5 text-sm rounded-lg border border-border text-muted hover:text-text hover:border-text/20 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void confirmBulkDelete()}
+                disabled={deleteLoading}
+                className="px-4 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {deleteLoading ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                Delete {selectedRows.length} files
               </button>
             </div>
           </div>

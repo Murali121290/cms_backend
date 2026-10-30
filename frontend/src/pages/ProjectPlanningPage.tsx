@@ -936,7 +936,7 @@ export function ProjectPlanningPage() {
       >
         <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
           <div className="flex items-center gap-1.5">
-            <span>{ch.chapters === 'FM' ? 'Front matter' : ch.chapters === 'BM' ? 'Back matter' : /^[A-Za-z]$/.test(ch.chapters) ? `Appendix ${ch.chapters}` : /^\d+$/.test(ch.chapters) ? `Chapter ${ch.chapters}` : ch.chapters}</span>
+            <span>{ch.chapters === '00' ? 'Book 00' : ch.chapters === 'FM' ? 'Front matter' : ch.chapters === 'BM' ? 'Back matter' : /^[A-Za-z]$/.test(ch.chapters) ? `Appendix ${ch.chapters}` : /^\d+$/.test(ch.chapters) ? `Chapter ${ch.chapters}` : ch.chapters}</span>
             {(ch.revision ?? 1) > 1 && (
               <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
                 Rev {ch.revision}
@@ -1465,7 +1465,7 @@ export function ProjectPlanningPage() {
                 <div>
                   <h3 className="text-base font-semibold text-text">Adjustment History</h3>
                   <p className="text-xs text-muted">
-                    Chapter {viewingHistory.chapter} · {viewingHistory.stageName}
+                    {viewingHistory.chapter === '00' ? 'Book 00' : `Chapter ${viewingHistory.chapter}`} · {viewingHistory.stageName}
                   </p>
                 </div>
               </div>
