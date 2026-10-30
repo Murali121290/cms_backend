@@ -358,25 +358,23 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
                 const fullName = `${fn} ${ln}`.trim()
                 const label = fullName || u.user_name
                 const isSelected = value === u.user_name
-                
+
                 return (
                   <button
                     key={u.id}
                     type="button"
-                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                      isSelected 
-                        ? 'bg-primary/10 text-primary font-medium' 
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                        ? 'bg-primary/10 text-primary font-medium'
                         : 'text-foreground hover:bg-muted/40'
-                    }`}
+                      }`}
                     onClick={(e) => {
                       e.stopPropagation()
                       setIsOpen(false)
                       if (value !== u.user_name) onChange(u.user_name)
                     }}
                   >
-                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
-                      isSelected ? 'text-primary' : 'text-transparent'
-                    }`}>
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                      }`}>
                       {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
                       {!isSelected && <User size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
                     </div>
@@ -473,7 +471,7 @@ function FilterAssigneeDropdown({
               <span className="group-hover:translate-x-0.5 transition-transform duration-200">All Assignees</span>
             </button>
           </div>
-          
+
           <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
             {filteredOptions.length === 0 ? (
               <div className="text-[11px] text-muted-foreground px-2.5 py-3 text-center">No results found</div>
@@ -481,25 +479,23 @@ function FilterAssigneeDropdown({
               filteredOptions.map(u => {
                 const label = getUserDisplayName(u, users)
                 const isSelected = value === u
-                
+
                 return (
                   <button
                     key={u}
                     type="button"
-                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                      isSelected 
-                        ? 'bg-primary/10 text-primary font-medium' 
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                        ? 'bg-primary/10 text-primary font-medium'
                         : 'text-foreground hover:bg-muted/40'
-                    }`}
+                      }`}
                     onClick={(e) => {
                       e.stopPropagation()
                       setIsOpen(false)
                       if (value !== u) onChange(u)
                     }}
                   >
-                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
-                      isSelected ? 'text-primary' : 'text-transparent'
-                    }`}>
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                      }`}>
                       {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
                       {!isSelected && <User size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
                     </div>
@@ -576,7 +572,7 @@ function StageSelectDropdown({
               <span className="group-hover:translate-x-0.5 transition-transform duration-200">{placeholder}</span>
             </button>
           </div>
-          
+
           <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
             {stages.map(s => {
               const isSelected = value === s
@@ -584,20 +580,18 @@ function StageSelectDropdown({
                 <button
                   key={s}
                   type="button"
-                  className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                    isSelected 
-                      ? 'bg-primary/10 text-primary font-medium' 
+                  className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                      ? 'bg-primary/10 text-primary font-medium'
                       : 'text-foreground hover:bg-muted/40'
-                  }`}
+                    }`}
                   onClick={(e) => {
                     e.stopPropagation()
                     setIsOpen(false)
                     if (value !== s) onChange(s)
                   }}
                 >
-                  <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
-                    isSelected ? 'text-primary' : 'text-transparent'
-                  }`}>
+                  <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                    }`}>
                     {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
                     {!isSelected && <Layers size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
                   </div>
@@ -1151,8 +1145,8 @@ export function ProjectWorkflow() {
     if (!uName) return new Set()
     const myAssigned = activeChapters.filter(
       c => c.stage_name === stg &&
-           c.current_assignee_name &&
-           c.current_assignee_name.trim().toLowerCase() === uName.toLowerCase()
+        c.current_assignee_name &&
+        c.current_assignee_name.trim().toLowerCase() === uName.toLowerCase()
     )
     return new Set(myAssigned.map(c => c.id))
   }
@@ -1295,9 +1289,9 @@ export function ProjectWorkflow() {
           mode: 'style',
           options: processType === 'structuring'
             ? {
-                structuring_method: 'manual',
-                tag_set: (project?.client_name && (project.client_name.toLowerCase().includes('springer') || project.client_name.toLowerCase() === 'spr')) ? 'springer' : 'lww'
-              }
+              structuring_method: 'manual',
+              tag_set: (project?.client_name && (project.client_name.toLowerCase().includes('springer') || project.client_name.toLowerCase() === 'spr')) ? 'springer' : 'lww'
+            }
             : undefined
         })
       })
@@ -1681,15 +1675,13 @@ export function ProjectWorkflow() {
               </span>
             )}
           </div>
-          {!isBookProject && (
-            <button
-              onClick={openAddChapter}
-              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors shrink-0"
-            >
-              <Plus size={12} />
-              New Chapter
-            </button>
-          )}
+          <button
+            onClick={openAddChapter}
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors shrink-0"
+          >
+            <Plus size={12} />
+            New Chapter
+          </button>
           <button
             onClick={() => navigate(uiPaths.projectStylesheets(id))}
             title={activeStylesheet ? `Active: ${activeStylesheet.name}` : 'No active stylesheet'}
@@ -1732,8 +1724,8 @@ export function ProjectWorkflow() {
             setFilterStatus('')
           }}
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'manuscript'
-              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
-              : 'text-muted border-transparent hover:bg-accent/40'
+            ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+            : 'text-muted border-transparent hover:bg-accent/40'
             }`}
         >
           📚 Manuscripts ({manuscriptChapters.length})
@@ -1745,8 +1737,8 @@ export function ProjectWorkflow() {
             setFilterStatus('')
           }}
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'art'
-              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
-              : 'text-muted border-transparent hover:bg-accent/40'
+            ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+            : 'text-muted border-transparent hover:bg-accent/40'
             }`}
         >
           📐 Art Tracks ({artChapters.length})
@@ -1758,8 +1750,8 @@ export function ProjectWorkflow() {
             setFilterStatus('')
           }}
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'design'
-              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
-              : 'text-muted border-transparent hover:bg-accent/40'
+            ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+            : 'text-muted border-transparent hover:bg-accent/40'
             }`}
         >
           🎨 Design ({designChapters.length})
@@ -1797,7 +1789,7 @@ export function ProjectWorkflow() {
           </span>
 
           {/* Assignee filter */}
-          <FilterAssigneeDropdown 
+          <FilterAssigneeDropdown
             value={filterAssignee}
             onChange={setFilterAssignee}
             assigneeOptions={assigneeOptions}
@@ -1852,8 +1844,8 @@ export function ProjectWorkflow() {
               const uName = viewer?.username?.trim().toLowerCase()
               const assigned = activeChapters.filter(
                 c => c.stage_name === val &&
-                     c.current_assignee_name &&
-                     c.current_assignee_name.trim().toLowerCase() === uName
+                  c.current_assignee_name &&
+                  c.current_assignee_name.trim().toLowerCase() === uName
               )
               setSelectedGroupProceedChapterIds(new Set(assigned.map(c => c.id)))
             }}
