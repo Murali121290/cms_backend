@@ -1586,18 +1586,7 @@ export function ChapterFilePage({
           </button>
         )}
 
-        {/* Delete Chapter — Admin only */}
-        {isAdminUser && (
-          <button
-            type="button"
-            onClick={() => setDeleteChapterModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors shadow-sm"
-            title="Delete Chapter"
-          >
-            <Trash2 size={13} />
-            <span>Delete Chapter</span>
-          </button>
-        )}
+
 
         {/* Proceed */}
         {onProceed && (

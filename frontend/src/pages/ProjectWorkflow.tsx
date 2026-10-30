@@ -1043,6 +1043,9 @@ export function ProjectWorkflow() {
     .filter(c => c.chapters.toLowerCase().includes('art'))
     .sort(sortChapters), [chapters])
 
+  // Check if project has a complete book manuscript (00)
+  const isBookProject = useMemo(() => manuscriptChapters.some(c => c.chapters === '00'), [manuscriptChapters])
+
   const batchTargets = useMemo(() => {
     if (filterStage) {
       return manuscriptChapters.filter(c => c.stage_name === filterStage)
@@ -1667,22 +1670,26 @@ export function ProjectWorkflow() {
         {/* Right section: chapter counts + action buttons */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0 text-xs text-muted whitespace-nowrap">
           <div className="hidden sm:flex items-center gap-2 shrink-0">
-            <span className="flex items-center gap-1">
-              <BookOpen size={12} /> {summary.total} chapters
-            </span>
+            {!isBookProject && (
+              <span className="flex items-center gap-1">
+                <BookOpen size={12} /> {summary.total} chapters
+              </span>
+            )}
             {summary.complete > 0 && (
               <span className="flex items-center gap-1 text-emerald-600">
                 <CheckCircle2 size={12} /> {summary.complete} done
               </span>
             )}
           </div>
-          <button
-            onClick={openAddChapter}
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors shrink-0"
-          >
-            <Plus size={12} />
-            New Chapter
-          </button>
+          {!isBookProject && (
+            <button
+              onClick={openAddChapter}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors shrink-0"
+            >
+              <Plus size={12} />
+              New Chapter
+            </button>
+          )}
           <button
             onClick={() => navigate(uiPaths.projectStylesheets(id))}
             title={activeStylesheet ? `Active: ${activeStylesheet.name}` : 'No active stylesheet'}
