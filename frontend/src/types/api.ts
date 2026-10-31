@@ -649,7 +649,42 @@ export interface IATemplateRow {
   subtype: string;
   pattern: string;
   example: string | null;
+  /** CE checklist rule this row sets, and the option it implies. */
+  ce_rule_no?: number | null;
+  ce_option?: number | null;
 }
+
+export type CESeverity = "Critical" | "Major" | "Minor" | "Informational";
+
+/** One rule of the CE checklist catalog (CE_rules_tool_input.xlsx). */
+export interface CERule {
+  sno: number;
+  name: string;
+  group: string;
+  description: string;
+  options: string[];
+  handling: string;
+  behaviour: string;
+  severity: CESeverity;
+  needs: string;
+  notes: string;
+  source_point: number | null;
+  detectable: "auto" | "flag" | "manual";
+}
+
+export interface CERulesResponse {
+  rules: CERule[];
+}
+
+/** A stylesheet's setting for one checklist rule; omitted fields inherit. */
+export interface CERuleSetting {
+  enabled?: boolean;
+  option?: number | string;
+  severity?: CESeverity;
+  custom_template?: string;
+}
+
+export type CERuleSettings = Record<string, CERuleSetting>;
 
 export interface StylesheetSourceFile {
   id: number;
@@ -668,6 +703,8 @@ export interface StylesheetSummary {
   selected_ia_rows: IARow[];
   analyzed_file_ids: number[];
   source_files: StylesheetSourceFile[];
+  ce_rules?: CERuleSettings;
+  style_profile?: Record<string, unknown>;
 }
 
 export interface StylesheetsListResponse {
@@ -681,6 +718,8 @@ export interface StylesheetCreateRequest {
   description?: string | null;
   selected_ia_rows: IARow[];
   analyzed_file_ids?: number[];
+  ce_rules?: CERuleSettings;
+  style_profile?: Record<string, unknown>;
 }
 
 export interface StylesheetCreateResponse {
@@ -692,6 +731,8 @@ export interface StylesheetUpdateRequest {
   name?: string | null;
   description?: string | null;
   selected_ia_rows?: IARow[] | null;
+  ce_rules?: CERuleSettings | null;
+  style_profile?: Record<string, unknown> | null;
 }
 
 export interface StylesheetUpdateResponse {
@@ -720,6 +761,8 @@ export interface TriggeredIARule {
   pattern: string;
   count: number;
   example_surfaces: string[];
+  ce_rule_no?: number | null;
+  ce_option?: number | null;
 }
 
 export interface AnalyzeFilesForStylesheetResponse {

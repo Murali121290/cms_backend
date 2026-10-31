@@ -442,6 +442,30 @@ IA_TEMPLATE_ROWS: list[tuple[str, str, str, str | None]] = [
     # Ã¢â€â‚¬Ã¢â€â‚¬ Mechanical Editing Ã¢â‚¬â€ Bias Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     ("Bias terms", "Inclusive language", "Clinical jargon", "preemie Ã¢â€ â€™ premature infant"),
     ("Bias terms", "Inclusive language", "Death euphemisms", "passed away Ã¢â€ â€™ died"),
+    # CE checklist rules (CE_rules_tool_input.xlsx)
+    ('SI units', 'Units', 'Non-SI unit label', '10 sec → 10 s'),
+    ('SI units', 'Units', 'Non-SI unit (needs conversion)', '5 lb'),
+    ('SI units', 'Units', 'Ambiguous unit symbol', '25 C'),
+    ('Unit symbols', 'Units', 'Symbol case or form', '200 ML → 200 mL'),
+    ('Unit symbols', 'Units', 'Full stop after symbol', '5 kg. → 5 kg'),
+    ('Unit symbols', 'Units', 'No space before unit', '5mg → 5 mg'),
+    ('Unit symbols', 'Units', 'Micro prefix', '15 ug → 15 μg'),
+    ('Unit symbols', 'Units', 'Exponent not superscript', '5 m2 → 5 m²'),
+    ('Degree symbol', 'General', 'Degree look-alike (º)', '45º → 45°'),
+    ('Greek letters', 'General', 'Greek letter spelled out', 'TNF-alpha → TNF-α'),
+    ('Negative numbers', 'General', 'Hyphen as minus', '-5 → −5'),
+    ('Time zones', 'General', 'Time zone', '3 p.m. EST'),
+    ('Equations', 'General', 'Equation reference', 'Eq. 2 → Equation (2)'),
+    ('Chemical formulae', 'General', 'Formula without subscripts', 'CO2 → CO₂'),
+    ('Scientific notation', 'General', 'E notation', '1.2E5 → 1.2 × 10⁵'),
+    ('Scientific notation', 'General', 'x 10^n', '3 x 10^5 → 3 × 10⁵'),
+    ('Statistics', 'General', 'p-value format', 'p<0.05 → p < 0.05'),
+    ('Statistics', 'General', 'Statistical symbol spacing', 'n=24 → n = 24'),
+    ('Tolerance', 'General', '± spacing', '5±0.2 → 5 ± 0.2'),
+    ('Tolerance', 'General', '+/- for ±', '5 +/- 0.2 → 5 ± 0.2'),
+    ('Special characters', 'General', 'Corrupted character', None),
+    ('Placeholders', 'General', 'Placeholder text', 'TBD'),
+    ('Duplicate content', 'General', 'Repeated paragraph', None),
 ]
 
 
@@ -920,6 +944,30 @@ RULE_ID_TO_IA: dict[str, tuple[str, str, str]] = {
     # Ã¢â€â‚¬Ã¢â€â‚¬ Mechanical Editing Ã¢â‚¬â€ Bias Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     "clinical_jargon":        ("Bias terms", "Inclusive language", "Clinical jargon"),
     "death_euphemism":        ("Bias terms", "Inclusive language", "Death euphemisms"),
+    # CE checklist rules (CE_rules_tool_input.xlsx)
+    'si_nonsi_rename': ('SI units', 'Units', 'Non-SI unit label'),
+    'si_nonsi_convert': ('SI units', 'Units', 'Non-SI unit (needs conversion)'),
+    'si_ambiguous_symbol': ('SI units', 'Units', 'Ambiguous unit symbol'),
+    'unit_case_wrong': ('Unit symbols', 'Units', 'Symbol case or form'),
+    'unit_symbol_period': ('Unit symbols', 'Units', 'Full stop after symbol'),
+    'unit_space_missing': ('Unit symbols', 'Units', 'No space before unit'),
+    'micro_lookalike': ('Unit symbols', 'Units', 'Micro prefix'),
+    'unit_exp_plain': ('Unit symbols', 'Units', 'Exponent not superscript'),
+    'degree_lookalike': ('Degree symbol', 'General', 'Degree look-alike (º)'),
+    'greek_spelled': ('Greek letters', 'General', 'Greek letter spelled out'),
+    'negative_hyphen': ('Negative numbers', 'General', 'Hyphen as minus'),
+    'timezone_abbr': ('Time zones', 'General', 'Time zone'),
+    'equation_ref': ('Equations', 'General', 'Equation reference'),
+    'chem_formula_plain': ('Chemical formulae', 'General', 'Formula without subscripts'),
+    'sci_notation_e': ('Scientific notation', 'General', 'E notation'),
+    'sci_notation_x': ('Scientific notation', 'General', 'x 10^n'),
+    'stat_p_value': ('Statistics', 'General', 'p-value format'),
+    'stat_symbol': ('Statistics', 'General', 'Statistical symbol spacing'),
+    'plusminus_spacing': ('Tolerance', 'General', '± spacing'),
+    'plusminus_text': ('Tolerance', 'General', '+/- for ±'),
+    'special_char_corrupt': ('Special characters', 'General', 'Corrupted character'),
+    'placeholder_text': ('Placeholders', 'General', 'Placeholder text'),
+    'duplicate_paragraph': ('Duplicate content', 'General', 'Repeated paragraph'),
 }
 
 

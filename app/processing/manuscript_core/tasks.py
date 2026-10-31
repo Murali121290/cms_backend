@@ -38,9 +38,12 @@ def analyze_job(job_id: str, chapters: list[dict]) -> dict:
         return {"status": "failed", "job_id": job_id, "error": str(e)}
 
 
-def fix_job(job_id: str, selected_patterns: list[dict], findings: list[dict], chapters: list[dict]) -> dict:
-    """Apply fixes in background."""
+def fix_job(job_id: str, selected_patterns: list[dict], findings: list[dict], chapters: list[dict],
+            ce_rules: dict | None = None) -> dict:
+    """Apply fixes in background. `ce_rules` are the stylesheet's CE checklist settings."""
     try:
+        from manuscript_core.ia_selection import apply_ce_settings
+        apply_ce_settings(findings, selected_patterns, ce_rules)
         from manuscript_core.fixer import (
             build_fixes_from_selection,
             build_highlight_texts_from_selection,

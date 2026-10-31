@@ -47,6 +47,12 @@ export function FindReplaceMasterCard({
   const category = (activeOccurrence?.category || "te_point").toLowerCase();
   const paraIndex = activeOccurrence?.para_index ?? null;
   const replacementOptions: string[] = activeOccurrence?.replacement_options || [];
+  // CE checklist link (CE_rules_tool_input.xlsx): rule number, severity, and the
+  // workbook's three options with the literal text each would produce here.
+  const ceRuleNo: number | null = activeOccurrence?.ce_rule_no ?? null;
+  const ceSeverity: string = activeOccurrence?.ce_severity || "";
+  const ceOptions: string[] = activeOccurrence?.ce_options || [];
+  const ceOptionReplacements: Record<string, string | null> = activeOccurrence?.option_replacements || {};
 
   const handleApplyFix = () => {
     onReplaceAndNext(effectiveReplacement, true);
@@ -88,6 +94,29 @@ export function FindReplaceMasterCard({
           >
             {category === "te_point" ? "TE Point" : "Mechanical"}
           </span>
+          {ceRuleNo !== null && (
+            <span
+              className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-xs shrink-0 bg-slate-100 text-slate-700 border border-slate-200"
+              title={activeOccurrence?.ce_rule_name || ""}
+            >
+              R{ceRuleNo}
+            </span>
+          )}
+          {ceSeverity && (
+            <span
+              className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-xs shrink-0 border ${
+                ceSeverity === "Critical"
+                  ? "bg-rose-50 text-rose-800 border-rose-200"
+                  : ceSeverity === "Major"
+                    ? "bg-amber-50 text-amber-800 border-amber-200"
+                    : ceSeverity === "Minor"
+                      ? "bg-sky-50 text-sky-800 border-sky-200"
+                      : "bg-slate-50 text-slate-600 border-slate-200"
+              }`}
+            >
+              {ceSeverity}
+            </span>
+          )}
           {paraIndex !== null && (
             <span className="text-[10px] font-medium text-slate-400 shrink-0">
               Para {paraIndex}
@@ -225,6 +254,60 @@ export function FindReplaceMasterCard({
                   {opt || "(empty)"}
                 </button>
               ))}
+            </div>
+          )}
+
+          {ceOptions.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              {ceRuleNo === 6 && (
+                <div className="text-[10px] bg-amber-50 border border-amber-200 text-amber-900 rounded p-1.5 flex items-center gap-1">
+                  <span>💡</span>
+                  <span><strong>Style Tip:</strong> Use "percent" with numbers (25 percent); use "percentage" for general proportions without numbers.</span>
+                </div>
+              )}
+              {ceRuleNo === 14 && (
+                <div className="text-[10px] bg-amber-50 border border-amber-200 text-amber-900 rounded p-1.5 flex items-center gap-1">
+                  <span>💡</span>
+                  <span><strong>Style Tip:</strong> En dashes (10–15) should not be used if preceded by "from" or "between".</span>
+                </div>
+              )}
+              {ceRuleNo === 35 && (
+                <div className="text-[10px] bg-amber-50 border border-amber-200 text-amber-900 rounded p-1.5 flex items-center gap-1">
+                  <span>💡</span>
+                  <span><strong>Style Tip:</strong> Chicago & APA style require a trailing comma after "e.g.," and "i.e.,".</span>
+                </div>
+              )}
+              <span className="text-[10px] font-semibold text-slate-400">
+                Checklist R{ceRuleNo} options{activeOccurrence?.ce_query ? " (author query)" : ""}:
+              </span>
+              {ceOptions.map((text, i) => {
+                const literal = ceOptionReplacements[String(i + 1)];
+                const usable = typeof literal === "string" && literal !== "QUERY";
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    disabled={!usable}
+                    onClick={() => {
+                      if (!usable) return;
+                      onCustomReplacementChange(literal);
+                      onActionTypeChange("fix");
+                    }}
+                    title={usable ? `Use "${literal}"` : "This option needs an editor or author decision"}
+                    className={`block w-full text-left px-2 py-1 rounded text-[10px] border transition-colors ${
+                      usable && effectiveReplacement === literal
+                        ? "bg-emerald-50 text-emerald-900 border-emerald-300"
+                        : usable
+                          ? "bg-white hover:bg-slate-50 text-slate-700 border-slate-200 cursor-pointer"
+                          : "bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed"
+                    }`}
+                  >
+                    {i + 1}. {text}
+                    {usable && <span className="font-mono font-semibold"> → "{literal}"</span>}
+                    {literal === "QUERY" && <span className="italic"> (adds an author query)</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

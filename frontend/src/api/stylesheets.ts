@@ -1,6 +1,7 @@
 import { apiClient } from "@/api/client";
 import type {
   AnalyzeFilesForStylesheetResponse,
+  CERulesResponse,
   IATemplateResponse,
   StylesheetActivateResponse,
   StylesheetCreateRequest,
@@ -13,6 +14,11 @@ import type {
 
 export async function getIATemplate() {
   const response = await apiClient.get<IATemplateResponse>("/ia-template");
+  return response.data;
+}
+
+export async function getCeRules() {
+  const response = await apiClient.get<CERulesResponse>("/ce-rules");
   return response.data;
 }
 

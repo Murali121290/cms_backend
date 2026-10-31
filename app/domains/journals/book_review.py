@@ -95,6 +95,22 @@ def selected_ia_rows(db: Session, journal: Journal):
         return []
 
 
+def selected_ce_rules(db: Session, journal: Journal) -> dict:
+    """The CE checklist settings of the journal's active stylesheet, read-only. {} when none."""
+    import json
+    from app.domains.projects.models import Project, ProjectStylesheet
+    project = db.query(Project).filter(Project.project_code == f"JRNL-{journal.journal_code}"[:100]).first()
+    if project is None:
+        return {}
+    sheet = db.query(ProjectStylesheet).filter(ProjectStylesheet.project_id == project.id, ProjectStylesheet.is_active == True) \
+        .order_by(ProjectStylesheet.id.desc()).first()  # noqa: E712
+    try:
+        data = json.loads(getattr(sheet, "ce_rules", None) or "{}") if sheet else {}
+        return data if isinstance(data, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
 def save_journal_ia_rules(db: Session, journal: Journal, rows, user_id=None, name=None):
     """Replace the selected IA rows and make that stylesheet the project's only active one."""
     import json

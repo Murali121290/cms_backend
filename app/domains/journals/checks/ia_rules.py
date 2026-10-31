@@ -42,10 +42,11 @@ class IaRulesCheck(JournalCheck):
     name = "IA rules"
 
     def run(self, article, db) -> CheckResult:
-        from app.domains.journals.book_review import selected_ia_rows
+        from app.domains.journals.book_review import selected_ce_rules, selected_ia_rows
         from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
 
         rows = selected_ia_rows(db, article.journal)
+        ce_rules = selected_ce_rules(db, article.journal)
         if not rows:
             from app.domains.journals.book_review import ia_catalog, save_journal_ia_rules
             rows = ia_catalog()
@@ -57,7 +58,7 @@ class IaRulesCheck(JournalCheck):
         path = resolve_manuscript_path(db, article)
         if not path:
             raise FileNotFoundError("No manuscript DOCX is attached to this article")
-        findings = annotate_with_stylesheet(analyze_docx(path), rows)
+        findings = annotate_with_stylesheet(analyze_docx(path), rows, ce_rules=ce_rules)
         texts = {b.idx: b.text for b in load_blocks(path)}
 
         from app.domains.journals.pa_preediting import IA_TO_PA_MAPPING, PA_121_RULES_CATALOG

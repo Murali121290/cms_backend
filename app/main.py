@@ -148,6 +148,15 @@ def init_data():
             except Exception:
                 db.rollback()
 
+        # CE checklist settings on stylesheets (alembic 0060); added here too so the
+        # stylesheet queries keep working before the migration has been run.
+        for col in ["ce_rules", "style_profile"]:
+            try:
+                db.execute(text(f"ALTER TABLE project_stylesheets ADD COLUMN IF NOT EXISTS {col} VARCHAR DEFAULT '{{}}';"))
+                db.commit()
+            except Exception:
+                db.rollback()
+
         try:
             db.execute(text("ALTER TABLE users ALTER COLUMN team DROP NOT NULL;"))
             db.commit()

@@ -278,6 +278,28 @@ IA_TO_PA_MAPPING: Dict[str, int] = {
     "versus_v": 107,
     "versus_vs_dot": 107,
     "versus_v_dot": 107,
+    # CE checklist detectors (CE_rules_tool_input.xlsx)
+    "si_nonsi_rename": 1,
+    "si_nonsi_convert": 5,
+    "si_ambiguous_symbol": 5,
+    "unit_case_wrong": 2,
+    "unit_symbol_period": 2,
+    "micro_lookalike": 2,
+    "unit_space_missing": 3,
+    "unit_exp_plain": 10,
+    "degree_celsius": 6,
+    "degree_lookalike": 6,
+    "negative_hyphen": 8,
+    "times_letter": 9,
+    "chem_formula_plain": 39,
+    "stat_p_value": 7,
+    "stat_symbol": 7,
+    "plusminus_spacing": 7,
+    "plusminus_text": 7,
+    "sci_notation_e": 10,
+    "sci_notation_x": 10,
+    "timezone_abbr": 19,
+    "duplicate_paragraph": 88,
 }
 
 

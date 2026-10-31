@@ -61,6 +61,8 @@ class ProjectStylesheet(Base):
     description = Column(String, nullable=True)
     selected_ia_rows = Column(String, nullable=False, default="[]")
     analyzed_file_ids = Column(String, nullable=True, default="[]")  # JSON list of file IDs used to build this stylesheet
+    ce_rules = Column(String, nullable=True, default="{}")  # JSON {checklist S.No.: {enabled, option, severity}}
+    style_profile = Column(String, nullable=True, default="{}")  # JSON project style settings (language, units, ...)
     is_active = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(

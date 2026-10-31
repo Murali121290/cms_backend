@@ -842,11 +842,21 @@ class IATemplateRow(BaseModel):
     subtype: str
     pattern: str
     example: str | None = None
+    ce_rule_no: int | None = None
+    ce_option: int | None = None
 
 
 class StylesheetSourceFile(BaseModel):
     id: int
     filename: str
+
+
+class CERuleSetting(BaseModel):
+    """One checklist rule's settings in a stylesheet; omitted fields inherit."""
+    enabled: bool | None = None
+    option: int | str | None = None
+    severity: Literal["Critical", "Major", "Minor", "Informational"] | None = None
+    custom_template: str | None = None
 
 
 class StylesheetSummary(BaseModel):
@@ -861,6 +871,8 @@ class StylesheetSummary(BaseModel):
     selected_ia_rows: list[IARow] = Field(default_factory=list)
     analyzed_file_ids: list[int] = Field(default_factory=list)
     source_files: list[StylesheetSourceFile] = Field(default_factory=list)
+    ce_rules: dict[str, CERuleSetting] = Field(default_factory=dict)
+    style_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 class StylesheetCreateRequest(BaseModel):
@@ -868,6 +880,8 @@ class StylesheetCreateRequest(BaseModel):
     description: str | None = None
     selected_ia_rows: list[IARow] = Field(default_factory=list)
     analyzed_file_ids: list[int] = Field(default_factory=list)
+    ce_rules: dict[str, CERuleSetting] = Field(default_factory=dict)
+    style_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 class StylesheetCreateResponse(BaseModel):
@@ -880,6 +894,8 @@ class StylesheetUpdateRequest(BaseModel):
     description: str | None = None
     selected_ia_rows: list[IARow] | None = None
     analyzed_file_ids: list[int] | None = None
+    ce_rules: dict[str, CERuleSetting] | None = None
+    style_profile: dict[str, Any] | None = None
 
 
 class StylesheetUpdateResponse(BaseModel):
@@ -908,6 +924,26 @@ class IATemplateResponse(BaseModel):
     rows: list[IATemplateRow]
 
 
+class CERule(BaseModel):
+    """One rule of the CE checklist catalog (CE_rules_tool_input.xlsx)."""
+    sno: int
+    name: str
+    group: str
+    description: str = ""
+    options: list[str]
+    handling: str
+    behaviour: str
+    severity: str
+    needs: str = ""
+    notes: str = ""
+    source_point: int | None = None
+    detectable: Literal["auto", "flag", "manual"]
+
+
+class CERulesResponse(BaseModel):
+    rules: list[CERule]
+
+
 # ─── Stylesheet Analysis ──────────────────────────────────────────────────────
 
 
@@ -921,6 +957,8 @@ class TriggeredIARule(BaseModel):
     pattern: str
     count: int
     example_surfaces: list[str] = Field(default_factory=list)
+    ce_rule_no: int | None = None
+    ce_option: int | None = None
 
 
 class AnalyzeFilesForStylesheetResponse(BaseModel):

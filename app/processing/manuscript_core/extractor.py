@@ -75,7 +75,13 @@ REFERENCE_HEADING_PATTERNS = [
     re.compile(r"^\s*selected\s+references?\s*$", re.IGNORECASE),
     re.compile(r"^\s*references?\s+cited\s*$", re.IGNORECASE),
     re.compile(r"^\s*endnotes?\s*$", re.IGNORECASE),
+    re.compile(r"^\s*(?:suggested|recommended|further)\s+readings?\s*$", re.IGNORECASE),
+    re.compile(r"^\s*sources?\s*:?\s*$", re.IGNORECASE),
 ]
+# Leading structuring tags such as "<REF>" or "<BXAPP_H1>" in pre-tagged manuscripts.
+_LEADING_TAGS_RE = re.compile(r"^(?:\s*</?[A-Za-z][\w.-]*>)+")
+# A closing box tag or a new heading ends a reference list that sits inside a box.
+_REFERENCE_BLOCK_END_RE = re.compile(r"^\s*(?:</[A-Za-z][\w.-]*>|<H\d)", re.IGNORECASE)
 
 # Straight + smart quote pairs. We mask text *between* them.
 QUOTE_PAIRS = [
@@ -330,8 +336,11 @@ def _classify_paragraph(style_name: str, text: str) -> tuple[bool, str]:
 
 
 def _is_reference_heading(text: str) -> bool:
+    if text.lstrip().upper().startswith("<REF>"):
+        return True
+    bare = _LEADING_TAGS_RE.sub("", text).strip()
     for pat in REFERENCE_HEADING_PATTERNS:
-        if pat.match(text.strip()):
+        if pat.match(bare):
             return True
     return False
 
@@ -428,6 +437,8 @@ def extract_segments(
                 in_reference_block = False
                 current_region = "body"
             elif re.match(r"^\s*(?:figure|table|box)\b", text, re.IGNORECASE):
+                in_reference_block = False
+            elif _REFERENCE_BLOCK_END_RE.match(text):
                 in_reference_block = False
 
         # Reference heading detection â€” everything after this is a reference zone.

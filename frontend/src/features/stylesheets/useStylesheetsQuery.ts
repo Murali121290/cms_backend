@@ -4,6 +4,7 @@ import {
   analyzeFilesForStylesheet,
   createStylesheet,
   deleteStylesheet,
+  getCeRules,
   getIATemplate,
   getProjectStylesheets,
   updateStylesheet,
@@ -23,6 +24,14 @@ export function useIATemplateQuery() {
   return useQuery({
     queryKey: ["ia-template"],
     queryFn: getIATemplate,
+    staleTime: Infinity,
+  });
+}
+
+export function useCeRulesQuery() {
+  return useQuery({
+    queryKey: ["ce-rules"],
+    queryFn: getCeRules,
     staleTime: Infinity,
   });
 }

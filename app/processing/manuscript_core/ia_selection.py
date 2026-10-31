@@ -1,8 +1,9 @@
 """Match technical-review findings to a selection of IA template rows (a project or journal style sheet).
 
-Used by the book Technical Review API (to mark findings `in_stylesheet`) and by the journal
-Pre-Editing IA rules step (to keep only the selected rules). Also applies the selection's
-preferred forms to range and thousand-separator replacements.
+Used by the book Technical Review API (to mark findings `in_stylesheet`), by the fix job, and by
+the journal Pre-Editing IA rules step (to keep only the selected rules). Also applies the
+stylesheet's CE checklist settings (option, on/off, severity) to every checklist finding, and the
+selection's preferred forms to range and thousand-separator replacements.
 """
 import re
 from typing import Dict, Iterable, List, Optional
@@ -25,11 +26,51 @@ def _rule_id_to_ia(rule_id_to_ia: Optional[Dict]) -> Dict:
             return {}
 
 
-def annotate_with_stylesheet(findings: List[dict], selected_rows: Iterable[dict], rule_id_to_ia: Optional[Dict] = None) -> List[dict]:
-    """Set finding["in_stylesheet"] for each finding and apply the preferred range / thousand-separator forms.
+def _ce_rules_module():
+    try:
+        from app.processing.manuscript_core.rules import ce_rules
+    except ImportError:
+        from manuscript_core.rules import ce_rules  # type: ignore
+    return ce_rules
+
+
+def apply_ce_settings(findings: List[dict], selected_rows: Iterable[dict] = (), ce_rules: Optional[dict] = None) -> List[dict]:
+    """Re-pick the replacement of every checklist finding from the stylesheet's CE settings.
+
+    Findings are the cached scan dicts; only those with a `ce_rule_no` change. A rule switched
+    off gets `ce_enabled=False` and no replacement; a review-only or query option gets no
+    replacement (the finding is highlighted) and `ce_query` when the option is an author query.
+    """
+    ce = _ce_rules_module()
+    resolved = ce.resolve_ce_config(list(selected_rows or []), ce_rules or {})
+    for f in findings:
+        sno = f.get("ce_rule_no")
+        if not sno:
+            continue
+        choice = ce.choose_replacement(
+            f.get("surface", ""), sno, f.get("option_replacements") or {},
+            resolved=resolved, ce_steps=f.get("ce_steps"),
+        )
+        f["ce_enabled"] = choice["enabled"]
+        f["ce_option"] = choice["option"]
+        f["ce_severity"] = choice["severity"]
+        f["ce_query"] = choice["query"]
+        f["replacement"] = choice["replacement"]
+    return findings
+
+
+def annotate_with_stylesheet(
+    findings: List[dict],
+    selected_rows: Iterable[dict],
+    rule_id_to_ia: Optional[Dict] = None,
+    ce_rules: Optional[dict] = None,
+) -> List[dict]:
+    """Set finding["in_stylesheet"] for each finding and apply the stylesheet's preferred forms.
 
     A finding matches when its rule maps to a selected (element, subtype, pattern) row, or, as a
-    fallback, when its category equals a selected row's subtype. Mutates and returns `findings`.
+    fallback, when its category equals a selected row's subtype. Checklist findings take their
+    replacement from the stylesheet's CE settings, and a checklist rule switched off is never
+    in the stylesheet. Mutates and returns `findings`.
     """
     rows = list(selected_rows or [])
     exact = {(r.get("element"), r.get("subtype"), r.get("pattern")) for r in rows}
@@ -44,12 +85,19 @@ def annotate_with_stylesheet(findings: List[dict], selected_rows: Iterable[dict]
             matched = bool(cat and cat in subtypes)
         f["in_stylesheet"] = matched
 
+    apply_ce_settings(findings, rows, ce_rules)
+    for f in findings:
+        if f.get("ce_rule_no") and not f.get("ce_enabled", True):
+            f["in_stylesheet"] = False
+
     preferred: Dict[str, set] = {}
     for r in rows:
         if r.get("element") and r.get("pattern"):
             preferred.setdefault(r["element"], set()).add(r["pattern"])
 
     for f in findings:
+        if f.get("ce_rule_no"):
+            continue  # ranges (R14) and thousands (R11) follow the CE option instead
         rule_id, surface = f.get("rule_id", ""), f.get("surface", "")
         if rule_id in RANGE_RULES and preferred.get("Ranges"):
             pref = next(iter(preferred["Ranges"])).lower()

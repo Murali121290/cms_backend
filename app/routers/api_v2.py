@@ -2675,16 +2675,32 @@ def api_v2_ia_template(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
-    # pyrefly: ignore [missing-import]
     from app.data.ia_template_rows import IA_TEMPLATE_ROWS
-    return schemas_v2.IATemplateResponse(
-        rows=[
-            schemas_v2.IATemplateRow(
-                element=row[0], subtype=row[1], pattern=row[2], example=row[3]
-            )
-            for row in IA_TEMPLATE_ROWS
-        ]
-    )
+    from app.processing.manuscript_core.rules.ce_rules import IA_ROW_TO_CE
+    rows = []
+    for element, subtype, pattern, example in IA_TEMPLATE_ROWS:
+        ce_rule_no, ce_option = IA_ROW_TO_CE.get((element, pattern), (None, None))
+        rows.append(schemas_v2.IATemplateRow(
+            element=element, subtype=subtype, pattern=pattern, example=example,
+            ce_rule_no=ce_rule_no, ce_option=ce_option,
+        ))
+    return schemas_v2.IATemplateResponse(rows=rows)
+
+
+@router.get("/ce-rules", response_model=schemas_v2.CERulesResponse)
+def api_v2_ce_rules(
+    user=Depends(get_current_user_from_cookie),
+):
+    """The CE checklist catalog (72 technical-editing rules) for the stylesheet editor."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    from app.processing.manuscript_core.rules.ce_rules import load_catalog
+    return schemas_v2.CERulesResponse(rules=[schemas_v2.CERule(**r) for r in load_catalog()])
 
 
 @router.get(
@@ -2753,6 +2769,8 @@ def api_v2_create_stylesheet(
         selected_ia_rows=payload.selected_ia_rows,
         created_by_id=viewer.id,
         analyzed_file_ids=payload.analyzed_file_ids,
+        ce_rules=payload.ce_rules,
+        style_profile=payload.style_profile,
     )
     return schemas_v2.StylesheetCreateResponse(
         stylesheet=stylesheet_service._serialize_stylesheet(ss, db=db)
@@ -2785,6 +2803,8 @@ def api_v2_update_stylesheet(
         description=payload.description,
         selected_ia_rows=payload.selected_ia_rows,
         analyzed_file_ids=payload.analyzed_file_ids,
+        ce_rules=payload.ce_rules,
+        style_profile=payload.style_profile,
     )
     if not ss:
         return _error_response(
@@ -2956,6 +2976,7 @@ def api_v2_analyze_files_for_stylesheet(
                     triggered_rules_map[key]["example_surfaces"].append(surface)
 
     # Convert to list of TriggeredIARule, sorted by count DESC
+    from app.processing.manuscript_core.rules.ce_rules import IA_ROW_TO_CE
     triggered_rules = [
         schemas_v2.TriggeredIARule(
             element=key[0],
@@ -2963,6 +2984,8 @@ def api_v2_analyze_files_for_stylesheet(
             pattern=key[2],
             count=data["count"],
             example_surfaces=data["example_surfaces"],
+            ce_rule_no=IA_ROW_TO_CE.get((key[0], key[2]), (None, None))[0],
+            ce_option=IA_ROW_TO_CE.get((key[0], key[2]), (None, None))[1],
         )
         for key, data in triggered_rules_map.items()
     ]
@@ -5795,7 +5818,19 @@ def api_v2_technical_scan(
             except (json.JSONDecodeError, TypeError):
                 selected_rows = []
             # rule_id_to_ia is embedded in the cached scan result; the helper imports it otherwise.
-            annotate_with_stylesheet(findings, selected_rows, raw_scan.get("ia_report", {}).get("rule_id_to_ia"))
+            annotate_with_stylesheet(
+                findings, selected_rows, raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
+                ce_rules=stylesheet_service.stylesheet_ce_rules(selected_stylesheet),
+            )
+    elif findings and file_record and file_record.project_id and active_stylesheet:
+        # No stylesheet chosen on the page: the project's active stylesheet decides the
+        # CE checklist options, so switching stylesheets needs no re-scan.
+        from app.processing.manuscript_core.ia_selection import apply_ce_settings
+        apply_ce_settings(
+            findings,
+            [row.model_dump() for row in active_stylesheet.selected_ia_rows],
+            {k: v.model_dump(exclude_none=True) for k, v in active_stylesheet.ce_rules.items()},
+        )
 
     # Ensure inconsistencies is a dict (convert list to dict if needed)
     inconsistencies_data = raw_scan.get("inconsistencies", {})
