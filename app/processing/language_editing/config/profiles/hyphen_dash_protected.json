@@ -1,0 +1,787 @@
+{
+  "_meta": {
+    "generated_by": "scripts/import_hyphen_dash_workbook.py",
+    "source_file": "hyphen_dash_wb.xlsx",
+    "source_sha256": "3d81ce61f0cbffce8698fe620f2d8f1e57805136c92fab1944cb1cd82f0368aa"
+  },
+  "literals": [
+    {
+      "id": "PR-001",
+      "note": "MW headword",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "COVID-19",
+      "type": "Name"
+    },
+    {
+      "id": "PR-002",
+      "note": "Virus name",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "SARS-CoV-2",
+      "type": "Name"
+    },
+    {
+      "id": "PR-003",
+      "note": "Virus type",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "HIV-1",
+      "type": "Name"
+    },
+    {
+      "id": "PR-004",
+      "note": "Virus type",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "HIV-2",
+      "type": "Name"
+    },
+    {
+      "id": "PR-005",
+      "note": "Marker",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "CD4",
+      "type": "Name"
+    },
+    {
+      "id": "PR-006",
+      "note": "Interleukin name",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "IL-6",
+      "type": "Name"
+    },
+    {
+      "id": "PR-007",
+      "note": "Cytokine name",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "TNF-α",
+      "type": "Name"
+    },
+    {
+      "id": "PR-008",
+      "note": "Enzyme name",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "COX-2",
+      "type": "Name"
+    },
+    {
+      "id": "PR-009",
+      "note": "Antigen name",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "HLA-DR",
+      "type": "Name"
+    },
+    {
+      "id": "PR-010",
+      "note": "Classification",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "ICD-10",
+      "type": "Code"
+    },
+    {
+      "id": "PR-011",
+      "note": "Classification",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "ICD-10-CM",
+      "type": "Code"
+    },
+    {
+      "id": "PR-012",
+      "note": "Manual edition",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "DSM-5",
+      "type": "Code"
+    },
+    {
+      "id": "PR-013",
+      "note": "Manual edition",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "DSM-IV-TR",
+      "type": "Code"
+    },
+    {
+      "id": "PR-014",
+      "note": "MW headword",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "Wi-Fi",
+      "type": "Name"
+    },
+    {
+      "id": "PR-015",
+      "note": "Surname with a hyphen",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "Kübler-Ross",
+      "type": "Name"
+    },
+    {
+      "id": "PR-016",
+      "note": "Given name with a hyphen",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "Jean-Paul",
+      "type": "Name"
+    },
+    {
+      "id": "PR-028",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "acid-base balance",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-029",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "acid-base balances",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-030",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "anti-DVT",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-031",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "antigen-antibody",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-032",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "anti-inflammatory",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-033",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "assist-control",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-034",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "at-risk",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-035",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "blood-brain",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-036",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "by-product",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-037",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "by-products",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-038",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "calcium-phosphorus",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-039",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "certified nurse-midwife",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-040",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "Drive-through",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-041",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "dual-energy",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-042",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "end-tidal",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-043",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "follow-up",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-044",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "follow-ups",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-045",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "in-hospital",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-046",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "live-born",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-047",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "long-arm cast",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-048",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "long-term",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-049",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "night-light",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-050",
+      "note": "Already the form in the LWW workbook. Not protected under the Chicago-AMA-APA profile (en dash form)",
+      "origin": "LWW workbook",
+      "style_profile": "mw_dictionary",
+      "term_or_pattern": "non-small cell",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-051",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "small-cell",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-052",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "one-half",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-053",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "over-the-counter",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-054",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "partial-thickness",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-055",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "peel-away",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-056",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "post-traumatic",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-057",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "pursed-lip",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-058",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "renin-angiotensin",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-059",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "rural-urban",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-060",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "shelter-in-place",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-061",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "short-leg cast",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-062",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "short-leg",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-063",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "short-lived",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-064",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "sodium-potassium",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-065",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "soft-tissue",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-066",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "stay-at-home",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-067",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "t-test",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-068",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "third-party",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-069",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "tonic-clonic",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-070",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "transfusion-related",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-071",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "ventilation-perfusion",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-072",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "ventilation-perfusions",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-073",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "weight-bearing",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-074",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "weight-bearings",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-075",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "x-ray study",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-076",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "x-ray studies",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-077",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "yin-yang theory",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-078",
+      "note": "Already the form in the LWW workbook",
+      "origin": "LWW workbook",
+      "style_profile": "all",
+      "term_or_pattern": "yin-yang theories",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-079",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "CD-ROM",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-080",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "attention-deficit",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-081",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "DSM-IV",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-082",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "e-reader",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-083",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "e-readers",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-084",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "full-time",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-085",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "gram-positive",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-086",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "gram-negative",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-087",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "short-term",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-088",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "middle-range theories",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-089",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "middle-range theory",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-090",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "NCLEX-PN",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-091",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "NCLEX-RN",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-092",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "small-cell lung",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-093",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "school-age",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-094",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "time-consuming",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-095",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "warm-up",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-096",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "warm-ups",
+      "type": "Correct hyphenated form"
+    },
+    {
+      "id": "PR-097",
+      "note": "Already the form in the Springer workbook",
+      "origin": "Springer workbook",
+      "style_profile": "all",
+      "term_or_pattern": "x-ray",
+      "type": "Correct hyphenated form"
+    }
+  ],
+  "patterns": [
+    {
+      "id": "PR-017",
+      "note": "Hyphens and dashes inside web addresses",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "(?i)\\bhttps?://\\S+|\\bwww\\.\\S+",
+      "type": "URL"
+    },
+    {
+      "id": "PR-018",
+      "note": "Hyphens inside email addresses",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "[\\w.+-]+@[\\w-]+\\.[\\w.-]+",
+      "type": "Email address"
+    },
+    {
+      "id": "PR-019",
+      "note": "Digits and hyphens inside a DOI",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "\\b10\\.\\d{4,9}/[^\\s]+",
+      "type": "DOI"
+    },
+    {
+      "id": "PR-020",
+      "note": "ISBN-10 and ISBN-13",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "\\b(?:ISBN(?:-1[03])?:?\\s*)?(?:97[89][- ]?)?\\d{1,5}[- ]?\\d{1,7}[- ]?\\d{1,7}[- ]?[\\dXx]\\b",
+      "type": "ISBN"
+    },
+    {
+      "id": "PR-021",
+      "note": "ISSN",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "\\bISSN:?\\s*\\d{4}-\\d{3}[\\dXx]\\b",
+      "type": "ISSN"
+    },
+    {
+      "id": "PR-022",
+      "note": "2024-05-12",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "\\b\\d{4}-\\d{2}-\\d{2}\\b",
+      "type": "ISO date"
+    },
+    {
+      "id": "PR-023",
+      "note": "Phone and fax numbers",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "\\b(?:\\+?\\d{1,3}[- ])?\\(?\\d{3}\\)?[- ]\\d{3,4}(?:[- ]\\d{4})?\\b",
+      "type": "Phone number"
+    },
+    {
+      "id": "PR-024",
+      "note": "Flags such as --help and -v",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "(?<=\\s)--?[A-Za-z][\\w-]*",
+      "type": "Command-line option"
+    },
+    {
+      "id": "PR-025",
+      "note": "IL-6, HLA-DR4, COX-2",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "\\b[A-Z]{2,}-\\d+[A-Za-z]?\\b",
+      "type": "Gene or protein symbol with hyphen"
+    },
+    {
+      "id": "PR-026",
+      "note": "Content in Word field codes or braces",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "(?s)\\{[^}]*\\}",
+      "type": "Reference list or field code"
+    },
+    {
+      "id": "PR-027",
+      "note": "2-methylpropane, 1,3-butadiene",
+      "origin": "New (this workbook)",
+      "style_profile": "all",
+      "term_or_pattern": "\\b\\d+(?:,\\d+)*-[A-Za-z]+",
+      "type": "Chemical or drug locant"
+    }
+  ]
+}

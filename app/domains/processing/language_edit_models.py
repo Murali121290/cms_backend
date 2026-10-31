@@ -50,6 +50,11 @@ class LanguageEditFinding(Base):
     source = Column(String(16), nullable=False, default="rule", server_default="rule", index=True)
     term_list_id = Column(Integer, ForeignKey("term_lists.id", ondelete="SET NULL"),
                           nullable=True, index=True)
+    # Alternate replacements offered by the hyphen/dash workbook rules (Dash_Rules
+    # Suggestion 2 and Detect_List Suggestion 2/3). The primary suggestion stays
+    # in ``suggestion`` so every existing reader keeps working; this column is
+    # populated only for rules that ship alternates.
+    alt_suggestions = Column(JSON, nullable=True)
 
 
 class ProjectLanguageRules(Base):
@@ -65,6 +70,16 @@ class ProjectLanguageRules(Base):
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"),
                         unique=True, nullable=False, index=True)
     profile_key = Column(String(64), nullable=False, default="uk", server_default="uk")
+    # Orthogonal to profile_key / profile_keys. The hyphen/dash workbook ships
+    # its own style profiles (``all`` | ``mw_dictionary`` | ``chicago_ama_apa``)
+    # that don't align with the existing UK/US/AMA axis. Nullable + no server
+    # default so legacy rows read as "unset" and the service layer applies
+    # ``all`` as the backward-compatible default.
+    dash_profile = Column(String(32), nullable=True)
+    # Scope C: sparse per-rule overrides keyed by rule ID. Entries look like
+    # ``{"HY-0001": {"enabled": false, "tool_behaviour": "flag"}, ...}``.
+    # Absent key → use the rule's default. NULL on the row → no overrides.
+    rule_overrides = Column(JSON, nullable=True)
     rules = Column(JSON, nullable=False)
     variant_to_canonical = Column(JSON, nullable=True)
     name = Column(String(255), nullable=True)

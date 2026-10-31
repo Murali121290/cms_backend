@@ -725,3 +725,177 @@ def test_screenshot_false_positives_do_not_leak_into_other_categories(sc):
             assert f.original.lower() not in {"psychodynamic", "wellbeing", "apps"}, (
                 f"finding for {f.original!r} leaked into {f.category!r}"
             )
+
+
+# --- Follow-up user-reported false positives -----------------------------
+#
+# Second production pass surfaced two more valid English words being
+# flagged with nearest-neighbour suggestions. Same underlying cause as
+# before (pyspellchecker's small base dict is lemma-oriented), different
+# missing bits of morphology:
+#   * reductionistic -> reductionist : `-ic` adjective built on an `-ist`
+#                                       noun; needed `-ic` suffix stripping.
+#   * destigmatizing -> stigmatizing : `de-` prefix form; needed `de`
+#                                       added to the PREFIXES tuple.
+
+
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        # Reported.
+        ("A reductionistic model of the mind.", "reductionistic"),
+        ("The destigmatizing campaign ran successfully.", "destigmatizing"),
+        # Same mechanism (-ic on -ist/-ion noun root).
+        ("A conformistic worldview spread.", "conformistic"),
+        # Same mechanism (de- prefix on known base word).
+        ("A destigmatize initiative was launched.", "destigmatize"),
+        # Other `de-` + known-base derivations.
+        ("A deactivation sequence ran.", "deactivation"),
+        # trans- / pro- / fore- / mid- prefixes on known bases.
+        ("A transnational agreement was signed.", "transnational"),
+        ("A proactive step prevented the issue.", "proactive"),
+        ("The forewarn signal came early.", "forewarn"),
+    ],
+)
+def test_second_round_false_positives_no_longer_flagged(sc, sentence, word):
+    """Valid English derivation — reported in the second production pass
+    after the first fix shipped. Must NOT be flagged just because a
+    nearest-neighbour candidate exists."""
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word not in flagged, (
+        f"valid English {word!r} must not be flagged; findings: {flagged}"
+    )
+
+
+def test_reductionistic_not_swapped_for_reductionist(sc):
+    """Lock-in: `.candidates('reductionistic')` returns `reductionist`.
+    The pipeline must not turn that into a finding — both are valid
+    English and the author's choice stands."""
+    out = sc_mod.spell_check_paragraph("A reductionistic model.", sc)
+    for f in out:
+        assert f.original.lower() != "reductionistic", (
+            f"`reductionistic` must not be swapped (suggestion was {f.suggestion!r})"
+        )
+
+
+def test_destigmatizing_not_swapped_for_stigmatizing(sc):
+    """Lock-in: pyspell knows `stigmatizing` and `.candidates(...)` returns
+    it. The `de-` prefix handling must prevent a suggestion from being
+    emitted — reversing the author's semantics would be a wrong edit."""
+    out = sc_mod.spell_check_paragraph("The destigmatizing campaign.", sc)
+    for f in out:
+        assert f.original.lower() != "destigmatizing", (
+            f"`destigmatizing` must not be swapped (suggestion was {f.suggestion!r})"
+        )
+
+
+# Guard: the two new morphology rules must not mask genuine typos.
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        # Genuine typos — none decompose into known base + the newly-added
+        # prefixes/suffixes.
+        ("Please recieve the box.", "recieve"),
+        ("The enviroment is dirty.", "enviroment"),
+        ("teh dog ran outside.", "teh"),
+        ("An ichill reaction formed.", "ichill"),
+    ],
+)
+def test_new_prefix_and_suffix_rules_do_not_mask_typos(sc, sentence, word):
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word in flagged, (
+        f"typo {word!r} must still fire after the new morphology rules; "
+        f"flagged={flagged}"
+    )
+
+
+# --- Third-round false positives: scientific compounds -------------------
+#
+# Reported from a geology/materials-science manuscript, paragraph 205:
+#   `pseudomorphic` flagged with `-> pedomorphic (alt: pseudomorphine)`.
+# Root cause: pyspell's lemma-oriented base dict carries the full
+# compounds (`polymorphic`, `isomorphic`, `monomorphic`,
+# `anthropomorphism`, …) but NOT the standalone `-morph-` combining-form
+# stems (`morph`, `morphic`, `morphism`, `morphous`), nor several
+# equally-productive learned prefixes it misses alongside the ones it has
+# (`bio`, `nano`, `neuro`, `cyto`, `thermo`, …). The compound-of-known
+# rule already splits `pseudomorphic -> pseudo + morphic`; the fix is to
+# fill the lemma gap in `_EXTRA_KNOWN_WORDS` so the right half resolves.
+
+
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        # Reported — primary case.
+        ("A pseudomorphic layer formed on the substrate.", "pseudomorphic"),
+        # Same `-morph-` family — same mechanism must cover siblings.
+        ("The crystal shows a clear pseudomorph.", "pseudomorph"),
+        ("Pseudomorphism is well-documented in metamorphic rocks.", "pseudomorphism"),
+        ("A pseudomorphous replacement occurred.", "pseudomorphous"),
+        # Other productive-prefix + known-root scientific compounds.
+        ("The biomolecular assembly was stable.", "biomolecular"),
+        ("A nanoscale defect disrupted the lattice.", "nanoscale"),
+        ("The neurotoxic effect was reversible.", "neurotoxic"),
+        ("A thermolabile protein denatured at 40 C.", "thermolabile"),
+        ("A cryogenic trap captured the gas.", "cryogenic"),
+    ],
+)
+def test_scientific_compounds_not_flagged(sc, sentence, word):
+    """Valid scientific compound terminology must not be flagged just
+    because the compound itself isn't in pyspell's small base dict —
+    `<productive-prefix> + <known-root>` resolves via compound-of-known
+    after the lemma-gap fix in `_EXTRA_KNOWN_WORDS`."""
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word not in flagged, (
+        f"valid scientific term {word!r} must not be flagged; findings: {flagged}"
+    )
+
+
+def test_pseudomorphic_not_swapped_for_pedomorphic(sc):
+    """Lock-in for the reported case: pyspell's `.candidates('pseudomorphic')`
+    at distance 2 ranks `pedomorphic` / `pseudomorphine` as neighbours.
+    The pipeline must not turn either suggestion into a finding — reversing
+    `pseudomorphic` to `pedomorphic` would be a semantically wrong edit."""
+    out = sc_mod.spell_check_paragraph(
+        "The pseudomorphic film grew epitaxially.", sc)
+    for f in out:
+        assert f.original.lower() != "pseudomorphic", (
+            f"`pseudomorphic` must not be swapped (suggestion was {f.suggestion!r})"
+        )
+
+
+# Guard: the new extras must not mask genuine misspellings. Note: we can
+# only assert on typos whose INTENDED word is in pyspell's dict —
+# `.candidates()` can't propose a correction it doesn't carry, so typos
+# of out-of-dict scientific compounds (e.g. `psuedomorphic` -> intended
+# `pseudomorphic`, which is itself unknown) silently drop by the no-
+# suggestion rule regardless of this change. That's a pre-existing
+# pyspell limitation, not a regression — the tests below cover the typo
+# shapes we can verify.
+@pytest.mark.parametrize(
+    "sentence,word",
+    [
+        # Classic typos — adding `bio`/`nano`/`morph` to extras must not
+        # weaken detection on unrelated misspellings.
+        ("Please recieve the box.", "recieve"),
+        ("The enviroment is dirty.", "enviroment"),
+        ("teh dog ran outside.", "teh"),
+        # Typo that happens to live near a newly-whitelisted stem.
+        # `morh` is NOT in extras, so `biomorh` (fictional typo near
+        # `biomorph`) decomposes as `bio` + `morh` → `morh` unknown →
+        # compound-of-known rejects. If `biomorph` is in pyspell's dict
+        # as a candidate at distance 1, the finding fires; this guards
+        # against the extras over-whitelisting the right half.
+        ("An ichill reaction formed.", "ichill"),
+    ],
+)
+def test_new_extras_do_not_mask_typos(sc, sentence, word):
+    out = sc_mod.spell_check_paragraph(sentence, sc)
+    flagged = [f.original.lower() for f in out]
+    assert word in flagged, (
+        f"typo {word!r} must still fire after the lemma-gap fix; "
+        f"flagged={flagged}"
+    )
