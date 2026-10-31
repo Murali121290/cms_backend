@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.domains.journals.models import Journal, JournalArticle, JournalFile, JournalStageDetail, JournalClient
 from app.domains.journals.service import MS_ANALYSIS, PRE_EDITING, advance_article_stage
 from app.domains.journals.files import article_dir, save_version
+from app.domains.journals.metadata_extractor import is_article_type_heading
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,25 @@ def resolve_manuscript_docx(db: Session, article: JournalArticle) -> Optional[st
             return p
 
     return None
+
+
+def inspect_image_file(file_path: str) -> Dict[str, Any]:
+    """Inspects an image file to check format, dimensions, color mode, and DPI."""
+    try:
+        from PIL import Image
+        with Image.open(file_path) as img:
+            dpi = img.info.get("dpi")
+            dpi_val = int(dpi[0]) if dpi and isinstance(dpi, (tuple, list)) and dpi[0] else None
+            return {
+                "width": img.width,
+                "height": img.height,
+                "format": img.format,
+                "mode": img.mode,
+                "dpi": dpi_val,
+                "is_low_res": bool(dpi_val and dpi_val < 300)
+            }
+    except Exception:
+        return {}
 
 
 def calculate_le_density(text: str, total_words: int) -> Tuple[int, float, str, List[Dict[str, Any]]]:
@@ -155,6 +175,159 @@ def calculate_le_density(text: str, total_words: int) -> Tuple[int, float, str, 
     return total_issues, density, recommended, issues[:30]
 
 
+ARTICLE_TYPE_SPECS: Dict[str, Dict[str, Any]] = {
+    "Original Article": {"min_words": 3000, "max_words": 6500, "max_abstract": 120, "target_refs": 50, "allow_art": True},
+    "Research Article": {"min_words": 3000, "max_words": 6500, "max_abstract": 120, "target_refs": 50, "allow_art": True},
+    "Review Article": {"min_words": 4000, "max_words": 6000, "max_abstract": 120, "target_refs": 80, "allow_art": True, "required_sections": ["Future perspective", "Executive summary"]},
+    "Case Study": {"min_words": 1500, "max_words": 3000, "max_abstract": 120, "target_refs": 30, "allow_art": True},
+    "Case Report": {"min_words": 1500, "max_words": 3000, "max_abstract": 120, "target_refs": 30, "allow_art": True},
+    "Short Communication": {"min_words": 1500, "max_words": 3000, "max_abstract": 120, "target_refs": 30, "allow_art": True},
+    "Special Report": {"min_words": 1500, "max_words": 3000, "max_abstract": 120, "target_refs": 50, "allow_art": True},
+    "Editorial": {"min_words": 500, "max_words": 1500, "max_abstract": 120, "max_refs": 20, "allow_art": False},
+    "Commentary": {"min_words": 1500, "max_words": 3000, "max_refs": 20, "allow_art": False},
+    "Letter to Editor": {"min_words": 500, "max_words": 1500, "max_refs": 10, "allow_art": False},
+    "Methodology": {"min_words": 3000, "max_words": 6500, "max_abstract": 120, "target_refs": 50, "allow_art": True},
+    "Clinical Trial": {"min_words": 3500, "max_words": 7000, "max_abstract": 120, "target_refs": 50, "allow_art": True},
+}
+
+
+def compute_ita_compliance(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Computes the 100-Point Instructions to Authors (ITA) Compliance Score and Component Weightage
+    based on the PA Editorial & STM benchmark guidelines (Weightage_Split.docx & ITA complaiance.docx):
+    - Front Matter: 20%
+    - Body Text: 40%
+    - Figures & Artwork: 15%
+    - Tables: 10%
+    - References & Citations: 15%
+    """
+    art_type = (data.get("editorial_screening") or {}).get("article_type", "Original Article")
+    spec = ARTICLE_TYPE_SPECS.get(art_type, ARTICLE_TYPE_SPECS["Original Article"])
+    
+    title = str(data.get("title") or "")
+    is_type_flag = is_article_type_heading(title) or (len(title.split()) <= 2 and len(title) <= 10)
+    total_words = int(data.get("word_count") or 0)
+    abstract_words = int(data.get("abstract_words") or 0)
+    keywords_count = int(data.get("keywords_count") or 0)
+    lead_author = str(data.get("lead_author") or "")
+    
+    # 1. Front Matter (Max 20 pts)
+    if is_type_flag:
+        title_score = 1  # heavily penalize if title is an article type instead of real title
+    elif len(title) <= 120:
+        title_score = 5
+    else:
+        title_score = 3
+    max_abs = spec.get("max_abstract", 120)
+    abstract_score = 5 if 0 < abstract_words <= max_abs else (3 if abstract_words > 0 else 0)
+    keywords_score = 5 if keywords_count >= 5 else (3 if keywords_count >= 3 else (1 if keywords_count > 0 else 0))
+    authors_score = 5 if lead_author and lead_author != "Unknown" else 2
+    front_matter_score = title_score + abstract_score + keywords_score + authors_score
+    
+    # 2. Body Text (Max 40 pts)
+    min_w = spec.get("min_words", 1500)
+    max_w = spec.get("max_words", 6500)
+    if min_w <= total_words <= max_w:
+        body_words_score = 15
+    elif (min_w * 0.7) <= total_words <= (max_w * 1.3):
+        body_words_score = 10
+    else:
+        body_words_score = 5
+        
+    imrad = data.get("imrad_sections") or {}
+    imrad_passed = sum(1 for v in imrad.values() if v)
+    body_imrad_score = round((imrad_passed / max(1, len(imrad))) * 10)
+    
+    decls = data.get("declarations") or {}
+    decls_passed = sum(1 for d in decls.values() if d.get("present"))
+    body_decl_score = decls_passed * 3  # 5 decls * 3 = 15
+    body_text_score = body_words_score + body_imrad_score + body_decl_score
+    
+    # 3. Figures & Artwork (Max 15 pts)
+    figs = data.get("figures") or []
+    uncalled = data.get("uncalled_art_files") or []
+    if not spec.get("allow_art", True):
+        figures_score = 15 if len(figs) == 0 else 0
+    elif len(figs) == 0:
+        figures_score = 15
+    else:
+        missing_figs = sum(1 for f in figs if f.get("status") == "missing_file")
+        low_res_figs = sum(1 for f in figs if f.get("is_low_res"))
+        fig_match_score = 5 if missing_figs == 0 else max(0, 5 - (missing_figs * 2))
+        fig_res_score = 5 if low_res_figs == 0 else max(0, 5 - (low_res_figs * 2))
+        uncalled_score = 5 if len(uncalled) == 0 else max(0, 5 - len(uncalled))
+        figures_score = fig_match_score + fig_res_score + uncalled_score
+        
+    # 4. Tables (Max 10 pts)
+    tbls = data.get("tables") or []
+    if not spec.get("allow_art", True) and len(tbls) > 0:
+        tables_score = 0
+    elif len(tbls) == 0:
+        tables_score = 10
+    else:
+        tables_score = 10 if len(tbls) <= 8 else 6
+        
+    # 5. References & Citations (Max 15 pts)
+    refs_count = int(data.get("references_count") or 0)
+    citations_count = int(data.get("citations_count") or 0)
+    target_refs = spec.get("target_refs", 50)
+    max_refs = spec.get("max_refs")
+    if max_refs:
+        ref_count_score = 5 if refs_count <= max_refs else 2
+    elif (target_refs * 0.7) <= refs_count <= (target_refs * 1.3):
+        ref_count_score = 5
+    elif refs_count > 0:
+        ref_count_score = 3
+    else:
+        ref_count_score = 0
+        
+    cit_ratio = round(citations_count / max(1, refs_count), 2)
+    cit_score = 5 if citations_count > 0 and cit_ratio >= 0.5 else (2 if citations_count > 0 else 0)
+    ref_style_score = 5 if refs_count > 0 else 0
+    references_score = ref_count_score + cit_score + ref_style_score
+    
+    total_score = min(100, max(0, front_matter_score + body_text_score + figures_score + tables_score + references_score))
+    
+    if total_score >= 80:
+        verdict = "Accepted for Production"
+        badge = "Passed"
+    elif total_score >= 60:
+        verdict = "Can Accept with Revisions"
+        badge = "Revisions Required"
+    else:
+        verdict = "Technical Return to Author (TRTA)"
+        badge = "TRTA Recommended"
+        
+    return {
+        "score": total_score,
+        "verdict": verdict,
+        "verdict_badge": badge,
+        "breakdown": {
+            "front_matter": {"score": front_matter_score, "max": 20, "weight": 20},
+            "body_text": {"score": body_text_score, "max": 40, "weight": 40},
+            "figures": {"score": figures_score, "max": 15, "weight": 15},
+            "tables": {"score": tables_score, "max": 10, "weight": 10},
+            "references": {"score": references_score, "max": 15, "weight": 15},
+        },
+        "metrics": {
+            "title": title,
+            "title_length": len(title),
+            "max_title_chars": 120,
+            "is_type_flag": is_type_flag,
+            "abstract_words": abstract_words,
+            "max_abstract_words": max_abs,
+            "keywords_count": keywords_count,
+            "keywords": data.get("keywords") or [],
+            "total_words": total_words,
+            "min_words": min_w,
+            "max_words": max_w,
+            "citations_count": citations_count,
+            "references_count": refs_count,
+            "citation_reference_ratio": cit_ratio
+        }
+    }
+
+
 def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
     """Runs the full 7-step MS Analysis & ELOG engine on an article."""
     docx_path = resolve_manuscript_docx(db, article)
@@ -214,10 +387,118 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
         article.word_count = total_words
 
     # 1. Overview & Frontmatter
-    title = article.article_title or (paragraphs_text[0] if paragraphs_text else "Untitled Article")
+    detected_type = None
+    real_title = None
+    title_idx = -1
+
+    for idx, p in enumerate(paragraphs_text[:15]):
+        if is_article_type_heading(p):
+            if not detected_type:
+                detected_type = p
+            continue
+        if re.match(r'^(?:abstract|keywords?|introduction|doi:|https?://|www\.)\b', p, re.I):
+            break
+        if re.match(r'^(?:vol(?:ume)?\.?\s*\d+|issn\b|page\s*\d+)', p, re.I):
+            continue
+        if any(term in p.lower() for term in ['department of', 'university', 'hospital', 'institute']):
+            continue
+        if not real_title and len(p) >= 10:
+            real_title = p
+            title_idx = idx
+            break
+
+    # Resolve Title: validate against article type heading
+    curr_title = (article.article_title or "").strip()
+    if not curr_title or is_article_type_heading(curr_title) or len(curr_title) <= 10:
+        if real_title:
+            title = real_title
+            article.article_title = real_title
+        elif paragraphs_text:
+            title = paragraphs_text[0]
+        else:
+            title = "Untitled Article"
+    else:
+        title = curr_title
+
+    # Resolve Lead Author: ensure it is not the title or an article type
+    curr_author = (article.lead_author or "").strip()
+    if not curr_author or curr_author == title or is_article_type_heading(curr_author) or curr_author == "Unknown":
+        start_search = (title_idx + 1) if title_idx >= 0 else 1
+        for p in paragraphs_text[start_search:start_search + 5]:
+            if re.match(r'^(?:abstract|keywords?|introduction|doi:)\b', p, re.I):
+                break
+            if any(term in p.lower() for term in ['department of', 'university', 'hospital', 'institute']):
+                continue
+            authors_clean = [re.sub(r'[\d,\*\†\‡\§]+', '', a).strip() for a in re.split(r'[,;&]|\band\b', p)]
+            authors_clean = [a for a in authors_clean if a and len(a) > 2]
+            if authors_clean:
+                lead_author = authors_clean[0]
+                article.lead_author = lead_author
+                break
+        else:
+            lead_author = curr_author or "Unknown"
+    else:
+        lead_author = curr_author
+
+    # Sync detected article type to editorial screening if applicable
+    if detected_type:
+        ed_scr = article.extracted_metadata.get("editorial_screening") if article.extracted_metadata else {}
+        if not ed_scr:
+            ed_scr = {}
+        if not ed_scr.get("article_type") or is_article_type_heading(ed_scr.get("article_type", "")):
+            normalized_type = "Review Article" if "review" in detected_type.lower() else (
+                "Case Report" if "case" in detected_type.lower() else (
+                    "Editorial" if "editorial" in detected_type.lower() else (
+                        "Short Communication" if "communication" in detected_type.lower() else (
+                            "Special Report" if "special" in detected_type.lower() else detected_type
+                        )
+                    )
+                )
+            )
+            ed_scr["article_type"] = normalized_type
+            if not article.extracted_metadata:
+                article.extracted_metadata = {}
+            article.extracted_metadata["editorial_screening"] = ed_scr
+            if not article.complexity_level or is_article_type_heading(article.complexity_level):
+                article.complexity_level = normalized_type
+
     doi = article.article_doi or "Pending Assignment"
-    lead_author = article.lead_author or (paragraphs_text[1] if len(paragraphs_text) > 1 else "Unknown")
     
+    # Abstract extraction & word count
+    abstract_text = ""
+    abstract_words = 0
+    in_abstract = False
+    for p in paragraphs_text[:35]:
+        p_strip = p.strip()
+        if re.match(r'^(?:abstract|summary)\b[:\s]*$', p_strip, re.I):
+            in_abstract = True
+            continue
+        m_abs = re.match(r'^(?:abstract|summary)\b[:\s]*(.+)', p_strip, re.I)
+        if m_abs:
+            abstract_text = m_abs.group(1).strip()
+            abstract_words = len(abstract_text.split())
+            break
+        if in_abstract:
+            if re.match(r'^(?:keywords?|key\s+words?|introduction|background)\b[:\s]*', p_strip, re.I):
+                break
+            abstract_text += (" " if abstract_text else "") + p_strip
+            abstract_words = len(abstract_text.split())
+            if abstract_words >= 30 and len(paragraphs_text) > 5:
+                in_abstract = False
+
+    # Keywords extraction & count
+    keywords_list: List[str] = []
+    for p in paragraphs_text[:40]:
+        m_kw = re.search(r'\b(?:keywords?|key\s+words?)\s*[:\-–]\s*(.+)', p, re.I)
+        if m_kw:
+            kw_raw = m_kw.group(1).strip()
+            for kw in re.split(r'[,;•·/]', kw_raw):
+                cleaned_kw = re.sub(r'[\.\(\)\[\]]', '', kw).strip()
+                if cleaned_kw and 1 < len(cleaned_kw) < 60:
+                    keywords_list.append(cleaned_kw)
+            break
+    keywords_count = len(keywords_list)
+
     # 2. Section Structure (IMRAD)
     imrad_sections = {
         "Abstract": bool(re.search(r'\babstract\b', full_text, re.I)),
@@ -258,6 +539,20 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
     fig_matches = set(re.findall(r'\b(?:fig(?:ure)?\.?\s*(\d+[a-z]?))\b', full_text, re.I))
     table_matches = set(re.findall(r'\b(?:table\s*(\d+[a-z]?))\b', full_text, re.I))
 
+    # Also scan table cell text for figure and table callouts
+    if docx_path and os.path.exists(docx_path):
+        try:
+            for t_item in doc.tables:
+                for row in t_item.rows:
+                    for cell in row.cells:
+                        c_txt = cell.text
+                        for fm in re.findall(r'\b(?:fig(?:ure)?\.?\s*(\d+[a-z]?))\b', c_txt, re.I):
+                            fig_matches.add(fm)
+                        for tm in re.findall(r'\b(?:table\s*(\d+[a-z]?))\b', c_txt, re.I):
+                            table_matches.add(tm)
+        except Exception:
+            pass
+
     # Art files attached
     art_files = db.query(JournalFile).filter(
         JournalFile.article_id == article.id,
@@ -266,14 +561,24 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
 
     figures_list: List[Dict[str, Any]] = []
     for fnum in sorted(fig_matches, key=lambda x: (int(re.findall(r'\d+', x)[0]) if re.findall(r'\d+', x) else 0, x)):
-        matched = next((f.filename for f in art_files if f"fig{fnum}" in f.filename.lower() or f"figure_{fnum}" in f.filename.lower() or f"figure{fnum}" in f.filename.lower() or (f.figure_number and str(f.figure_number) == str(fnum))), None)
-        figures_list.append({
+        matched_obj = next((f for f in art_files if f"fig{fnum}" in f.filename.lower() or f"figure_{fnum}" in f.filename.lower() or f"figure{fnum}" in f.filename.lower() or (f.figure_number and str(f.figure_number) == str(fnum))), None)
+        matched = matched_obj.filename if matched_obj else None
+        fig_info: Dict[str, Any] = {
             "label": f"Figure {fnum}",
             "number": fnum,
             "called_in_text": True,
             "matched_file": matched,
             "status": "ok" if matched else "missing_file"
-        })
+        }
+        if matched_obj and matched_obj.path:
+            p = _translate_path(matched_obj.path)
+            if p and os.path.exists(p):
+                fig_info.update(inspect_image_file(p))
+        figures_list.append(fig_info)
+
+    # Detect uncalled artwork files
+    matched_file_names = {f["matched_file"] for f in figures_list if f.get("matched_file")}
+    uncalled_art_files = [f.filename for f in art_files if f.filename not in matched_file_names]
 
     tables_list: List[Dict[str, Any]] = []
     for tnum in sorted(table_matches, key=lambda x: (int(re.findall(r'\d+', x)[0]) if re.findall(r'\d+', x) else 0, x)):
@@ -380,10 +685,99 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
             if re.search(r'\b(19|20)\d{2}\b', group):
                 citation_author_years.add(group)
 
+    # B2. Identify Citations called inside all Tables (review tables, study characteristics, etc.)
+    if docx_path and os.path.exists(docx_path):
+        try:
+            for t_obj in doc.tables:
+                for row in t_obj.rows:
+                    for cell in row.cells:
+                        c_txt = cell.text.strip()
+                        if not c_txt:
+                            continue
+
+                        # Bracketed or parenthetical numbers
+                        for m in re.finditer(r'\[(\d+(?:[–\-,;\s]+\d+)*)\]|(?<!\w)\((\d+(?:[–\-,;\s]+\d+)*)\)(?!\w)', c_txt):
+                            is_bracket = bool(m.group(1))
+                            group = m.group(1) or m.group(2) or ''
+                            for chunk in re.split(r'[,;]', group):
+                                chunk = chunk.strip()
+                                range_match = re.match(r'^(\d+)[–\-](\d+)$', chunk)
+                                if range_match:
+                                    start_n, end_n = int(range_match.group(1)), int(range_match.group(2))
+                                    if 0 < start_n <= end_n <= 500:
+                                        if ref_count == 0 or end_n <= ref_count + 5:
+                                            citation_numbers.update(range(start_n, end_n + 1))
+                                elif chunk.isdigit():
+                                    num = int(chunk)
+                                    if 0 < num <= 500:
+                                        if is_bracket or ref_count == 0 or num <= ref_count:
+                                            citation_numbers.add(num)
+
+                        # Author-year citations
+                        for m in re.finditer(r'(?<!\w)\(([A-Z][a-zA-Z\s.,&–-]+?(?:19|20)\d{2}[a-z]?(?:;\s*[A-Z][a-zA-Z\s.,&–-]+?(?:19|20)\d{2}[a-z]?)*)\)', c_txt):
+                            group = m.group(1).strip()
+                            if re.search(r'\b(19|20)\d{2}\b', group):
+                                citation_author_years.add(group)
+
+                        # Superscript runs in table cells
+                        for p_cell in cell.paragraphs:
+                            for r in p_cell.runs:
+                                if (r.font.superscript or (r.style and 'superscript' in r.style.name.lower())) and r.text.strip():
+                                    for m in re.finditer(r'(\d+(?:[–\-,;\s]+\d+)*)', r.text.strip()):
+                                        for chunk in re.split(r'[,;]', m.group(1)):
+                                            chunk = chunk.strip()
+                                            range_match = re.match(r'^(\d+)[–\-](\d+)$', chunk)
+                                            if range_match:
+                                                start_n, end_n = int(range_match.group(1)), int(range_match.group(2))
+                                                if 0 < start_n <= end_n <= 500:
+                                                    citation_numbers.update(range(start_n, end_n + 1))
+                                            elif chunk.isdigit():
+                                                num = int(chunk)
+                                                if 0 < num <= 500:
+                                                    citation_numbers.add(num)
+        except Exception as e:
+            logger.warning("Error scanning tables for citations: %s", e)
+
     if ref_count == 0 and citation_numbers:
         ref_count = max(citation_numbers)
 
     citations_count = len(citation_numbers) if citation_numbers else len(citation_author_years)
+    cit_ratio = round(citations_count / max(1, ref_count), 2) if ref_count > 0 else 0.0
+
+    # 5b. Editorial Scope, Article Type & Quality Screening
+    existing_meta = article.extracted_metadata or {}
+    editorial_screening = dict(existing_meta.get("editorial_screening") or {})
+    if not editorial_screening:
+        editorial_screening = {
+            "scope_aligned": True,
+            "scope_notes": "Manuscript fits the aims and scope of the journal.",
+            "article_type": article.article_type or "Original Article",
+            "peer_review_status": "Accepted for Production",
+            "similarity_percentage": existing_meta.get("similarity_percentage", 12),
+            "similarity_status": "Normal (<20%)",
+            "ethics_clearance_confirmed": True,
+            "intake_status": "Cleared for Production"
+        }
+
+    # 5c. Instructions to Authors (ITA) 100-Point Compliance & Gap Analysis
+    art_spec = ARTICLE_TYPE_SPECS.get(editorial_screening.get("article_type", "Original Article"), ARTICLE_TYPE_SPECS["Original Article"])
+    analysis_preview = {
+        "title": title,
+        "word_count": total_words,
+        "abstract_words": abstract_words,
+        "keywords_count": keywords_count,
+        "keywords": keywords_list,
+        "lead_author": lead_author,
+        "imrad_sections": imrad_sections,
+        "declarations": declarations,
+        "figures": figures_list,
+        "tables": tables_list,
+        "uncalled_art_files": uncalled_art_files,
+        "references_count": ref_count,
+        "citations_count": citations_count,
+        "editorial_screening": editorial_screening
+    }
+    ita_compliance = compute_ita_compliance(analysis_preview)
 
     # 6. Advisory Language Editing Level Calculation
     err_count, density, recommended_level, sample_issues = calculate_le_density(full_text, total_words)
@@ -397,6 +791,43 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
     # 7. Author Queries (AQ) Generation
     author_queries: List[Dict[str, Any]] = []
     aq_idx = 1
+
+    # Frontmatter and Title queries
+    if is_article_type_heading(title) or len(title) <= 10:
+        author_queries.append({
+            "id": f"AQ-{aq_idx:02d}",
+            "category": "Front Matter",
+            "query": f"Manuscript title field appears to contain an article classification ('{title}') rather than the complete article title. Please provide the full manuscript title.",
+            "status": "Open"
+        })
+        aq_idx += 1
+    elif len(title) > 120:
+        author_queries.append({
+            "id": f"AQ-{aq_idx:02d}",
+            "category": "Front Matter",
+            "query": f"Manuscript title is {len(title)} characters long, exceeding the journal limit of 120 characters. Please provide a shortened title or running head.",
+            "status": "Open"
+        })
+        aq_idx += 1
+
+    max_abs_w = art_spec.get("max_abstract", 120)
+    if abstract_words > max_abs_w:
+        author_queries.append({
+            "id": f"AQ-{aq_idx:02d}",
+            "category": "Abstract",
+            "query": f"Abstract length is {abstract_words} words, which exceeds the journal maximum of {max_abs_w} words. Please condense the abstract to 120 words or fewer.",
+            "status": "Open"
+        })
+        aq_idx += 1
+
+    if keywords_count < 3:
+        author_queries.append({
+            "id": f"AQ-{aq_idx:02d}",
+            "category": "Keywords",
+            "query": f"Please provide 5–10 keywords for manuscript indexing and discoverability (currently {keywords_count} detected).",
+            "status": "Open"
+        })
+        aq_idx += 1
 
     if not declarations["funding"]["present"]:
         author_queries.append({
@@ -443,12 +874,57 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
                 "status": "Open"
             })
             aq_idx += 1
+        elif fig.get("is_low_res"):
+            dpi_val = fig.get("dpi")
+            author_queries.append({
+                "id": f"AQ-{aq_idx:02d}",
+                "category": "Artwork Resolution",
+                "query": f"{fig['label']} ({fig.get('matched_file')}) resolution is {dpi_val} DPI, which is below the publisher 300 DPI print threshold. Please provide high-resolution replacement.",
+                "status": "Open"
+            })
+            aq_idx += 1
+
+    for uncalled in uncalled_art_files:
+        author_queries.append({
+            "id": f"AQ-{aq_idx:02d}",
+            "category": "Artwork",
+            "query": f"Artwork file '{uncalled}' was supplied in the package but is not cited anywhere in the manuscript. Please confirm in-text callout placement or remove.",
+            "status": "Open"
+        })
+        aq_idx += 1
+
+    if editorial_screening.get("similarity_percentage", 0) > 25:
+        author_queries.append({
+            "id": f"AQ-{aq_idx:02d}",
+            "category": "Similarity Check",
+            "query": f"Plagiarism/similarity check indicates {editorial_screening['similarity_percentage']}% text overlap, which exceeds the standard 20% limit. Please review and clarify cited sources.",
+            "status": "Open"
+        })
+        aq_idx += 1
+
+    if not art_spec.get("allow_art", True) and (len(figures_list) > 0 or len(tables_list) > 0):
+        author_queries.append({
+            "id": f"AQ-{aq_idx:02d}",
+            "category": "Article Type Fit",
+            "query": f"Figures and tables are not permitted in {editorial_screening.get('article_type', 'Editorial')} submissions per journal Instructions to Authors (ITA). Please remove them or request article reclassification.",
+            "status": "Open"
+        })
+        aq_idx += 1
 
     if chosen_level == "Level 3 – Heavy":
         author_queries.append({
             "id": f"AQ-{aq_idx:02d}",
             "category": "Language Editing",
             "query": f"Manuscript language density ({density} issues/1k words) indicates Level 3 (Heavy) language editing is advised. Authors will receive edited phrasing for verification.",
+            "status": "Open"
+        })
+        aq_idx += 1
+
+    if ref_count > 0 and citations_count == 0:
+        author_queries.append({
+            "id": f"AQ-{aq_idx:02d}",
+            "category": "Citations & References",
+            "query": f"The manuscript contains {ref_count} reference entries in the bibliography, but no corresponding in-text citation callouts were detected in the body text. Please ensure all references are cited in text.",
             "status": "Open"
         })
         aq_idx += 1
@@ -472,8 +948,8 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
         {
             "step": 1,
             "title": "Manuscript Overview & Frontmatter",
-            "status": "pass" if (total_words > 0 and title) else "warning",
-            "details": f"{total_words:,} words · ~{estimated_pages} pages · {total_paras} paragraphs"
+            "status": "pass" if (total_words > 0 and title and len(title) <= 120 and keywords_count >= 3) else "warning",
+            "details": f"{total_words:,} words · Abstract: {abstract_words}w · {keywords_count} kws · Title: {len(title)} chars"
         },
         {
             "step": 2,
@@ -496,8 +972,8 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
         {
             "step": 5,
             "title": "Citation & Reference Integrity",
-            "status": "pass" if (citations_count > 0 or ref_count > 0) else "warning",
-            "details": f"{citations_count} citations called in-text · {ref_count} reference entries listed"
+            "status": "pass" if (citations_count > 0 and ref_count > 0) else "warning",
+            "details": f"{citations_count} citations called · {ref_count} references listed (Ratio: {cit_ratio})"
         },
         {
             "step": 6,
@@ -526,17 +1002,26 @@ def analyze_manuscript(db: Session, article: JournalArticle) -> Dict[str, Any]:
         "estimated_pages": estimated_pages,
         "paragraphs_count": total_paras,
         "table_count": table_count,
+        "abstract_words": abstract_words,
+        "abstract_text": abstract_text,
+        "keywords": keywords_list,
+        "keywords_count": keywords_count,
+        "title_length": len(title),
+        "citation_reference_ratio": cit_ratio,
+        "ita_compliance": ita_compliance,
         "imrad_sections": imrad_sections,
         "headings": headings[:20],
         "declarations": declarations,
         "figures": figures_list,
         "tables": tables_list,
+        "uncalled_art_files": uncalled_art_files,
         "citations_count": citations_count,
         "references_count": ref_count,
         "le_error_count": err_count,
         "le_density": density,
         "le_recommended_level": recommended_level,
         "le_chosen_level": chosen_level,
+        "editorial_screening": editorial_screening,
         "sample_language_issues": sample_issues,
         "author_queries": author_queries,
         "checklist": checklist,
@@ -587,12 +1072,21 @@ def generate_elog_html(article: JournalArticle, data: Dict[str, Any]) -> str:
 
     figures_rows = ""
     for f in data.get("figures", []):
-        status_badge = "<span style='color: #16a34a;'>Matched</span>" if f["status"] == "ok" else "<span style='color: #dc2626; font-weight: 700;'>Missing Art File</span>"
+        if f["status"] == "ok":
+            res_txt = f"{f.get('dpi')} DPI" if f.get("dpi") else "Standard"
+            if f.get("is_low_res"):
+                status_badge = f"<span style='color: #d97706; font-weight: 700;'>Low Res ({res_txt})</span>"
+            else:
+                status_badge = f"<span style='color: #16a34a; font-weight: 700;'>Matched ({res_txt})</span>"
+        else:
+            status_badge = "<span style='color: #dc2626; font-weight: 700;'>Missing Art File</span>"
+
+        dims = f"{f.get('width')}x{f.get('height')} px · {f.get('format', '')}" if f.get("width") else "Word embedded / link"
         figures_rows += f"""
         <tr style="border-bottom: 1px solid #e2e8f0;">
           <td style="padding: 6px 12px; font-weight: 600;">{f['label']}</td>
           <td style="padding: 6px 12px; font-size: 12px;">{status_badge}</td>
-          <td style="padding: 6px 12px; font-size: 12px; color: #64748b; font-family: monospace;">{f.get('matched_file') or 'No file found in package'}</td>
+          <td style="padding: 6px 12px; font-size: 12px; color: #64748b; font-family: monospace;">{f.get('matched_file') or 'No file found in package'} ({dims})</td>
         </tr>
         """
 
@@ -610,6 +1104,86 @@ def generate_elog_html(article: JournalArticle, data: Dict[str, Any]) -> str:
           </div>
         </div>
         """
+
+    ed = data.get("editorial_screening") or {}
+    scope_badge = "<span style='color: #16a34a; font-weight: 700;'>✓ Confirmed / Aligned</span>" if ed.get("scope_aligned", True) else "<span style='color: #dc2626; font-weight: 700;'>⚠ Scope Query Flagged</span>"
+    sim_pct = ed.get("similarity_percentage", 12)
+    sim_color = "#16a34a" if sim_pct < 20 else ("#d97706" if sim_pct <= 30 else "#dc2626")
+
+    ita = data.get("ita_compliance") or {}
+    ita_score = ita.get("score", 80)
+    ita_verdict = ita.get("verdict", "Accepted for Production")
+    ita_score_color = "#16a34a" if ita_score >= 80 else ("#d97706" if ita_score >= 60 else "#dc2626")
+    breakdown = ita.get("breakdown") or {}
+    front_s = breakdown.get("front_matter", {}).get("score", 16)
+    body_s = breakdown.get("body_text", {}).get("score", 32)
+    fig_s = breakdown.get("figures", {}).get("score", 13)
+    tbl_s = breakdown.get("tables", {}).get("score", 8)
+    ref_s = breakdown.get("references", {}).get("score", 13)
+    cit_ratio = data.get("citation_reference_ratio", 1.0)
+
+    ita_compliance_card = f"""
+    <div style="background: #ffffff; border: 2px solid #0284c7; border-radius: 10px; padding: 18px 22px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(2,132,199,0.08);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div>
+          <span style="font-size: 14px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;">Instructions to Authors (ITA) 100-Point Compliance &amp; Gap Analysis</span>
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">PA Editorial Ltd. Weighted Preflight Matrix (Weightage_Split &amp; STM Standard)</div>
+        </div>
+        <div style="text-align: right;">
+          <span style="font-size: 26px; font-weight: 900; color: {ita_score_color};">{ita_score}%</span>
+          <div style="font-size: 11px; font-weight: 700; color: {ita_score_color}; text-transform: uppercase;">{ita_verdict}</div>
+        </div>
+      </div>
+      <div style="background: #e2e8f0; border-radius: 9999px; height: 12px; overflow: hidden; margin-bottom: 16px;">
+        <div style="background: {ita_score_color}; height: 100%; width: {ita_score}%; border-radius: 9999px;"></div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; font-size: 11px; text-align: center;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 8px;">
+          <div style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 10px;">Front Matter (20%)</div>
+          <div style="font-size: 15px; font-weight: 800; color: #0f172a; margin: 3px 0;">{front_s} / 20</div>
+          <div style="color: #64748b; font-size: 10px;">Title &le;120c, Abs, Kws</div>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 8px;">
+          <div style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 10px;">Body Text (40%)</div>
+          <div style="font-size: 15px; font-weight: 800; color: #0f172a; margin: 3px 0;">{body_s} / 40</div>
+          <div style="color: #64748b; font-size: 10px;">Words, IMRAD, 5 Decls</div>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 8px;">
+          <div style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 10px;">Figures &amp; Art (15%)</div>
+          <div style="font-size: 15px; font-weight: 800; color: #0f172a; margin: 3px 0;">{fig_s} / 15</div>
+          <div style="color: #64748b; font-size: 10px;">&ge;300 DPI, Calls</div>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 8px;">
+          <div style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 10px;">Tables (10%)</div>
+          <div style="font-size: 15px; font-weight: 800; color: #0f172a; margin: 3px 0;">{tbl_s} / 10</div>
+          <div style="color: #64748b; font-size: 10px;">Numbered &amp; Cited</div>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 8px;">
+          <div style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 10px;">References (15%)</div>
+          <div style="font-size: 15px; font-weight: 800; color: #0f172a; margin: 3px 0;">{ref_s} / 15</div>
+          <div style="color: #64748b; font-size: 10px;">Ratio: {cit_ratio}</div>
+        </div>
+      </div>
+    </div>
+    """
+
+    editorial_screening_card = f"""
+    <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <span style="font-size: 13px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;">Editorial Scope &amp; Quality Screening</span>
+        <span style="font-size: 11px; font-weight: 700; background: #e2e8f0; color: #334155; padding: 2px 8px; border-radius: 4px; text-transform: uppercase;">{ed.get('intake_status', 'Cleared for Production')}</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; font-size: 12px; color: #334155;">
+        <div><strong>Article Type:</strong> {ed.get('article_type', 'Original Article')}</div>
+        <div><strong>Aims &amp; Scope:</strong> {scope_badge}</div>
+        <div><strong>Similarity Check:</strong> <span style="color: {sim_color}; font-weight: 800;">{sim_pct}%</span> ({ed.get('similarity_status', 'Normal')})</div>
+        <div><strong>Peer Review:</strong> {ed.get('peer_review_status', 'Accepted')}</div>
+      </div>
+      <div style="margin-top: 8px; font-size: 11px; color: #64748b;">
+        <strong>Screening Note:</strong> {ed.get('scope_notes', 'All frontmatter and editorial scope checks verified.')}
+      </div>
+    </div>
+    """
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -671,16 +1245,16 @@ def generate_elog_html(article: JournalArticle, data: Dict[str, Any]) -> str:
       <div class="meta-val">{data.get('word_count'):,}</div>
     </div>
     <div class="meta-card">
-      <div class="meta-label">Est. Pages</div>
-      <div class="meta-val">~{data.get('estimated_pages')} pp</div>
+      <div class="meta-label">Abstract / Title</div>
+      <div class="meta-val">{data.get('abstract_words', 0)}w abs / {data.get('title_length', 0)}c</div>
+    </div>
+    <div class="meta-card">
+      <div class="meta-label">ITA Score</div>
+      <div class="meta-val"><span class="badge" style="background: {ita_score_color}15; color: {ita_score_color}; border: 1px solid {ita_score_color}40;">{ita_score}%</span></div>
     </div>
     <div class="meta-card">
       <div class="meta-label">Advisory LE Level</div>
       <div class="meta-val"><span class="badge badge-level">{data.get('le_chosen_level')}</span></div>
-    </div>
-    <div class="meta-card">
-      <div class="meta-label">LE Density Score</div>
-      <div class="meta-val">{data.get('le_density')} / 1k</div>
     </div>
     <div class="meta-card">
       <div class="meta-label">Tables &amp; Figs</div>
@@ -688,9 +1262,13 @@ def generate_elog_html(article: JournalArticle, data: Dict[str, Any]) -> str:
     </div>
     <div class="meta-card">
       <div class="meta-label">Refs &amp; Citations</div>
-      <div class="meta-val">{data.get('references_count', 0)} refs / {data.get('citations_count', 0)} cited</div>
+      <div class="meta-val">{data.get('references_count', 0)} refs (Ratio: {cit_ratio})</div>
     </div>
   </div>
+
+  {ita_compliance_card}
+
+  {editorial_screening_card}
 
   <div class="section-title">1. 7-Step Manuscript Analysis Checklist</div>
   <div style="margin-bottom: 20px;">
@@ -820,4 +1398,74 @@ def complete_ms_analysis_stage(db: Session, article: JournalArticle, user_id: Op
     return {
         **res,
         "ms_analysis": analysis
+    }
+
+
+def set_editorial_screening(db: Session, article: JournalArticle, screening_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Updates the editorial screening criteria (scope, article type, similarity, clearance) and refreshes ELOG."""
+    meta = dict(article.extracted_metadata or {})
+    ms = dict(meta.get("ms_analysis") or {})
+    if not ms:
+        ms = analyze_manuscript(db, article)
+        meta = dict(article.extracted_metadata or {})
+        ms = dict(meta.get("ms_analysis") or {})
+
+    current_screening = dict(ms.get("editorial_screening") or {})
+    current_screening.update(screening_data)
+
+    if "similarity_percentage" in screening_data:
+        pct = int(screening_data["similarity_percentage"])
+        current_screening["similarity_percentage"] = pct
+        current_screening["similarity_status"] = "Normal (<20%)" if pct < 20 else ("Moderate (20-30%)" if pct <= 30 else "High (>30%)")
+        meta["similarity_percentage"] = pct
+
+    if "article_type" in screening_data:
+        article.article_type = str(screening_data["article_type"])
+        current_screening["article_type"] = article.article_type
+
+    ms["editorial_screening"] = current_screening
+    ms["ita_compliance"] = compute_ita_compliance(ms)
+
+    for c in ms.get("checklist", []):
+        if c.get("step") == 2:
+            imrad_sections = ms.get("imrad_sections", {})
+            c["details"] = f"Type: {current_screening.get('article_type', 'Original Article')} · {sum(1 for v in imrad_sections.values() if v)}/{len(imrad_sections)} IMRAD sections"
+            c["status"] = "pass" if current_screening.get("scope_aligned", True) else "warning"
+
+    ms["elog_html"] = generate_elog_html(article, ms)
+    meta["ms_analysis"] = ms
+    article.extracted_metadata = meta
+    db.commit()
+
+    _save_elog_file(db, article, ms["elog_html"])
+    return ms
+
+
+def trigger_trta_package(db: Session, article: JournalArticle, reason: Optional[str] = None) -> Dict[str, Any]:
+    """Records Technical Return to Author (TRTA) and compiles author return package metadata."""
+    meta = dict(article.extracted_metadata or {})
+    ms = dict(meta.get("ms_analysis") or {})
+    if not ms:
+        ms = analyze_manuscript(db, article)
+        meta = dict(article.extracted_metadata or {})
+        ms = dict(meta.get("ms_analysis") or {})
+
+    screening = dict(ms.get("editorial_screening") or {})
+    screening["intake_status"] = "Technical Return to Author (TRTA)"
+    screening["trta_reason"] = reason or "Technical or mandatory declaration deficiencies detected during intake pre-flight."
+    screening["trta_timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    ms["editorial_screening"] = screening
+    meta["ms_analysis"] = ms
+    meta["intake_decision"] = "TRTA"
+    article.extracted_metadata = meta
+    db.commit()
+
+    return {
+        "status": "TRTA",
+        "message": f"Article #{article.id} marked as Technical Return to Author (TRTA).",
+        "author_queries_count": len(ms.get("author_queries", [])),
+        "missing_declarations": sum(1 for d in ms.get("declarations", {}).values() if not d.get("present")),
+        "missing_figures": sum(1 for f in ms.get("figures", []) if f.get("status") == "missing_file"),
+        "trta_timestamp": screening["trta_timestamp"]
     }

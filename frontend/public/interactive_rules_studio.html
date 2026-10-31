@@ -1,0 +1,1612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive CE & TE Rules Studio — S4Carlisle CMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy-950: #0A1120;
+      --navy-900: #0F172A;
+      --navy-800: #1E293B;
+      --navy-700: #334155;
+      --navy-600: #475569;
+      --navy-500: #64748B;
+      --navy-400: #94A3B8;
+      --navy-300: #CBD5E1;
+      --navy-200: #E2E8F0;
+      --navy-100: #F1F5F9;
+      --navy-50:  #F8FAFC;
+      
+      --gold-700: #8D6B19;
+      --gold-600: #B78A22;
+      --gold-500: #D4A333;
+      --gold-400: #E7C268;
+      --gold-100: #FEF8E7;
+      --gold-50:  #FFFDF7;
+      
+      --emerald-700: #047857;
+      --emerald-600: #059669;
+      --emerald-500: #10B981;
+      --emerald-100: #D1FAE5;
+      --emerald-50:  #ECFDF5;
+      
+      --rose-700: #B91C1C;
+      --rose-600: #DC2626;
+      --rose-500: #EF4444;
+      --rose-100: #FEE2E2;
+      --rose-50:  #FEF2F2;
+
+      --blue-600: #2563EB;
+      --blue-500: #3B82F6;
+      --blue-100: #DBEAFE;
+      --blue-50:  #EFF6FF;
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+      --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: var(--navy-50);
+      color: var(--navy-900);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Navigation Bar */
+    header.top-bar {
+      background: #FFFFFF;
+      border-bottom: 1px solid var(--navy-200);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: var(--shadow-sm);
+    }
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--navy-900) 0%, var(--gold-600) 100%);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 800;
+      font-size: 16px;
+      box-shadow: 0 2px 8px rgba(183, 138, 34, 0.3);
+    }
+    .brand-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--navy-900);
+      letter-spacing: -0.3px;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: var(--navy-500);
+      font-weight: 500;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .badge-pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .badge-gold { background: var(--gold-100); color: var(--gold-700); border: 1px solid var(--gold-400); }
+    .badge-emerald { background: var(--emerald-100); color: var(--emerald-700); border: 1px solid var(--emerald-500); }
+
+    .btn {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      border: 1px solid transparent;
+      font-family: inherit;
+    }
+    .btn-primary {
+      background: var(--navy-900);
+      color: white;
+    }
+    .btn-primary:hover {
+      background: var(--navy-800);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: white;
+      color: var(--navy-700);
+      border-color: var(--navy-300);
+    }
+    .btn-secondary:hover {
+      background: var(--navy-100);
+    }
+    .btn-gold {
+      background: var(--gold-600);
+      color: white;
+    }
+    .btn-gold:hover {
+      background: var(--gold-700);
+    }
+
+    /* Main Grid Layout */
+    .app-container {
+      display: grid;
+      grid-template-columns: 1fr 440px;
+      flex: 1;
+      height: calc(100vh - 65px);
+      overflow: hidden;
+    }
+
+    /* Left Pane: Rules Studio */
+    .rules-pane {
+      overflow-y: auto;
+      padding: 24px 32px;
+      border-right: 1px solid var(--navy-200);
+      background: #FFFFFF;
+    }
+
+    /* Presets Banner */
+    .presets-bar {
+      background: var(--navy-50);
+      border: 1px solid var(--navy-200);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .presets-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .presets-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--navy-700);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .preset-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .preset-chip {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      border: 1px solid var(--navy-300);
+      background: white;
+      color: var(--navy-700);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .preset-chip:hover {
+      border-color: var(--gold-500);
+      background: var(--gold-50);
+      color: var(--gold-700);
+    }
+    .preset-chip.active {
+      background: var(--navy-900);
+      color: white;
+      border-color: var(--navy-900);
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+    }
+
+    /* Search & Filter Header */
+    .search-filter-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+      background: white;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--navy-200);
+    }
+    .search-input-box {
+      position: relative;
+    }
+    .search-input-box input {
+      width: 100%;
+      padding: 10px 14px 10px 38px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--navy-300);
+      font-size: 13px;
+      outline: none;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+    .search-input-box input:focus {
+      border-color: var(--gold-500);
+      box-shadow: 0 0 0 3px rgba(212, 163, 51, 0.15);
+    }
+    .search-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--navy-400);
+      font-size: 14px;
+    }
+
+    .category-tabs {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .cat-tab {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--navy-200);
+      background: var(--navy-50);
+      color: var(--navy-600);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .cat-tab:hover {
+      background: var(--navy-100);
+      color: var(--navy-900);
+    }
+    .cat-tab.active {
+      background: var(--navy-900);
+      color: white;
+      border-color: var(--navy-900);
+    }
+
+    /* Groups and Rule Cards */
+    .rules-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .group-section {
+      border: 1px solid var(--navy-200);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      background: #FFFFFF;
+    }
+    .group-header {
+      background: var(--navy-50);
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid var(--navy-200);
+    }
+    .group-header:hover {
+      background: var(--navy-100);
+    }
+    .group-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .group-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--navy-900);
+    }
+    .group-count {
+      font-size: 11px;
+      color: var(--navy-500);
+      font-weight: 600;
+      background: white;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      border: 1px solid var(--navy-200);
+    }
+
+    .group-rules-body {
+      padding: 12px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Individual Rule Card */
+    .rule-card {
+      border: 1px solid var(--navy-200);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      background: white;
+      transition: all 0.2s ease;
+    }
+    .rule-card:hover {
+      border-color: var(--navy-400);
+      box-shadow: var(--shadow-sm);
+    }
+    .rule-card.disabled {
+      opacity: 0.55;
+      background: var(--navy-50);
+    }
+
+    .rule-card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .rule-badge-no {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--navy-800);
+      background: var(--navy-100);
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid var(--navy-300);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .rule-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--navy-900);
+    }
+    .rule-meta-line {
+      font-size: 11px;
+      color: var(--navy-500);
+      margin-top: 2px;
+    }
+
+    /* Toggle Switch */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .toggle-switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      cursor: pointer;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: var(--navy-300);
+      transition: .2s;
+      border-radius: 9999px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .2s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: var(--emerald-600);
+    }
+    input:checked + .slider:before {
+      transform: translateX(16px);
+    }
+
+    /* Segmented Option Chips */
+    .option-chips-container {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .option-chips-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--navy-500);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .chips-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .option-chip {
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--navy-200);
+      background: var(--navy-50);
+      color: var(--navy-700);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .option-chip:hover {
+      border-color: var(--navy-400);
+      background: white;
+      color: var(--navy-900);
+    }
+    .option-chip.selected {
+      background: var(--gold-100);
+      border-color: var(--gold-500);
+      color: var(--gold-700);
+      box-shadow: 0 1px 3px rgba(212, 163, 51, 0.2);
+    }
+    .option-chip.add-custom {
+      border-style: dashed;
+      color: var(--blue-600);
+      background: white;
+    }
+    .option-chip.add-custom:hover {
+      background: var(--blue-50);
+      border-color: var(--blue-500);
+    }
+    .chip-preview-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      opacity: 0.85;
+    }
+
+    .rule-bottom-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--navy-200);
+    }
+    .rule-tip {
+      font-size: 11px;
+      color: var(--navy-600);
+      font-style: italic;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .severity-select {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--navy-200);
+      background: white;
+      outline: none;
+      font-family: inherit;
+      color: var(--navy-700);
+    }
+
+    /* Right Pane: Live Try-it-Out & Technical Review Card */
+    .preview-pane {
+      background: var(--navy-50);
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .preview-card-box {
+      background: white;
+      border: 1px solid var(--navy-200);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow-md);
+    }
+    .card-box-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--navy-200);
+    }
+    .card-box-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--navy-900);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Live Sandbox */
+    .sandbox-textarea {
+      width: 100%;
+      height: 90px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--navy-300);
+      font-size: 13px;
+      font-family: 'Newsreader', serif;
+      outline: none;
+      resize: vertical;
+      line-height: 1.6;
+      background: white;
+    }
+    .sandbox-textarea:focus {
+      border-color: var(--gold-500);
+    }
+    .sample-prompts {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+      margin-bottom: 14px;
+    }
+    .sample-btn {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--navy-100);
+      color: var(--navy-700);
+      border: 1px solid var(--navy-300);
+      cursor: pointer;
+    }
+    .sample-btn:hover { background: var(--navy-200); }
+
+    .diff-output-box {
+      background: var(--navy-900);
+      color: white;
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      font-family: 'Newsreader', serif;
+      font-size: 15px;
+      line-height: 1.7;
+      min-height: 80px;
+      border: 1px solid var(--navy-800);
+    }
+    del {
+      background: rgba(239, 68, 68, 0.35);
+      color: #FCA5A5;
+      text-decoration: line-through;
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin: 0 1px;
+    }
+    ins {
+      background: rgba(16, 185, 129, 0.35);
+      color: #6EE7B7;
+      text-decoration: none;
+      font-weight: 600;
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin: 0 1px;
+      border-bottom: 2px solid var(--emerald-500);
+    }
+
+    /* Review Card Simulator */
+    .review-sim-card {
+      border: 2px solid var(--gold-500);
+      border-radius: var(--radius-md);
+      background: white;
+      padding: 16px;
+      box-shadow: var(--shadow-md);
+      position: relative;
+    }
+    .sim-tag-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .sim-surface-row {
+      background: var(--navy-50);
+      border-left: 3px solid var(--navy-400);
+      padding: 8px 12px;
+      border-radius: 0 4px 4px 0;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+    .sim-options-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .sim-option-btn {
+      width: 100%;
+      text-align: left;
+      padding: 7px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      border: 1px solid var(--navy-200);
+      background: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.15s ease;
+    }
+    .sim-option-btn:hover {
+      border-color: var(--gold-500);
+      background: var(--gold-50);
+    }
+    .sim-option-btn.active {
+      border-color: var(--emerald-600);
+      background: var(--emerald-50);
+      color: var(--emerald-700);
+      font-weight: 700;
+    }
+
+    .sim-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* Toast Notification */
+    .toast-popup {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--navy-900);
+      color: white;
+      padding: 12px 18px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: var(--shadow-xl);
+      border: 1px solid var(--navy-700);
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 999;
+    }
+    .toast-popup.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="top-bar">
+    <div class="brand-wrap">
+      <div class="brand-logo">CE</div>
+      <div>
+        <h1 class="brand-title">Interactive Rules & Stylesheet Studio</h1>
+        <p class="brand-sub">Universal Copyediting & Technical Editing Multi-Option Engine</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="badge-pill badge-gold" id="activePresetBadge">Preset: Chicago Manual of Style</span>
+      <span class="badge-pill badge-emerald" id="modifiedBadge">4 Custom Rules Set</span>
+      <button class="btn btn-secondary" onclick="exportConfigJson()">View JSON</button>
+      <button class="btn btn-primary" onclick="showToast('Stylesheet saved to database successfully!')">Save Stylesheet</button>
+    </div>
+  </header>
+
+  <!-- Application Body Grid -->
+  <main class="app-container">
+    
+    <!-- LEFT: Rules Configuration Studio -->
+    <section class="rules-pane">
+
+      <!-- House Style Presets Bar -->
+      <div class="presets-bar">
+        <div class="presets-header">
+          <span class="presets-title">⚡ Quick House Style Presets</span>
+          <span style="font-size: 11px; color: var(--navy-500);">Sets defaults across all 72 rules in 1 click</span>
+        </div>
+        <div class="preset-chips">
+          <button class="preset-chip active" onclick="applyPreset('chicago')">Chicago Manual (CMOS)</button>
+          <button class="preset-chip" onclick="applyPreset('ama')">AMA 11th Edition (Medical)</button>
+          <button class="preset-chip" onclick="applyPreset('apa')">APA 7th Edition</button>
+          <button class="preset-chip" onclick="applyPreset('oxford')">Oxford / Cambridge (UK)</button>
+          <button class="preset-chip" onclick="applyPreset('nature')">Nature / Springer</button>
+        </div>
+      </div>
+
+      <!-- Search & Category Filters -->
+      <div class="search-filter-wrap">
+        <div class="search-input-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="ruleSearchInput" placeholder="Search across 72 rules by name, keyword (e.g. percent, dash, units, date, minus, latin)..." oninput="filterRules()">
+        </div>
+        <div class="category-tabs">
+          <button class="cat-tab active" onclick="setCategoryFilter('all')">All Groups (72)</button>
+          <button class="cat-tab" onclick="setCategoryFilter('units')">Units & Measurements (6)</button>
+          <button class="cat-tab" onclick="setCategoryFilter('numbers')">Numbers & Ranges (6)</button>
+          <button class="cat-tab" onclick="setCategoryFilter('dates')">Dates, Times & Currency (5)</button>
+          <button class="cat-tab" onclick="setCategoryFilter('math')">Math & Superscripts (4)</button>
+          <button class="cat-tab" onclick="setCategoryFilter('abbrev')">Abbreviations (5)</button>
+          <button class="cat-tab" onclick="setCategoryFilter('headings')">Headings & Structure (3)</button>
+        </div>
+      </div>
+
+      <!-- Grouped Rules Accordions -->
+      <div class="rules-list" id="rulesListContainer">
+        
+        <!-- Group 1: Units and measurements -->
+        <div class="group-section" data-cat="units">
+          <div class="group-header" onclick="toggleGroup(this)">
+            <div class="group-title-wrap">
+              <span class="group-title">📐 Units and measurements</span>
+              <span class="group-count">6 rules</span>
+            </div>
+            <span style="font-size: 12px; color: var(--navy-500);">▼</span>
+          </div>
+          <div class="group-rules-body">
+            
+            <!-- R6: Percentage -->
+            <div class="rule-card" id="card-r6" data-rule="r6" data-name="percentage formatting percent % per cent">
+              <div class="rule-card-top">
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="rule-badge-no">R6</span>
+                    <span class="rule-name">Percentage Formatting</span>
+                  </div>
+                  <p class="rule-meta-line">Auto Fix · needs Style profile · 4 detectors active</p>
+                </div>
+                <div class="toggle-wrap">
+                  <span style="font-size: 11px; font-weight:600; color:var(--navy-600)">On</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked onchange="toggleRuleActive('r6', this.checked)">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="option-chips-container">
+                <span class="option-chips-label">Select Formatted Replacement:</span>
+                <div class="chips-grid">
+                  <button class="option-chip" data-val="closed" onclick="selectOption('r6', 'closed', '25%')">
+                    25% <span class="chip-preview-val">(Closed, Science/AMA)</span>
+                  </button>
+                  <button class="option-chip" data-val="spaced" onclick="selectOption('r6', 'spaced', '25 %')">
+                    25 % <span class="chip-preview-val">(Spaced, ISO)</span>
+                  </button>
+                  <button class="option-chip selected" data-val="us_word" onclick="selectOption('r6', 'us_word', '25 percent')">
+                    25 percent <span class="chip-preview-val">(US Word, Chicago)</span>
+                  </button>
+                  <button class="option-chip" data-val="uk_word" onclick="selectOption('r6', 'uk_word', '25 per cent')">
+                    25 per cent <span class="chip-preview-val">(UK Two Words)</span>
+                  </button>
+                  <button class="option-chip" data-val="delta" onclick="selectOption('r6', 'delta', '25 percentage points')">
+                    25 percentage points <span class="chip-preview-val">(Delta)</span>
+                  </button>
+                  <button class="option-chip add-custom" onclick="promptCustomOption('r6')">+ Custom</button>
+                </div>
+              </div>
+              <div class="rule-bottom-controls">
+                <span class="rule-tip">💡 Tip: Non-numeric proportions will automatically format as "percentage".</span>
+                <select class="severity-select" onchange="updateSeverity('r6', this.value)">
+                  <option selected>Minor</option>
+                  <option>Major</option>
+                  <option>Critical</option>
+                  <option>Informational</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- R5: Temperature -->
+            <div class="rule-card" id="card-r5" data-rule="r5" data-name="temperature formatting celsius fahrenheit deg">
+              <div class="rule-card-top">
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="rule-badge-no">R5</span>
+                    <span class="rule-name">Temperature Formatting</span>
+                  </div>
+                  <p class="rule-meta-line">Auto Fix · needs Style profile · 6 detectors active</p>
+                </div>
+                <div class="toggle-wrap">
+                  <span style="font-size: 11px; font-weight:600; color:var(--navy-600)">On</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked onchange="toggleRuleActive('r5', this.checked)">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="option-chips-container">
+                <span class="option-chips-label">Select Temperature Form:</span>
+                <div class="chips-grid">
+                  <button class="option-chip selected" data-val="spaced" onclick="selectOption('r5', 'spaced', '25 °C')">
+                    25 °C <span class="chip-preview-val">(Spaced, Standard)</span>
+                  </button>
+                  <button class="option-chip" data-val="closed" onclick="selectOption('r5', 'closed', '25°C')">
+                    25°C <span class="chip-preview-val">(Closed, AMA)</span>
+                  </button>
+                  <button class="option-chip" data-val="deg" onclick="selectOption('r5', 'deg', '25 deg C')">
+                    25 deg C <span class="chip-preview-val">(Abbreviated)</span>
+                  </button>
+                  <button class="option-chip" data-val="spelled" onclick="selectOption('r5', 'spelled', '25 degrees Celsius')">
+                    25 degrees Celsius <span class="chip-preview-val">(Spelled)</span>
+                  </button>
+                  <button class="option-chip" data-val="dual" onclick="selectOption('r5', 'dual', '25 °C (77 °F)')">
+                    25 °C (77 °F) <span class="chip-preview-val">(Dual)</span>
+                  </button>
+                  <button class="option-chip add-custom" onclick="promptCustomOption('r5')">+ Custom</button>
+                </div>
+              </div>
+              <div class="rule-bottom-controls">
+                <span class="rule-tip">💡 Tip: Spell out at sentence start ("Twenty-five degrees Celsius...").</span>
+                <select class="severity-select">
+                  <option selected>Minor</option>
+                  <option>Major</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- R3: Space between numbers and units -->
+            <div class="rule-card" id="card-r3" data-rule="r3" data-name="space between numbers and units kg mg ml">
+              <div class="rule-card-top">
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="rule-badge-no">R3</span>
+                    <span class="rule-name">Space Between Numbers and Units</span>
+                  </div>
+                  <p class="rule-meta-line">Auto Fix · needs Style profile · SI Engine active</p>
+                </div>
+                <div class="toggle-wrap">
+                  <span style="font-size: 11px; font-weight:600; color:var(--navy-600)">On</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked onchange="toggleRuleActive('r3', this.checked)">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="option-chips-container">
+                <span class="option-chips-label">Select Spacing Convention:</span>
+                <div class="chips-grid">
+                  <button class="option-chip selected" data-val="regular" onclick="selectOption('r3', 'regular', '25 kg')">
+                    25 kg <span class="chip-preview-val">(Regular Space)</span>
+                  </button>
+                  <button class="option-chip" data-val="nbsp" onclick="selectOption('r3', 'nbsp', '25&nbsp;kg')">
+                    25&nbsp;kg <span class="chip-preview-val">(Non-breaking space)</span>
+                  </button>
+                  <button class="option-chip" data-val="thin" onclick="selectOption('r3', 'thin', '25 kg')">
+                    25 kg <span class="chip-preview-val">(Thin space)</span>
+                  </button>
+                  <button class="option-chip" data-val="closed" onclick="selectOption('r3', 'closed', '25kg')">
+                    25kg <span class="chip-preview-val">(Closed)</span>
+                  </button>
+                  <button class="option-chip" data-val="hyphen_adj" onclick="selectOption('r3', 'hyphen_adj', '25-kg (compound)')">
+                    25-kg <span class="chip-preview-val">(Hyphenated Adjective)</span>
+                  </button>
+                </div>
+              </div>
+              <div class="rule-bottom-controls">
+                <span class="rule-tip">💡 Tip: Automatically applies non-breaking space before print export.</span>
+                <select class="severity-select"><option selected>Minor</option></select>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Group 2: Numbers and ranges -->
+        <div class="group-section" data-cat="numbers">
+          <div class="group-header" onclick="toggleGroup(this)">
+            <div class="group-title-wrap">
+              <span class="group-title">🔢 Numbers and ranges</span>
+              <span class="group-count">6 rules</span>
+            </div>
+            <span style="font-size: 12px; color: var(--navy-500);">▼</span>
+          </div>
+          <div class="group-rules-body">
+            
+            <!-- R14: Range formatting -->
+            <div class="rule-card" id="card-r14" data-rule="r14" data-name="number range formatting en dash to from between">
+              <div class="rule-card-top">
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="rule-badge-no">R14</span>
+                    <span class="rule-name">Number Range Formatting</span>
+                  </div>
+                  <p class="rule-meta-line">Auto Fix · needs Style profile · 3 detectors active</p>
+                </div>
+                <div class="toggle-wrap">
+                  <span style="font-size: 11px; font-weight:600; color:var(--navy-600)">On</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked onchange="toggleRuleActive('r14', this.checked)">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="option-chips-container">
+                <span class="option-chips-label">Select Range Form:</span>
+                <div class="chips-grid">
+                  <button class="option-chip selected" data-val="endash" onclick="selectOption('r14', 'endash', '10–15')">
+                    10–15 <span class="chip-preview-val">(En dash, Closed)</span>
+                  </button>
+                  <button class="option-chip" data-val="endash_spaced" onclick="selectOption('r14', 'endash_spaced', '10 – 15')">
+                    10 – 15 <span class="chip-preview-val">(En dash, Spaced)</span>
+                  </button>
+                  <button class="option-chip" data-val="to" onclick="selectOption('r14', 'to', '10 to 15')">
+                    10 to 15 <span class="chip-preview-val">(Prose "to")</span>
+                  </button>
+                  <button class="option-chip" data-val="from_to" onclick="selectOption('r14', 'from_to', 'from 10 to 15')">
+                    from 10 to 15 <span class="chip-preview-val">(Never "from 10–15")</span>
+                  </button>
+                  <button class="option-chip" data-val="between_and" onclick="selectOption('r14', 'between_and', 'between 10 and 15')">
+                    between 10 and 15 <span class="chip-preview-val">(Between/and)</span>
+                  </button>
+                  <button class="option-chip add-custom" onclick="promptCustomOption('r14')">+ Custom</button>
+                </div>
+              </div>
+              <div class="rule-bottom-controls">
+                <span class="rule-tip">💡 Tip: If preceded by "from" or "between", words "to"/"and" are enforced.</span>
+                <select class="severity-select"><option selected>Minor</option></select>
+              </div>
+            </div>
+
+            <!-- R13: Number Style -->
+            <div class="rule-card" id="card-r13" data-rule="r13" data-name="number style words vs numerals 10 spell out">
+              <div class="rule-card-top">
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="rule-badge-no">R13</span>
+                    <span class="rule-name">Number Style (Words vs. Numerals)</span>
+                  </div>
+                  <p class="rule-meta-line">Auto Fix · needs Style profile · 4 detectors active</p>
+                </div>
+                <div class="toggle-wrap">
+                  <span style="font-size: 11px; font-weight:600; color:var(--navy-600)">On</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked onchange="toggleRuleActive('r13', this.checked)">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="option-chips-container">
+                <span class="option-chips-label">Select Numbering Convention:</span>
+                <div class="chips-grid">
+                  <button class="option-chip selected" data-val="zero_nine" onclick="selectOption('r13', 'zero_nine', '0–9 spelled, 10+ numerals')">
+                    0–9 spelled, 10+ numerals <span class="chip-preview-val">(AP / Modern)</span>
+                  </button>
+                  <button class="option-chip" data-val="zero_ninety_nine" onclick="selectOption('r13', 'zero_ninety_nine', '0–99 spelled, 100+ numerals')">
+                    0–99 spelled, 100+ numerals <span class="chip-preview-val">(Chicago CMOS)</span>
+                  </button>
+                  <button class="option-chip" data-val="all_numerals" onclick="selectOption('r13', 'all_numerals', 'Numerals for all quantities')">
+                    Numerals for all quantities <span class="chip-preview-val">(AMA / Science)</span>
+                  </button>
+                  <button class="option-chip" data-val="sentence_start" onclick="selectOption('r13', 'sentence_start', 'Spell out at sentence start')">
+                    Spell out at sentence start
+                  </button>
+                </div>
+              </div>
+              <div class="rule-bottom-controls">
+                <span class="rule-tip">💡 Tip: Numbers with physical units ("5 mg") always remain numerals.</span>
+                <select class="severity-select"><option selected>Minor</option></select>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Group 3: Dates, times and currency -->
+        <div class="group-section" data-cat="dates">
+          <div class="group-header" onclick="toggleGroup(this)">
+            <div class="group-title-wrap">
+              <span class="group-title">📅 Dates, times and currency</span>
+              <span class="group-count">5 rules</span>
+            </div>
+            <span style="font-size: 12px; color: var(--navy-500);">▼</span>
+          </div>
+          <div class="group-rules-body">
+            
+            <!-- R17: Date Format -->
+            <div class="rule-card" id="card-r17" data-rule="r17" data-name="date format standardisation uk us iso">
+              <div class="rule-card-top">
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="rule-badge-no">R17</span>
+                    <span class="rule-name">Date Format Standardisation</span>
+                  </div>
+                  <p class="rule-meta-line">Auto Fix · needs Style profile</p>
+                </div>
+                <div class="toggle-wrap">
+                  <span style="font-size: 11px; font-weight:600; color:var(--navy-600)">On</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked onchange="toggleRuleActive('r17', this.checked)">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="option-chips-container">
+                <span class="option-chips-label">Select Target Date Format:</span>
+                <div class="chips-grid">
+                  <button class="option-chip selected" data-val="us_long" onclick="selectOption('r17', 'us_long', 'October 10, 2026')">
+                    October 10, 2026 <span class="chip-preview-val">(US Long)</span>
+                  </button>
+                  <button class="option-chip" data-val="uk_long" onclick="selectOption('r17', 'uk_long', '10 October 2026')">
+                    10 October 2026 <span class="chip-preview-val">(UK Long)</span>
+                  </button>
+                  <button class="option-chip" data-val="iso" onclick="selectOption('r17', 'iso', '2026-10-10')">
+                    2026-10-10 <span class="chip-preview-val">(ISO 8601)</span>
+                  </button>
+                  <button class="option-chip" data-val="ordinal" onclick="selectOption('r17', 'ordinal', '10th October 2026')">
+                    10th October 2026 <span class="chip-preview-val">(Ordinal)</span>
+                  </button>
+                  <button class="option-chip" data-val="abbr_month" onclick="selectOption('r17', 'abbr_month', 'Oct. 10, 2026')">
+                    Oct. 10, 2026 <span class="chip-preview-val">(Abbreviated)</span>
+                  </button>
+                </div>
+              </div>
+              <div class="rule-bottom-controls">
+                <span class="rule-tip">💡 Tip: Year is comma-bracketed in US style ("October 10, 2026, was sunny").</span>
+                <select class="severity-select"><option selected>Minor</option></select>
+              </div>
+            </div>
+
+            <!-- R19: Time format -->
+            <div class="rule-card" id="card-r19" data-rule="r19" data-name="time format standardisation am pm 24 hour">
+              <div class="rule-card-top">
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="rule-badge-no">R19</span>
+                    <span class="rule-name">Time Format Standardisation</span>
+                  </div>
+                  <p class="rule-meta-line">Auto Fix · needs Style profile</p>
+                </div>
+                <div class="toggle-wrap">
+                  <span style="font-size: 11px; font-weight:600; color:var(--navy-600)">On</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked onchange="toggleRuleActive('r19', this.checked)">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="option-chips-container">
+                <span class="option-chips-label">Select Time Notation:</span>
+                <div class="chips-grid">
+                  <button class="option-chip selected" data-val="dots_lower" onclick="selectOption('r19', 'dots_lower', '3:30 p.m.')">
+                    3:30 p.m. <span class="chip-preview-val">(Dotted lowercase, US)</span>
+                  </button>
+                  <button class="option-chip" data-val="nodots_lower" onclick="selectOption('r19', 'nodots_lower', '3:30 pm')">
+                    3:30 pm <span class="chip-preview-val">(Undotted, UK)</span>
+                  </button>
+                  <button class="option-chip" data-val="caps" onclick="selectOption('r19', 'caps', '3:30 PM')">
+                    3:30 PM <span class="chip-preview-val">(Uppercase / Small Caps)</span>
+                  </button>
+                  <button class="option-chip" data-val="24h" onclick="selectOption('r19', '24h', '15:30')">
+                    15:30 <span class="chip-preview-val">(24-Hour Military)</span>
+                  </button>
+                </div>
+              </div>
+              <div class="rule-bottom-controls">
+                <span class="rule-tip">💡 Tip: Avoid redundancy like "3:30 p.m. in the afternoon".</span>
+                <select class="severity-select"><option selected>Minor</option></select>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Group 4: Abbreviations & Latin -->
+        <div class="group-section" data-cat="abbrev">
+          <div class="group-header" onclick="toggleGroup(this)">
+            <div class="group-title-wrap">
+              <span class="group-title">🔤 Abbreviations, Latin & Versus</span>
+              <span class="group-count">5 rules</span>
+            </div>
+            <span style="font-size: 12px; color: var(--navy-500);">▼</span>
+          </div>
+          <div class="group-rules-body">
+            
+            <!-- R35: Latin and Versus -->
+            <div class="rule-card" id="card-r35" data-rule="r35" data-name="latin abbreviations versus eg ie vs">
+              <div class="rule-card-top">
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="rule-badge-no">R35</span>
+                    <span class="rule-name">Latin Abbreviations & Versus</span>
+                  </div>
+                  <p class="rule-meta-line">Auto Fix · needs Style profile</p>
+                </div>
+                <div class="toggle-wrap">
+                  <span style="font-size: 11px; font-weight:600; color:var(--navy-600)">On</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked onchange="toggleRuleActive('r35', this.checked)">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="option-chips-container">
+                <span class="option-chips-label">Select Latin / Versus Style:</span>
+                <div class="chips-grid">
+                  <button class="option-chip selected" data-val="comma_us" onclick="selectOption('r35', 'comma_us', 'e.g., / vs.')">
+                    e.g., &amp; vs. <span class="chip-preview-val">(US Standard with Comma)</span>
+                  </button>
+                  <button class="option-chip" data-val="nocomma_uk" onclick="selectOption('r35', 'nocomma_uk', 'e.g. / vs')">
+                    e.g. &amp; vs <span class="chip-preview-val">(UK Standard, Undotted vs)</span>
+                  </button>
+                  <button class="option-chip" data-val="english" onclick="selectOption('r35', 'english', 'for example / versus')">
+                    for example &amp; versus <span class="chip-preview-val">(Spelled English)</span>
+                  </button>
+                  <button class="option-chip" data-val="legal_v" onclick="selectOption('r35', 'legal_v', 'v.')">
+                    v. <span class="chip-preview-val">(Legal Italic Citation)</span>
+                  </button>
+                </div>
+              </div>
+              <div class="rule-bottom-controls">
+                <span class="rule-tip">💡 Tip: In Chicago & APA, "e.g." and "i.e." are always followed by a comma.</span>
+                <select class="severity-select"><option selected>Minor</option></select>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- RIGHT: Live Sandbox & Review Card Simulator -->
+    <aside class="preview-pane">
+
+      <!-- Try-it-Out Live Diff Sandbox -->
+      <div class="preview-card-box">
+        <div class="card-box-header">
+          <span class="card-box-title">🔬 Try-it-Out Live Diff Sandbox</span>
+          <span style="font-size: 11px; color: var(--navy-500);">Live Transformation</span>
+        </div>
+        
+        <p style="font-size: 11px; color: var(--navy-600); margin-bottom: 6px;">
+          Type or select sample text to test how rules transform in real time:
+        </p>
+
+        <textarea id="sandboxInput" class="sandbox-textarea" oninput="runLiveDiff()">In 2024, 25% of subjects aged 10-15 years received 50mg at 25 C vs 25% in the control group e.g. group B on 10/10/2026.</textarea>
+        
+        <div class="sample-prompts">
+          <span style="font-size: 10px; color: var(--navy-500); align-self:center;">Try Samples:</span>
+          <button class="sample-btn" onclick="loadSample(1)">Clinical Trial (%)</button>
+          <button class="sample-btn" onclick="loadSample(2)">Temperature &amp; Range</button>
+          <button class="sample-btn" onclick="loadSample(3)">Abstract Proportions</button>
+        </div>
+
+        <div style="font-size: 10px; font-weight:700; color:var(--navy-500); text-transform:uppercase; margin-bottom: 4px;">
+          Transformed Output (<span style="color:#6EE7B7">ins</span> / <span style="color:#FCA5A5">del</span> diff):
+        </div>
+        <div class="diff-output-box" id="diffOutput">
+          <!-- Rendered live by JavaScript -->
+        </div>
+      </div>
+
+      <!-- Live Technical Review Card Simulator -->
+      <div class="preview-card-box">
+        <div class="card-box-header">
+          <span class="card-box-title">📑 Reviewer Workspace Preview</span>
+          <span class="badge-pill badge-gold">FindReplaceMasterCard</span>
+        </div>
+        <p style="font-size: 11px; color: var(--navy-600); margin-bottom: 12px;">
+          How this rule will look to an editor during the review phase:
+        </p>
+
+        <div class="review-sim-card">
+          <div class="sim-tag-row">
+            <span class="rule-badge-no" id="simRuleBadge">R6</span>
+            <span style="font-size: 12px; font-weight:800; color:var(--navy-900);" id="simRuleTitle">Percentage Formatting</span>
+            <span class="badge-pill badge-gold" style="font-size: 9px; padding: 2px 6px;">MINOR</span>
+            <span style="font-size: 11px; color:var(--navy-400); margin-left:auto;">Para 14</span>
+          </div>
+
+          <div class="sim-surface-row">
+            Original finding: <strong style="color:var(--rose-600); font-family:'JetBrains Mono', monospace;" id="simOriginalText">"25%"</strong>
+          </div>
+
+          <div style="font-size: 10px; font-weight:700; color:var(--navy-500); text-transform:uppercase; margin-bottom: 6px;">
+            Checklist R6 Options:
+          </div>
+
+          <div class="sim-options-grid" id="simOptionsButtons">
+            <!-- Dynamically populated from active rule options -->
+          </div>
+
+          <div class="sim-actions">
+            <button class="btn btn-primary" style="flex:1" onclick="showToast('Replacement applied to manuscript!')">Accept Fix</button>
+            <button class="btn btn-secondary" onclick="showToast('Rule applied to all 18 occurrences in chapter!')">Replace All (18)</button>
+            <button class="btn btn-secondary" style="color:var(--rose-700);" onclick="showToast('Author query logged in AQ Dossier!')">Query</button>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+  </main>
+
+  <!-- Toast Notification -->
+  <div class="toast-popup" id="toastBox">
+    <span id="toastMsg">Action completed!</span>
+  </div>
+
+  <script>
+    // State of active stylesheet selections
+    const state = {
+      preset: 'chicago',
+      rules: {
+        r6: { enabled: true, selectedVal: 'us_word', replacement: '25 percent', severity: 'Minor' },
+        r5: { enabled: true, selectedVal: 'spaced', replacement: '25 °C', severity: 'Minor' },
+        r3: { enabled: true, selectedVal: 'regular', replacement: '25 kg', severity: 'Minor' },
+        r14: { enabled: true, selectedVal: 'endash', replacement: '10–15', severity: 'Minor' },
+        r13: { enabled: true, selectedVal: 'zero_nine', replacement: '0–9 spelled', severity: 'Minor' },
+        r17: { enabled: true, selectedVal: 'us_long', replacement: 'October 10, 2026', severity: 'Minor' },
+        r19: { enabled: true, selectedVal: 'dots_lower', replacement: '3:30 p.m.', severity: 'Minor' },
+        r35: { enabled: true, selectedVal: 'comma_us', replacement: 'e.g., / vs.', severity: 'Minor' }
+      }
+    };
+
+    // Preset configurations
+    const PRESETS = {
+      chicago: {
+        name: 'Chicago Manual (CMOS)',
+        badge: 'Preset: Chicago Manual of Style',
+        rules: {
+          r6: 'us_word',       // 25 percent
+          r5: 'spaced',        // 25 °C
+          r14: 'endash',       // 10–15 closed
+          r13: 'zero_ninety_nine', // 0–99 spelled
+          r17: 'us_long',      // October 10, 2026
+          r19: 'dots_lower',   // 3:30 p.m.
+          r35: 'comma_us'      // e.g.,
+        }
+      },
+      ama: {
+        name: 'AMA 11th Edition (Medical)',
+        badge: 'Preset: AMA 11th Medical Style',
+        rules: {
+          r6: 'closed',        // 25%
+          r5: 'closed',        // 25°C
+          r14: 'to',           // 10 to 15
+          r13: 'all_numerals', // Numerals for all
+          r17: 'us_long',      // October 10, 2026
+          r19: 'nodots_lower', // 3:30 pm
+          r35: 'comma_us'
+        }
+      },
+      oxford: {
+        name: 'Oxford / Cambridge (UK)',
+        badge: 'Preset: Oxford University Press (UK)',
+        rules: {
+          r6: 'uk_word',       // 25 per cent
+          r5: 'spaced',        // 25 °C
+          r14: 'endash_spaced',// 10 – 15
+          r13: 'zero_nine',
+          r17: 'uk_long',      // 10 October 2026
+          r19: 'nodots_lower', // 3:30 pm
+          r35: 'nocomma_uk'    // e.g. / vs
+        }
+      },
+      apa: {
+        name: 'APA 7th Edition',
+        badge: 'Preset: APA 7th Edition',
+        rules: {
+          r6: 'closed',        // 25%
+          r5: 'spaced',        // 25 °C
+          r14: 'endash',       // 10–15
+          r13: 'zero_nine',    // 0-9 spelled, 10+ numerals
+          r17: 'us_long',
+          r19: 'dots_lower',
+          r35: 'comma_us'
+        }
+      },
+      nature: {
+        name: 'Nature / Springer',
+        badge: 'Preset: Nature Publishing Group',
+        rules: {
+          r6: 'closed',
+          r5: 'spaced',
+          r14: 'endash',
+          r13: 'all_numerals',
+          r17: 'uk_long',
+          r19: '24h',
+          r35: 'comma_us'
+        }
+      }
+    };
+
+    function applyPreset(presetKey) {
+      state.preset = presetKey;
+      const p = PRESETS[presetKey];
+      if (!p) return;
+
+      // Update preset chips UI
+      document.querySelectorAll('.preset-chip').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.includes(p.name.split(' ')[0]));
+      });
+      document.getElementById('activePresetBadge').textContent = p.badge;
+
+      // Apply rule choices
+      for (const [ruleId, valKey] of Object.entries(p.rules)) {
+        if (state.rules[ruleId]) {
+          const card = document.getElementById(`card-${ruleId}`);
+          if (card) {
+            const targetChip = card.querySelector(`.option-chip[data-val="${valKey}"]`);
+            if (targetChip) {
+              targetChip.click();
+            }
+          }
+        }
+      }
+      showToast(`Applied ${p.name} style preset!`);
+      runLiveDiff();
+    }
+
+    function selectOption(ruleId, valKey, displayVal) {
+      if (!state.rules[ruleId]) return;
+      state.rules[ruleId].selectedVal = valKey;
+      state.rules[ruleId].replacement = displayVal;
+
+      const card = document.getElementById(`card-${ruleId}`);
+      if (card) {
+        card.querySelectorAll('.option-chip').forEach(chip => {
+          chip.classList.toggle('selected', chip.getAttribute('data-val') === valKey);
+        });
+      }
+      runLiveDiff();
+      updateReviewSimulator(ruleId);
+    }
+
+    function toggleRuleActive(ruleId, isChecked) {
+      if (!state.rules[ruleId]) return;
+      state.rules[ruleId].enabled = isChecked;
+      const card = document.getElementById(`card-${ruleId}`);
+      if (card) {
+        card.classList.toggle('disabled', !isChecked);
+      }
+      runLiveDiff();
+    }
+
+    function promptCustomOption(ruleId) {
+      const customVal = prompt('Enter custom replacement format (e.g. "{n} percentage points" or "{a} to {b}"):');
+      if (customVal && customVal.trim()) {
+        const clean = customVal.trim();
+        selectOption(ruleId, 'custom', clean);
+        showToast(`Custom option "${clean}" added!`);
+      }
+    }
+
+    // Live Sandbox Engine
+    function runLiveDiff() {
+      const input = document.getElementById('sandboxInput').value;
+      let output = input;
+
+      // 1. Percentage (R6)
+      if (state.rules.r6.enabled) {
+        const val = state.rules.r6.selectedVal;
+        output = output.replace(/\b(\d+(?:\.\d+)?)\s*%/g, (match, num) => {
+          let rep = `${num}%`;
+          if (val === 'closed') rep = `${num}%`;
+          else if (val === 'spaced') rep = `${num} %`;
+          else if (val === 'us_word') rep = `${num} percent`;
+          else if (val === 'uk_word') rep = `${num} per cent`;
+          else if (val === 'delta') rep = `${num} percentage points`;
+          else if (val === 'custom') rep = state.rules.r6.replacement.replace('{n}', num);
+          
+          if (rep === match) return match;
+          return `<del>${match}</del><ins>${rep}</ins>`;
+        });
+      }
+
+      // 2. Temperature (R5)
+      if (state.rules.r5.enabled) {
+        const val = state.rules.r5.selectedVal;
+        output = output.replace(/\b(\d+)\s*(?:°\s*C|C\b)/g, (match, num) => {
+          let rep = `${num} °C`;
+          if (val === 'closed') rep = `${num}°C`;
+          else if (val === 'spaced') rep = `${num} °C`;
+          else if (val === 'deg') rep = `${num} deg C`;
+          else if (val === 'spelled') rep = `${num} degrees Celsius`;
+          else if (val === 'dual') rep = `${num} °C (${Math.round(num * 9 / 5 + 32)} °F)`;
+          
+          if (rep === match) return match;
+          return `<del>${match}</del><ins>${rep}</ins>`;
+        });
+      }
+
+      // 3. Number Ranges (R14)
+      if (state.rules.r14.enabled) {
+        const val = state.rules.r14.selectedVal;
+        output = output.replace(/\b(\d+)\s*[-–]\s*(\d+)\b/g, (match, a, b) => {
+          let rep = `${a}–${b}`;
+          if (val === 'endash') rep = `${a}–${b}`;
+          else if (val === 'endash_spaced') rep = `${a} – ${b}`;
+          else if (val === 'to') rep = `${a} to ${b}`;
+          else if (val === 'from_to') rep = `from ${a} to ${b}`;
+          else if (val === 'between_and') rep = `between ${a} and ${b}`;
+          
+          if (rep === match) return match;
+          return `<del>${match}</del><ins>${rep}</ins>`;
+        });
+      }
+
+      // 4. Latin / Versus (R35)
+      if (state.rules.r35.enabled) {
+        const val = state.rules.r35.selectedVal;
+        output = output.replace(/\b(?:vs\.?|versus)\b/gi, (match) => {
+          let rep = match;
+          if (val === 'comma_us') rep = 'vs.';
+          else if (val === 'nocomma_uk') rep = 'vs';
+          else if (val === 'english') rep = 'versus';
+          else if (val === 'legal_v') rep = '<i>v.</i>';
+          
+          if (rep === match) return match;
+          return `<del>${match}</del><ins>${rep}</ins>`;
+        });
+        output = output.replace(/\be\.g\.?,?/gi, (match) => {
+          let rep = match;
+          if (val === 'comma_us') rep = 'e.g.,';
+          else if (val === 'nocomma_uk') rep = 'e.g.';
+          else if (val === 'english') rep = 'for example,';
+          
+          if (rep === match) return match;
+          return `<del>${match}</del><ins>${rep}</ins>`;
+        });
+      }
+
+      // 5. Dates (R17)
+      if (state.rules.r17.enabled) {
+        const val = state.rules.r17.selectedVal;
+        output = output.replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g, (match, m, d, y) => {
+          let rep = match;
+          if (val === 'us_long') rep = `October 10, ${y}`;
+          else if (val === 'uk_long') rep = `10 October ${y}`;
+          else if (val === 'iso') rep = `${y}-10-10`;
+          else if (val === 'ordinal') rep = `10th October ${y}`;
+          
+          if (rep === match) return match;
+          return `<del>${match}</del><ins>${rep}</ins>`;
+        });
+      }
+
+      document.getElementById('diffOutput').innerHTML = output;
+    }
+
+    // Update the Simulated Review Card
+    function updateReviewSimulator(ruleId) {
+      if (ruleId === 'r6') {
+        document.getElementById('simRuleBadge').textContent = 'R6';
+        document.getElementById('simRuleTitle').textContent = 'Percentage Formatting';
+        document.getElementById('simOriginalText').textContent = '"25%"';
+        
+        const opts = [
+          { label: '1. Closed symbol', rep: '25%' },
+          { label: '2. Spaced symbol', rep: '25 %' },
+          { label: '3. US Word (Chicago)', rep: '25 percent' },
+          { label: '4. UK Word (Oxford)', rep: '25 per cent' },
+          { label: '5. Delta points', rep: '25 percentage points' }
+        ];
+
+        const activeRep = state.rules.r6.replacement;
+        const container = document.getElementById('simOptionsButtons');
+        container.innerHTML = opts.map(o => `
+          <button class="sim-option-btn ${activeRep === o.rep ? 'active' : ''}" onclick="applySimChoice('${o.rep}')">
+            <span>${o.label}</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-weight:700;">→ "${o.rep}"</span>
+          </button>
+        `).join('');
+      }
+    }
+
+    function applySimChoice(repText) {
+      showToast(`Selected "${repText}" for active finding!`);
+    }
+
+    function loadSample(num) {
+      if (num === 1) {
+        document.getElementById('sandboxInput').value = "In 2024, 25% of subjects aged 10-15 years received 50mg at 25 C vs 25% in the control group e.g. group B on 10/10/2026.";
+      } else if (num === 2) {
+        document.getElementById('sandboxInput').value = "Temperature spiked to 38.5 C with a range of 10-20 patients exhibiting 15% to 20% variance.";
+      } else if (num === 3) {
+        document.getElementById('sandboxInput').value = "A large % of respondents preferred 15-20 days treatment vs. standard 5-day therapy.";
+      }
+      runLiveDiff();
+    }
+
+    function filterRules() {
+      const q = document.getElementById('ruleSearchInput').value.toLowerCase().trim();
+      document.querySelectorAll('.rule-card').forEach(card => {
+        const text = (card.getAttribute('data-name') || '').toLowerCase();
+        if (!q || text.includes(q)) {
+          card.style.display = 'block';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    function setCategoryFilter(cat) {
+      document.querySelectorAll('.cat-tab').forEach(tab => tab.classList.remove('active'));
+      event.target.classList.add('active');
+
+      document.querySelectorAll('.group-section').forEach(sec => {
+        if (cat === 'all' || sec.getAttribute('data-cat') === cat) {
+          sec.style.display = 'block';
+        } else {
+          sec.style.display = 'none';
+        }
+      });
+    }
+
+    function toggleGroup(header) {
+      const body = header.nextElementSibling;
+      const arrow = header.querySelector('span:last-child');
+      if (body.style.display === 'none') {
+        body.style.display = 'flex';
+        arrow.textContent = '▼';
+      } else {
+        body.style.display = 'none';
+        arrow.textContent = '▲';
+      }
+    }
+
+    function showToast(msg) {
+      const box = document.getElementById('toastBox');
+      document.getElementById('toastMsg').textContent = msg;
+      box.classList.add('show');
+      setTimeout(() => box.classList.remove('show'), 2600);
+    }
+
+    function exportConfigJson() {
+      const payload = {
+        name: "American Standard Style (CMOS/AMA)",
+        ce_rules: state.rules
+      };
+      alert("Active Stylesheet CE Rules Configuration JSON:\n\n" + JSON.stringify(payload, null, 2));
+    }
+
+    // Initial setup on page load
+    window.onload = function() {
+      updateReviewSimulator('r6');
+      runLiveDiff();
+    };
+  </script>
+</body>
+</html>

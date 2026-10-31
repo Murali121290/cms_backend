@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, Form, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
 from jose import jwt, JWTError
 from datetime import datetime, timezone
@@ -305,28 +306,40 @@ async def download_backup_or_folder_file(
         raise HTTPException(status_code=404, detail="Chapter not found")
         
     # Resolve file path on disk:
-    # 1. If subfolder is Backup, look in the FileVersion table matching the filename
+    # 1. If subfolder is Backup, look in models.File or FileVersion table matching the filename
     if subfolder == "Backup":
-        version_entry = db.query(models.FileVersion).join(
-            models.File, models.FileVersion.file_id == models.File.id
-        ).filter(
+        backup_file_rec = db.query(models.File).filter(
             models.File.chapter_id == chapter.id,
-            models.FileVersion.path.like(f"%/{file_name}")
+            models.File.category == "Backup",
+            models.File.filename == file_name
         ).first()
-        if not version_entry or not version_entry.path or not os.path.exists(version_entry.path):
-            found_path = None
-            chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
-            if os.path.exists(chapter_dir):
-                for cat_folder in os.listdir(chapter_dir):
-                    archive_path = os.path.join(chapter_dir, cat_folder, "Archive", file_name)
-                    if os.path.exists(archive_path):
-                        found_path = archive_path
-                        break
-            if not found_path:
-                raise HTTPException(status_code=404, detail="Backup file not found")
-            file_path = found_path
+        if backup_file_rec and backup_file_rec.path and os.path.exists(backup_file_rec.path):
+            file_path = backup_file_rec.path
         else:
-            file_path = version_entry.path
+            version_entry = db.query(models.FileVersion).join(
+                models.File, models.FileVersion.file_id == models.File.id
+            ).filter(
+                models.File.chapter_id == chapter.id,
+                models.FileVersion.path.like(f"%/{file_name}")
+            ).first()
+            if not version_entry or not version_entry.path or not os.path.exists(version_entry.path):
+                found_path = None
+                chapter_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters)
+                if os.path.exists(chapter_dir):
+                    backup_dir = os.path.join(chapter_dir, "Backup", file_name)
+                    if os.path.exists(backup_dir):
+                        found_path = backup_dir
+                    else:
+                        for cat_folder in os.listdir(chapter_dir):
+                            archive_path = os.path.join(chapter_dir, cat_folder, "Archive", file_name)
+                            if os.path.exists(archive_path):
+                                found_path = archive_path
+                                break
+                if not found_path:
+                    raise HTTPException(status_code=404, detail="Backup file not found")
+                file_path = found_path
+            else:
+                file_path = version_entry.path
     else:
         file_record = db.query(models.File).filter(
             models.File.project_id == project_id,
@@ -727,26 +740,22 @@ async def convert_xhtml_to_xml_endpoint(
     if file_name.lower().endswith((".xhtml", ".html")):
         base_name = os.path.splitext(file_name)[0]
 
-        # Find all matching XML file records for this chapter
+        # Find all matching XML file records for this chapter strictly under XML category
         matching_xml_records = db.query(models.File).filter(
             models.File.project_id == project_id,
             models.File.chapter_id == chapter.id,
+            func.lower(models.File.category) == "xml",
             models.File.filename.ilike(f"{base_name}.xml")
         ).filter(
             ~models.File.filename.ilike("%_layout.html")
         ).all()
 
-        xml_disk_paths = set()
+        xml_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "XML")
+        primary_target_xml_path = os.path.join(xml_dir, f"{base_name}.xml")
+        xml_disk_paths = {os.path.abspath(primary_target_xml_path)}
         for rec in matching_xml_records:
-            xml_disk_paths.add(os.path.abspath(os.path.join(UPLOAD_DIR, rec.path)))
-
-        for folder in ["XML", "xml", "Manuscript"]:
-            candidate_dir = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, folder)
-            candidate_file = os.path.abspath(os.path.join(candidate_dir, f"{base_name}.xml"))
-            if os.path.exists(candidate_file) or os.path.exists(candidate_dir):
-                xml_disk_paths.add(candidate_file)
-
-        primary_target_xml_path = list(xml_disk_paths)[0] if xml_disk_paths else os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, "XML", f"{base_name}.xml")
+            if rec.path:
+                xml_disk_paths.add(os.path.abspath(os.path.join(UPLOAD_DIR, rec.path)))
 
         scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "scripts"))
         converter_script = os.path.join(scripts_dir, "universal_converter.pl")
@@ -1027,6 +1036,8 @@ async def delete_chapter(
     db: Session = Depends(database.get_db)
 ):
     if not user: return RedirectResponse(url="/login", status_code=302)
+    if "Admin" not in [r.name for r in user.roles]:
+        raise HTTPException(status_code=403, detail="Admin access required to delete chapters")
 
     chapter_result = chapter_service.delete_chapter_primary(
         db,
@@ -1099,8 +1110,13 @@ async def download_file(
         raise HTTPException(status_code=404, detail="File not found")
         
     mime, _ = mimetypes.guess_type(file_record.filename)
+    physical_path = getattr(file_record, "physical_path", None)
+    if not physical_path or not os.path.exists(physical_path):
+        from app.domains.processing.service import resolve_physical_file_path
+        physical_path = resolve_physical_file_path(file_record.path, file_service.UPLOAD_DIR)
+
     return FileResponse(
-        path=file_record.path, 
+        path=physical_path, 
         filename=file_record.filename, 
         media_type=mime or 'application/octet-stream'
     )

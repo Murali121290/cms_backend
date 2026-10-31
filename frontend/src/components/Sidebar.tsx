@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, BarChart3,
   Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2,
-  BookOpen, BookMarked, BookText, FileText,
+  BookOpen, BookText, FileText,
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -18,7 +18,7 @@ import { cn } from '@/utils/cn'
 
 export function Sidebar() {
   const { collapsed, toggle } = useSidebarStore()
-  const { canAccess, viewer } = useRBAC()
+  const { canAccess, hasPermission, viewer } = useRBAC()
   const location = useLocation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -67,45 +67,29 @@ export function Sidebar() {
     return typeof role === 'string' ? role : (role?.name ?? '')
   }
 
-  const isAccessibilityUser =
-    viewer?.team === 'Accessibility Team' ||
-    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('accessibility')) ||
-    Boolean(viewer?.roles && viewer.roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
-
-  const isCustomerUser =
-    viewer?.team === 'Customer Team' ||
-    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('customer')) ||
-    Boolean(viewer?.roles && (viewer.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('customer')))
-
-  const hasBodCustomerAccess = Boolean(
-    (viewer as any)?.customer_access &&
-    Array.isArray((viewer as any).customer_access) &&
-    (viewer as any).customer_access.includes('BOD')
-  )
-
   const navItems = [
-    ...(!isAccessibilityUser && !isCustomerUser
+    ...(hasPermission('view_books_dashboard')
       ? [{ to: '/', icon: LayoutDashboard, label: 'Book Dashboard' }]
       : []),
-    ...(!isAccessibilityUser && !isCustomerUser
+    ...(hasPermission('view_workspace')
       ? [{ to: '/workspace', icon: Briefcase, label: 'My Workspace' }]
       : []),
-    ...(!isAccessibilityUser && !isCustomerUser
-      ? [{ to: '/clients', icon: Users, label: 'Books Production' },
-      { to: '/term-lists', icon: BookMarked, label: 'Term Library' },
-      { to: '/reports', icon: BarChart3, label: 'Reports' }
-      ]
+    ...(hasPermission('access_books_production')
+      ? [{ to: '/clients', icon: Users, label: 'Books Production' }]
       : []),
-    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || !isCustomerUser)
+    ...(hasPermission('access_journal_production')
+      ? [{ to: '/journal-production', icon: BookText, label: 'Journal Production' }]
+      : []),
+    ...(hasPermission('access_books_production') || hasPermission('view_books_dashboard')
+      ? [{ to: '/reports', icon: BarChart3, label: 'Reports' }]
+      : []),
+    ...(hasPermission('access_post_production')
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist Hub' }]
       : []),
-    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || (isCustomerUser && hasBodCustomerAccess))
-      ? [
-        // { to: '/bod/internal', icon: BookOpen, label: 'Books on Demand' },
-        { to: '/bod/report', icon: BookOpen, label: 'BOD Report' },
-      ]
+    ...(hasPermission('access_bod')
+      ? [{ to: '/bod/report', icon: BookOpen, label: 'BOD Report' }]
       : []),
-    ...(canAccess(ROLE_PERMISSIONS.access_settings) && !isAccessibilityUser && !isCustomerUser
+    ...(hasPermission('access_settings')
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
       : []),
   ]

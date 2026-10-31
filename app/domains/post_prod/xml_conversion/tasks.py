@@ -26,7 +26,7 @@ def run_xml_conversion_pipeline(history_id: int):
         history.project.conversion_status = "Processing"
         db.commit()
         
-        # 1. PDF to S4C XML using external PDF2XML API
+        # 1. PDF to XML using external PDF2XML API (request all formats in zip)
         url = os.environ.get("PDF2XML_API_URL")
         if not url:
             logger.error("PDF2XML_API_URL environment variable is not set")
@@ -36,27 +36,39 @@ def run_xml_conversion_pipeline(history_id: int):
         params = {
             "engine": "docling",
             "targets": "json,xml,jats,bits",
-            "return_xml": "rawxml"
+            "return_xml": "all"
         }
         
         with open(history.project.filepath, 'rb') as f:
-            files = {'file': (history.project.filepath.split('/')[-1], f, 'application/pdf')}
+            files = {'file': (os.path.basename(history.project.filepath), f, 'application/pdf')}
             response = requests.post(url, params=params, files=files)
             
         if response.status_code != 200:
             raise Exception(f"PDF2XML API Failed ({response.status_code}): {response.text}")
             
-        s4c_xml = response.text
-        
-        # 2. Map to target format
+        out_dir = os.path.dirname(history.project.filepath)
+        base_name = os.path.splitext(os.path.basename(history.project.filepath))[0]
         target_format = history.project.target_format or "XML"
-        final_xml = convert_s4c_to_target(s4c_xml, target_format)
-        
-        # Save output XML to disk
-        out_path = history.project.filepath.rsplit('.', 1)[0] + f".{target_format.lower()}.xml"
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(final_xml)
-            
+
+        content_type = response.headers.get("Content-Type", "")
+        if "zip" in content_type or response.content[:4] == b"PK\x03\x04":
+            from app.domains.post_prod.xml_conversion.router import _extract_and_save_pdf2xml_zip
+            saved = _extract_and_save_pdf2xml_zip(
+                response.content,
+                out_dir,
+                base_name,
+                target_format=target_format
+            )
+            out_path = saved["final_filepath"]
+            history.project.raw_xml_status = "Completed"
+            history.project.final_xml_status = "Completed"
+        else:
+            # Fallback for plain XML string
+            final_xml = convert_s4c_to_target(response.text, target_format)
+            out_path = os.path.join(out_dir, f"{base_name}_final.xml")
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(final_xml)
+
         history.project.result_filepath = out_path
         
         # 3. Validate

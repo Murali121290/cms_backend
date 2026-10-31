@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Search, FolderOpen, BookOpen,
-  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle, Trash2, User as UserIcon
+  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle, Trash2, User as UserIcon,
+  History, ArrowRight, Calendar
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
@@ -19,7 +20,7 @@ import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
 import { ProjectInfoModal } from './ProjectInfoModal'
 import { useUsersStore } from '@/stores/usersStore'
-import { formatDate } from '@/utils/dateUtils'
+import { formatDate, formatDateTime } from '@/utils/dateUtils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -245,10 +246,11 @@ interface ProjectCardProps {
   onEditInfo: () => void
   onOpenWorkflow: () => void
   onOpenPlanning: () => void
+  onOpenHistory: () => void
   onDelete: (id: number) => void
 }
 
-function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning, onDelete }: ProjectCardProps) {
+function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning, onOpenHistory, onDelete }: ProjectCardProps) {
   const { canAccess } = useRBAC()
   const canEdit = canAccess(['admin', 'manager'])
   const isFastTrack = project.priority === 'Fast Track'
@@ -261,7 +263,11 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
   useEffect(() => {
     if (!project.project_code) { setChLoading(false); return }
     chaptersApi.getByProject(project.project_code)
-      .then(setChapters)
+      .then(chs => setChapters((chs || []).filter(c => 
+        c.chapters !== 'Design' && 
+        c.chapters !== 'CE support' && 
+        !c.chapters.toLowerCase().includes('art')
+      )))
       .catch(() => { })
       .finally(() => setChLoading(false))
   }, [project.project_code])
@@ -318,10 +324,10 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
       <div className="px-5 py-4 border-b border-border">
         <div className="flex items-start justify-between gap-2 mb-3">
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-text truncate">{projectLabel(project)}</p>
+            <p className="font-semibold text-text truncate">{project.project_code || project.project_title || `Project #${project.id}`}</p>
             <div className="flex items-center gap-1.5 mt-0.5">
-              {project.project_code && project.project_title && (
-                <span className="text-xs text-muted">{project.project_code}</span>
+              {project.project_title && (
+                <span className="text-xs text-muted truncate max-w-[200px]" title={project.project_title}>{project.project_title}</span>
               )}
               <button
                 onClick={e => { e.stopPropagation(); onViewInfo() }}
@@ -353,6 +359,15 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
                   className="text-red-500 hover:text-red-600 transition-colors flex-shrink-0 ml-1"
                 >
                   <Trash2 size={12} />
+                </button>
+              )}
+              {project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0 && (
+                <button
+                  onClick={e => { e.stopPropagation(); onOpenHistory() }}
+                  title="View due date change history"
+                  className="text-muted hover:text-primary transition-colors flex-shrink-0"
+                >
+                  <History size={12} />
                 </button>
               )}
             </div>
@@ -408,11 +423,23 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
             )}
           </div>
           {project.due_date && (
-            <div className="flex items-center gap-1 flex-shrink-0">
+            <div
+              onClick={e => {
+                if (project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0) {
+                  e.stopPropagation()
+                  onOpenHistory()
+                }
+              }}
+              className={`flex items-center gap-1 flex-shrink-0 ${project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0 ? 'cursor-pointer hover:text-primary transition-colors' : ''}`}
+              title={project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0 ? 'View due date history' : undefined}
+            >
               <CalendarDays size={11} className="text-muted" />
               <span className="text-xs text-muted font-medium">Due:</span>
-              <span className="text-xs text-text font-semibold">
+              <span className="text-xs text-text font-semibold flex items-center gap-1">
                 {formatDate(project.due_date)}
+                {project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0 && (
+                  <History size={10} className="text-amber-500" />
+                )}
               </span>
             </div>
           )}
@@ -486,6 +513,7 @@ export function ClientProjects() {
   const [loading, setLoading] = useState(true)
   const [infoProject, setInfoProject] = useState<Project | null>(null)
   const [editProject, setEditProject] = useState<Project | null>(null)
+  const [historyProject, setHistoryProject] = useState<Project | null>(null)
 
 
   const [viewMode, setViewMode] = useViewMode('view:client-projects', 'large')
@@ -672,9 +700,61 @@ export function ClientProjects() {
         }}
       />
 
-
-
-
+      {/* Due Date History Modal */}
+      <Modal
+        isOpen={historyProject !== null}
+        onClose={() => setHistoryProject(null)}
+        title="Due Date Change History"
+        description={historyProject ? `${projectLabel(historyProject)} (${historyProject.project_code || ''})` : undefined}
+      >
+        <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
+          {historyProject?.due_date_history && Array.isArray(historyProject.due_date_history) && historyProject.due_date_history.length > 0 ? (
+            [...historyProject.due_date_history].reverse().map((entry: any, idx: number) => {
+              const fromStr = entry.from_date || entry.old_date
+              const toStr = entry.to_date || entry.new_date
+              return (
+                <div key={idx} className="flex items-start justify-between bg-surface border border-border rounded-lg p-3 gap-3">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
+                      <Calendar size={14} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        {fromStr ? (
+                          <>
+                            <span className="text-muted line-through">{formatDate(fromStr)}</span>
+                            <ArrowRight size={12} className="text-muted" />
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                              {formatDate(toStr)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                            Set to {formatDate(toStr)}
+                          </span>
+                        )}
+                      </div>
+                      {entry.reason && (
+                        <p className="text-xs text-text/80 mt-1.5 mb-0 break-words">
+                          <span className="text-muted font-medium">Reason:</span> {entry.reason}
+                        </p>
+                      )}
+                      <p className="text-[11px] text-muted m-0 mt-1">
+                        Changed By: <span className="font-medium text-text/90">{entry.changed_by || 'Unknown'}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-muted font-medium shrink-0 pt-0.5 text-right whitespace-nowrap">
+                    {entry.timestamp ? formatDateTime(entry.timestamp) : '—'}
+                  </div>
+                </div>
+              )
+            })
+          ) : (
+            <p className="text-sm text-muted text-center py-6">No due date change history recorded for this project.</p>
+          )}
+        </div>
+      </Modal>
 
       {/* Projects — 4 view modes */}
       {filtered.length === 0 ? (
@@ -694,6 +774,7 @@ export function ClientProjects() {
                   onProjectUpdate={u => setProjects(ps => ps.map(p => p.id === u.id ? u : p))}
                   onViewInfo={() => setInfoProject(project)}
                   onEditInfo={() => setEditProject(project)}
+                  onOpenHistory={() => setHistoryProject(project)}
                   onOpenWorkflow={() => {
                     if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return }
                     navigate(`/clients/${clientId}/projects/${project.id}`)
@@ -734,7 +815,22 @@ export function ClientProjects() {
                       {project.project_manager
                         ? <span className="truncate">PM: {useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager)}</span>
                         : <span className="italic">No PM</span>}
-                      {project.due_date && <span className="flex-shrink-0 flex items-center gap-0.5"><CalendarDays size={10} /> {formatDate(project.due_date, 'en-GB', { day: '2-digit', month: 'short' })}</span>}
+                      {project.due_date && (
+                        <span
+                          onClick={e => {
+                            if (project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0) {
+                              e.stopPropagation()
+                              setHistoryProject(project)
+                            }
+                          }}
+                          className={`flex-shrink-0 flex items-center gap-1 ${project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0 ? 'hover:text-primary' : ''}`}
+                        >
+                          <CalendarDays size={10} /> {formatDate(project.due_date, 'en-GB', { day: '2-digit', month: 'short' })}
+                          {project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0 && (
+                            <History size={10} className="text-amber-500" />
+                          )}
+                        </span>
+                      )}
                     </div>
                   </div>
                 )
@@ -761,7 +857,22 @@ export function ClientProjects() {
                     {project.status && <Badge variant={statusV} className="flex-shrink-0">{project.status}</Badge>}
                     <div className="flex items-center gap-4 text-xs text-muted flex-shrink-0">
                       {project.project_manager && <span>PM: {useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager)}</span>}
-                      {project.due_date && <span className="flex items-center gap-1"><CalendarDays size={11} /> {formatDate(project.due_date)}</span>}
+                      {project.due_date && (
+                        <span
+                          onClick={e => {
+                            if (project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0) {
+                              e.stopPropagation()
+                              setHistoryProject(project)
+                            }
+                          }}
+                          className={`flex items-center gap-1 ${project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0 ? 'hover:text-primary' : ''}`}
+                        >
+                          <CalendarDays size={11} /> {formatDate(project.due_date)}
+                          {project.due_date_history && Array.isArray(project.due_date_history) && project.due_date_history.length > 0 && (
+                            <History size={11} className="text-amber-500" />
+                          )}
+                        </span>
+                      )}
                     </div>
                     <ChevronRight size={14} className="text-muted flex-shrink-0" />
                   </div>
@@ -776,7 +887,7 @@ export function ClientProjects() {
               <table className="w-full text-sm border-collapse min-w-max">
                 <thead>
                   <tr className="border-b border-border bg-surface">
-                    {['Code', 'Title', 'Status', 'Workflow', 'PM', 'Due Date', 'Chapters', 'Pages'].map(h => (
+                    {['Code', 'Title', 'Status', 'Workflow', 'PM', 'Due Date', 'History', 'Chapters', 'Pages'].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                     {canAccess(['admin']) && <th className="px-4 py-3"></th>}
@@ -785,6 +896,7 @@ export function ClientProjects() {
                 <tbody>
                   {filtered.map((project, i) => {
                     const statusV = project.status ? statusToBadge(project.status.toLowerCase()) : 'default'
+                    const historyCount = project.due_date_history && Array.isArray(project.due_date_history) ? project.due_date_history.length : 0
                     return (
                       <tr key={project.id}
                         onClick={() => { if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return } navigate(`/clients/${clientId}/projects/${project.id}`) }}
@@ -796,6 +908,24 @@ export function ClientProjects() {
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.project_manager ? useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager) : '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">
                           {formatDate(project.due_date)}
+                        </td>
+                        <td className="px-4 py-3 text-xs whitespace-nowrap">
+                          {historyCount > 0 ? (
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation()
+                                setHistoryProject(project)
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 transition-colors"
+                              title="Click to view history of due date changes"
+                            >
+                              <History size={11} />
+                              {historyCount} change{historyCount !== 1 ? 's' : ''}
+                            </button>
+                          ) : (
+                            <span className="text-muted text-xs">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-xs text-center text-text font-medium">{(project as any).chapter_count ?? '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">

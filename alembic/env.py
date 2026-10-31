@@ -77,6 +77,13 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        try:
+            from sqlalchemy import text
+            connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
+            connection.commit()
+        except Exception:
+            pass
+
         context.configure(
             connection=connection, target_metadata=target_metadata
         )

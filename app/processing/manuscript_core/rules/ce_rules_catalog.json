@@ -1,0 +1,1654 @@
+{
+ "source": "CE_rules_tool_input.xlsx",
+ "rules": [
+  {
+   "sno": 1,
+   "name": "SI Unit Standardisation",
+   "group": "Units and measurements",
+   "editing_type": "Technical editing",
+   "description": "Verify that SI units and their symbols follow the applicable international conventions and publisher requirements.",
+   "options": [
+    "Replace the non-SI unit name or symbol with the SI form (sec → s; hr → h)",
+    "Keep the author's unit and add the SI equivalent in parentheses",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "Unit names and symbols only. Converting a value is rule 28.",
+   "source_point": 31,
+   "te_rule_ids": [
+    "si_nonsi_rename",
+    "si_nonsi_convert",
+    "si_ambiguous_symbol"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 2,
+   "name": "Unit Symbol Formatting",
+   "group": "Units and measurements",
+   "editing_type": "Technical editing",
+   "description": "Check the correct representation of unit symbols, such as kg, m, s, and mol, including capitalisation and symbol integrity.",
+   "options": [
+    "Correct the symbol's case and form (KG → kg; Mol → mol; l → L)",
+    "Replace a look-alike character with the correct symbol (µ, °)",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 32,
+   "te_rule_ids": [
+    "unit_case_wrong",
+    "unit_symbol_period"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 3,
+   "name": "Space Between Numbers and Units",
+   "group": "Units and measurements",
+   "editing_type": "Technical editing",
+   "description": "Verify that a space separates a numerical value from a unit symbol, such as 25 kg and 37 °C, except where specific conventions apply.",
+   "options": [
+    "Insert a space (25 kg; 37 °C)",
+    "Insert a non-breaking space (25 kg)",
+    "Keep closed form where the style requires it (25%)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "Percent sign follows rule 6.",
+   "source_point": 33,
+   "te_rule_ids": [
+    "unit_space_missing"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 4,
+   "name": "Unit Abbreviation Consistency",
+   "group": "Units and measurements",
+   "editing_type": "Technical editing",
+   "description": "Standardise unit abbreviations throughout the manuscript according to the applicable style guide and subject-specific requirements.",
+   "options": [
+    "Use the abbreviation set in the style profile throughout (h, min, s)",
+    "Use the form that dominates in the manuscript",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 34,
+   "te_rule_ids": [
+    "unit_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 5,
+   "name": "Temperature Formatting",
+   "group": "Units and measurements",
+   "editing_type": "Technical editing",
+   "description": "Check the formatting of temperature values and symbols, such as 25 °C, according to the required scientific style.",
+   "options": [
+    "25 °C (spaced, standard scientific)",
+    "25°C (closed, AMA 11th / medical)",
+    "25 deg C (abbreviated without symbol)",
+    "25 degrees Celsius (spelled out)",
+    "25 °C (77 °F) (dual with Fahrenheit)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 35,
+   "te_rule_ids": [
+    "degree_celsius",
+    "degree_fahrenheit",
+    "degree_deg_c",
+    "degree_deg_f",
+    "degree_celsius_spelled",
+    "degree_fahrenheit_spelled"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 6,
+   "name": "Percentage Formatting",
+   "group": "Units and measurements",
+   "editing_type": "Technical editing",
+   "description": "Standardise percentage presentation, such as 25% or 25 %, according to the applicable style guide.",
+   "options": [
+    "25% (closed symbol, Science/AMA)",
+    "25 % (spaced symbol, ISO)",
+    "25 percent (US single word, Chicago)",
+    "25 per cent (UK two words, Oxford)",
+    "25 percentage points (delta / difference)",
+    "percentage (abstract proportion without number)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 36,
+   "te_rule_ids": [
+    "percent_symbol",
+    "percent_word",
+    "per_cent_word",
+    "percent_percentage"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 7,
+   "name": "Mathematical Symbol Consistency",
+   "group": "Mathematical symbols and superscripts",
+   "editing_type": "Technical editing",
+   "description": "Verify the correct and consistent use of mathematical symbols, operators, inequalities, and comparison signs.",
+   "options": [
+    "Replace look-alikes with the correct operator (− for hyphen, × for x, ≤ ≥ for <= >=)",
+    "Use the form the author uses most consistently",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 37,
+   "te_rule_ids": [
+    "cmp_*",
+    "times_letter",
+    "times_symbol"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 8,
+   "name": "Greek Letter Consistency",
+   "group": "Mathematical symbols and superscripts",
+   "editing_type": "Technical editing",
+   "description": "Check the correct use of Greek letters, such as α, β, and μ, in scientific and medical terminology.",
+   "options": [
+    "Use the Unicode Greek letter (α, β, μ)",
+    "Spell out in running text where the style requires (alpha, beta)",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 38,
+   "te_rule_ids": [
+    "greek_lowercase",
+    "greek_uppercase",
+    "greek_spelled"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 9,
+   "name": "Micro Prefix Standardisation",
+   "group": "Mathematical symbols and superscripts",
+   "editing_type": "Technical editing",
+   "description": "Verify the correct use of the micro symbol (μ) in unit symbols and ensure compliance with the publisher's preferred terminology, such as mcg where required for medication dosages.",
+   "options": [
+    "Use μ (μg)",
+    "Use mcg for medication dosages where the publisher requires it",
+    "Spell out: microgram"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "Apply mcg only to medication dosages and only where the publisher requires it.",
+   "source_point": 39,
+   "te_rule_ids": [
+    "micro_lookalike"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 10,
+   "name": "Superscript and Subscript Formatting",
+   "group": "Mathematical symbols and superscripts",
+   "editing_type": "Technical editing",
+   "description": "Verify that exponents, chemical formulas, mathematical expressions, and scientific notation use appropriate superscript and subscript formatting.",
+   "options": [
+    "Apply super/subscript formatting (m², CO₂, 10⁻³)",
+    "Replace typed ^ or _ notation with formatted super/subscript",
+    "Query author (ambiguous expression)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 40,
+   "te_rule_ids": [
+    "gas_*",
+    "unit_exp_plain"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 11,
+   "name": "Number Formatting",
+   "group": "Numbers",
+   "editing_type": "Technical editing",
+   "description": "Standardise numerical presentation, including thousands separators and decimal separators, according to the target language and publisher requirements.",
+   "options": [
+    "Apply the profile's separators (1,000 and 3.14)",
+    "Use a thin space as thousands separator (1 000)",
+    "Keep four-digit numbers closed (1000) where the style allows"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "A separator change can alter a value (1.000 vs 1,000): check the language variant first.",
+   "source_point": 41,
+   "te_rule_ids": [
+    "thousands_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 12,
+   "name": "Decimal Precision",
+   "group": "Numbers",
+   "editing_type": "Technical editing",
+   "description": "Check whether decimal places and significant figures are presented consistently and flag unexplained inconsistencies without changing scientific values.",
+   "options": [
+    "Query author to confirm the precision (no change to the value)",
+    "Keep as reported (precision is intentional)",
+    "Apply a uniform number of decimal places only after the author confirms"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct where deterministic; otherwise flag",
+   "severity": "Major",
+   "needs": "Editor judgement",
+   "confirm": true,
+   "notes": "Scientific values are never changed automatically.",
+   "source_point": 42,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 13,
+   "name": "Number Style",
+   "group": "Numbers",
+   "editing_type": "Technical editing",
+   "description": "Apply the specified rules for spelling out numbers versus using numerals, considering the style guide and disciplinary conventions.",
+   "options": [
+    "Spell out one to nine; numerals for 10 and above",
+    "Numerals for all measurements and quantities (5 mg; 3 days)",
+    "Spell out a number that begins a sentence"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 43,
+   "te_rule_ids": [
+    "num_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 14,
+   "name": "Number Range Formatting",
+   "group": "Numbers",
+   "editing_type": "Technical editing",
+   "description": "Standardise number ranges, such as 10–15, pp. 25–30, or other prescribed forms.",
+   "options": [
+    "10–15 (en dash, closed)",
+    "10 to 15 (spelled 'to' in prose)",
+    "from 10 to 15 / between 10 and 15 (preceded form)",
+    "10 – 15 (en dash, spaced)",
+    "10-15 (hyphen, code/computing)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 44,
+   "te_rule_ids": [
+    "range_to",
+    "range_endash",
+    "range_hyphen"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 15,
+   "name": "Negative Number Formatting",
+   "group": "Numbers",
+   "editing_type": "Technical editing",
+   "description": "Verify the consistent representation of negative values using the correct minus sign rather than an inappropriate hyphen.",
+   "options": [
+    "−5 (true minus sign)",
+    "–5 (en dash minus)",
+    "-5 (hyphen-minus)",
+    "negative 5 (spelled out)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 45,
+   "te_rule_ids": [
+    "negative_hyphen"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 16,
+   "name": "Fractions and Ratios",
+   "group": "Numbers",
+   "editing_type": "Technical editing",
+   "description": "Check consistent formatting of fractions, ratios, proportions, and related numerical expressions.",
+   "options": [
+    "Use the style's form (1/2 or ½; 3:1)",
+    "Spell out in running text (one-half)",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 46,
+   "te_rule_ids": [
+    "fraction_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 17,
+   "name": "Date Format Standardisation",
+   "group": "Dates, times and currency",
+   "editing_type": "Technical editing",
+   "description": "Standardise dates according to the required format, such as October 10, 2026 for US English or 10 October 2026 for UK English.",
+   "options": [
+    "10 October 2026 (UK / International long)",
+    "October 10, 2026 (US long with comma)",
+    "2026-10-10 (ISO 8601, tables/data)",
+    "10th October 2026 (ordinal date)",
+    "Oct. 10, 2026 (abbreviated month)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 47,
+   "te_rule_ids": [
+    "date_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 18,
+   "name": "Date Consistency",
+   "group": "Dates, times and currency",
+   "editing_type": "Technical editing",
+   "description": "Check that dates are consistently formatted throughout the manuscript, including running text, tables, figures, notes, and appendices.",
+   "options": [
+    "Apply the required date format everywhere (text, tables, figures, notes)",
+    "Convert only dates in tables and figures to match the text",
+    "Query author (dates conflict)"
+   ],
+   "handling": "Review Auto Fix",
+   "behaviour": "Auto-correct then editor review",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "Handling is entered as 'Review Auto Fix' in the checklist; treated here as auto-correct followed by editor review. Confirm.",
+   "source_point": 48,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 19,
+   "name": "Time Format Standardisation",
+   "group": "Dates, times and currency",
+   "editing_type": "Technical editing",
+   "description": "Standardise time presentation, including 12-hour or 24-hour notation, according to the specified style.",
+   "options": [
+    "3:30 p.m. (12-hour dotted lowercase, US)",
+    "15:30 (24-hour military/scientific)",
+    "3:30 pm (12-hour undotted lowercase, UK)",
+    "3:30 PM (12-hour uppercase / small caps)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 49,
+   "te_rule_ids": [
+    "ampm_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 20,
+   "name": "Time Zone Formatting",
+   "group": "Dates, times and currency",
+   "editing_type": "Technical editing",
+   "description": "Check the consistent presentation of time zones and their abbreviations where relevant.",
+   "options": [
+    "Use the standard abbreviation, defined at first use (UTC, EST)",
+    "Give the UTC offset (UTC+5:30)",
+    "Spell out the zone (Eastern Standard Time)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 50,
+   "te_rule_ids": [
+    "timezone_abbr"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 21,
+   "name": "Currency Formatting",
+   "group": "Dates, times and currency",
+   "editing_type": "Technical editing",
+   "description": "Standardise currency symbols, currency codes, numerical values, and their placement according to the target market and style guide.",
+   "options": [
+    "Symbol before the amount, no space ($5 million; £50)",
+    "ISO code before the amount (USD 5 million)",
+    "Spell out in text (five dollars)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 51,
+   "te_rule_ids": [
+    "currency_symbols",
+    "currency_spelled"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 22,
+   "name": "Mathematical Equation Formatting",
+   "group": "Equations, chemical formulae and statistics",
+   "editing_type": "Technical editing",
+   "description": "Check the structural presentation of equations, including alignment, numbering, symbols, and references within the text.",
+   "options": [
+    "Align and number equations consecutively; cite as Equation (1)",
+    "Convert a simple display equation to inline text (a + b = c)",
+    "Query author (equation unclear or supplied as an image)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 52,
+   "te_rule_ids": [
+    "equation_ref"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 23,
+   "name": "Chemical Formula Formatting",
+   "group": "Equations, chemical formulae and statistics",
+   "editing_type": "Technical editing",
+   "description": "Verify the presentation of chemical formulas, including element symbols, subscripts, superscripts, and charge notation.",
+   "options": [
+    "Apply subscripts and superscripts (H₂O; Ca²⁺)",
+    "Correct element-symbol case (NaCl, not NACL)",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 53,
+   "te_rule_ids": [
+    "chem_formula_plain"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 24,
+   "name": "Scientific Notation",
+   "group": "Equations, chemical formulae and statistics",
+   "editing_type": "Technical editing",
+   "description": "Check the consistent formatting of values expressed in scientific notation, including exponents and powers of ten.",
+   "options": [
+    "Use × with a superscript exponent (3.2 × 10⁵)",
+    "Use E notation in tables and data only (3.2E5)",
+    "Replace the letter x with the multiplication sign ×"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 54,
+   "te_rule_ids": [
+    "sci_notation_x",
+    "sci_notation_e"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 25,
+   "name": "Statistical Notation",
+   "group": "Equations, chemical formulae and statistics",
+   "editing_type": "Technical editing",
+   "description": "Verify the formatting of statistical symbols, variables, probability values, confidence intervals, and related expressions against the relevant style guide.",
+   "options": [
+    "Italicise statistical symbols (p, n, t, F)",
+    "Write p-values per style (p < 0.001 or P < .001)",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 55,
+   "te_rule_ids": [
+    "stat_p_value",
+    "stat_symbol"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 26,
+   "name": "Statistical Value Consistency",
+   "group": "Equations, chemical formulae and statistics",
+   "editing_type": "Technical editing",
+   "description": "Flag inconsistencies between statistical values reported in the text, tables, figures, and supplementary material.",
+   "options": [
+    "Query author: values differ between text and table or figure",
+    "Update the text to match the table (only if the author confirms)",
+    "Update the table to match the text (only if the author confirms)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Critical",
+   "needs": "Editor judgement",
+   "confirm": false,
+   "notes": "Scientific values are never changed automatically.",
+   "source_point": 56,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 27,
+   "name": "Measurement Consistency",
+   "group": "Measurement consistency, conversion and ranges",
+   "editing_type": "Technical editing",
+   "description": "Verify that the same measurement units and conventions are used consistently within comparable contexts.",
+   "options": [
+    "Use one unit consistently within comparable contexts (mg throughout)",
+    "Add the second unit in parentheses where both are needed",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 57,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 28,
+   "name": "Unit Conversion Verification",
+   "group": "Measurement consistency, conversion and ranges",
+   "editing_type": "Technical editing",
+   "description": "Flag potentially inconsistent conversions between measurement systems for editorial or subject-matter review without automatically changing values.",
+   "options": [
+    "Query author or subject expert to verify the conversion",
+    "Keep as given (conversion confirmed)",
+    "Add or correct the converted value only after author confirmation"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct where deterministic; otherwise flag",
+   "severity": "Critical",
+   "needs": "Editor judgement",
+   "confirm": true,
+   "notes": "Scientific values are never changed automatically. Rule wording is flag only.",
+   "source_point": 58,
+   "te_rule_ids": [
+    "si_nonsi_convert"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 29,
+   "name": "Range and Tolerance Formatting",
+   "group": "Measurement consistency, conversion and ranges",
+   "editing_type": "Technical editing",
+   "description": "Standardise the presentation of measurement ranges, tolerances, and uncertainty values according to the applicable technical style.",
+   "options": [
+    "Use ± with spaces (5 ± 0.2 mm)",
+    "Use an en dash for ranges (5–10 mm)",
+    "Use 'to' in running text"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 59,
+   "te_rule_ids": [
+    "plusminus_spacing",
+    "plusminus_text"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 30,
+   "name": "Degree Symbol Formatting",
+   "group": "Measurement consistency, conversion and ranges",
+   "editing_type": "Technical editing",
+   "description": "Verify the correct use of degree symbols in temperatures, angles, and geographical coordinates.",
+   "options": [
+    "Use the degree sign ° (not º or a superscript o) with correct spacing",
+    "Spell out 'degrees' in running text",
+    "Use ° ′ ″ for coordinates (40° 26′ 46″ N)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 60,
+   "te_rule_ids": [
+    "degree_symbol_alone",
+    "degree_spelled",
+    "degree_lookalike"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 31,
+   "name": "First-Use Abbreviation Definition",
+   "group": "Abbreviations and acronyms",
+   "editing_type": "Technical editing",
+   "description": "Check that abbreviations are expanded at first use where required by the publisher's style guide.",
+   "options": [
+    "Expand at first use with the abbreviation in parentheses (World Health Organization [WHO])",
+    "Define in the abbreviation list only",
+    "Spell out in full (do not abbreviate)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 61,
+   "te_rule_ids": [
+    "abbrev_body"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 32,
+   "name": "Abbreviation Reuse",
+   "group": "Abbreviations and acronyms",
+   "editing_type": "Technical editing",
+   "description": "Verify that established abbreviations are used consistently after their definitions have been introduced.",
+   "options": [
+    "Use the abbreviation after its definition",
+    "Re-define in the abstract and again in the main text if the style requires",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 62,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 33,
+   "name": "Abbreviation List Validation",
+   "group": "Abbreviations and acronyms",
+   "editing_type": "Technical editing",
+   "description": "Compare abbreviations used in the manuscript against the abbreviation list and flag missing, unused, or inconsistent entries.",
+   "options": [
+    "Add the missing abbreviation to the list",
+    "Delete the unused entry from the list",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct where deterministic; otherwise flag",
+   "severity": "Minor",
+   "needs": "Abbreviation list",
+   "confirm": true,
+   "notes": "",
+   "source_point": 63,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 34,
+   "name": "Acronym Capitalisation",
+   "group": "Abbreviations and acronyms",
+   "editing_type": "Technical editing",
+   "description": "Check the capitalisation of acronyms and initialisms according to established usage and house style.",
+   "options": [
+    "Capitalise the acronym (WHO, MRI)",
+    "Use lower case for acronyms that have become words (laser, scuba)",
+    "Keep the author's form (proper name)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 64,
+   "te_rule_ids": [
+    "abbrev_heading"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 35,
+   "name": "Latin Abbreviation Formatting",
+   "group": "Abbreviations and acronyms",
+   "editing_type": "Technical editing",
+   "description": "Verify the presentation of Latin abbreviations such as et al., i.e., and e.g. according to the specified style.",
+   "options": [
+    "e.g., & vs. (roman with comma, US standard)",
+    "e.g. & vs (roman without comma, UK standard)",
+    "for example, & versus (spelled out in English)",
+    "v. (italicized single letter, legal citation)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 65,
+   "te_rule_ids": [
+    "latin_*",
+    "versus_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 36,
+   "name": "Scientific Name Formatting",
+   "group": "Scientific, medical and chemical nomenclature",
+   "editing_type": "Technical editing",
+   "description": "Check the formatting of genus and species names, including italicisation and capitalisation conventions.",
+   "options": [
+    "Italicise genus and species; capitalise the genus only (Homo sapiens)",
+    "Abbreviate the genus after first use (H. sapiens)",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 66,
+   "te_rule_ids": [
+    "genus_species_*"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 37,
+   "name": "Taxonomic Name Consistency",
+   "group": "Scientific, medical and chemical nomenclature",
+   "editing_type": "Technical editing",
+   "description": "Verify consistent use of organism names and taxonomic terminology throughout the manuscript.",
+   "options": [
+    "Use one accepted name throughout",
+    "Give the common name with the scientific name at first use",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 67,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 38,
+   "name": "Gene and Protein Nomenclature",
+   "group": "Scientific, medical and chemical nomenclature",
+   "editing_type": "Technical editing",
+   "description": "Flag gene and protein names for compliance with the relevant subject-specific nomenclature conventions.",
+   "options": [
+    "Apply the species convention (gene symbols italic, protein symbols roman)",
+    "Correct the symbol to the approved database form",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 68,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 39,
+   "name": "Drug Name Consistency",
+   "group": "Scientific, medical and chemical nomenclature",
+   "editing_type": "Technical editing",
+   "description": "Check consistent presentation of generic and brand-name drug names according to the applicable medical style and regulatory requirements.",
+   "options": [
+    "Use the generic name in lower case (ibuprofen)",
+    "Capitalise the brand name, with the generic name at first use (Advil [ibuprofen])",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 69,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 40,
+   "name": "Medical Terminology",
+   "group": "Scientific, medical and chemical nomenclature",
+   "editing_type": "Technical editing",
+   "description": "Verify the spelling and consistency of medical terms against the publisher's approved medical dictionary or terminology reference.",
+   "options": [
+    "Correct to the approved medical dictionary spelling",
+    "Use the preferred term from the publisher's terminology reference",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 70,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 41,
+   "name": "Anatomical Terminology",
+   "group": "Scientific, medical and chemical nomenclature",
+   "editing_type": "Technical editing",
+   "description": "Check the spelling and consistent presentation of anatomical terms according to the required nomenclature.",
+   "options": [
+    "Use the standard anatomical term in lower case (for example Terminologia Anatomica)",
+    "Use the common English term, with the anatomical term at first use",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 71,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 42,
+   "name": "Chemical Terminology",
+   "group": "Scientific, medical and chemical nomenclature",
+   "editing_type": "Technical editing",
+   "description": "Check chemical names, symbols, and terminology for consistency with the applicable scientific conventions.",
+   "options": [
+    "Use the IUPAC name or the accepted common name consistently",
+    "Correct the spelling of the name or symbol",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 72,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 43,
+   "name": "Trademark and Registered Symbols",
+   "group": "Trademarks and symbols",
+   "editing_type": "Technical editing",
+   "description": "Verify the consistent treatment of trademarks, registered marks, and proprietary names according to publisher requirements.",
+   "options": [
+    "Remove ™ and ® (publisher style omits them)",
+    "Keep the symbol at first mention only",
+    "Keep as supplied"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 73,
+   "te_rule_ids": [
+    "sym_trademark_char",
+    "sym_trademark_text",
+    "sym_registered_char",
+    "sym_registered_text"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 44,
+   "name": "Copyright Symbols",
+   "group": "Trademarks and symbols",
+   "editing_type": "Technical editing",
+   "description": "Check the formatting and placement of copyright symbols and associated notices where required.",
+   "options": [
+    "Format as © year owner",
+    "Spell out 'Copyright' with the year",
+    "Query author (notice incomplete)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 74,
+   "te_rule_ids": [
+    "sym_copyright_char",
+    "sym_copyright_text"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 45,
+   "name": "Special Character Validation",
+   "group": "Special characters and encoding",
+   "editing_type": "Technical editing",
+   "description": "Identify missing, corrupted, substituted, or incorrectly encoded special characters in the manuscript.",
+   "options": [
+    "Replace the corrupted character with the correct Unicode character",
+    "Insert the missing character from the source file",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct where deterministic; otherwise flag",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": true,
+   "notes": "Rule wording is detect only. Replace only when the intended character is certain.",
+   "source_point": 75,
+   "te_rule_ids": [
+    "special_char_corrupt"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 46,
+   "name": "Trademarked Product Names",
+   "group": "Product names and terminology databases",
+   "editing_type": "Technical editing",
+   "description": "Verify the spelling and capitalisation of proprietary product names against approved references where available.",
+   "options": [
+    "Correct spelling and capitalisation to the approved form (iPhone; PowerPoint)",
+    "Use the generic term",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 79,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 47,
+   "name": "Terminology Database Validation",
+   "group": "Product names and terminology databases",
+   "editing_type": "Technical editing",
+   "description": "Compare selected technical terms against an approved glossary or terminology database to identify inconsistencies.",
+   "options": [
+    "Replace with the approved glossary term",
+    "Keep (term not in the glossary; add it to the glossary)",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 80,
+   "te_rule_ids": [
+    "wk_*"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 64,
+   "name": "Footnote and Endnote References",
+   "group": "Completeness, order, duplicates and style compliance",
+   "editing_type": "Technical editing",
+   "description": "Check note numbering, citation placement, and consistency between notes and their corresponding references.",
+   "options": [
+    "Renumber notes consecutively",
+    "Move the note callout after the punctuation",
+    "Query author (note and reference do not match)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "Citation style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 97,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 68,
+   "name": "Heading Hierarchy",
+   "group": "Headings",
+   "editing_type": "Technical editing",
+   "description": "Verify that headings and subheadings follow a logical and consistent hierarchy throughout the manuscript.",
+   "options": [
+    "Restore a logical heading-level order (no skipped levels)",
+    "Promote or demote the heading to the correct level",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 101,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 69,
+   "name": "Heading Numbering",
+   "group": "Headings",
+   "editing_type": "Technical editing",
+   "description": "Check the sequence and consistency of numbered headings and subheadings.",
+   "options": [
+    "Renumber headings sequentially",
+    "Remove numbering if the style does not number headings",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 102,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 70,
+   "name": "Heading Capitalisation",
+   "group": "Headings",
+   "editing_type": "Technical editing",
+   "description": "Standardise heading capitalisation according to the publisher's style guide.",
+   "options": [
+    "Sentence case",
+    "Title case",
+    "Follow the publisher's style (set in the style profile)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 103,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 71,
+   "name": "Table Numbering",
+   "group": "Numbering and callouts",
+   "editing_type": "Technical editing",
+   "description": "Verify the sequence and consistency of table numbers throughout the manuscript.",
+   "options": [
+    "Renumber tables consecutively and update the callouts",
+    "Use the numeral type the style requires (Arabic or Roman)",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 126,
+   "te_rule_ids": [
+    "ref_table_*",
+    "ref_tab_*",
+    "ref_tables_*",
+    "ref_tabs_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 72,
+   "name": "Figure Numbering",
+   "group": "Numbering and callouts",
+   "editing_type": "Technical editing",
+   "description": "Verify the sequence and consistency of figure numbers throughout the manuscript.",
+   "options": [
+    "Renumber figures consecutively and update the callouts",
+    "Use the numeral type the style requires (Arabic or Roman)",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 127,
+   "te_rule_ids": [
+    "ref_figure_*",
+    "ref_fig_*",
+    "ref_figures_*",
+    "ref_figs_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 73,
+   "name": "Table Callout Validation",
+   "group": "Numbering and callouts",
+   "editing_type": "Technical editing",
+   "description": "Check that every table cited in the text exists and that table callouts follow the required sequence.",
+   "options": [
+    "Add the missing table callout in the text",
+    "Correct the callout number",
+    "Query author (table not supplied)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 128,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 74,
+   "name": "Figure Callout Validation",
+   "group": "Numbering and callouts",
+   "editing_type": "Technical editing",
+   "description": "Check that every figure cited in the text exists and that figure callouts follow the required sequence.",
+   "options": [
+    "Add the missing figure callout in the text",
+    "Correct the callout number",
+    "Query author (figure not supplied)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 129,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 75,
+   "name": "Table Caption Consistency",
+   "group": "Captions, notes and legends",
+   "editing_type": "Technical editing",
+   "description": "Verify the formatting, numbering, and wording of table titles and captions according to the publisher's style.",
+   "options": [
+    "Apply the publisher's table title format (label, number, title)",
+    "Move the caption above the table",
+    "Query author (title missing)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 130,
+   "te_rule_ids": [
+    "cap_table_*",
+    "cap_tab_*",
+    "cap_tables_*",
+    "cap_tabs_*"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 76,
+   "name": "Figure Caption Consistency",
+   "group": "Captions, notes and legends",
+   "editing_type": "Technical editing",
+   "description": "Check the formatting, numbering, and completeness of figure captions and legends.",
+   "options": [
+    "Apply the publisher's figure caption format (label, number, legend)",
+    "Move the caption below the figure",
+    "Query author (caption missing)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 131,
+   "te_rule_ids": [
+    "cap_figure_*",
+    "cap_fig_*",
+    "cap_figures_*",
+    "cap_figs_*",
+    "citation_bracket_numeric"
+   ],
+   "detectable": "auto"
+  },
+  {
+   "sno": 77,
+   "name": "Caption–Asset Matching",
+   "group": "Captions, notes and legends",
+   "editing_type": "Technical editing",
+   "description": "Verify that captions correspond to the correct tables, figures, images, and other visual assets.",
+   "options": [
+    "Correct the caption number or text to match the asset",
+    "Swap the captions between the assets",
+    "Query author"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 132,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 78,
+   "name": "Table Footnotes",
+   "group": "Captions, notes and legends",
+   "editing_type": "Technical editing",
+   "description": "Check the formatting, sequence, and placement of table footnotes and explanatory notes.",
+   "options": [
+    "Use the style's markers in order (a, b, c or *, †)",
+    "Move the footnotes below the table",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 133,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 79,
+   "name": "Figure Legend Validation",
+   "group": "Captions, notes and legends",
+   "editing_type": "Technical editing",
+   "description": "Identify missing, incomplete, or inconsistent figure legends and explanatory keys.",
+   "options": [
+    "Query author for the missing legend or key",
+    "Complete the legend from the text",
+    "Keep (legend not required)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct where deterministic; otherwise flag",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": true,
+   "notes": "Rule wording is detect only.",
+   "source_point": 134,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 80,
+   "name": "Table Structure",
+   "group": "Captions, notes and legends",
+   "editing_type": "Technical editing",
+   "description": "Check the consistency of table rows, columns, headers, and data alignment.",
+   "options": [
+    "Align rows and columns and repair merged cells",
+    "Add the missing column header",
+    "Query author (data missing)"
+   ],
+   "handling": "Auto Fix",
+   "behaviour": "Auto-correct",
+   "severity": "Major",
+   "needs": "None (rule-based)",
+   "confirm": false,
+   "notes": "",
+   "source_point": 135,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 81,
+   "name": "Table Abbreviation Definitions",
+   "group": "Captions, notes and legends",
+   "editing_type": "Technical editing",
+   "description": "Verify that abbreviations used in tables are defined according to the required style.",
+   "options": [
+    "Define the abbreviations in a table footnote",
+    "Spell out in the table",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Minor",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 136,
+   "te_rule_ids": [
+    "abbrev_table",
+    "abbrev_caption"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 82,
+   "name": "Table Unit Consistency",
+   "group": "Captions, notes and legends",
+   "editing_type": "Technical editing",
+   "description": "Check that units of measurement are consistently represented in table headings, cells, and notes.",
+   "options": [
+    "Put the unit in the column heading and remove it from the cells",
+    "Add the missing unit to the heading",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Style profile",
+   "confirm": false,
+   "notes": "",
+   "source_point": 137,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 83,
+   "name": "Missing Content Detection",
+   "group": "Missing and duplicate content",
+   "editing_type": "Technical editing",
+   "description": "Identify apparent gaps, incomplete sections, missing paragraphs, or unexpected interruptions in the manuscript.",
+   "options": [
+    "Query author: text appears to be missing",
+    "Insert the missing text if supplied separately",
+    "Keep (nothing missing)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Critical",
+   "needs": "Editor judgement",
+   "confirm": false,
+   "notes": "",
+   "source_point": 146,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 84,
+   "name": "Duplicate Content Detection",
+   "group": "Missing and duplicate content",
+   "editing_type": "Technical editing",
+   "description": "Identify repeated paragraphs, duplicated sections, or potentially redundant content for editorial review.",
+   "options": [
+    "Delete the duplicated passage (after editor review)",
+    "Merge the duplicated passages",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Editor judgement",
+   "confirm": false,
+   "notes": "",
+   "source_point": 147,
+   "te_rule_ids": [
+    "duplicate_paragraph"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 85,
+   "name": "Contradictory Statements",
+   "group": "Consistency checks",
+   "editing_type": "Technical editing",
+   "description": "Flag statements that appear inconsistent with other information presented elsewhere in the manuscript.",
+   "options": [
+    "Query author to resolve the contradiction",
+    "Edit one statement to match the other (author-confirmed)",
+    "Keep (statements are compatible)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Critical",
+   "needs": "Editor judgement",
+   "confirm": false,
+   "notes": "",
+   "source_point": 148,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 86,
+   "name": "Terminology Conflicts",
+   "group": "Consistency checks",
+   "editing_type": "Technical editing",
+   "description": "Identify instances where the same concept is described using inconsistent or potentially conflicting terminology.",
+   "options": [
+    "Use one term throughout",
+    "Define both terms if they differ in meaning",
+    "Query author"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Glossary / terminology database",
+   "confirm": false,
+   "notes": "",
+   "source_point": 149,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 87,
+   "name": "Internal Consistency Check",
+   "group": "Consistency checks",
+   "editing_type": "Technical editing",
+   "description": "Compare repeated facts, names, dates, quantities, and terminology across chapters or sections.",
+   "options": [
+    "Make repeated facts, names, dates and quantities agree (once confirmed)",
+    "Query author where values differ",
+    "Keep (difference is intentional)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Critical",
+   "needs": "Editor judgement",
+   "confirm": false,
+   "notes": "",
+   "source_point": 150,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 88,
+   "name": "Author Query Identification",
+   "group": "Queries, placeholders and missing references",
+   "editing_type": "Technical editing",
+   "description": "Identify unresolved questions, placeholders, incomplete statements, and ambiguous content that require author clarification.",
+   "options": [
+    "Insert an author query at the passage",
+    "Resolve from the source files",
+    "Keep (no query needed)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Editor judgement",
+   "confirm": false,
+   "notes": "",
+   "source_point": 152,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 89,
+   "name": "Placeholder Detection",
+   "group": "Queries, placeholders and missing references",
+   "editing_type": "Technical editing",
+   "description": "Identify temporary text such as TK, TBD, insert figure, or reference needed that may remain in the manuscript.",
+   "options": [
+    "Query author to supply the missing text (TK, TBD)",
+    "Delete the placeholder",
+    "Replace from the supplied files"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Editor judgement",
+   "confirm": false,
+   "notes": "",
+   "source_point": 153,
+   "te_rule_ids": [
+    "placeholder_text"
+   ],
+   "detectable": "flag"
+  },
+  {
+   "sno": 90,
+   "name": "Content Completeness",
+   "group": "Completeness and readiness",
+   "editing_type": "Technical editing",
+   "description": "Check whether all expected manuscript components have been supplied according to the project specifications.",
+   "options": [
+    "Query author for the missing component",
+    "Add the component from the project files",
+    "Record as outstanding (not required for this project)"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Major",
+   "needs": "Project specification",
+   "confirm": false,
+   "notes": "",
+   "source_point": 159,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  },
+  {
+   "sno": 91,
+   "name": "Editorial Readiness Assessment",
+   "group": "Completeness and readiness",
+   "editing_type": "Technical editing",
+   "description": "Generate a summary of identified issues and outstanding queries to determine whether the manuscript is ready for copyediting or production.",
+   "options": [
+    "Mark ready for copyediting",
+    "Mark ready with outstanding queries",
+    "Hold: return to author before copyediting"
+   ],
+   "handling": "Review and Fix",
+   "behaviour": "Flag and suggest",
+   "severity": "Informational",
+   "needs": "Project specification",
+   "confirm": false,
+   "notes": "",
+   "source_point": 160,
+   "te_rule_ids": [],
+   "detectable": "manual"
+  }
+ ]
+}

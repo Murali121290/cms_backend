@@ -33,7 +33,11 @@ class Project(Base):
     chapter_count    = Column(Integer,     nullable=True)
     isbn_no          = Column(String(20),  nullable=True)
     billing_location = Column(String(255), nullable=True)
+    billing_type     = Column(String(50),  nullable=True)
+    alt_text         = Column(String(10),  nullable=True)
+    accessibility    = Column(String(10),  nullable=True)
     due_date         = Column(Date,        nullable=True)
+    due_date_history = Column(JSON,        nullable=False, server_default='[]', default=list)
     file_details     = Column(JSON,        nullable=True)
     created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -60,6 +64,8 @@ class ProjectStylesheet(Base):
     description = Column(String, nullable=True)
     selected_ia_rows = Column(String, nullable=False, default="[]")
     analyzed_file_ids = Column(String, nullable=True, default="[]")  # JSON list of file IDs used to build this stylesheet
+    ce_rules = Column(String, nullable=True, default="{}")  # JSON {checklist S.No.: {enabled, option, severity}}
+    style_profile = Column(String, nullable=True, default="{}")  # JSON project style settings (language, units, ...)
     is_active = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(

@@ -18,7 +18,12 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
     if isinstance(rules, list):
         allowed_styles = set(rules)
     else:
-        allowed_styles = set(rules.get("allowed_styles", []))
+        allowed_styles = set(
+            rules.get("allowed_styles")
+            or rules.get("bep_styles")
+            or rules.get("publisher_styles")
+            or []
+        )
 
     # 2. Open Edited Word Document
     try:

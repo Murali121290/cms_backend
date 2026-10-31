@@ -62,7 +62,19 @@ export interface Project extends ProjectSummary {
   actual_pages?: number
   isbn_no?: string | null
   billing_location?: string | null
+  billing_type?: string | null
+  alt_text?: string | null
+  accessibility?: string | null
   due_date?: string | null
+  due_date_history?: Array<{
+    from_date?: string | null
+    to_date?: string | null
+    old_date?: string | null
+    new_date?: string | null
+    changed_by?: string | null
+    reason?: string | null
+    timestamp?: string | null
+  }> | null
   file_details?: Record<string, unknown> | null
   created_at?: string
   updated_at?: string
@@ -94,6 +106,9 @@ export interface ProjectCreate {
   chapter_count?: number | null
   isbn_no?: string | null
   billing_location?: string | null
+  billing_type?: string | null
+  alt_text?: string | null
+  accessibility?: string | null
   due_date?: string | null
   xml_standard?: string | null
 }
@@ -117,9 +132,17 @@ export interface ProjectUpdate {
   color?: string | null
   trim_size?: string | null
   copyright_year?: number | null
+  estimated_pages?: number | null
   actual_pages?: number
   manuscript_pages?: number | null
+  isbn_no?: string | null
+  billing_location?: string | null
+  billing_type?: string | null
+  alt_text?: string | null
+  accessibility?: string | null
   due_date?: string | null
+  reason?: string | null
+  skipped_stages?: Record<string, string[]> | null
 }
 
 export interface Chapter extends ChapterSummary {

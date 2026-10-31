@@ -293,8 +293,8 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh }: ProjectCar
           </div>
         </div>
 
-        {/* eISBN & Copyright Badges */}
-        {(project.eisbn || project.copyright_year) && (
+        {/* eISBN, Copyright & Language Badges */}
+        {(project.eisbn || project.copyright_year || project.language) && (
           <div className="mt-2 flex items-center gap-1.5 flex-wrap text-[10px]">
             {project.eisbn && (
               <span className="font-mono bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded font-bold">
@@ -304,6 +304,11 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh }: ProjectCar
             {project.copyright_year && (
               <span className="font-mono bg-amber-500/10 text-amber-600 border border-amber-500/20 px-1.5 py-0.5 rounded font-bold">
                 © {project.copyright_year}
+              </span>
+            )}
+            {project.language && (
+              <span className="font-mono uppercase bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold" title={`Language: ${project.language}`}>
+                {project.language}
               </span>
             )}
           </div>
@@ -397,7 +402,13 @@ export function PostProdEpubValidator() {
   const fetchProjects = useCallback(async () => {
     try {
       const data = await listProjects();
-      setProjects(data);
+      // Hide BOD jobs from general EPUB Validator UI; they are only accessed directly through BOD pages
+      const nonBodProjects = data.filter(
+        (p) =>
+          (p.client_code ?? '').toUpperCase() !== 'BOD' &&
+          (p.client ?? '').toLowerCase() !== 'books on demand'
+      );
+      setProjects(nonBodProjects);
     } catch {
       /* silent */
     } finally {

@@ -14,7 +14,8 @@ import { useStylesheetsQuery, useIATemplateQuery, useStylesheetMutations, useAna
 import { useProjectChaptersQuery } from "@/features/projects/useProjectChaptersQuery";
 import { getChapterFiles } from "@/api/projects";
 import { StylesheetFormDrawer } from "@/features/stylesheets/StylesheetFormDrawer";
-import type { StylesheetSummary, TriggeredIARule, FileRecord } from "@/types/api";
+import type { StylesheetSummary, TriggeredIARule, FileRecord, IATemplateRow } from "@/types/api";
+import { deriveFromRows } from "@/features/stylesheets/ceRules";
 import { formatDateTime as formatUtcDateTime } from "@/utils/dateUtils";
 
 type ActiveTab = "manage" | "create";
@@ -102,6 +103,9 @@ export function StylesheetsPage() {
 
   const stylesheets = stylesheetsQuery.data?.stylesheets || [];
   const chapters = chaptersQuery.data?.chapters || [];
+  const iaLinks = new Map(
+    (iaTemplateQuery.data?.rows || []).map((r) => [`${r.element}|${r.subtype}|${r.pattern}`, r]),
+  );
 
   const handleEditStylesheet = (stylesheet: StylesheetSummary) => {
     setEditingStylesheet(stylesheet);
@@ -281,6 +285,7 @@ export function StylesheetsPage() {
                   isActivating={mutations.activate.isPending}
                   isDeleting={mutations.remove.isPending}
                   isJustCreated={stylesheet.id === justCreatedId}
+                  iaLinks={iaLinks}
                 />
               ))}
             </div>
@@ -396,6 +401,7 @@ interface StylesheetCardProps {
   isActivating: boolean;
   isDeleting: boolean;
   isJustCreated?: boolean;
+  iaLinks: Map<string, IATemplateRow>;
 }
 
 function StylesheetCard({
@@ -406,6 +412,7 @@ function StylesheetCard({
   isActivating,
   isDeleting,
   isJustCreated = false,
+  iaLinks,
 }: StylesheetCardProps) {
   const isActive = stylesheet.is_active;
   const [showAllRules, setShowAllRules] = useState(false);
@@ -415,6 +422,13 @@ function StylesheetCard({
     showAllRules || ruleCount <= previewLimit
       ? stylesheet.selected_ia_rows
       : stylesheet.selected_ia_rows.slice(0, previewLimit);
+  const linkOf = (row: { element: string; subtype: string; pattern: string }) =>
+    iaLinks.get(`${row.element}|${row.subtype}|${row.pattern}`);
+  const { derived } = deriveFromRows(stylesheet.selected_ia_rows.map((r) => ({ ...r, ...linkOf(r) })));
+  const ceRuleCount = new Set([
+    ...Object.keys(derived),
+    ...Object.keys(stylesheet.ce_rules ?? {}),
+  ]).size;
   const sourceFiles = stylesheet.source_files ?? [];
   const sourceFileCount = sourceFiles.length || stylesheet.analyzed_file_ids?.length || 0;
 
@@ -462,6 +476,7 @@ function StylesheetCard({
               label="Total Rules"
               value={`${ruleCount} rule${ruleCount === 1 ? "" : "s"}`}
             />
+            <MetaField label="CE Rules Set" value={`${ceRuleCount} of 72`} />
             <MetaField
               label={`Source Document${sourceFileCount === 1 ? "" : "s"}`}
               value={
@@ -482,16 +497,23 @@ function StylesheetCard({
                     <th className="py-1.5 px-2 text-left">Element</th>
                     <th className="py-1.5 px-2 text-left">Subtype</th>
                     <th className="py-1.5 px-2 text-left">Pattern</th>
+                    <th className="py-1.5 px-2 text-left">CE Rule</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRules.map((row, i) => (
-                    <tr key={i} className="border-b border-navy-50">
-                      <td className="py-1.5 px-2 font-medium text-navy-800">{row.element}</td>
-                      <td className="py-1.5 px-2 text-navy-600">{row.subtype}</td>
-                      <td className="py-1.5 px-2 font-mono text-navy-600 truncate">{row.pattern}</td>
-                    </tr>
-                  ))}
+                  {visibleRules.map((row, i) => {
+                    const link = linkOf(row);
+                    return (
+                      <tr key={i} className="border-b border-navy-50">
+                        <td className="py-1.5 px-2 font-medium text-navy-800">{row.element}</td>
+                        <td className="py-1.5 px-2 text-navy-600">{row.subtype}</td>
+                        <td className="py-1.5 px-2 font-mono text-navy-600 truncate">{row.pattern}</td>
+                        <td className="py-1.5 px-2 text-navy-600 whitespace-nowrap">
+                          {link?.ce_rule_no ? `R${link.ce_rule_no} · Option ${link.ce_option}` : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {ruleCount > previewLimit && (
@@ -967,6 +989,22 @@ function ReviewRulesStep({
         </div>
       </div>
 
+      {(() => {
+        const ticked = analyzeResult.triggered_rules.filter((r: TriggeredIARule) =>
+          selectedRuleKeys.has(`${r.element}|${r.subtype}|${r.pattern}`),
+        );
+        const { conflicts } = deriveFromRows(ticked);
+        if (conflicts.length === 0) return null;
+        return (
+          <div className="mb-4 p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-900">
+            <span className="font-semibold">Conflict:</span> two different forms are ticked for checklist rule
+            {conflicts.length === 1 ? " " : "s "}
+            {conflicts.map((n) => `R${n}`).join(", ")}. The first ticked row is used. Untick one so the stylesheet
+            records the form you want.
+          </div>
+        );
+      })()}
+
       <div className="overflow-x-auto mb-6">
         <table className="text-xs border-collapse w-full border border-navy-100">
           <thead>
@@ -983,6 +1021,7 @@ function ReviewRulesStep({
               <th className="py-2 px-3 text-left font-medium text-navy-700">Subtype</th>
               <th className="py-2 px-3 text-left font-medium text-navy-700">Pattern</th>
               <th className="py-2 px-3 text-right font-medium text-navy-700">Count</th>
+              <th className="py-2 px-3 text-left font-medium text-navy-700">CE Rule</th>
             </tr>
           </thead>
           <tbody>
@@ -1005,6 +1044,9 @@ function ReviewRulesStep({
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gold-100 text-gold-700 text-xs font-semibold">
                       {rule.count}
                     </span>
+                  </td>
+                  <td className="py-2 px-3 text-navy-600 whitespace-nowrap">
+                    {rule.ce_rule_no ? `R${rule.ce_rule_no} · Option ${rule.ce_option}` : "—"}
                   </td>
                 </tr>
               );

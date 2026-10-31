@@ -1,4 +1,5 @@
 import datetime
+import os
 import re
 
 from bs4 import BeautifulSoup
@@ -461,7 +462,7 @@ def validate_certified_by(book_details, rule_config=None):
                 "extract": tag.get("refines", "missing"),
             })
         
-        if not tag.get("id"):
+        if not tag.get("id") and config_dict.get("require_id", True):
             issues.append({
                 "type": "missing_id_certifiedBy",
                 "message": "a11y:certifiedBy must have an 'id' attribute",
@@ -517,6 +518,48 @@ def validate_certifier_credential(book_details, rule_config=None):
                 "extract": tag.get("refines", "missing"),
             })
             
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-014")
+def validate_tdm_reservation(book_details, rule_config=None):
+    """Validate tdm:reservation metadata."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_value = str(config_dict.get("expected_value", "1"))
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    metadata = soup.find("metadata") or soup.find(lambda tag: tag.name.endswith("metadata"))
+    if not metadata:
+        return {"issues_count": 1, "issues": [{
+            "type": "missing_metadata_tag",
+            "message": "Missing <metadata> element in OPF file",
+            "category": "Error",
+            "line_number": 1,
+            "extract": "<metadata>",
+        }]}
+
+    issues = []
+    tdm_tag = next((m for m in metadata.find_all("meta") if m.get("property") == "tdm:reservation"), None)
+    if not tdm_tag:
+        issues.append({
+            "type": "missing_tdm_reservation",
+            "message": f"Missing required <meta property=\"tdm:reservation\">{expected_value}</meta>",
+            "category": "Error",
+            "line_number": _find_line(lines, "<metadata"),
+            "extract": "tdm:reservation",
+        })
+    elif tdm_tag.get_text(strip=True) != expected_value:
+        issues.append({
+            "type": "invalid_tdm_reservation",
+            "message": f"tdm:reservation value must be '{expected_value}', found: '{tdm_tag.get_text(strip=True)}'",
+            "category": "Error",
+            "line_number": getattr(tdm_tag, "sourceline", _find_line(lines, "tdm:reservation")),
+            "extract": tdm_tag.get_text(strip=True),
+        })
+
     return {"issues_count": len(issues), "issues": issues}
 
 
@@ -1270,3 +1313,5 @@ def validate_gwp_opf_version(book_details, rule_config=None):
         }]}
         
     return {"issues_count": 0, "issues": []}
+
+

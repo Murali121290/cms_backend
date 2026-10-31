@@ -88,7 +88,7 @@ export const FOLDER_CONFIG: Record<string, FolderConfig> = {
   proof:      { label:'Proof',      icon:'ClipboardCheck',allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','reviewer','reviewStatus','size','uploadedBy','uploadedOn'] },
   xml:        { label:'XML',        icon:'Code2',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','xmlType','validationStatus','size','uploadedBy','uploadedOn'] },
   misc:       { label:'Final delivery', icon:'FolderOpen',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
-  backup:     { label:'Backup',     icon:'Archive',       allowUpload:false, allowDownload:true,  columns:['fileName','fileType','size','uploadedOn'] },
+  backup:     { label:'Backup',     icon:'Archive',       allowUpload:false, allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
 }
 
 export const DESIGN_FOLDER_CONFIG: Record<string, FolderConfig> = {
@@ -165,7 +165,7 @@ export type ProcessingActionKey =
   | 'languageEdit' | 'technicalEdit' | 'unifiedReview'
   | 'manuscriptAnalysis'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml' | 'wordToIndesign'
-  | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'styleValidation' | 'artValidation'
+  | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'inddToProof' | 'styleValidation' | 'artValidation'
 
 const PRODUCTION_STAGES = [
   'XML Conversion',
@@ -201,7 +201,8 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   wordToIndesign:       WORD_TO_INDESIGN_STAGES,
   xmlToIndesign:        WORD_TO_INDESIGN_STAGES,
   indesignToXml:        WORD_TO_INDESIGN_STAGES,
-  viewProof:            WORD_TO_INDESIGN_STAGES
+  viewProof:            WORD_TO_INDESIGN_STAGES,
+  inddToProof:          '*'
 }
 
 let _dynamicStageActionsMap: Record<string, string[]> | null = null

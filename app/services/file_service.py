@@ -42,6 +42,80 @@ def extract_chapter_number_from_filename(name: str) -> str | None:
         return f"{int(m.group(1)):02d}"
     return None
 
+
+def resolve_chapter_art_folder(project_dir: str, chapter_dir: str, chapter_number: str) -> str | None:
+    """Find the directory containing art files for a given chapter or complete book ('00').
+
+    Searches:
+    1. Direct chapter folders: <chapter_dir>/Art, <chapter_dir>/art, <chapter_dir>/Links, etc.
+    2. Project-level chapter art folder names:
+       - 'Ch {ch_num} - Art', 'Chapter {ch_num} - Art'
+       - 'Book {ch_num} - Art', 'Book 00 - Art', 'Book - Art', 'Book Art'
+       - 'Ch {ch_num}', 'Chapter {ch_num}', '{ch_num} - Art'
+    3. Fallback for whole-book jobs ('00', '0', or 'book'): any project subfolder with 'book' and 'art'.
+    """
+    ch_num = (chapter_number or "").strip()
+    ch_num_clean = ch_num.lstrip("0") if ch_num.lstrip("0") else "0"
+    ch_num_padded = ch_num.zfill(2)
+
+    img_exts = (".eps", ".tif", ".tiff", ".jpg", ".jpeg", ".png", ".pdf")
+
+    # 1. Candidate folders inside chapter_dir
+    if chapter_dir and os.path.exists(chapter_dir):
+        for sub in ["Art", "art", "Links", "links", "ART"]:
+            c = os.path.join(chapter_dir, sub)
+            if os.path.exists(c) and os.path.isdir(c) and len(os.listdir(c)) > 0:
+                return c
+
+    if not project_dir or not os.path.exists(project_dir):
+        return None
+
+    # 2. Known project-level naming patterns
+    possible_names = [
+        f"Ch {ch_num} - Art", f"Ch {ch_num_clean} - Art", f"Ch {ch_num_padded} - Art",
+        f"Ch_{ch_num}_Art", f"Ch_{ch_num_clean}_Art", f"Ch_{ch_num_padded}_Art",
+        f"Chapter {ch_num} - Art", f"Chapter {ch_num_clean} - Art", f"Chapter {ch_num_padded} - Art",
+        f"Book {ch_num} - Art", f"Book {ch_num_clean} - Art", f"Book {ch_num_padded} - Art",
+        f"Book {ch_num}- Art", f"Book {ch_num_clean}- Art", f"Book {ch_num_padded}- Art",
+        f"Book_{ch_num}_Art", f"Book_{ch_num_clean}_Art", f"Book_{ch_num_padded}_Art",
+        f"Book {ch_num} Art", f"Book {ch_num_clean} Art", f"Book {ch_num_padded} Art",
+        "Book 00 - Art", "Book 0 - Art", "Book - Art", "Book- Art", "Book_Art", "Book Art",
+        f"Ch {ch_num}", f"Ch {ch_num_clean}", f"Ch {ch_num_padded}",
+        f"Chapter {ch_num}", f"Chapter {ch_num_clean}", f"Chapter {ch_num_padded}",
+        f"{ch_num} - Art", f"{ch_num_clean} - Art", f"{ch_num_padded} - Art",
+        f"{ch_num}_Art", f"{ch_num_clean}_Art", f"{ch_num_padded}_Art",
+        "Art", "art", "Links", "links",
+    ]
+    possible_names_lower = {n.lower() for n in possible_names}
+
+    for entry in os.listdir(project_dir):
+        entry_path = os.path.join(project_dir, entry)
+        if os.path.isdir(entry_path):
+            if entry.lower() in possible_names_lower:
+                for sub in ["Art", "art", "Links", "links", "ART"]:
+                    sub_path = os.path.join(entry_path, sub)
+                    if os.path.exists(sub_path) and os.path.isdir(sub_path) and len(os.listdir(sub_path)) > 0:
+                        return sub_path
+                if any(f.lower().endswith(img_exts) for f in os.listdir(entry_path)):
+                    return entry_path
+
+    # 3. Fallback for book-level manuscripts (00 or 0 or 'book' in ch_num)
+    if ch_num in ("00", "0") or "book" in ch_num.lower():
+        for entry in os.listdir(project_dir):
+            entry_path = os.path.join(project_dir, entry)
+            if os.path.isdir(entry_path):
+                el = entry.lower()
+                if "book" in el and "art" in el:
+                    for sub in ["Art", "art", "Links", "links", "ART"]:
+                        sub_path = os.path.join(entry_path, sub)
+                        if os.path.exists(sub_path) and os.path.isdir(sub_path) and len(os.listdir(sub_path)) > 0:
+                            return sub_path
+                    if any(f.lower().endswith(img_exts) for f in os.listdir(entry_path)):
+                        return entry_path
+
+    return None
+
+
 def save_upload_file(upload_file: UploadFile, destination: str):
     try:
         with open(destination, "wb") as buffer:
@@ -325,9 +399,32 @@ def upload_chapter_files(
 
 def get_file_for_download(db: Session, *, file_id: int):
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
-    if not file_record or not file_record.path or not os.path.exists(file_record.path):
+    if not file_record or not file_record.path:
         return None
-    return file_record
+
+    # Check if path is already an existing absolute path
+    if os.path.isabs(file_record.path) and os.path.exists(file_record.path):
+        file_record.physical_path = file_record.path
+        return file_record
+
+    # Resolve relative path using UPLOAD_DIR
+    from app.domains.processing.service import resolve_physical_file_path
+    physical_path = resolve_physical_file_path(file_record.path, UPLOAD_DIR)
+    if os.path.exists(physical_path):
+        file_record.physical_path = physical_path
+        return file_record
+
+    # Additional fallback using project and chapter hierarchy
+    project = db.query(models.Project).filter(models.Project.id == file_record.project_id).first() if file_record.project_id else None
+    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first() if file_record.chapter_id else None
+    if project and chapter:
+        for cat in [file_record.category, (file_record.category or '').replace(" ", "_"), (file_record.category or '').capitalize()]:
+            candidate = os.path.join(UPLOAD_DIR, project.client_name or 'unknown', project.code, chapter.number or chapter.chapters, cat, file_record.filename)
+            if os.path.exists(candidate):
+                file_record.physical_path = candidate
+                return file_record
+
+    return None
 
 
 def delete_file_and_capture_context(db: Session, *, file_id: int):
@@ -341,11 +438,16 @@ def delete_file_and_capture_context(db: Session, *, file_id: int):
         "category": file_record.category,
     }
 
-    if file_record.path and os.path.exists(file_record.path):
+    physical_path = file_record.path
+    if physical_path and (not os.path.isabs(physical_path) or not os.path.exists(physical_path)):
+        from app.domains.processing.service import resolve_physical_file_path
+        physical_path = resolve_physical_file_path(physical_path, UPLOAD_DIR)
+
+    if physical_path and os.path.exists(physical_path):
         try:
             # Also clean up the corresponding XHTML file if it exists
-            dir_name = os.path.dirname(file_record.path)
-            base_name = os.path.splitext(os.path.basename(file_record.path))[0]
+            dir_name = os.path.dirname(physical_path)
+            base_name = os.path.splitext(os.path.basename(physical_path))[0]
             xhtml_path = os.path.join(dir_name, "xhtml", f"{base_name}.html")
             if os.path.exists(xhtml_path):
                 try:
@@ -353,7 +455,7 @@ def delete_file_and_capture_context(db: Session, *, file_id: int):
                 except Exception as e:
                     print(f"Error deleting associated XHTML file on disk: {e}")
 
-            os.remove(file_record.path)
+            os.remove(physical_path)
         except Exception as e:
             print(f"Error deleting file on disk: {e}")
 

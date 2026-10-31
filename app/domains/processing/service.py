@@ -103,6 +103,7 @@ PROCESS_PERMISSIONS = {
     "style_match_design": ["XML Manager", "XML Operator", "Senior XML Operator", "Production Manager"] + PRE_EDITOR_ROLES,
     "art_validation": ["XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Production Manager"] + PRE_EDITOR_ROLES,
     "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"] + PRE_EDITOR_ROLES,
+    "indd_to_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"] + PRE_EDITOR_ROLES,
 }
 
 
@@ -394,6 +395,8 @@ def background_processing_task(
                             )
                     if c_name and ("springer" in str(c_name).lower() or "spr" in str(c_name).lower()):
                         tag_set = "springer"
+                    elif c_name and "bep" in str(c_name).lower():
+                        tag_set = "bep"
 
                 def on_progress_callback(step_name: str, pct: int):
                     update_job_status(db, job_id, "processing", step_name, pct)
@@ -574,6 +577,22 @@ def background_processing_task(
                 generated_files = []
                 success_msg = "View Proof layout regeneration completed"
 
+            elif process_type == "indd_to_proof":
+                update_job_status(db, job_id, "processing", "Converting InDesign layout to Proof XHTML & CSS...", 30)
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.indd_to_proof_engine import InddToProofEngine
+                InddToProofEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                generated_files = []
+                success_msg = "InDesign to Proof conversion completed"
+
             elif process_type == "extract_design_css":
                 update_job_status(db, job_id, "processing", "Extracting CSS from InDesign template...", 30)
                 from app.core.config import get_settings
@@ -701,8 +720,19 @@ def background_processing_task(
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
                 output_report_path = os.path.join(manuscript_dir, f"{base_name}_style_report.html")
                 
+                c_name = getattr(project, "client_name", None) if project else None
+                if not c_name and chapter:
+                    c_name = getattr(chapter, "client", None)
+                
                 script_path = os.path.abspath("app/services/scripts/springerstylevalidation.py")
-                config_path = os.path.abspath("app/services/scripts/springerstyles.json")
+                if c_name and "bep" in str(c_name).lower():
+                    config_path = os.path.abspath("app/services/scripts/bepstyles.json")
+                    if not os.path.exists(config_path):
+                        config_path = os.path.abspath("services/scripts/bepstyles.json")
+                else:
+                    config_path = os.path.abspath("app/services/scripts/springerstyles.json")
+                    if not os.path.exists(config_path):
+                        config_path = os.path.abspath("services/scripts/springerstyles.json")
                 
                 if not os.path.exists(script_path):
                     raise FileNotFoundError(f"Style validation script not found: {script_path}")
@@ -995,8 +1025,9 @@ def background_processing_task(
                     if is_in_place_docx and os.path.exists(processed_path):
                         if processed_filename.endswith(".docx"):
                             try:
-                                inject_publisher_styles_func(processed_path)
-                                logger.info(f"Publisher styles injected into: {processed_filename}")
+                                c_style_client = getattr(project, "client_name", None) if project else None
+                                inject_publisher_styles_func(processed_path, client_name=c_style_client)
+                                logger.info(f"Publisher/client styles injected into: {processed_filename}")
                             except Exception as style_err:
                                 logger.warning(f"Style injection failed for {processed_filename}: {style_err}")
 
@@ -1073,9 +1104,10 @@ def background_processing_task(
                         elif processed_filename.endswith(".docx"):
                             mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                             try:
-                                inject_publisher_styles_func(processed_path)
+                                c_style_client = getattr(project, "client_name", None) if project else None
+                                inject_publisher_styles_func(processed_path, client_name=c_style_client)
                                 logger.info(
-                                    f"Publisher styles injected into: {processed_filename}"
+                                    f"Publisher/client styles injected into: {processed_filename}"
                                 )
                             except Exception as style_err:
                                 logger.warning(

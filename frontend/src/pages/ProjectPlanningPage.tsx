@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, Layers, Calendar, Flag, AlertTriangle, Edit3, X, History, FileText } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Layers, Calendar, Flag, AlertTriangle, Edit3, X, History, Sliders } from 'lucide-react'
 import { projectsApi } from '@/api/projects'
 import type { Project } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
@@ -143,7 +143,6 @@ function buildTrackSchedules(
   baseSlaMap: Map<string, number | null>,
   cellSlas: Record<number, Record<string, number | null>>,
   effectiveAnchor: string,
-  staffCount: number | 'parallel',
   pageNormMap?: Map<string, number | null>,
   projectCreatedAt?: string,
   dbDates?: Record<string, { start: Date; due: Date }>,
@@ -155,25 +154,18 @@ function buildTrackSchedules(
   const result = new Map<number, StageSchedule[]>()
   if (trackChapters.length === 0 || orderedStages.length === 0) return result
 
+  // Track the due date of the first stage across chapters so due dates stagger progressively
+  // Track the due date of the first stage across planned chapters so due dates stagger progressively
+  let prevFirstStageDue: Date | null = null
+  // Separate stagger tracker for unplanned/new/revised chapters added after project creation
+  let prevUnplannedFirstStageDue: Date | null = null
   const sorted = [...trackChapters].sort(sortChapters)
-
-  // Track worker availability for stages that define a page throughput norm (e.g. Pre-editing)
-  // Each element in workerPool stores the date when worker k finishes their current chapter
-  const stageWorkerPools = new Map<string, (Date | null)[]>()
-  if (staffCount !== 'parallel') {
-    const k = Math.max(1, typeof staffCount === 'number' ? staffCount : 1)
-    for (const ws of orderedStages) {
-      const norm = pageNormMap?.get(ws.stage_name)
-      if (norm != null && norm > 0) {
-        stageWorkerPools.set(ws.stage_name, new Array(k).fill(null))
-      }
-    }
-  }
 
   for (const ch of sorted) {
     const isUnplanned = alreadyApproved && plannedChapterNumbers && !plannedChapterNumbers.has(ch.chapters)
+    // Any chapter pending planning (unapproved / revised) starts fresh on the day planning is being reviewed/approved (today)
     const anchor = isUnplanned
-      ? (ch.created_at || effectiveAnchor)
+      ? new Date().toISOString()
       : (alreadyApproved && !isAdjusting ? (projectCreatedAt || effectiveAnchor) : effectiveAnchor)
 
     const cursor = validDate(anchor)
@@ -184,11 +176,13 @@ function buildTrackSchedules(
 
     const chSched: StageSchedule[] = []
 
-    for (const ws of orderedStages) {
+    for (let stageIdx = 0; stageIdx < orderedStages.length; stageIdx++) {
+      const ws = orderedStages[stageIdx]
       const isCompleted = checkCompleted ? checkCompleted(ch, ws.stage_name) : false
       const dbKey = `${ch.chapters}||${ws.stage_name}`
       const pageNorm = pageNormMap ? pageNormMap.get(ws.stage_name) : null
 
+      // Individual chapter SLA based on page norm or master SLA
       const pageBasedSla = (pageNorm && chPages != null && chPages > 0)
         ? Math.max(1, Math.ceil(chPages / pageNorm))
         : null
@@ -203,47 +197,36 @@ function buildTrackSchedules(
       if (isCompleted && dbDates && dbDates[dbKey]) {
         start = new Date(dbDates[dbKey].start)
         due = new Date(dbDates[dbKey].due)
-        const pool = stageWorkerPools.get(ws.stage_name)
-        if (pool) {
-          let minIdx = 0
-          for (let i = 1; i < pool.length; i++) {
-            const curVal = pool[i]?.getTime() ?? 0
-            const minVal = pool[minIdx]?.getTime() ?? 0
-            if (curVal < minVal) minIdx = i
-          }
-          pool[minIdx] = new Date(due)
-        }
       } else {
-        const chapterReady = new Date(cursor)
-        const pool = stageWorkerPools.get(ws.stage_name)
-        if (pool && staffCount !== 'parallel') {
-          // Find worker available earliest
-          let minIdx = 0
-          for (let i = 1; i < pool.length; i++) {
-            const curVal = pool[i]?.getTime() ?? 0
-            const minVal = pool[minIdx]?.getTime() ?? 0
-            if (curVal < minVal) minIdx = i
-          }
-          const workerFreeUntil = pool[minIdx]
-          if (workerFreeUntil) {
-            const nextFree = new Date(workerFreeUntil)
-            nextFree.setDate(nextFree.getDate() + 1)
-            start = chapterReady.getTime() > nextFree.getTime() ? new Date(chapterReady) : new Date(nextFree)
+        if (stageIdx === 0) {
+          // Stage 1 (Job Initiation):
+          // ALL chapters start on Day 1 (anchor date)
+          start = new Date(cursor)
+          const prevStagger = isUnplanned ? prevUnplannedFirstStageDue : prevFirstStageDue
+          if (pageNorm != null && pageNorm > 0 && prevStagger) {
+            // Due date staggers progressively after the previous chapter finishes
+            due = new Date(prevStagger)
+            if (slaDays) due.setDate(due.getDate() + slaDays)
           } else {
-            start = new Date(chapterReady)
+            due = new Date(start)
+            if (slaDays) due.setDate(due.getDate() + slaDays)
           }
-          due = new Date(start)
-          if (slaDays) due.setDate(due.getDate() + slaDays)
-          pool[minIdx] = new Date(due)
+          if (isUnplanned) {
+            prevUnplannedFirstStageDue = new Date(due)
+          } else {
+            prevFirstStageDue = new Date(due)
+          }
         } else {
-          start = new Date(chapterReady)
+          // Subsequent stages:
+          // Starts immediately the day after THIS chapter's preceding stage is due
+          start = new Date(cursor)
           due = new Date(start)
           if (slaDays) due.setDate(due.getDate() + slaDays)
         }
       }
 
       chSched.push({ stageName: ws.stage_name, start, due, slaDays, pageNorm })
-      // Next stage starts the day after this one is due, not on the same day.
+      // Next stage for THIS chapter starts the day after this stage is due
       cursor.setTime(due.getTime())
       cursor.setDate(cursor.getDate() + 1)
     }
@@ -252,35 +235,6 @@ function buildTrackSchedules(
   }
 
   return result
-}
-
-function buildChapterSchedule(
-  chId: number,
-  orderedStages: WorkflowStage[],
-  baseSlaMap: Map<string, number | null>,
-  cellSlas: Record<number, Record<string, number | null>>,
-  projectCreatedAt: string,
-  chapter?: Chapter,
-  dbDates?: Record<string, { start: Date; due: Date }>,
-  checkCompleted?: (chapter: Chapter, stageName: string) => boolean,
-  pageNormMap?: Map<string, number | null>,
-): StageSchedule[] {
-  if (chapter) {
-    const map = buildTrackSchedules(
-      [chapter],
-      orderedStages,
-      baseSlaMap,
-      cellSlas,
-      projectCreatedAt,
-      'parallel',
-      pageNormMap,
-      projectCreatedAt,
-      dbDates,
-      checkCompleted,
-    )
-    return map.get(chId) ?? []
-  }
-  return []
 }
 
 // ── Planning Table Header ────────────────────────────────────────────────────────
@@ -407,6 +361,9 @@ export function ProjectPlanningPage() {
   const [adjustmentReason, setAdjustmentReason] = useState('')
   const [viewingHistory, setViewingHistory] = useState<{ chapter: string; stageName: string; history: StageHistoryEntry[] } | null>(null)
   const [activeTab, setActiveTab] = useState<'manuscript' | 'art' | 'design'>('manuscript')
+  const [isCustomizeStagesOpen, setIsCustomizeStagesOpen] = useState(false)
+  const [localSkippedStages, setLocalSkippedStages] = useState<Record<string, string[]>>({})
+  const [skipReason, setSkipReason] = useState('')
 
   const loadPlanningData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -416,6 +373,8 @@ export function ProjectPlanningPage() {
       const proj = response.project as unknown as Project
       setProject(proj)
       setPreviewComposition(proj.composition ?? 'Medium')
+      const initialSkipped = ((proj.file_details as Record<string, unknown> | null)?.skipped_stages as Record<string, string[]> | undefined) || {}
+      setLocalSkippedStages(initialSkipped)
       const projectCode = proj.code || proj.project_code || ''
 
       // Ensure WMS chapter_details are in sync with CMS chapters
@@ -431,7 +390,10 @@ export function ProjectPlanningPage() {
           : Promise.resolve([]),
       ])
 
-      if (chsRaw.filter(c => c.chapters !== 'Design').length === 0) {
+      // Only redirect to mapping if project is still in Planning status AND has no chapters.
+      // If the project is already Active or Completed and chapters were deleted, stay on the planning page.
+      const isAlreadyApproved = proj.status === 'Active' || proj.status === 'Completed'
+      if (!isAlreadyApproved && chsRaw.filter(c => c.chapters !== 'Design').length === 0) {
         navigate(`/projects/${id}/mapping`, { replace: true })
         return
       }
@@ -576,25 +538,17 @@ export function ProjectPlanningPage() {
   }, [activeTab, designChapters, artChapters, manuscriptChapters, project])
 
   const currentOrderedStages = useMemo(() => {
-    return wfStagesMap[activeWorkflowName] ?? []
-  }, [activeWorkflowName, wfStagesMap])
-
-  const [planFromToday, setPlanFromToday] = useState<boolean>(true)
-  const [staffCount, setStaffCount] = useState<number | 'parallel'>(1)
-
-  const effectiveProjectAnchor = useMemo(() => {
-    if (planFromToday) {
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      return today.toISOString()
-    }
-    return project?.created_at || new Date().toISOString()
-  }, [planFromToday, project?.created_at])
+    const raw = wfStagesMap[activeWorkflowName] ?? []
+    const skippedList = localSkippedStages[activeTab] || []
+    if (skippedList.length === 0) return raw
+    const skippedSet = new Set(skippedList)
+    return raw.filter(s => !skippedSet.has(s.stage_name))
+  }, [activeWorkflowName, wfStagesMap, localSkippedStages, activeTab])
 
   const baseSchedule = useMemo((): StageSchedule[] => {
     if (!project || currentOrderedStages.length === 0) return []
-    return buildBaseSchedule(currentOrderedStages, masterMap, previewComposition, effectiveProjectAnchor)
-  }, [project, currentOrderedStages, masterMap, previewComposition, effectiveProjectAnchor])
+    return buildBaseSchedule(currentOrderedStages, masterMap, previewComposition, project.created_at || '')
+  }, [project, currentOrderedStages, masterMap, previewComposition])
 
   const baseSlaMap = useMemo(() => {
     const m = new Map<string, number | null>()
@@ -627,13 +581,17 @@ export function ProjectPlanningPage() {
     return s
   }, [dbDates])
 
+  // Track-level schedules computed with staggered delivery windows across chapters
   const allTrackSchedules = useMemo(() => {
     if (!project || chapters.length === 0) return new Map<number, StageSchedule[]>()
     const resultMap = new Map<number, StageSchedule[]>()
+    const anchor = project.created_at || new Date().toISOString()
 
     // Manuscript track
-    const msStages = wfStagesMap[manuscriptChapters[0]?.workflow || project.workflow_name || ''] ?? []
-    const msBase = buildBaseSchedule(msStages, masterMap, previewComposition, effectiveProjectAnchor)
+    const rawMsStages = wfStagesMap[manuscriptChapters[0]?.workflow || project.workflow_name || ''] ?? []
+    const msSkipped = new Set(localSkippedStages['manuscript'] || [])
+    const msStages = rawMsStages.filter(s => !msSkipped.has(s.stage_name))
+    const msBase = buildBaseSchedule(msStages, masterMap, previewComposition, anchor)
     const msBaseSla = new Map<string, number | null>()
     const msPageNorm = new Map<string, number | null>()
     msBase.forEach(s => {
@@ -645,8 +603,7 @@ export function ProjectPlanningPage() {
       msStages,
       msBaseSla,
       cellSlas,
-      effectiveProjectAnchor,
-      staffCount,
+      anchor,
       msPageNorm,
       project.created_at,
       dbDates,
@@ -659,8 +616,10 @@ export function ProjectPlanningPage() {
 
     // Art track
     if (artChapters.length > 0) {
-      const artStages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
-      const artBase = buildBaseSchedule(artStages, masterMap, previewComposition, effectiveProjectAnchor)
+      const rawArtStages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
+      const artSkipped = new Set(localSkippedStages['art'] || [])
+      const artStages = rawArtStages.filter(s => !artSkipped.has(s.stage_name))
+      const artBase = buildBaseSchedule(artStages, masterMap, previewComposition, anchor)
       const artBaseSla = new Map<string, number | null>()
       const artPageNorm = new Map<string, number | null>()
       artBase.forEach(s => {
@@ -672,8 +631,7 @@ export function ProjectPlanningPage() {
         artStages,
         artBaseSla,
         cellSlas,
-        effectiveProjectAnchor,
-        'parallel',
+        anchor,
         artPageNorm,
         project.created_at,
         dbDates,
@@ -687,8 +645,10 @@ export function ProjectPlanningPage() {
 
     // Design track
     if (designChapters.length > 0) {
-      const designStages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
-      const designBase = buildBaseSchedule(designStages, masterMap, previewComposition, effectiveProjectAnchor)
+      const rawDesignStages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
+      const designSkipped = new Set(localSkippedStages['design'] || [])
+      const designStages = rawDesignStages.filter(s => !designSkipped.has(s.stage_name))
+      const designBase = buildBaseSchedule(designStages, masterMap, previewComposition, anchor)
       const designBaseSla = new Map<string, number | null>()
       const designPageNorm = new Map<string, number | null>()
       designBase.forEach(s => {
@@ -700,8 +660,7 @@ export function ProjectPlanningPage() {
         designStages,
         designBaseSla,
         cellSlas,
-        effectiveProjectAnchor,
-        'parallel',
+        anchor,
         designPageNorm,
         project.created_at,
         dbDates,
@@ -714,7 +673,7 @@ export function ProjectPlanningPage() {
     }
 
     return resultMap
-  }, [project, chapters, manuscriptChapters, artChapters, designChapters, wfStagesMap, masterMap, previewComposition, effectiveProjectAnchor, staffCount, cellSlas, dbDates, isStageCompleted, alreadyApproved, isAdjusting, plannedChapterNumbers])
+  }, [project, chapters, manuscriptChapters, artChapters, designChapters, wfStagesMap, masterMap, previewComposition, cellSlas, dbDates, isStageCompleted, alreadyApproved, isAdjusting, plannedChapterNumbers])
 
   const chapterSchedules = allTrackSchedules
 
@@ -766,14 +725,6 @@ export function ProjectPlanningPage() {
     return allTrackSchedules.get(ch.id) ?? []
   }, [allTrackSchedules])
 
-  const totalManuscriptPages = useMemo(() => {
-    return activeChapters.reduce((sum, ch) => sum + (ch.manuscript_pages || 0), 0)
-  }, [activeChapters])
-
-  const activePageNormStage = useMemo(() => {
-    return baseSchedule.find(s => s.pageNorm != null && s.pageNorm > 0)
-  }, [baseSchedule])
-
   const manuscriptFinalDue = useMemo(() => {
     let max: Date | null = null
     for (const ch of manuscriptChapters) {
@@ -824,13 +775,6 @@ export function ProjectPlanningPage() {
     return manuscriptFinalDue
   }, [activeTab, manuscriptFinalDue, artFinalDue, designFinalDue])
 
-  const hasActiveDelays = useMemo(() => {
-    for (const d of delayMap.values()) {
-      if (d > 0) return true
-    }
-    return false
-  }, [delayMap])
-
   function toLocalDateStr(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   }
@@ -863,6 +807,8 @@ export function ProjectPlanningPage() {
         status: 'Active',
         due_date: project.due_date || toLocalDateStr(finalDue),
         composition: previewComposition ?? undefined,
+        skipped_stages: localSkippedStages,
+        reason: reason || undefined,
       })
     } catch {
       toast.error('Failed to approve planning')
@@ -1006,7 +952,14 @@ export function ProjectPlanningPage() {
         className="border-b border-border hover:bg-accent transition-colors group bg-card"
       >
         <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
-          {ch.chapters === 'FM' ? 'Front matter' : ch.chapters === 'BM' ? 'Back matter' : /^[A-Za-z]$/.test(ch.chapters) ? `Appendix ${ch.chapters}` : /^\d+$/.test(ch.chapters) ? `Chapter ${ch.chapters}` : ch.chapters}
+          <div className="flex items-center gap-1.5">
+            <span>{ch.chapters === '00' ? 'Book 00' : ch.chapters === 'FM' ? 'Front matter' : ch.chapters === 'BM' ? 'Back matter' : /^[A-Za-z]$/.test(ch.chapters) ? `Appendix ${ch.chapters}` : /^\d+$/.test(ch.chapters) ? `Chapter ${ch.chapters}` : ch.chapters}</span>
+            {(ch.revision ?? 1) > 1 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                Rev {ch.revision}
+              </span>
+            )}
+          </div>
         </td>
         <td className={`px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors ${activeTab === 'design' ? 'shadow-[inset_-2px_0_0_var(--color-border)]' : 'shadow-[inset_-1px_0_0_var(--color-border)]'
           }`}>
@@ -1036,7 +989,7 @@ export function ProjectPlanningPage() {
           const isCellEditable = editable && !isCompleted
           const stageHist = stageHistoryMap.get(dbKey)
 
-          const displayStart = dbDates[dbKey] && (!editable || isCompleted) ? dbDates[dbKey].start : s.start
+          const displayStart = dbDates[dbKey] ? dbDates[dbKey].start : s.start
           const displayDue = dbDates[dbKey] && (!editable || isCompleted) ? dbDates[dbKey].due : s.due
           const dueStr = toLocalDateStr(displayDue)
           const cellExceedsDue = projectDueDateStr ? dueStr > projectDueDateStr : false
@@ -1096,17 +1049,17 @@ export function ProjectPlanningPage() {
                       {s.slaDays != null && (
                         <span className="text-[10px] font-bold text-primary">{s.slaDays}d</span>
                       )}
-                      {delayDays > 0 && (
-                        <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 ml-1">
-                          +{delayDays}d
-                        </span>
-                      )}
                       {s.pageNorm != null && chEffectivePages != null && chEffectivePages > 0 && (
                         <span
                           className="text-[9px] text-muted/70 ml-1 whitespace-nowrap"
                           title={`${chEffectivePages} pages ÷ ${s.pageNorm} pgs/day norm = ${Math.ceil(chEffectivePages / s.pageNorm)}d`}
                         >
                           ({chEffectivePages}p ÷ {s.pageNorm})
+                        </span>
+                      )}
+                      {delayDays > 0 && (
+                        <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 ml-1">
+                          +{delayDays}d
                         </span>
                       )}
                     </>
@@ -1170,191 +1123,143 @@ export function ProjectPlanningPage() {
   return (
     <div className="flex flex-col min-h-full">
 
-      {/* Header (2 Rows) */}
-      <div className="border-b border-border bg-card/60 backdrop-blur-sm flex-shrink-0">
-        {/* Row 1: Back Navigation, Project Title & Action Buttons */}
-        <div className="px-6 py-3 border-b border-border/60 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              onClick={handleBack}
-              className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors flex-shrink-0"
-              title="Back"
+      {/* Header */}
+      <div className="px-6 py-3.5 border-b border-border bg-card/50 backdrop-blur-sm flex items-center justify-between gap-4 flex-shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={handleBack}
+            className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors flex-shrink-0"
+            title="Back"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div className="min-w-0">
+            <h1
+              className="text-base sm:text-lg font-bold text-text truncate max-w-[240px] sm:max-w-xs md:max-w-sm lg:max-w-md xl:max-w-xl"
+              title={project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
             >
-              <ArrowLeft size={18} />
-            </button>
-            <div className="min-w-0">
-              <h1
-                className="text-base sm:text-lg font-bold text-text truncate max-w-md lg:max-w-xl xl:max-w-2xl"
-                title={project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
-              >
-                {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
-              </h1>
-              <p className="text-xs text-muted flex items-center gap-1.5 mt-0.5 whitespace-nowrap">
-                <Layers size={11} className="flex-shrink-0" />
-                <span className="truncate">{project.workflow_name || 'No workflow'} · Project Planning</span>
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2.5 flex-shrink-0">
-            {alreadyApproved && !isAdjusting ? (
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 h-8 px-2.5 rounded-lg whitespace-nowrap flex-shrink-0">
-                  <CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /> Planning Approved
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsAdjusting(true)}
-                  leftIcon={<Edit3 size={13} />}
-                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
-                >
-                  Adjust Planning
-                </Button>
-              </div>
-            ) : alreadyApproved && isAdjusting ? (
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setIsAdjusting(false)
-                    loadPlanningData({ silent: true })
-                  }}
-                  leftIcon={<X size={13} />}
-                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 text-muted hover:text-text font-medium"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleApprove}
-                  disabled={isExceedingDueDate || approving || !finalDue}
-                  isLoading={approving}
-                  size="sm"
-                  leftIcon={<CheckCircle2 size={14} />}
-                  variant={isExceedingDueDate ? "outline" : "primary"}
-                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
-                  title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
-                >
-                  {approving ? "Re-approving…" : "Re-approve Planning"}
-                </Button>
-              </div>
-            ) : (
-              <Button
-                onClick={handleApprove}
-                disabled={isExceedingDueDate || approving || !finalDue || chapters.length === 0}
-                isLoading={approving}
-                size="sm"
-                leftIcon={<CheckCircle2 size={14} />}
-                className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
-                title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
-              >
-                {approving ? "Approving…" : "Approve Planning"}
-              </Button>
-            )}
+              {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
+            </h1>
+            <p className="text-xs text-muted flex items-center gap-1.5 mt-0.5 whitespace-nowrap">
+              <Layers size={11} className="flex-shrink-0" />
+              <span className="truncate">{project.workflow_name || 'No workflow'} · Project Planning</span>
+            </p>
           </div>
         </div>
 
-        {/* Row 2: Planning Controls (Composition, Plan From, Staffing) & Schedule Target Badges */}
-        <div className="px-6 py-2.5 flex items-center justify-between gap-4 flex-wrap bg-surface/30">
-          <div className="flex items-center gap-3.5 flex-wrap">
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <label className="text-xs text-muted font-medium whitespace-nowrap">Composition:</label>
-              <select
-                value={previewComposition ?? 'Medium'}
-                onChange={e => setPreviewComposition(e.target.value)}
-                disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
-                className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <label className="text-xs text-muted font-medium whitespace-nowrap">Composition:</label>
+            <select
+              value={previewComposition ?? 'Medium'}
+              onChange={e => setPreviewComposition(e.target.value)}
+              disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
+              className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <option value="Low">Low (Level 1)</option>
+              <option value="Medium">Medium (Level 2)</option>
+              <option value="High">High (Level 3)</option>
+            </select>
+            {previewComposition !== (project.composition ?? 'Medium') && (
+              <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                Preview only
+              </span>
+            )}
+          </div>
+
+          {/* Project Due Date Badge */}
+          {projectDueDate && (
+            <div
+              className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 h-8 rounded-lg border whitespace-nowrap flex-shrink-0 ${isExceedingDueDate
+                ? 'text-red-700 bg-red-50 border-red-300 font-semibold'
+                : 'text-text bg-surface/80 border-border'
+                }`}
+              title={`Project Due Date: ${fmt(projectDueDate)}`}
+            >
+              <Calendar size={13} className={isExceedingDueDate ? 'text-red-600 flex-shrink-0' : 'text-muted flex-shrink-0'} />
+              <span>Due: <span className="font-semibold text-text">{fmt(projectDueDate)}</span></span>
+            </div>
+          )}
+
+          {activeTabFinalDue && (
+            <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+              <div
+                className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 h-8 rounded-lg border whitespace-nowrap ${isExceedingDueDate
+                  ? 'text-red-700 bg-red-50 border-red-300 font-semibold'
+                  : alreadyApproved
+                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                    : 'text-primary bg-primary/10 border-primary/20'
+                  }`}
+                title={`${activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Final Deliverable: ${fmt(activeTabFinalDue)}`}
               >
-                <option value="Low">Low (Level 1)</option>
-                <option value="Medium">Medium (Level 2)</option>
-                <option value="High">High (Level 3)</option>
-              </select>
-              {previewComposition !== (project.composition ?? 'Medium') && (
-                <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded whitespace-nowrap">
-                  Preview only
+                <Flag size={12} className="flex-shrink-0" />
+                <span>
+                  {activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Target: <span className="font-semibold">{fmt(activeTabFinalDue)}</span>
                 </span>
+              </div>
+              {alreadyApproved && actualFinalDue && finalDue && actualFinalDue > finalDue && (
+                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md whitespace-nowrap">
+                  <Flag size={9} className="flex-shrink-0" /> Updated: {fmt(actualFinalDue)} due to delays
+                </div>
               )}
             </div>
+          )}
 
-            <div className="h-4 w-px bg-border/80 hidden sm:block" />
-
-            {/* Plan From Selector */}
+          {alreadyApproved && !isAdjusting ? (
             <div className="flex items-center gap-2 flex-shrink-0">
-              <label className="text-xs text-muted font-medium whitespace-nowrap">Plan from:</label>
-              <select
-                value={planFromToday ? 'today' : 'created'}
-                onChange={e => setPlanFromToday(e.target.value === 'today')}
-                disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
-                className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 h-8 px-2.5 rounded-lg whitespace-nowrap flex-shrink-0">
+                <CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /> Planning Approved
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsAdjusting(true)}
+                leftIcon={<Edit3 size={13} />}
+                className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
               >
-                <option value="today">Today ({fmt(new Date())})</option>
-                <option value="created">Project Start ({fmt(validDate(project.created_at))})</option>
-              </select>
+                Adjust Planning
+              </Button>
             </div>
-
-            <div className="h-4 w-px bg-border/80 hidden sm:block" />
-
-            {/* Staff / Resource Selector */}
+          ) : alreadyApproved && isAdjusting ? (
             <div className="flex items-center gap-2 flex-shrink-0">
-              <label className="text-xs text-muted font-medium whitespace-nowrap">
-                {activePageNormStage ? `${activePageNormStage.stageName} Staff:` : 'Staffing:'}
-              </label>
-              <select
-                value={staffCount}
-                onChange={e => setStaffCount(e.target.value === 'parallel' ? 'parallel' : parseInt(e.target.value, 10))}
-                disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
-                className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsAdjusting(false)
+                  loadPlanningData({ silent: true })
+                }}
+                leftIcon={<X size={13} />}
+                className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 text-muted hover:text-text font-medium"
               >
-                <option value="1">1 Person (Sequential)</option>
-                <option value="2">2 Persons</option>
-                <option value="3">3 Persons</option>
-                <option value="4">4 Persons</option>
-                <option value="parallel">Parallel (Full Team)</option>
-              </select>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleApprove}
+                disabled={isExceedingDueDate || approving || !finalDue}
+                isLoading={approving}
+                size="sm"
+                leftIcon={<CheckCircle2 size={14} />}
+                variant={isExceedingDueDate ? "outline" : "primary"}
+                className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
+                title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
+              >
+                {approving ? "Re-approving…" : "Re-approve Planning"}
+              </Button>
             </div>
-          </div>
-
-          <div className="flex items-center gap-3 flex-shrink-0">
-            {/* Project Due Date Badge */}
-            {projectDueDate && (
-              <div
-                className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 h-8 rounded-lg border whitespace-nowrap flex-shrink-0 ${isExceedingDueDate
-                  ? 'text-red-700 bg-red-50 border-red-300 font-semibold'
-                  : 'text-text bg-surface/80 border-border'
-                  }`}
-                title={`Project Due Date: ${fmt(projectDueDate)}`}
-              >
-                <Calendar size={13} className={isExceedingDueDate ? 'text-red-600 flex-shrink-0' : 'text-muted flex-shrink-0'} />
-                <span>Due: <span className="font-semibold text-text">{fmt(projectDueDate)}</span></span>
-              </div>
-            )}
-
-            {/* Target Deliverable Badge */}
-            {activeTabFinalDue && (
-              <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                <div
-                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 h-8 rounded-lg border whitespace-nowrap ${isExceedingDueDate
-                    ? 'text-red-700 bg-red-50 border-red-300 font-semibold'
-                    : alreadyApproved
-                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                      : 'text-primary bg-primary/10 border-primary/20'
-                    }`}
-                  title={`${activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Final Deliverable: ${fmt(activeTabFinalDue)}`}
-                >
-                  <Flag size={12} className="flex-shrink-0" />
-                  <span>
-                    {activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Target: <span className="font-semibold">{fmt(activeTabFinalDue)}</span>
-                  </span>
-                </div>
-                {alreadyApproved && hasActiveDelays && actualFinalDue && finalDue && actualFinalDue > finalDue && (
-                  <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md whitespace-nowrap">
-                    <Flag size={9} className="flex-shrink-0" /> Updated: {fmt(actualFinalDue)} due to delays
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          ) : (
+            <Button
+              onClick={handleApprove}
+              disabled={isExceedingDueDate || approving || !finalDue || chapters.length === 0}
+              isLoading={approving}
+              size="sm"
+              leftIcon={<CheckCircle2 size={14} />}
+              className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
+              title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
+            >
+              {approving ? "Approving…" : "Approve Planning"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1393,22 +1298,38 @@ export function ProjectPlanningPage() {
         <div className="px-6 py-2 bg-surface border-b border-border text-xs text-muted flex items-center justify-between flex-shrink-0 gap-4 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
             <span>Active Workflow: <strong>{activeWorkflowName || 'None'}</strong></span>
-            {activeTab === 'manuscript' && totalManuscriptPages > 0 && (
+            {isEditable && (
+              <button
+                type="button"
+                onClick={() => setIsCustomizeStagesOpen(true)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border transition-all shadow-sm ${
+                  (localSkippedStages[activeTab]?.length || 0) > 0
+                    ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                    : 'bg-card text-text border-border hover:bg-surface'
+                }`}
+                title="Customize which stages are active or skipped for this book"
+              >
+                <Sliders size={12} className="text-primary" />
+                Customize Stages
+                {(localSkippedStages[activeTab]?.length || 0) > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900">
+                    {localSkippedStages[activeTab].length} skipped
+                  </span>
+                )}
+              </button>
+            )}
+            {activeTab === 'manuscript' && activeChapters.reduce((sum, ch) => sum + (ch.manuscript_pages || 0), 0) > 0 && (
               <>
                 <span className="text-border">|</span>
-                <span>Total MS Pages: <strong className="text-text">{totalManuscriptPages.toLocaleString()} pgs</strong></span>
-                {activePageNormStage && activePageNormStage.pageNorm && (
-                  <>
+                <span>Total MS Pages: <strong className="text-text">{activeChapters.reduce((sum, ch) => sum + (ch.manuscript_pages || 0), 0).toLocaleString()} pgs</strong></span>
+                {baseSchedule.filter(s => s.pageNorm != null && s.pageNorm > 0).map(s => (
+                  <span key={s.stageName} className="flex items-center gap-1.5 text-primary font-medium">
                     <span className="text-border">|</span>
-                    <span className="text-primary font-medium">
-                      {activePageNormStage.stageName} Norm: <strong>{activePageNormStage.pageNorm} pgs/day</strong>
-                      {staffCount === 'parallel'
-                        ? ' · Parallel (all concurrent)'
-                        : ` · ${staffCount} Person${staffCount !== 1 ? 's' : ''} (${Math.ceil(totalManuscriptPages / (activePageNormStage.pageNorm * (typeof staffCount === 'number' ? staffCount : 1)))} working days total)`
-                      }
+                    <span>
+                      {s.stageName}: <strong>{s.pageNorm} pgs/day</strong>
                     </span>
-                  </>
-                )}
+                  </span>
+                ))}
               </>
             )}
           </div>
@@ -1493,6 +1414,115 @@ export function ProjectPlanningPage() {
           </>
         )}
       </div>
+
+      {/* Customize Stages Modal */}
+      {isCustomizeStagesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <Sliders size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-text">Customize Stages</h3>
+                  <p className="text-xs text-muted">
+                    {activeTab === 'manuscript' ? 'Manuscript Track' : activeTab === 'art' ? 'Art Track' : 'Design Track'} — {activeWorkflowName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsCustomizeStagesOpen(false)}
+                className="text-muted hover:text-text p-1 rounded-lg hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-muted">
+                Uncheck any stages that are not needed for this book. The schedule and workflow rail will automatically omit skipped stages.
+              </p>
+
+              <div className="max-h-60 overflow-y-auto space-y-1.5 border border-border rounded-lg p-2.5 bg-surface/50">
+                {(wfStagesMap[activeWorkflowName] ?? []).map((stage, idx) => {
+                  const currentSkipped = localSkippedStages[activeTab] || []
+                  const isChecked = !currentSkipped.includes(stage.stage_name)
+                  return (
+                    <label
+                      key={stage.stage_name}
+                      className="flex items-center gap-2.5 p-2 rounded-md hover:bg-card border border-transparent hover:border-border transition-colors cursor-pointer select-none text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          const nextSkipped = isChecked
+                            ? [...currentSkipped, stage.stage_name]
+                            : currentSkipped.filter(s => s !== stage.stage_name)
+                          setLocalSkippedStages(prev => ({
+                            ...prev,
+                            [activeTab]: nextSkipped
+                          }))
+                        }}
+                        className="rounded border-border text-primary focus:ring-primary/40 h-4 w-4"
+                      />
+                      <span className="w-5 text-[11px] font-bold text-muted">{idx + 1}.</span>
+                      <span className={`font-medium ${isChecked ? 'text-text' : 'text-muted line-through'}`}>
+                        {stage.stage_name}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+
+              {alreadyApproved && (
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-semibold text-text block">
+                    Reason for Skipping / Changing Stages <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={skipReason}
+                    onChange={e => setSkipReason(e.target.value)}
+                    placeholder="e.g. Non-XML and Indexing not required by client"
+                    className="w-full text-xs bg-surface border border-border rounded-lg px-3 py-2 text-text placeholder:text-muted/60 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  <p className="text-[10px] text-muted">Who, when, and this reason will be preserved in the audit log.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsCustomizeStagesOpen(false)}
+                className="text-xs h-8 px-3"
+              >
+                Close
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (alreadyApproved && !skipReason.trim()) {
+                    toast.error('Please enter a reason for changing the stages')
+                    return
+                  }
+                  if (alreadyApproved) {
+                    setAdjustmentReason(skipReason.trim())
+                  }
+                  setIsCustomizeStagesOpen(false)
+                  toast.success('Stages updated. Review recalculated schedule and approve when ready.')
+                }}
+                className="text-xs h-8 px-3 font-medium"
+              >
+                Apply & Replan
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Adjustment Reason Modal */}
       {isReasonModalOpen && (
@@ -1581,7 +1611,7 @@ export function ProjectPlanningPage() {
                 <div>
                   <h3 className="text-base font-semibold text-text">Adjustment History</h3>
                   <p className="text-xs text-muted">
-                    Chapter {viewingHistory.chapter} · {viewingHistory.stageName}
+                    {viewingHistory.chapter === '00' ? 'Book 00' : `Chapter ${viewingHistory.chapter}`} · {viewingHistory.stageName}
                   </p>
                 </div>
               </div>

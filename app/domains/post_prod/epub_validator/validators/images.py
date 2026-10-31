@@ -8,7 +8,6 @@ from PIL import Image
 from ..engine.registry import rule
 from ._common import find_opf
 
-_MAX_PIXELS = 4_000_000
 _ALLOWED_EXT = {".jpg", ".jpeg"}
 
 
@@ -118,15 +117,115 @@ def validate_no_empty_alt(file_details, rule_config=None):
             issues.append(issue)
     return {"issues_count": len(issues), "issues": issues}
 
+@rule("BOD-IMG-003")
+def validate_bod_alt(file_details, rule_config=None):
+    """<img> elements must not have empty alt attributes (unless decorative or captioned)."""
+    with open(file_details["full_path"], "r", encoding="utf-8") as f:
+        content = f.read()
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
+    issues = []
+
+    for img in soup.find_all("img"):
+        alt = img.get("alt")
+        # Missing alt attribute is always invalid (images MUST have an alt attribute)
+        if alt is None:
+            is_invalid = True
+        elif alt.strip() == "":
+            # Empty alt (alt="") is valid ONLY for:
+            # 1. Decorative images: role="presentation", role="none", or aria-hidden="true"
+            role = img.get("role", "")
+            if isinstance(role, list):
+                role = " ".join(role)
+            is_decorative = role.lower() in ("presentation", "none") or img.get("aria-hidden", "").lower() == "true"
+
+            # 2. Images with captions that function as alt tags:
+            # - inside <figure> with <figcaption> containing text
+            # - referenced by aria-labelledby or aria-describedby with matching non-empty element
+            # - adjacent sibling or parent containing a caption class (e.g. class="caption", "fig-caption", "image-caption")
+            has_caption = False
+            figure_parent = img.find_parent("figure")
+            if figure_parent:
+                figcaption = figure_parent.find("figcaption")
+                if figcaption and figcaption.get_text(strip=True):
+                    has_caption = True
+
+            if not has_caption:
+                for attr in ("aria-labelledby", "aria-describedby"):
+                    ref_id = img.get(attr)
+                    if ref_id:
+                        ref_elem = soup.find(id=ref_id)
+                        if ref_elem and ref_elem.get_text(strip=True):
+                            has_caption = True
+                            break
+
+            if not has_caption:
+                # Check parent or direct adjacent sibling element with caption class
+                parent = img.parent
+                if parent:
+                    # check sibling caption tags or elements with class containing 'caption'
+                    caption_sibling = parent.find(lambda el: el != img and (
+                        el.name == "figcaption" or
+                        any("caption" in c.lower() for c in el.get("class", []))
+                    ))
+                    if caption_sibling and caption_sibling.get_text(strip=True):
+                        has_caption = True
+
+            is_invalid = not (is_decorative or has_caption)
+        else:
+            is_invalid = False
+
+        if is_invalid:
+            src = img.get("src", "")
+            line_num = None
+            if hasattr(img, 'sourceline') and img.sourceline:
+                line_num = img.sourceline
+            else:
+                for idx, line in enumerate(lines, 1):
+                    if "src=" in line and src in line:
+                        line_num = idx
+                        break
+
+            import re
+            extract_text = str(img)
+            if line_num and line_num <= len(lines):
+                raw_line = lines[line_num - 1]
+                img_match = re.search(r'<img[^>]*>', raw_line, re.IGNORECASE)
+                if img_match:
+                    img_tag = img_match.group(0)
+                    alt_match = re.search(r'alt\s*=\s*["\'][^"\']*["\']|alt\b', img_tag, re.IGNORECASE)
+                    extract_text = alt_match.group(0) if alt_match else img_tag
+
+            msg = f"<img src='{src}'> is missing alt attribute" if alt is None else f"<img src='{src}'> has empty alt attribute without caption or decorative role"
+            issue = {
+                "type": "empty_alt_text",
+                "message": msg,
+                "category": "Error",
+                "href": src,
+                "extract": extract_text,
+            }
+            if line_num:
+                issue["line_number"] = line_num
+            issues.append(issue)
+    return {"issues_count": len(issues), "issues": issues}
 
 @rule("ASP-IMG-003")
+@rule("BOD-IMG-002")
 def validate_image_dimensions(file_details, rule_config=None):
-    """No image may exceed 4,000,000 pixels (width × height), except cover.jpg."""
+    """Validate image dimensions against configurable limits (max pixels, min width or height, etc.)."""
     file_path = file_details.get("file_path", "")
     full_path = file_details.get("full_path", "")
 
-    # Skip cover.jpg
-    if os.path.basename(file_path).lower() == "cover.jpg":
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    max_pixels = cfg.get("max_pixels")
+    min_dimension = cfg.get("min_dimension") or cfg.get("min_width_or_height")
+    min_width = cfg.get("min_width")
+    min_height = cfg.get("min_height")
+    exclude_files = [f.lower() for f in cfg.get("exclude_files", ["cover.jpg"])]
+
+    # Skip excluded files
+    if os.path.basename(file_path).lower() in exclude_files:
         return {"issues_count": 0, "issues": []}
 
     if not full_path or not os.path.exists(full_path):
@@ -136,15 +235,47 @@ def validate_image_dimensions(file_details, rule_config=None):
     try:
         with Image.open(full_path) as img:
             w, h = img.size
-            if w * h > _MAX_PIXELS:
+
+            # 1. Check max total pixels budget
+            if max_pixels is not None and (w * h > max_pixels):
                 issues.append({
                     "type": "image_over_pixel_budget",
                     "message": (
-                        f"Image is {w}x{h} = {w*h:,} pixels; max allowed is {_MAX_PIXELS:,}"
+                        f"Image is {w}x{h} = {w*h:,} pixels; max allowed is {max_pixels:,} pixels."
                     ),
                     "category": "Warning",
                     "file_path": file_path,
                 })
+
+            # 2. Check min dimension (e.g. at least min_dimension in width OR height)
+            if min_dimension is not None:
+                if max(w, h) < min_dimension:
+                    issues.append({
+                        "type": "image_dimension_too_small",
+                        "message": (
+                            f"Image dimensions are {w}x{h} px. Images must have a minimum of {min_dimension} px "
+                            f"in width or height."
+                        ),
+                        "category": "Error",
+                        "file_path": file_path,
+                    })
+
+            # 3. Optional specific min_width / min_height checks
+            if min_width is not None and w < min_width:
+                issues.append({
+                    "type": "image_width_too_small",
+                    "message": f"Image width is {w} px (minimum required is {min_width} px).",
+                    "category": "Error",
+                    "file_path": file_path,
+                })
+            if min_height is not None and h < min_height:
+                issues.append({
+                    "type": "image_height_too_small",
+                    "message": f"Image height is {h} px (minimum required is {min_height} px).",
+                    "category": "Error",
+                    "file_path": file_path,
+                })
+
     except Exception:
         pass
 
@@ -445,6 +576,7 @@ def validate_all_images_in_opf(file_details, rule_config=None):
 
 
 @rule("IMG-001")
+@rule("BOD-IMG-001")
 def validate_body_image_dpi(file_details, rule_config=None):
     """Every body image (not just the cover) must be exactly 300 DPI."""
     file_path = file_details.get("file_path", "")

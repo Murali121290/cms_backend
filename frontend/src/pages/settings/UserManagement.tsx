@@ -55,7 +55,7 @@ interface CreateModalProps {
 }
 
 function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, customerOptions }: CreateModalProps) {
-  const [form, setForm] = useState<Partial<CreateUserPayload>>({ customer_access: [], active_status: true, access_level: 'standard' })
+  const [form, setForm] = useState<Partial<CreateUserPayload>>({ customer_access: [], additional_roles: [], active_status: true, access_level: 'standard' })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
 
@@ -70,10 +70,18 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
     return list.map(n => ({ value: n, label: n }))
   }, [roles])
 
+  const additionalRoleOptions = useMemo(() => {
+    return roleOptions.filter(opt => opt.value !== form.role)
+  }, [roleOptions, form.role])
+
   function handleRoleChange(roleName: string) {
     set('role', roleName)
     const matched = roles.filter(r => r.role_name === roleName)
     if (matched.length >= 1) set('team', matched[0].team)
+    // Remove selected primary role from additional_roles if present
+    if (form.additional_roles?.includes(roleName)) {
+      set('additional_roles', form.additional_roles.filter(r => r !== roleName))
+    }
     const val = roleName.toLowerCase().replace(/[\s-]/g, '')
     let lvl = 'Employee'
     if (val.includes('admin')) lvl = 'Admin'
@@ -81,6 +89,19 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
     else if (val.includes('teamlead') || val.includes('lead')) lvl = 'TeamLead'
     set('access_level', lvl)
   }
+
+  // Calculate combined teams preview
+  const displayTeams = useMemo(() => {
+    const teamSet = new Set<string>()
+    if (form.team) teamSet.add(form.team)
+    if (form.additional_roles) {
+      form.additional_roles.forEach(ar => {
+        const found = roles.find(r => r.role_name === ar)
+        if (found?.team) teamSet.add(found.team)
+      })
+    }
+    return Array.from(teamSet).join(', ') || 'Auto-filled from role'
+  }, [form.team, form.additional_roles, roles])
 
   async function handleSubmit() {
     const errs = validateCreate(form, users)
@@ -91,7 +112,7 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
       toast.success(`User "${user.user_name}" created successfully`)
       onCreated(user)
       onClose()
-      setForm({ customer_access: [], active_status: true, access_level: 'standard' })
+      setForm({ customer_access: [], additional_roles: [], active_status: true, access_level: 'standard' })
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       toast.error(msg ?? 'Failed to create user')
@@ -113,10 +134,14 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
         <Input label="User Name" required value={form.user_name ?? ''} onChange={e => set('user_name', e.target.value)} error={errors.user_name} placeholder="e.g. john_doe" />
         <Input label="Email" type="email" required value={form.email ?? ''} onChange={e => set('email', e.target.value)} error={errors.email} placeholder="john@example.com" />
         <Input label="Password" type="password" required value={form.password ?? ''} onChange={e => set('password', e.target.value)} error={errors.password} placeholder="Min 8 characters" />
-        <Select label="Role" required value={form.role ?? ''} onChange={e => handleRoleChange(e.target.value)} error={errors.role}
-          options={roleOptions} placeholder="Select role" />
-        <Input label="Team" value={form.team ?? ''} disabled className="opacity-70 cursor-not-allowed"
-          placeholder="Auto-filled from role" hint="Set automatically when a role is selected" />
+        <Select label="Role (Primary)" required value={form.role ?? ''} onChange={e => handleRoleChange(e.target.value)} error={errors.role}
+          options={roleOptions} placeholder="Select primary role" />
+        <div className="sm:col-span-2">
+          <MultiSelect label="Additional Roles (Multiple Allowed)" options={additionalRoleOptions} value={form.additional_roles ?? []}
+            onChange={v => set('additional_roles', v)} placeholder="Select additional roles (e.g. Accessibility Team, Non-XML, etc.)..." />
+        </div>
+        <Input label="Team(s)" value={displayTeams} disabled className="opacity-70 cursor-not-allowed sm:col-span-2"
+          placeholder="Auto-filled from roles" hint="Set automatically from primary & additional roles" />
         <Input label="Access Level" value={form.access_level ?? 'standard'} disabled className="opacity-70 cursor-not-allowed font-mono text-xs"
           placeholder="standard" hint="Access level for system permissions" />
         <div className="sm:col-span-2">
@@ -145,7 +170,18 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (user) setForm({ role: user.role || user.designation, designation: user.designation, team: user.team, customer_access: user.customer_access, active_status: user.active_status, access_level: user.access_level ?? 'standard', password: '' })
+    if (user) {
+      setForm({
+        role: user.role || user.designation,
+        designation: user.designation,
+        team: user.team,
+        additional_roles: user.additional_roles || [],
+        customer_access: user.customer_access,
+        active_status: user.active_status,
+        access_level: user.access_level ?? 'standard',
+        password: ''
+      })
+    }
   }, [user])
 
   function set<K extends keyof UpdateUserPayload>(key: K, value: UpdateUserPayload[K]) {
@@ -159,10 +195,17 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
     return list.map(n => ({ value: n, label: n }))
   }, [roles])
 
+  const additionalRoleOptions = useMemo(() => {
+    return roleOptions.filter(opt => opt.value !== form.role)
+  }, [roleOptions, form.role])
+
   function handleRoleChange(roleName: string) {
     set('role', roleName)
     const matched = roles.filter(r => r.role_name === roleName)
     if (matched.length >= 1) set('team', matched[0].team)
+    if (form.additional_roles?.includes(roleName)) {
+      set('additional_roles', form.additional_roles.filter(r => r !== roleName))
+    }
     const val = roleName.toLowerCase().replace(/[\s-]/g, '')
     let lvl = 'Employee'
     if (val.includes('admin')) lvl = 'Admin'
@@ -170,6 +213,19 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
     else if (val.includes('teamlead') || val.includes('lead')) lvl = 'TeamLead'
     set('access_level', lvl)
   }
+
+  // Calculate combined teams preview
+  const displayTeams = useMemo(() => {
+    const teamSet = new Set<string>()
+    if (form.team) teamSet.add(form.team)
+    if (form.additional_roles) {
+      form.additional_roles.forEach(ar => {
+        const found = roles.find(r => r.role_name === ar)
+        if (found?.team) teamSet.add(found.team)
+      })
+    }
+    return Array.from(teamSet).join(', ') || 'Auto-filled from roles'
+  }, [form.team, form.additional_roles, roles])
 
   async function handleSubmit() {
     const errs = validateEdit(form)
@@ -205,10 +261,14 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
         <Input label="Email" value={user?.email ?? ''} disabled className="opacity-60" />
         <Input label="New Password" type="password" value={form.password ?? ''} onChange={e => set('password', e.target.value)}
           placeholder="Leave blank to keep current" hint="Leave blank to keep existing password" />
-        <Select label="Role" required value={form.role ?? ''} onChange={e => handleRoleChange(e.target.value)} error={errors.role}
-          options={roleOptions} placeholder="Select role" />
-        <Input label="Team" value={form.team ?? ''} disabled className="opacity-70 cursor-not-allowed"
-          placeholder="Auto-filled from role" hint="Set automatically when a role is selected" />
+        <Select label="Role (Primary)" required value={form.role ?? ''} onChange={e => handleRoleChange(e.target.value)} error={errors.role}
+          options={roleOptions} placeholder="Select primary role" />
+        <div className="sm:col-span-2">
+          <MultiSelect label="Additional Roles (Multiple Allowed)" options={additionalRoleOptions} value={form.additional_roles ?? []}
+            onChange={v => set('additional_roles', v)} placeholder="Select additional roles (e.g. Accessibility Team, Non-XML, etc.)..." />
+        </div>
+        <Input label="Team(s)" value={displayTeams} disabled className="opacity-70 cursor-not-allowed sm:col-span-2"
+          placeholder="Auto-filled from roles" hint="Set automatically from primary & additional roles" />
         <Input label="Access Level" value={form.access_level ?? 'standard'} disabled className="opacity-70 cursor-not-allowed font-mono text-xs"
           placeholder="standard" hint="Access level for system permissions" />
         <div className="sm:col-span-2">
@@ -399,13 +459,24 @@ export function UserManagement() {
                         <td className="px-4 py-3 text-muted">{user.email}</td>
                         {/* Role */}
                         <td className="px-4 py-3">
-                          {user.role ? (
-                            <Badge variant={statusToBadge('in-progress')} className="bg-purple-100 text-purple-700 border-purple-200">
-                              {user.role}
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
+                          <div className="flex flex-col gap-1">
+                            {user.role ? (
+                              <Badge variant={statusToBadge('in-progress')} className="bg-purple-100 text-purple-700 border-purple-200">
+                                {user.role}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                            {user.additional_roles && user.additional_roles.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-0.5">
+                                {user.additional_roles.map(ar => (
+                                  <span key={ar} className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded border border-purple-200 font-medium">
+                                    +{ar}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </td>
                         {/* Designation */}
                         <td className="px-4 py-3 text-text font-medium">{user.designation || '—'}</td>
@@ -421,7 +492,16 @@ export function UserManagement() {
                           </span>
                         </td>
                         {/* Team */}
-                        <td className="px-4 py-3 text-text">{user.team}</td>
+                        <td className="px-4 py-3 text-text">
+                          <div>
+                            <span>{user.team || '—'}</span>
+                            {user.additional_teams && user.additional_teams.length > 0 && (
+                              <div className="text-[11px] text-muted mt-0.5">
+                                {user.additional_teams.filter(t => t !== user.team).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        </td>
                         {/* Customer Access */}
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-1 max-w-[180px]">

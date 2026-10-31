@@ -94,3 +94,102 @@ def article_figures(db: Session, article: JournalArticle) -> List[int]:
                 if m:
                     numbers.add(int(m.group(1)))
     return sorted(numbers)
+
+
+def capture_images_from_docx(db: Session, article: JournalArticle) -> List[Any]:
+    """Extracts embedded drawings/images from the manuscript DOCX and registers them as Art files."""
+    import logging
+    import zipfile
+    from xml.etree import ElementTree as ET
+    from app.domains.journals.files import save_version, art_files
+    from app.domains.journals.manuscript import resolve_manuscript_path
+
+    logger = logging.getLogger(__name__)
+    path = resolve_manuscript_path(db, article)
+    if not path or not os.path.exists(path):
+        return []
+
+    existing = {f.figure_number: f for f in art_files(db, article.id) if f.figure_number is not None}
+    all_figs = article_figures(db, article)
+
+    try:
+        with zipfile.ZipFile(path, "r") as z:
+            names = set(z.namelist())
+            media_names = [n for n in names if n.startswith("word/media/")]
+            if not media_names:
+                return []
+
+            rels = {}
+            if "word/_rels/document.xml.rels" in names:
+                tree = ET.fromstring(z.read("word/_rels/document.xml.rels"))
+                for rel in tree:
+                    rid = rel.get("Id")
+                    target = rel.get("Target")
+                    if rid and target:
+                        if not target.startswith("word/"):
+                            target = "word/" + target.lstrip("../").lstrip("/")
+                        rels[rid] = target
+
+            import docx
+            from docx.oxml.ns import qn
+            doc = docx.Document(path)
+            body_ps = list(doc.element.body.iter(qn("w:p")))
+
+            captured: Dict[int, Any] = {}
+            unlinked_images: List[Any] = []
+
+            for idx, p in enumerate(body_ps):
+                xml = p.xml
+                embed_rids = re.findall(r'embed="([^"]+)"', xml)
+                if not embed_rids:
+                    continue
+
+                for rid in embed_rids:
+                    target_media = rels.get(rid)
+                    if not target_media or target_media not in names:
+                        continue
+                    data = z.read(target_media)
+                    orig_name = os.path.basename(target_media)
+
+                    fig_num = None
+                    for offset in [1, -1, 2, -2, 3]:
+                        chk_idx = idx + offset
+                        if 0 <= chk_idx < len(body_ps):
+                            txt = docx.text.paragraph.Paragraph(body_ps[chk_idx], doc).text.strip()
+                            m = re.match(r"^(?:Figure|Fig\.)\s*(\d+)", txt, re.I)
+                            if m:
+                                fig_num = int(m.group(1))
+                                break
+
+                    if fig_num is not None:
+                        captured[fig_num] = (orig_name, data)
+                    else:
+                        unlinked_images.append((orig_name, data))
+
+            # If any unlinked images remain and we have unassigned figure numbers
+            unassigned = [n for n in all_figs if n not in captured and n not in existing]
+            for n, (orig_name, data) in zip(unassigned, unlinked_images):
+                captured[n] = (orig_name, data)
+
+            if not captured and unlinked_images:
+                for idx, (orig_name, data) in enumerate(unlinked_images, start=1):
+                    captured[idx] = (orig_name, data)
+
+            saved_rows = []
+            for fig_num, (orig_name, data) in captured.items():
+                if fig_num in existing:
+                    continue
+                ext = os.path.splitext(orig_name)[1].lower()
+                if ext in (".tiff", ".tif"):
+                    ext = ".tif"
+                save_name = f"fig{fig_num}{ext}"
+                row = save_version(db, article, "Art", save_name, data, "art", figure_number=fig_num)
+                saved_rows.append(row)
+
+            if saved_rows:
+                db.commit()
+            return saved_rows
+    except Exception as e:
+        logger.warning("Error capturing images from docx: %s", e)
+        return []
+

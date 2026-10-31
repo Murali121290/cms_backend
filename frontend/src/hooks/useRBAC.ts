@@ -45,6 +45,14 @@ export function useRBAC() {
     return roles.some(r => allowed.includes(r.toLowerCase().replace(/[\s-]/g, '')))
   }
 
+  const permissions: string[] = (viewer as any)?.permissions || []
+
+  /** True if the user has a specific permission key. Admin has all permissions. */
+  function hasPermission(permission: string): boolean {
+    if (accessLevel === 'Admin') return true
+    return permissions.includes(permission)
+  }
+
   /** True if the user has this role or access level. */
   function hasRole(r: string): boolean {
     const target = r.toLowerCase().replace(/[\s-]/g, '')
@@ -56,7 +64,9 @@ export function useRBAC() {
     viewer,
     roles,
     accessLevel,
+    permissions,
     canAccess,
+    hasPermission,
     hasRole,
     isAdmin:    accessLevel === 'Admin' || hasRole('admin'),
     isManager:  accessLevel === 'Admin' || accessLevel === 'Manager' || hasRole('manager'),

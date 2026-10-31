@@ -4,44 +4,27 @@ Each detector returns Findings for every hit. We don't try to pick the
 and enforce consistency.
 """
 from __future__ import annotations
-from manuscript_core.rules.base import Finding, context_snippet, iter_unmasked_matches
+from manuscript_core.rules.base import Finding, iter_unmasked_matches
 import re
 from typing import Iterable
 from manuscript_core.extractor import Segment
+from manuscript_core.rules.finding_builder import build_finding
 # Shortcut: build a Finding from a segment + match with common fields.
+# The builder uses a surface-specific search pattern rather than the shared regex,
+# so "one" matches only "one" when several number rules apply, and attaches the
+# CE checklist metadata and per-option replacements.
 def _f(seg: Segment, m: re.Match, category: str, rule_id: str,
        rule_label: str, canonical: str, severity: str = "info",
        pat: re.Pattern | None = None) -> Finding:
-    from manuscript_core.rules.te_point_replacements import get_te_replacement, get_te_replacement_options
-    rep = get_te_replacement(rule_id, m)
-    rep_opts = get_te_replacement_options(rule_id, m)
-    # For pattern matching in fixer: use surface-specific pattern instead of shared regex
-    # This ensures "one" matches only "one", not any number when multiple number rules apply
-    surface = m.group(0)
-    prefix = r'\b' if (surface and (surface[0].isalnum() or surface[0] == '_')) else ''
-    suffix = r'\b' if (surface and (surface[-1].isalnum() or surface[-1] == '_')) else ''
-    surface_pattern = prefix + re.escape(surface) + suffix
-    return Finding(
-        category=category, rule_id=rule_id, rule_label=rule_label,
-        surface=m.group(0), canonical=canonical,
-        chapter_index=seg.chapter_index, chapter_name=seg.chapter_name,
-        source=seg.source, page=seg.page, para_index=seg.para_index,
-        context=context_snippet(seg.text, m.start(), m.end()),
-        severity=severity,
-        replacement=rep,
-        search_pattern=surface_pattern,
-        region=seg.region,
-        match_start=m.start(),
-        match_end=m.end(),
-        replacement_options=rep_opts,
-    )
+    return build_finding(seg, m.start(), m.end(), rule_id, rule_label, canonical,
+                         m=m, category=category, severity=severity)
 # ---------------------------------------------------------------------------
 # Rule 1: percent style — %, percent, per cent
 # ---------------------------------------------------------------------------
 PERCENT_PATTERNS = [
     (re.compile(r"\b\d+(?:\.\d+)?\s*%"), "percent_symbol"),
-    (re.compile(r"\bpercent\b", re.IGNORECASE), "percent_word"),
-    (re.compile(r"\bper\s+cent\b", re.IGNORECASE), "per_cent_word"),
+    (re.compile(r"(?:\b\d+(?:\.\d+)?\s*)?\bpercent\b", re.IGNORECASE), "percent_word"),
+    (re.compile(r"(?:\b\d+(?:\.\d+)?\s*)?\bper\s+cent\b", re.IGNORECASE), "per_cent_word"),
     (re.compile(r"\bpercentage\b", re.IGNORECASE), "percent_percentage"),
 ]
 def detect_percent(seg: Segment) -> Iterable[Finding]:
@@ -97,18 +80,6 @@ def detect_era(seg: Segment) -> Iterable[Finding]:
         for m in iter_unmasked_matches(pat, seg.text, seg.mask):
             yield _f(seg, m, "te_point", rule_id, "AD/BC style", "era_style", pat=pat)
 # ---------------------------------------------------------------------------
-# Rule 5: number ranges — "1 to 6", "1–6", "1-6"
-# ---------------------------------------------------------------------------
-RANGE_PATTERNS = [
-    (re.compile(r"\b\d+\s+to\s+\d+\b"), "range_to"),
-    (re.compile(r"\b\d+\u2013\d+\b"), "range_endash"),
-    (re.compile(r"\b\d+-\d+\b"), "range_hyphen"),
-]
-def detect_number_ranges(seg: Segment) -> Iterable[Finding]:
-    for pat, rule_id in RANGE_PATTERNS:
-        for m in iter_unmasked_matches(pat, seg.text, seg.mask):
-            yield _f(seg, m, "te_point", rule_id, "Number range style", "range_style", pat=pat)
-# ---------------------------------------------------------------------------
 # Rule 6: leading zero — .5 vs 0.5
 # ---------------------------------------------------------------------------
 LEADING_ZERO_PATTERNS = [
@@ -126,9 +97,12 @@ TIMES_SIGN_PATTERNS = [
     (re.compile(r"\b\d+\s*\u00d7\s*\d+\b"), "times_symbol"),
     (re.compile(r"\b\d+\s*[xX]\s*\d+\b"), "times_letter"),
 ]
+_SCI_TAIL_RE = re.compile(r"^(?:\^|[-−]\d)")
 def detect_times(seg: Segment) -> Iterable[Finding]:
     for pat, rule_id in TIMES_SIGN_PATTERNS:
         for m in iter_unmasked_matches(pat, seg.text, seg.mask):
+            if m.group(0).endswith("10") and _SCI_TAIL_RE.match(seg.text[m.end():]):
+                continue  # 3.2 x 10^5 is scientific notation (detect_sci_notation)
             yield _f(seg, m, "te_point", rule_id, "Multiplication sign (× vs x)", "times_sign_style", pat=pat)
 # ---------------------------------------------------------------------------
 # Rule 8: versus abbreviation
@@ -361,6 +335,8 @@ def detect_number_ranges(seg: Segment) -> Iterable[Finding]:
             prefix = seg.text[max(0, m.start() - 30) : m.start()]
             if _CITATION_LABEL_PREFIX.search(prefix):
                 continue
+            if re.match(r"[-–]\d", seg.text[m.end():m.end() + 2]) or re.search(r"\d[-–]$", prefix):
+                continue  # part of an ISBN, phone number or other code (978-1-4729-...)
             yield _f(seg, m, "te_point", rule_id, "Number range style", "range_style", pat=pat)
 # ---------------------------------------------------------------------------
 # Rule 13: number style (0–9 numeral vs spelled out and 0–99 numeral vs spelled out)
@@ -382,11 +358,14 @@ _CITATION_LABEL_PREFIX = re.compile(
     r')$',
     re.IGNORECASE,
 )
+# The rest of a number series after one of its numbers: ", 4, and 6" / " and 10" / " to 12"
+_NUMBER_SERIES_RE = re.compile(r"(?:\s*(?:,|and|or|to|–|-)\s*(?:and\s+|or\s+)?\d+(?:\.\d+)?)+")
 _UNIT_OR_COMPOUND_SUFFIX_RE = re.compile(
     r'^(?:\s*|-)(?:'
     r'kg|g|mg|mcg|\u03bcg|m|cm|mm|km|l|ml|lb|lbs|oz|yd|ft|in|mi|'
+    r'feet|foot|inch(?:es)?|miles?|yards?|pounds?|ounces?|metres?|meters?|kilograms?|grams?|'
     r'mph|kph|rpm|hz|khz|mhz|ghz|v|w|kw|'
-    r'sec|secs|min|mins|hr|hrs|wk|wks|mo|mos|yr|yrs|'
+    r'sec|secs|seconds?|min|mins|minutes?|hr|hrs|hours?|days?|wk|wks|weeks?|mo|mos|months?|yr|yrs|years?|'
     r'fold|way|step|point|part|stage|degree|\u00b0|\u00ba|%|per\s+cent|percent|'
     r'/wk|/day|/hr|/sec|/min|/yr|/kg|/g|/m|/l|/ml'
     r')\b',
@@ -410,6 +389,10 @@ def is_number_exception(text: str, start: int, end: int, rule_id: str) -> bool:
     # 2. Units / Compound Suffix check (e.g., "9 kg", "20 lb", "75 mph", "10-fold", "7 %")
     suffix = text[end : min(len(text), end + 25)]
     if _UNIT_OR_COMPOUND_SUFFIX_RE.match(suffix):
+        return True
+    # ...including a number inside a measured series or range: "2, 4, and 6 weeks", "6 and 10 months"
+    series = _NUMBER_SERIES_RE.match(text[end : min(len(text), end + 60)])
+    if series and _UNIT_OR_COMPOUND_SUFFIX_RE.match(text[end + series.end():end + series.end() + 25]):
         return True
 
     # 3. Citation / Reference Prefix check (e.g., "Figure 1", "Table 3", "Box 2.4", "p. 9")
@@ -435,8 +418,24 @@ def is_number_exception(text: str, start: int, end: int, rule_id: str) -> bool:
     if end < len(text) and text[end].isalpha():
         return True
 
+    # 7. Hyphenated identifiers and suspended hyphens ("Bayley-4", "3- to 4 years")
+    if (start > 0 and text[start - 1] == "-") or (end < len(text) and text[end] == "-"):
+        return True
+
+    # 8. List numbering at the start of a paragraph ("1.<tab>", "<NL>2) ")
+    if _LIST_NUMBER_RE.match(text[:start]) and re.match(r"[.)]?(?:\s|$)", text[end:end + 2]):
+        return True
+
+    # 9. After a comparison sign ("< 1", "> 65")
+    if re.search(r"[<>≤≥]\s*$", text[max(0, start - 3):start]):
+        return True
+
     return False
+_LIST_NUMBER_RE = re.compile(r"^\s*(?:<[^>]+>\s*)*$")
 def detect_digit_spell(seg: Segment) -> Iterable[Finding]:
+    # Tables hold data: numerals stay numerals there (CE rule 13 applies to running text).
+    if seg.source == "table":
+        return
     # First, collect all range matches so we can exclude individual numbers within ranges
     range_matches = set()
     for pat, _ in RANGE_PATTERNS:
@@ -617,8 +616,8 @@ def detect_fraction(seg: Segment) -> Iterable[Finding]:
 # ---------------------------------------------------------------------------
 TEMP_PATTERNS = [
     # °C and °F (most specific first)
-    (re.compile(r"\u00b0C\b"), "degree_celsius"),
-    (re.compile(r"\u00b0F\b"), "degree_fahrenheit"),
+    (re.compile(r"(?:\b\d+(?:\.\d+)?\s?)?\u00b0\s?C\b"), "degree_celsius"),
+    (re.compile(r"(?:\b\d+(?:\.\d+)?\s?)?\u00b0\s?F\b"), "degree_fahrenheit"),
     # degree spelled out with C/F
     (re.compile(r"\bdeg(?:rees?)?\s+C\b", re.IGNORECASE), "degree_deg_c"),
     (re.compile(r"\bdeg(?:rees?)?\s+F\b", re.IGNORECASE), "degree_deg_f"),
@@ -729,29 +728,6 @@ def detect_citations(seg: Segment) -> Iterable[Finding]:
         for pat, rule_id in CITATION_PATTERNS:
             for m in pat.finditer(seg.text):
                 yield _f(seg, m, "te_point", rule_id, "Citation style", "citation_style", pat=pat)
-# ---------------------------------------------------------------------------
-# Rule 13: US / UK date format
-# ---------------------------------------------------------------------------
-US_UK_DATE_PATTERNS = [
-    (re.compile(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b"), "date_numeric_slash"),
-    (re.compile(r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\b"), "date_numeric_dot"),
-    (re.compile(r"\b\d{1,2}-\d{1,2}-\d{2,4}\b"), "date_numeric_dash"),
-    (re.compile(r"\b\d{1,2}\s+Jan\s+\d{4}\b"), "date_us_long"),
-    (re.compile(r"\bJan\s+\d{1,2}\s+\d{4}\b"), "date_us_long"),
-    (re.compile(r"\b\d{1,2}\s+Jan\s+\d{4}\b"), "date_us_long"),
-    (re.compile(r"\bJan\s+\d{1,2}\s+\d{4}\b"), "date_us_long"),
-    (re.compile(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b"), "date_numeric_slash"),
-    (re.compile(r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\b"), "date_numeric_dot"),
-    (re.compile(r"\b\d{1,2}-\d{1,2}-\d{2,4}\b"), "date_numeric_dash"),
-    (re.compile(r"\b\d{1,2}\s+Jan\s+\d{4}\b"), "date_us_long"),
-    (re.compile(r"\bJan\s+\d{1,2}\s+\d{4}\b"), "date_us_long"),
-    (re.compile(r"\b\d{1,2}\s+Jan\s+\d{4}\b"), "date_us_long"),
-    (re.compile(r"\bJan\s+\d{1,2}\s+\d{4}\b"), "date_us_long"),
-]
-def detect_date_format(seg: Segment) -> Iterable[Finding]:
-    for pat, rule_id in US_UK_DATE_PATTERNS:
-        for m in iter_unmasked_matches(pat, seg.text, seg.mask):
-            yield _f(seg, m, "te_point", rule_id, "Date format", "date_style", pat=pat)
 # ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
@@ -951,8 +927,15 @@ def detect_latin_terms(seg: Segment) -> Iterable[Finding]:
 # ---------------------------------------------------------------------------
 _HEADING_TAG_RE = re.compile(r'^</?[A-Za-z][A-Za-z0-9._-]*>', re.IGNORECASE)
 def detect_para_ending(seg: Segment) -> Iterable[Finding]:
+    # Skip table cells / rows completely
+    if seg.source == "table" or seg.region == "table":
+        return
+    if any(k in (seg.style or "").lower() for k in ("table", "cell", "tbl")):
+        return
+    if seg.exclude_reason in ("caption", "table"):
+        return
     text = seg.text.rstrip()
-    if not text or seg.exclude_reason == "caption":
+    if not text:
         return
     if _HEADING_TAG_RE.match(text):
         return
@@ -994,13 +977,11 @@ def detect_genus_species(seg: Segment) -> Iterable[Finding]:
 # Rule 40: Greek letters
 # ---------------------------------------------------------------------------
 _GREEK_PATTERNS = [
-    (None, "greek_lowercase"),
-    (None, "greek_uppercase"),
+    (re.compile(r"[α-ω]"), "greek_lowercase"),
+    (re.compile(r"[Α-Ω]"), "greek_uppercase"),
 ]
 def detect_greek_letters(seg: Segment) -> Iterable[Finding]:
     for pat, rule_id in _GREEK_PATTERNS:
-        if pat is None:
-            continue
         for m in iter_unmasked_matches(pat, seg.text, seg.mask):
             label = "Greek letters (lowercase)" if "lower" in rule_id else "Greek letters (uppercase)"
             yield _f(seg, m, "te_point", rule_id, label, "greek_letter_style", pat=pat)
@@ -1037,6 +1018,92 @@ def detect_wk_terms(seg: Segment) -> Iterable[Finding]:
         for m in iter_unmasked_matches(pat, seg.text, seg.mask):
             yield _f(seg, m, "te_point", rule_id, "WK term (query/validate)", "wk_term_style", pat=pat)
 # ---------------------------------------------------------------------------
+# CE checklist rules (CE_rules_tool_input.xlsx) not covered by the detectors above.
+# Each comment names the checklist rule number. Units (R1, R2, R3, R9, R10, R28)
+# are handled by manuscript_core.rules.units.detect_units.
+# ---------------------------------------------------------------------------
+_GREEK_SPELLED_PAT = re.compile(
+    r"(?<=-)(?:alpha|beta|gamma|delta|kappa)\b|\b(?:alpha|beta|gamma|delta|kappa)(?=-\d)", re.IGNORECASE)
+def detect_greek_spelled(seg: Segment) -> Iterable[Finding]:  # R8
+    for m in iter_unmasked_matches(_GREEK_SPELLED_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "greek_spelled", "Greek letter spelled out", "greek_letter_style")
+
+_NEGATIVE_PAT = re.compile(r"(?<![\w)\]–\-/.])-\d+(?:\.\d+)?")
+def detect_negative_hyphen(seg: Segment) -> Iterable[Finding]:  # R15
+    for m in iter_unmasked_matches(_NEGATIVE_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "negative_hyphen", "Hyphen used as minus sign", "negative_number_style")
+
+_DEGREE_LOOKALIKE_PAT = re.compile(r"(?<=\d)\s?º|(?<=\d)o(?=\s?[CF]\b)")
+def detect_degree_lookalike(seg: Segment) -> Iterable[Finding]:  # R30
+    for m in iter_unmasked_matches(_DEGREE_LOOKALIKE_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "degree_lookalike", "Degree sign look-alike", "temp_style")
+
+_TIMEZONE_PAT = re.compile(
+    r"(?:(?<=\d)|(?<=\d\s)|(?<=[ap]\.m\.\s)|(?<=[AP]M\s))(?:UTC|GMT|EST|EDT|CST|CDT|MST|MDT|PST|PDT|IST|CET|CEST|BST|AEST|JST)\b"
+    r"|\b(?:UTC|GMT)\s?[+−\-]\s?\d{1,2}(?::\d{2})?")
+def detect_timezone(seg: Segment) -> Iterable[Finding]:  # R20
+    for m in iter_unmasked_matches(_TIMEZONE_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "timezone_abbr", "Time zone", "timezone_style")
+
+_EQUATION_REF_PAT = re.compile(r"\b(?:Eqs?\.|Eqn\.?|eqn\.?|equation)\s*\(?\d+(?:\.\d+)?\)?")
+def detect_equation_refs(seg: Segment) -> Iterable[Finding]:  # R22
+    for m in iter_unmasked_matches(_EQUATION_REF_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "equation_ref", "Equation reference style", "equation_style")
+
+_CHEM_FORMULAS = ["H2O2", "H2SO4", "HNO3", "C6H12O6", "C2H5OH", "CaCO3", "CaCl2", "MgSO4", "NaHCO3",
+                  "Na2CO3", "HCO3", "NH3", "NH4", "CH4", "SO2", "NO2", "N2O", "H2O", "CO2", "O3", "NACL"]
+_CHEM_PAT = re.compile(r"\b(?:" + "|".join(_CHEM_FORMULAS) + r")\b")
+def detect_chem_formulas(seg: Segment) -> Iterable[Finding]:  # R23
+    for m in iter_unmasked_matches(_CHEM_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "chem_formula_plain", "Chemical formula without subscripts", "chem_formula_style")
+
+_SCI_E_PAT = re.compile(r"\b\d+(?:\.\d+)?[eE][-+]?\d+\b")
+_SCI_X_PAT = re.compile(r"\b\d+(?:\.\d+)?\s*[xX×]\s*10(?:\^[-+−]?\d+|[-−]\d+)")
+def detect_sci_notation(seg: Segment) -> Iterable[Finding]:  # R24
+    for pat, rule_id in ((_SCI_X_PAT, "sci_notation_x"), (_SCI_E_PAT, "sci_notation_e")):
+        for m in iter_unmasked_matches(pat, seg.text, seg.mask):
+            yield _f(seg, m, "te_point", rule_id, "Scientific notation", "sci_notation_style")
+
+_STAT_P_PAT = re.compile(r"\b[pP]\s*[<=>≤≥]\s*(?:0?\.\d+|1(?:\.0+)?)\b")
+_STAT_SYM_PAT = re.compile(r"\b[nNtF]\s*=\s*\d+(?:\.\d+)?\b")
+_STAT_WELL_FORMED = re.compile(r"^[A-Za-z] [<=>≤≥] \S+$")
+def detect_stat_notation(seg: Segment) -> Iterable[Finding]:  # R25
+    for pat, rule_id in ((_STAT_P_PAT, "stat_p_value"), (_STAT_SYM_PAT, "stat_symbol")):
+        for m in iter_unmasked_matches(pat, seg.text, seg.mask):
+            if _STAT_WELL_FORMED.match(m.group(0)):
+                continue  # spacing is right; italics are checked by the editor
+            yield _f(seg, m, "te_point", rule_id, "Statistical notation", "stat_style")
+
+_PLUSMINUS_PAT = re.compile(r"\d+(?:\.\d+)?(?:±\s*|\s*±|\s{2,}±\s*)\d+(?:\.\d+)?")
+_PLUSMINUS_TEXT_PAT = re.compile(r"(?<=\d)\s*(?:\+/-|\+-)\s*(?=\d)")
+def detect_plusminus(seg: Segment) -> Iterable[Finding]:  # R29
+    for m in iter_unmasked_matches(_PLUSMINUS_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "plusminus_spacing", "Spacing around ±", "tolerance_style")
+    for m in iter_unmasked_matches(_PLUSMINUS_TEXT_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "plusminus_text", "+/- written for ±", "tolerance_style")
+
+def _special_char_pattern() -> re.Pattern:
+    from manuscript_core.rules.te_options import MOJIBAKE
+    keys = sorted(MOJIBAKE, key=len, reverse=True)
+    return re.compile("|".join(re.escape(k) for k in keys) + "|�")
+_SPECIAL_CHAR_PAT = _special_char_pattern()
+def detect_special_chars(seg: Segment) -> Iterable[Finding]:  # R45
+    for m in iter_unmasked_matches(_SPECIAL_CHAR_PAT, seg.text, seg.mask):
+        yield _f(seg, m, "te_point", "special_char_corrupt", "Corrupted or replacement character", "special_char_style")
+
+_PLACEHOLDER_PAT = re.compile(
+    r"\b(?:TBD|TBC|TK|XXX+)\b|\[(?:insert|add|ref(?:erence)? needed|citation needed|TBD)[^\]]*\]|\?{2,}",
+    re.IGNORECASE)
+def detect_placeholders(seg: Segment) -> Iterable[Finding]:  # R89
+    for m in iter_unmasked_matches(_PLACEHOLDER_PAT, seg.text, seg.mask):
+        if m.group(0).lower() in ("tk", "tbd", "tbc") and not m.group(0).isupper():
+            continue
+        yield _f(seg, m, "te_point", "placeholder_text", "Placeholder text", "placeholder_style")
+
+def detect_units_ce(seg: Segment) -> Iterable[Finding]:  # R1, R2, R3, R9, R10, R28
+    from manuscript_core.rules.units import detect_units
+    return detect_units(seg)
+# ---------------------------------------------------------------------------
 # Wire all late-defined detectors into TE_DETECTORS
 # ---------------------------------------------------------------------------
 TE_DETECTORS.extend([
@@ -1055,4 +1122,16 @@ TE_DETECTORS.extend([
     detect_greek_letters,
     detect_aux_verbs,
     detect_wk_terms,
+    detect_greek_spelled,
+    detect_negative_hyphen,
+    detect_degree_lookalike,
+    detect_timezone,
+    detect_equation_refs,
+    detect_chem_formulas,
+    detect_sci_notation,
+    detect_stat_notation,
+    detect_plusminus,
+    detect_special_chars,
+    detect_placeholders,
+    detect_units_ce,
 ])

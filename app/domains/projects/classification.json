@@ -2,6 +2,20 @@
   "heuristics": [
     {
       "patterns": [
+        "complete book",
+        "whole book",
+        "full book",
+        "complete_book",
+        "whole_book",
+        "full_book",
+        "completebook",
+        "wholebook",
+        "fullbook"
+      ],
+      "category": "Book"
+    },
+    {
+      "patterns": [
         "fm"
       ],
       "category": "Front Matter"

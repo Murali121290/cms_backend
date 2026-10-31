@@ -7,10 +7,13 @@ to the suggested replacements. Findings carry para_idx + surface, so the editor 
 and "Apply fix" works as for the other checks.
 """
 import os
+import logging
 from typing import List
 
 from app.domains.journals.checks.base import CheckResult, IssueDraft, JournalCheck, register
 from app.domains.journals.manuscript import load_blocks, resolve_manuscript_path
+
+logger = logging.getLogger(__name__)
 
 SEVERITY = {"error": "error", "warn": "warning", "warning": "warning", "info": "info"}
 
@@ -39,23 +42,27 @@ class IaRulesCheck(JournalCheck):
     name = "IA rules"
 
     def run(self, article, db) -> CheckResult:
-        from app.domains.journals.book_review import selected_ia_rows
+        from app.domains.journals.book_review import selected_ce_rules, selected_ia_rows
         from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
 
         rows = selected_ia_rows(db, article.journal)
+        ce_rules = selected_ce_rules(db, article.journal)
         if not rows:
-            return CheckResult(issues=[IssueDraft(
-                rule_id="IA-00", severity="error", title="No IA rules selected for this journal",
-                message="Choose the rules in Journal settings → IA rules, then run this step again. "
-                        "Mark this fixed if the journal uses no IA rules.",
-                suggestion={"type": "signoff"}, fingerprint="IA-00",
-            )], rules_total=1, rule_set_version="IA template")
+            from app.domains.journals.book_review import ia_catalog, save_journal_ia_rules
+            rows = ia_catalog()
+            try:
+                save_journal_ia_rules(db, article.journal, rows)
+            except Exception:
+                pass
 
         path = resolve_manuscript_path(db, article)
         if not path:
             raise FileNotFoundError("No manuscript DOCX is attached to this article")
-        findings = annotate_with_stylesheet(analyze_docx(path), rows)
+        findings = annotate_with_stylesheet(analyze_docx(path), rows, ce_rules=ce_rules)
         texts = {b.idx: b.text for b in load_blocks(path)}
+
+        from app.domains.journals.pa_preediting import IA_TO_PA_MAPPING, PA_121_RULES_CATALOG
+        catalog_by_id = {r["id"]: r for r in PA_121_RULES_CATALOG}
 
         issues: List[IssueDraft] = []
         for f in findings:
@@ -64,23 +71,96 @@ class IaRulesCheck(JournalCheck):
             para = f.get("para_index")
             surface = f.get("surface") or ""
             start = f.get("match_start")
-            body = (f.get("source") or "body") == "body" and para is not None
-            text = texts.get(para, "") if body else ""
-            if body and surface and (start is None or text[start:start + len(surface)] != surface):
-                # Some rules report match_start 0; find the surface in the paragraph instead.
+            source = f.get("source") or "body"
+            text = texts.get(para, "") if para is not None else ""
+            if para is not None and surface and (start is None or text[start:start + len(surface)] != surface):
                 start = text.find(surface) if surface in text else None
-            location = {"para_idx": para, "block_id": f"p{para}", "surface": surface} if body else {"surface": surface}
-            if body and start is not None:
-                location.update(start=start, end=start + len(surface))
+
+            location = {"surface": surface, "source": source}
+            if para is not None:
+                location["para_idx"] = para
+                location["block_id"] = f"p{para}"
+            if start is not None and start >= 0:
+                location["start"] = start
+                location["end"] = start + len(surface)
+
+            raw_rule = f.get("rule_id", "")
+            pa_rule_id = IA_TO_PA_MAPPING.get(raw_rule)
+            pa_rule = catalog_by_id.get(pa_rule_id) if pa_rule_id else None
+
+            if pa_rule:
+                rule_id_out = f"PA #{pa_rule['id']} ({raw_rule})"
+                title_out = f"PA Point #{pa_rule['id']}: {pa_rule['name']}"
+                location["pa_point"] = pa_rule["id"]
+                location["pa_part"] = pa_rule["part"]
+                location["pa_domain"] = pa_rule["domain"]
+                location["source_type"] = "PA 121 Rules"
+            else:
+                rule_id_out = f"IA:{raw_rule}"
+                title_out = f.get("rule_label") or raw_rule or "IA rule"
+                location["source_type"] = "IA Baseline"
+
             replacement = f.get("replacement")
             issues.append(IssueDraft(
-                rule_id=f"IA:{f.get('rule_id')}",
+                rule_id=rule_id_out,
                 severity=SEVERITY.get((f.get("severity") or "info").lower(), "info"),
-                title=f.get("rule_label") or f.get("rule_id") or "IA rule",
+                title=title_out,
                 message=(f"Journal style: {replacement}" if replacement else None),
                 location=location,
                 context_snippet=_snippet(f.get("context")),
                 suggestion={"type": "replace", "from": surface, "to": replacement} if replacement and replacement != surface else None,
-                fingerprint=f"IA:{f.get('rule_id')}:{para}:{start}:{surface}"[:255],
+                fingerprint=f"{rule_id_out}:{para}:{start}:{surface}"[:255],
             ))
-        return CheckResult(issues=issues, rules_total=len(rows), rule_set_version="IA template")
+
+        # Also run PA 121 Mechanical detectors (En-dash ranges, SI units, Grammar agreement, Abbreviations)
+        try:
+            from app.domains.journals.pa_preediting import PAPreEditingEngine
+            pa_engine = PAPreEditingEngine(path)
+            pa_analysis = pa_engine.run_ms_analysis()
+            le_findings = pa_analysis.get("step_7_le_and_elog", {}).get("language_findings", [])
+            for idx, lf in enumerate(le_findings):
+                orig = lf.get("original", "")
+                sugg = lf.get("suggested", "")
+                rule_num = lf.get("rule_id", idx + 1)
+                pa_meta = catalog_by_id.get(rule_num)
+
+                pa_para_idx = None
+                pa_start = None
+                if orig:
+                    for p_idx, p_txt in texts.items():
+                        s_pos = p_txt.find(orig)
+                        if s_pos >= 0:
+                            pa_para_idx = p_idx
+                            pa_start = s_pos
+                            break
+                pa_loc = {"surface": orig, "source": "body"}
+                if pa_para_idx is not None:
+                    pa_loc["para_idx"] = pa_para_idx
+                    pa_loc["block_id"] = f"p{pa_para_idx}"
+                if pa_start is not None and pa_start >= 0:
+                    pa_loc["start"] = pa_start
+                    pa_loc["end"] = pa_start + len(orig)
+                
+                pa_loc["pa_point"] = rule_num
+                if pa_meta:
+                    pa_loc["pa_part"] = pa_meta["part"]
+                    pa_loc["pa_domain"] = pa_meta["domain"]
+                pa_loc["source_type"] = "PA 121 Rules"
+
+                rule_tag = f"PA #{rule_num}"
+                rule_title = f"PA Point #{rule_num}: {pa_meta['name']}" if pa_meta else (lf.get("category") or "Mechanical Rule")
+
+                issues.append(IssueDraft(
+                    rule_id=rule_tag,
+                    severity=SEVERITY.get(lf.get("severity", "minor").lower(), "warning"),
+                    title=rule_title,
+                    message=lf.get("message") or f"Standardize '{orig}' to '{sugg}'",
+                    location=pa_loc,
+                    context_snippet=f"{lf.get('location')}: {orig} -> {sugg}",
+                    suggestion={"type": "replace", "from": orig, "to": sugg} if sugg else None,
+                    fingerprint=f"PA:{rule_num}:{orig}:{idx}"[:255]
+                ))
+        except Exception as e:
+            logger.warning("Error running PA mechanical rules detector: %s", e)
+
+        return CheckResult(issues=issues, rules_total=len(rows) + len(issues), rule_set_version="PA Editorial / IA template")

@@ -20,6 +20,7 @@ export interface Chapter {
   word_count: number | null
   art_count?: number | null
   priority: string
+  revision?: number
   delayed_stages: Record<string, number> | null
   created_at: string
   updated_at: string
@@ -44,6 +45,7 @@ export interface ChapterUpdate {
   published_status?:       string | null
   complexity_level?:       string | null
   delayed_stages?:         Record<string, number> | null
+  revision?:               number | null
 }
 
 export interface ChapterZipSkippedItem {
@@ -78,19 +80,21 @@ export const chaptersApi = {
   bulkUpdateStatus: (project: string, status: string) =>
     api.put<{ updated: number }>(`/chapters/project/${encodeURIComponent(project)}/status`, { status }).then(r => r.data),
 
-  createWithManuscript: (projectId: number, number: string, file: File) => {
+  createWithManuscript: (projectId: number, number: string, file: File, allowRevision?: boolean) => {
     const formData = new FormData()
     formData.append('number', number)
     formData.append('file', file)
+    if (allowRevision) formData.append('allow_revision', 'true')
     return api.post<Chapter>(`/projects/${projectId}/chapters/create-with-manuscript`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },
 
-  createManuscriptChaptersFromZip: (projectId: number, file: File, workflowName?: string) => {
+  createManuscriptChaptersFromZip: (projectId: number, file: File, workflowName?: string, allowRevision?: boolean) => {
     const formData = new FormData()
     formData.append('file', file)
     if (workflowName) formData.append('workflow_name', workflowName)
+    if (allowRevision) formData.append('allow_revision', 'true')
     return api.post<ChapterZipUploadResponse>(`/projects/${projectId}/chapters/create-with-manuscript-zip`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
@@ -105,10 +109,11 @@ export const chaptersApi = {
     }).then(r => r.data)
   },
 
-  createArtChaptersFromZip: (projectId: number, file: File, workflowName?: string) => {
+  createArtChaptersFromZip: (projectId: number, file: File, workflowName?: string, allowRevision?: boolean) => {
     const formData = new FormData()
     formData.append('file', file)
     if (workflowName) formData.append('workflow_name', workflowName)
+    if (allowRevision) formData.append('allow_revision', 'true')
     return api.post<ChapterZipUploadResponse>(`/projects/${projectId}/chapters/create-with-art-zip`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
@@ -127,6 +132,12 @@ export const chaptersApi = {
 
   bulkTransitionExecute: (payload: BulkTransitionExecutePayload) => {
     return api.post<{ status: string; transitioned_count: number }>('/chapters/bulk-transition', payload).then(r => r.data)
+  },
+
+  delete: (projectId: number, chapterId: number) => {
+    return api.delete<{ deleted: { project_id: number; chapter_id: number; chapter_number: string } }>(
+      `/projects/${projectId}/chapters/${chapterId}`
+    ).then(r => r.data)
   },
 }
 

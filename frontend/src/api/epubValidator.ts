@@ -238,6 +238,7 @@ export interface EvProject {
   assignee: string | null;
   eisbn?: string | null;
   copyright_year?: string | null;
+  language?: string | null;
   uploaded_by_id: number | null;
   uploaded_at: string;
   updated_at: string;

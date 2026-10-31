@@ -1,13 +1,14 @@
-import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, Check } from 'lucide-react'
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
+import { ChevronDown, CheckCircle2, Search } from 'lucide-react'
 import { cn } from '@/utils/cn'
 
-interface DropdownOption {
+export interface DropdownOption {
   value: string
   label: React.ReactNode
 }
 
-interface DropdownProps {
+export interface DropdownProps {
   options: DropdownOption[]
   value: string
   onChange: (v: string) => void
@@ -17,118 +18,251 @@ interface DropdownProps {
   icon?: React.ReactNode
   variant?: 'default' | 'inline'
   searchable?: boolean
+  searchPlaceholder?: string
+  disabled?: boolean
 }
 
-export function Dropdown({ options, value, onChange, placeholder = 'Select...', className, dropdownClassName, icon, variant = 'default', searchable = false }: DropdownProps) {
+export function Dropdown({
+  options,
+  value,
+  onChange,
+  placeholder = 'Select...',
+  className,
+  dropdownClassName,
+  icon,
+  variant = 'default',
+  searchable = false,
+  searchPlaceholder = 'Search...',
+  disabled = false,
+}: DropdownProps) {
   const [open, setOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const ref = useRef<HTMLDivElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null)
+
+  const isInline = variant === 'inline'
+  const selectedOpt = options.find(o => o.value === value)
+
+  const updatePosition = () => {
+    if (!triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    const menuHeight = 280
+    const placeAbove = spaceBelow < 220 && spaceAbove > spaceBelow
+
+    const top = placeAbove
+      ? Math.max(10, rect.top - Math.min(spaceAbove - 10, menuHeight) - 4)
+      : rect.bottom + 4
+
+    const maxHeight = placeAbove
+      ? Math.min(menuHeight, spaceAbove - 20)
+      : Math.min(menuHeight, spaceBelow - 20)
+
+    const minWidth = Math.max(200, rect.width)
+    let left = rect.left
+    if (left + minWidth > window.innerWidth - 10) {
+      left = Math.max(10, window.innerWidth - minWidth - 10)
+    }
+
+    setCoords({
+      top,
+      left,
+      width: minWidth,
+      maxHeight,
+    })
+  }
+
+  useLayoutEffect(() => {
+    if (open) {
+      updatePosition()
+    }
+  }, [open])
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  useEffect(() => {
-    if (open && listRef.current && !searchQuery) {
-      const selectedEl = listRef.current.querySelector('[data-selected="true"]') as HTMLElement
-      if (selectedEl) {
-        setTimeout(() => selectedEl.scrollIntoView({ block: 'nearest' }), 0)
-      }
-    }
     if (!open) {
       setSearchQuery('')
+      return
     }
-  }, [open, searchQuery])
 
-  const selectedOpt = options.find(o => o.value === value)
-  const isInline = variant === 'inline'
+    const handleScrollOrResize = () => {
+      updatePosition()
+    }
 
-  const filteredOptions = searchQuery 
-    ? options.filter(opt => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (popoverRef.current?.contains(target)) return
+      setOpen(false)
+    }
+
+    window.addEventListener('resize', handleScrollOrResize)
+    window.addEventListener('scroll', handleScrollOrResize, true)
+    document.addEventListener('mousedown', handleOutsideClick)
+
+    return () => {
+      window.removeEventListener('resize', handleScrollOrResize)
+      window.removeEventListener('scroll', handleScrollOrResize, true)
+      document.removeEventListener('mousedown', handleOutsideClick)
+    }
+  }, [open])
+
+  // Extract unassigned option if searchable
+  const unassignedOpt = searchable
+    ? options.find(o => o.value === '' || (typeof o.label === 'string' && o.label.toLowerCase().includes('unassigned')))
+    : null
+
+  const regularOptions = unassignedOpt
+    ? options.filter(o => o !== unassignedOpt)
+    : options
+
+  const filteredOptions = searchQuery
+    ? regularOptions.filter(opt => {
         const text = typeof opt.label === 'string' ? opt.label.toLowerCase() : String(opt.value).toLowerCase()
         return text.includes(searchQuery.toLowerCase())
       })
-    : options
+    : regularOptions
 
   return (
-    <div className={cn("relative inline-block text-left", className?.includes('w-') ? '' : 'w-full')} ref={ref}>
+    <div className={cn("relative inline-block text-left", className?.includes('w-') ? '' : 'w-full')}>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (!disabled) setOpen(prev => !prev)
+        }}
+        disabled={disabled}
         className={cn(
           'flex items-center justify-between w-full focus:outline-none transition-colors cursor-pointer',
-          isInline 
-            ? 'bg-transparent border-0 p-0 text-text hover:text-primary ' + (open ? 'text-primary' : '') 
+          isInline
+            ? 'bg-transparent border-0 p-0 text-text hover:text-primary ' + (open ? 'text-primary' : '')
             : 'bg-card border border-border rounded-lg px-3 py-2 text-xs text-text focus:border-primary',
           className
         )}
+        title={typeof selectedOpt?.label === 'string' ? selectedOpt.label : undefined}
       >
         <span className="flex items-center gap-1.5 truncate">
           {icon}
-          {selectedOpt ? selectedOpt.label : <span className="text-muted">{placeholder}</span>}
+          {selectedOpt ? (
+            <span className="truncate">{selectedOpt.label}</span>
+          ) : (
+            <span className="text-muted truncate">{placeholder}</span>
+          )}
         </span>
-        <ChevronDown size={14} className={cn('transition-transform ml-2 shrink-0', open && 'rotate-180', isInline ? 'text-current' : 'text-muted')} />
+        <ChevronDown
+          size={12}
+          className={cn(
+            'transition-transform duration-200 ml-1.5 shrink-0',
+            open && 'rotate-180',
+            isInline ? 'text-current' : 'text-muted'
+          )}
+        />
       </button>
 
-      {open && (
-        <div 
-          ref={listRef}
+      {open && coords && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={popoverRef}
+          style={{
+            position: 'fixed',
+            top: coords.top,
+            left: coords.left,
+            minWidth: Math.max(200, coords.width),
+            maxHeight: coords.maxHeight,
+            zIndex: 99999,
+          }}
           className={cn(
-          'absolute z-50 mt-1 min-w-[140px] bg-card border border-border rounded-xl shadow-lg max-h-60 overflow-y-auto p-2 flex flex-col gap-1',
-          dropdownClassName
-        )}>
-          {searchable && (
-            <div className="pb-1.5 mb-1 border-b border-border sticky top-0 bg-card z-10 -mx-1 px-1">
-              <input
-                type="text"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                onClick={e => e.stopPropagation()}
-                className="w-full bg-background border border-border rounded-md px-2.5 py-1.5 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-                autoFocus
-              />
-            </div>
+            "w-max max-w-[280px] bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] rounded-xl py-1.5 flex flex-col backdrop-blur-3xl ring-1 ring-black/5 animate-in fade-in duration-150 text-text font-sans",
+            dropdownClassName
           )}
-          
-          {filteredOptions.length === 0 ? (
-            <div className="text-xs text-muted py-3 text-center">No results found</div>
-          ) : (
-            filteredOptions.map(opt => {
-              const isSelected = value === opt.value
-              return (
+          onClick={(e) => e.stopPropagation()}
+        >
+          {searchable && (
+            <div className="px-2 pb-1.5 mb-1 border-b border-border/60 shrink-0 space-y-1">
+              <div className="relative flex items-center gap-1.5 bg-muted/40 border border-border/50 rounded-lg px-2 py-1">
+                <Search size={12} className="text-muted shrink-0" />
+                <input
+                  type="text"
+                  placeholder={searchPlaceholder}
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                  className="w-full bg-transparent border-none text-[11px] text-text placeholder:text-muted focus:outline-none p-0"
+                  autoFocus
+                />
+              </div>
+
+              {unassignedOpt && (
                 <button
-                  key={opt.value}
                   type="button"
-                  data-selected={isSelected}
                   onClick={(e) => {
                     e.stopPropagation()
-                    onChange(opt.value)
+                    onChange(unassignedOpt.value)
                     setOpen(false)
                   }}
                   className={cn(
-                    "w-full flex items-center gap-2 px-3 py-2 text-xs rounded-md transition-colors text-left shrink-0",
-                    isSelected 
-                      ? "bg-primary/10 text-primary font-medium" 
-                      : "text-text hover:bg-accent/70 hover:text-primary"
+                    "w-full text-left px-2.5 py-1.5 text-[11px] rounded-md transition-all flex items-center gap-2 group cursor-pointer",
+                    value === unassignedOpt.value
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-muted hover:bg-muted/40 hover:text-text"
                   )}
                 >
-                  {!isInline && (
-                    <span className={cn("w-3 flex justify-center shrink-0", isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-50")}>
-                      <Check size={14} className={isSelected ? "text-primary" : "text-muted"} />
-                    </span>
-                  )}
-                  <span className="truncate">{opt.label}</span>
+                  <div className={cn(
+                    "w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors",
+                    value === unassignedOpt.value ? "text-primary" : "text-transparent"
+                  )}>
+                    {value === unassignedOpt.value && <CheckCircle2 size={12} strokeWidth={2.5} />}
+                  </div>
+                  <span className="truncate group-hover:translate-x-0.5 transition-transform duration-200">
+                    {unassignedOpt.label}
+                  </span>
                 </button>
-              )
-            })
+              )}
+            </div>
           )}
-        </div>
+
+          <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto custom-scrollbar flex-1">
+            {filteredOptions.length === 0 ? (
+              <div className="text-[11px] text-muted px-2.5 py-3 text-center">No results found</div>
+            ) : (
+              filteredOptions.map(opt => {
+                const isSelected = value === opt.value
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onChange(opt.value)
+                      setOpen(false)
+                    }}
+                    className={cn(
+                      "w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group cursor-pointer",
+                      isSelected
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "text-text hover:bg-muted/40 hover:text-primary"
+                    )}
+                  >
+                    <div className={cn(
+                      "w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors",
+                      isSelected ? "text-primary" : "text-transparent"
+                    )}>
+                      {isSelected && <CheckCircle2 size={12} strokeWidth={2.5} />}
+                    </div>
+                    <span className={cn(
+                      "truncate transition-transform duration-200",
+                      !isSelected && "group-hover:translate-x-0.5"
+                    )}>
+                      {opt.label}
+                    </span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )

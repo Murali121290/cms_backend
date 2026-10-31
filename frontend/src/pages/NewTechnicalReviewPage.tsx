@@ -10,8 +10,7 @@ import { useFileXhtmlQuery } from "@/features/technicalReview/useFileXhtmlQuery"
 import { useStylesheetsQuery } from "@/features/stylesheets/useStylesheetsQuery";
 import { useTechnicalApply } from "@/features/technicalReview/useTechnicalApply";
 import { useTechnicalReviewQuery } from "@/features/technicalReview/useTechnicalReviewQuery";
-import { LeftTechnicalSidebarTable } from "@/features/technicalReview/components/LeftTechnicalSidebarTable";
-import { OccurrenceInspectorPanel } from "@/features/technicalReview/components/OccurrenceInspectorPanel";
+import { UnifiedFindReplaceSidebar } from "@/features/technicalReview/components/UnifiedFindReplaceSidebar";
 import { TechnicalApplyConfirmModal } from "@/features/technicalReview/components/TechnicalApplyConfirmModal";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
@@ -271,7 +270,10 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
         f.context.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (f.rule_label || "").toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchesCategory = categoryFilter === "all" || f.category === categoryFilter;
+      const matchesCategory =
+        categoryFilter === "all" ||
+        (categoryFilter === "te_point" && f.category === "te_point") ||
+        (categoryFilter === "mechanical" && f.category !== "te_point");
 
       const matchesStylesheet =
         stylesheetFilter === "all" ||
@@ -358,6 +360,23 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
       });
     setActionTypes(newActions);
     setCustomReplacements(newReplacements);
+  }
+
+  function handleBatchFixRule(ruleId: string, rep: string) {
+    const newActions = { ...actionTypes };
+    const newReplacements = { ...customReplacements };
+    let count = 0;
+    findings
+      .filter((f: any) => f.rule_id === ruleId)
+      .forEach((f: any) => {
+        const key = `${f.para_index}-${f.match_start}-${f.surface}`;
+        newActions[key] = "fix";
+        newReplacements[key] = rep || f.replacement || f.surface;
+        count++;
+      });
+    setActionTypes(newActions);
+    setCustomReplacements(newReplacements);
+    toast.success(`Updated ${count} occurrence${count !== 1 ? "s" : ""} to "${rep}"`);
   }
 
   function handleClearDraft() {
@@ -569,31 +588,7 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
       )}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        <LeftTechnicalSidebarTable
-          findings={findings}
-          filteredFindings={filteredFindings}
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          categoryFilter={categoryFilter}
-          onCategoryFilterChange={setCategoryFilter}
-          categoriesList={categoriesList}
-          stylesheetFilter={stylesheetFilter}
-          onStylesheetFilterChange={setStylesheetFilter}
-          hasActiveStylesheet={!!selectedStylesheetId}
-          selectedOccurrenceIndex={selectedOccurrenceIndex}
-          onSelectOccurrenceIndex={setSelectedOccurrenceIndex}
-          checkedIds={checkedIds}
-          onToggleCheck={handleToggleSingleCheck}
-          onToggleAll={handleToggleAll}
-          isAllChecked={isAllChecked}
-          actionTypes={actionTypes}
-          reviewedCount={reviewedCount}
-          onClearDraft={handleClearDraft}
-          onBatchFixCategory={handleBatchFixCategory}
-          isCollapsed={leftSidebarCollapsed}
-          onToggleCollapse={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
-        />
-
+        {/* Expanded Editor Canvas */}
         <main className="flex-1 flex flex-col min-w-0 bg-slate-100 overflow-hidden relative">
           <div className="flex-1 relative min-h-0 overflow-hidden">
             {xhtmlQuery.isPending ? (
@@ -633,11 +628,17 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
           </div>
         </main>
 
-        <OccurrenceInspectorPanel
+        {/* Consolidated Single Review Sidebar */}
+        <UnifiedFindReplaceSidebar
+          findings={findings}
+          filteredFindings={filteredFindings}
           activeOccurrence={activeOccurrence}
-          totalFindings={filteredFindings.length}
           selectedIndex={selectedOccurrenceIndex}
           onSelectIndex={setSelectedOccurrenceIndex}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          categoryFilter={categoryFilter}
+          onCategoryFilterChange={setCategoryFilter}
           actionType={actionTypes[activeKey] || "fix"}
           onActionTypeChange={(act) => setActionTypes((prev) => ({ ...prev, [activeKey]: act }))}
           customReplacement={
@@ -646,16 +647,31 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
               : (activeOccurrence?.replacement ?? "")
           }
           onCustomReplacementChange={(val) => setCustomReplacements((prev) => ({ ...prev, [activeKey]: val }))}
+          onReplaceAndNext={(rep, asTrack) => {
+            handleReplaceInEditor(activeOccurrence, rep, asTrack, false);
+            if (selectedOccurrenceIndex < filteredFindings.length - 1) {
+              setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
+            }
+          }}
+          onHighlightAndNext={() => {
+            handleReplaceInEditor(activeOccurrence, "", false, true);
+            if (selectedOccurrenceIndex < filteredFindings.length - 1) {
+              setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
+            }
+          }}
+          onSkipNext={() => {
+            if (selectedOccurrenceIndex < filteredFindings.length - 1) {
+              setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
+            }
+          }}
+          onBatchFixRule={handleBatchFixRule}
           onApplySelected={handleApplySelected}
           isApplying={technicalApply.isPending}
           selectedCount={selectedCount}
           applyWarning={applyWarning}
           editorRef={editorRef}
-          rightTab={rightSidebarTab}
-          onRightTabChange={setRightSidebarTab}
           isCollapsed={rightSidebarCollapsed}
           onToggleCollapse={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
-          onReplaceInEditor={handleReplaceInEditor}
           comments={comments}
           commentsLoading={commentsLoading}
           newCommentText={newCommentText}

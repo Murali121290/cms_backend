@@ -36,6 +36,9 @@ type ProjectRow = {
   category: string;
   manuscriptPages: number;
   billingLocation: string;
+  billingType: string;
+  altText: string;
+  accessibility: string;
   copyrightYear: string | number;
   startDate: string;
   dueDate: string;
@@ -111,6 +114,9 @@ type ProjectRow = {
             category: p.category || "",
             manuscriptPages: p.manuscript_pages ?? 0,
             billingLocation: p.billing_location || "",
+            billingType: p.billing_type ? (p.billing_type.charAt(0).toUpperCase() + p.billing_type.slice(1)) : "",
+            altText: p.alt_text ? (p.alt_text.charAt(0).toUpperCase() + p.alt_text.slice(1)) : "",
+            accessibility: p.accessibility ? (p.accessibility.charAt(0).toUpperCase() + p.accessibility.slice(1)) : "",
             copyrightYear: p.copyright_year || "",
             startDate: p.created_at ? p.created_at.split("T")[0] : "",
             dueDate: p.due_date || "",
@@ -350,6 +356,57 @@ type ProjectRow = {
           className="w-full rounded border border-border bg-background px-1 py-0.5 text-xs outline-none focus:border-primary text-text font-sans font-normal"
         >
           {salesPersons.map((item) => (
+            <option key={item} value={item}>
+              {item === "--ALL--" ? "All" : item}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    if (col.id === "billing_type") {
+      const types = ["--ALL--", ...Array.from(new Set(projectData.map((row) => row.billingType).filter(Boolean)))];
+      return (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded border border-border bg-background px-1 py-0.5 text-xs outline-none focus:border-primary text-text font-sans font-normal"
+        >
+          {types.map((item) => (
+            <option key={item} value={item}>
+              {item === "--ALL--" ? "All" : item}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    if (col.id === "alt_text") {
+      const options = ["--ALL--", ...Array.from(new Set(projectData.map((row) => row.altText).filter(Boolean)))];
+      return (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded border border-border bg-background px-1 py-0.5 text-xs outline-none focus:border-primary text-text font-sans font-normal"
+        >
+          {options.map((item) => (
+            <option key={item} value={item}>
+              {item === "--ALL--" ? "All" : item}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    if (col.id === "accessibility") {
+      const options = ["--ALL--", ...Array.from(new Set(projectData.map((row) => row.accessibility).filter(Boolean)))];
+      return (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded border border-border bg-background px-1 py-0.5 text-xs outline-none focus:border-primary text-text font-sans font-normal"
+        >
+          {options.map((item) => (
             <option key={item} value={item}>
               {item === "--ALL--" ? "All" : item}
             </option>

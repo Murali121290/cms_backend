@@ -1,18 +1,74 @@
 #!/usr/bin/perl
+# universal_converter.pl  (v2)  BITS/JATS InDesign XML  <->  XHTML for browser proof correction
+#
+#   perl universal_converter.pl xml2xhtml  in.xml|dir    mapping_config.json [out_file|dir] [indesign.css]
+#   perl universal_converter.pl xhtml2xml  in.xhtml|dir  mapping_config.json [out_file|dir]
+#
+# What it does
+#   * aid:pstyle / aid:cstyle (real attributes, or the old <!-- aid:pstyle="x" --> comments) become CSS classes,
+#     so the InDesign-exported CSS styles the page. The original attribute is kept in data-ns-aid-pstyle /
+#     data-ns-aid-cstyle and written back on the way out.
+#   * <?tsp ...?> typesetting instructions travel untouched (as PIs, or as <span class="tsp"> markers).
+#   * The root element, its namespace declarations and the DOCTYPE are stored in the XHTML, so no regex patching
+#     of the output XML is needed any more.
 use strict;
 use warnings;
+use utf8;
 use XML::LibXML;
 use JSON::PP;
 use File::Path qw(make_path);
 use File::Basename;
 
 my ($mode, $in_param, $config_file, $out_param, $css_file) = @ARGV;
-
-unless ($mode && $in_param && $config_file) {
+unless ($mode && $in_param && $config_file && $mode =~ /^(?:xml2xhtml|xhtml2xml)$/) {
     die "Usage: perl $0 <xml2xhtml|xhtml2xml> <input_file_or_dir> <config.json> [output_file_or_dir] [indesign.css]\n";
 }
 
-# Resolve input files (handles single file vs directory)
+# ---------------------------------------------------------------- config
+sub read_file {
+    my ($p) = @_;
+    open my $fh, '<:raw', $p or die "Cannot open '$p': $!\n";
+    local $/ = undef;
+    my $c = <$fh>;
+    close $fh;
+    return $c;
+}
+sub save_file {
+    my ($path, $content) = @_;
+    open my $fh, '>:raw', $path or die "Cannot save '$path': $!\n";
+    print $fh $content;
+    close $fh;
+}
+sub save_text {                       # character string -> UTF-8 file
+    my ($path, $content) = @_;
+    open my $fh, '>:encoding(UTF-8)', $path or die "Cannot save '$path': $!\n";
+    print $fh $content;
+    close $fh;
+}
+
+my $config = decode_json(read_file($config_file));
+my %OPT = (
+    tsp_mode          => 'pi',          # pi   = keep <?tsp ...?> as real processing instructions
+                                        # span = <span class="tsp" data-pi="tsp ..."> (safer if your editor parses as text/html)
+    pstyle_attr       => 'aid:pstyle',
+    cstyle_attr       => 'aid:cstyle',
+    sanitize_classes  => 1,             # characters outside [A-Za-z0-9_-] become "_" (InDesign does the same in its CSS)
+    cell_tags         => ['td', 'th'],  # style class of a cell gets a prefix so it does not double the inner <p> style
+    cell_class_prefix => 'cell-',
+    block_default     => 'div',         # unmapped element that carries aid:pstyle
+    inline_default    => 'span',        # unmapped element without aid:pstyle
+    link_tags         => ['ext-link', 'uri'],
+    css_replace       => [],
+    list_markers      => {},
+    list_numbers      => [],
+    root_fallback     => ($config->{xhtml_to_xml_root} || 'book'),
+);
+%OPT = (%OPT, %{ $config->{options} || {} });
+my %IS_CELL = map { $_ => 1 } @{ $OPT{cell_tags} };
+my %IS_LINK = map { $_ => 1 } @{ $OPT{link_tags} };
+my $XML_NS  = 'http://www.w3.org/XML/1998/namespace';
+
+# ---------------------------------------------------------------- input / output paths
 my @file_queue;
 if (-f $in_param) {
     push @file_queue, $in_param;
@@ -25,396 +81,401 @@ if (-f $in_param) {
     die "Input path '$in_param' does not exist as a file or directory.\n";
 }
 
-# Resolve output directory
 my $out_dir;
 if ($out_param) {
-    if ($out_param =~ /\.(?:xml|xhtml)$/i) {
-        $out_dir = dirname($out_param);
-    } else {
-        $out_dir = $out_param;
-    }
+    $out_dir = ($out_param =~ /\.(?:xml|xhtml)$/i) ? dirname($out_param) : $out_param;
 } else {
     $out_dir = ($mode eq 'xml2xhtml') ? "xhtml_output" : "xml_output";
 }
 make_path($out_dir) unless -d $out_dir;
 
-# Handle InDesign CSS File
-my $css_filename = "";
-if ($css_file && -e $css_file) {
-    $css_filename = basename($css_file);
-    if ($mode eq 'xml2xhtml') {
-        open my $in_css, '<:raw', $css_file or warn "Cannot read CSS '$css_file': $!\n";
-        local $/ = undef;
-        my $css_content = <$in_css>;
-        close $in_css;
+# ---------------------------------------------------------------- CSS (xml2xhtml only)
+my @css_links;
+if ($mode eq 'xml2xhtml') {
+    save_text("$out_dir/review_base.css",    base_css());
+    save_text("$out_dir/review_overlay.css", overlay_css());
+    push @css_links, 'review_base.css';
 
-        # Clean element selectors to match class names directly
-        $css_content =~ s{\n([A-Za-z0-9_-]+)\.}{\n.}g;
-        $css_content =~ s{\#ffffff}{\#0d2950}g;
-        $css_content .= "\n/* Color highlighting for bibliography & reference elements */\n"
-                      . ".surname {\n    color: \#8b0000 !important; /* Dark Red */\n}\n\n"
-                      . ".given-names {\n    color: \#006400 !important; /* Dark Green */\n}\n\n"
-                      . ".bib_year {\n    color: \#d97706 !important; /* Dark Amber / Gold */\n}\n\n"
-                      . ".article-title {\n    color: \#1e40af !important; /* Deep Royal Blue */\n}\n\n"
-                      . ".bib_journal {\n    color: \#6b21a8 !important; /* Dark Purple */\n}\n\n"
-                      . ".bib_volume {\n    color: \#0d9488 !important; /* Teal */\n}\n\n"
-                      . ".bib_issue {\n    color: \#be185d !important; /* Dark Pink / Crimson */\n}\n\n"
-                      . ".bib_fpage {\n    color: \#4338ca !important; /* Indigo */\n}\n\n"
-                      . ".bib_lpage {\n    color: \#c05621 !important; /* Dark Rust / Orange */\n}\n\n"
-                      . ".ext-link {\n    color: \#2563eb !important; /* Bright Blue */\n    text-decoration: underline;\n}\n"
-                      . ".bib_chapter-title {\n    color: \#047857 !important; /* Emerald Green */\n    font-weight: bold;\n}\n\n"
-                      . ".bib_collab {\n    color: \#b45309 !important; /* Deep Ochre / Amber-Brown */\n}";
-
-        open my $out_css, '>:raw', "$out_dir/$css_filename" or warn "Cannot write CSS: $!\n";
-        print $out_css $css_content;
-        close $out_css;
+    if ($css_file && -e $css_file) {
+        my $css = read_file($css_file);
+        utf8::decode($css);
+        # p.Para-FL {  ->  .Para-FL {   (class selectors must match whatever element we generate)
+        $css =~ s{(^|[\n,])([ \t]*)[A-Za-z][A-Za-z0-9_-]*\.(?=[A-Za-z_-])}{$1$2.}g;
+        for my $pair (@{ $OPT{css_replace} }) {
+            my ($from, $to) = @$pair;
+            $css =~ s/\Q$from\E/$to/gi;
+        }
+        my $name = basename($css_file);
+        save_text("$out_dir/$name", $css);
+        push @css_links, $name;
+    } elsif ($css_file) {
+        warn "CSS file '$css_file' not found - XHTML will be written without InDesign CSS.\n";
     }
+    push @css_links, 'review_overlay.css';
 }
 
-open my $fh_json, '<:raw', $config_file or die "Cannot open config file '$config_file': $!\n";
-local $/ = undef;
-my $config = decode_json(<$fh_json>);
-close $fh_json;
-
+# ---------------------------------------------------------------- main loop
 foreach my $full_path (@file_queue) {
-    my ($file_name, $file_dir, $file_ext) = fileparse($full_path, qr/\.[^.]*/);
-    
+    my ($file_name) = fileparse($full_path, qr/\.[^.]*/);
     my $target_out_path;
     if ($out_param && $out_param =~ /\.(?:xml|xhtml)$/i && @file_queue == 1) {
         $target_out_path = $out_param;
     } else {
-        my $new_ext = ($mode eq 'xml2xhtml') ? '.xhtml' : '.xml';
-        $target_out_path = "$out_dir/$file_name$new_ext";
+        $target_out_path = "$out_dir/$file_name" . (($mode eq 'xml2xhtml') ? '.xhtml' : '.xml');
     }
 
-    open my $fh, '<:encoding(UTF-8)', $full_path or die "Cannot open $full_path: $!";
-    local $/;
-    my $content = <$fh>;
-    close $fh;
-
-    # Pre-clean duplicated attributes (e.g. data-xml-tag="fig" data-xml-tag="fig")
-    $content =~ s/\bdata-xml-tag="([^"]*)"(?:\s+data-xml-tag="[^"]*")+/data-xml-tag="$1"/gi;
-    $content =~ s/\bclass="([^"]*)"(?:\s+class="[^"]*")+/class="$1"/gi;
-
-    my $parser  = XML::LibXML->new(recover => 2);
-    my $dom = eval { $parser->parse_string($content) } || eval { $parser->parse_html_string($content) } || $parser->parse_file($full_path);
-    my $out_dom = XML::LibXML::Document->new('1.0', 'UTF-8');
+    my $parser = XML::LibXML->new(load_ext_dtd => 0, no_network => 1);
+    my $dom    = $parser->parse_file($full_path);
+    my $out    = XML::LibXML::Document->new('1.0', 'UTF-8');
 
     if ($mode eq 'xml2xhtml') {
-        my $html_root = $out_dom->createElement('html');
-        $html_root->setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
-        $html_root->setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+        my $html = $out->createElement('html');
+        $html->setAttribute('xmlns',       'http://www.w3.org/1999/xhtml');
+        $html->setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+        $out->setDocumentElement($html);
 
-        my $head = $out_dom->createElement('head');
-        if ($css_filename) {
-            my $link = $out_dom->createElement('link');
-            $link->setAttribute('rel', 'stylesheet');
+        my $head = $out->createElement('head');
+        $html->appendChild($head);
+        my $t = $out->createElement('title');
+        $t->appendChild($out->createTextNode($file_name));
+        $head->appendChild($t);
+
+        # remember what is needed to rebuild the XML document
+        my $root = $dom->documentElement;
+        add_meta($out, $head, 'xml-root', $root->nodeName);
+        if (my $dtd = $dom->internalSubset) {
+            add_meta($out, $head, 'xml-doctype-public', $dtd->publicId) if defined $dtd->publicId;
+            add_meta($out, $head, 'xml-doctype-system', $dtd->systemId) if defined $dtd->systemId;
+        }
+        foreach my $href (@css_links) {
+            my $link = $out->createElement('link');
+            $link->setAttribute('rel',  'stylesheet');
             $link->setAttribute('type', 'text/css');
-            $link->setAttribute('href', $css_filename);
+            $link->setAttribute('href', $href);
             $head->appendChild($link);
         }
-        $html_root->appendChild($head);
 
-        $out_dom->setDocumentElement($html_root);
+        my $body = $out->createElement('body');
+        $html->appendChild($body);
 
-        my $body = $out_dom->createElement('body');
-        $html_root->appendChild($body);
-
-        foreach my $child ($dom->documentElement->childNodes()) {
-            my $converted = convert_xml_to_xhtml($child, $out_dom, $config->{xml_to_xhtml});
-            $body->appendChild($converted) if $converted;
+        my $conv = convert_xml_to_xhtml($root, $out, $config->{xml_to_xhtml} || {});
+        foreach my $ns ($root->getNamespaces) {            # xmlns:aid, xmlns:xlink ... of the root
+            my $p = $ns->declaredPrefix;
+            $conv->setAttribute('data-xmlns-' . (defined $p && length $p ? $p : '_default'), $ns->declaredURI);
         }
-        
-        my $xmlout = $out_dom->toString(1);
-        $xmlout =~ s{ }{}g;
-        
-        save_file($target_out_path, $xmlout);
+        $body->appendChild($conv);
 
-    } elsif ($mode eq 'xhtml2xml') {
-        my $root_tag  = $config->{xhtml_to_xml_root} || "book";
-        my $body_node = ($dom->findnodes('//body'))[0] || $dom->documentElement;
+        my $xhtml = $out->toString(0);
+        # keep the file safe for text/html parsers too: <span/> -> <span></span> (non-void elements only)
+        $xhtml =~ s{<(span|a|div|p|td|th|li|i|b|h2)((?:\s[^>]*?)?)/>}{<$1$2></$1>}g;
+        $xhtml =~ s{}{};
+        save_file($target_out_path, $xhtml);
 
-        my @converted_children;
-        foreach my $child ($body_node->childNodes()) {
-            my $converted = convert_xhtml_to_xml($child, $out_dom, $config->{xhtml_to_xml});
-            push @converted_children, $converted if $converted;
+    } else {
+        my ($body) = $dom->findnodes('//*[local-name()="body"]');
+        $body ||= $dom->documentElement;
+
+        my $meta = sub {
+            my ($n) = $dom->findnodes('//*[local-name()="meta"][@name="' . $_[0] . '"]');
+            return $n ? $n->getAttribute('content') : undef;
+        };
+
+        my @kids;
+        foreach my $child ($body->childNodes) {
+            push @kids, convert_xhtml_to_xml($child, $out, $config->{xhtml_to_xml} || {});
         }
+        my @els = grep { $_->nodeType == XML_ELEMENT_NODE } @kids;
 
-        if (@converted_children == 1 && $converted_children[0]->nodeType == XML_ELEMENT_NODE) {
-            $out_dom->setDocumentElement($converted_children[0]);
+        my $root;
+        if (@els == 1 && $els[0]->nodeName ne 'html') {
+            $root = $els[0];
         } else {
-            my $xml_root = $out_dom->createElement($root_tag);
-            $out_dom->setDocumentElement($xml_root);
-            foreach my $c (@converted_children) {
-                $xml_root->appendChild($c);
-            }
+            $root = $out->createElement($meta->('xml-root') || $OPT{root_fallback});
+            $root->appendChild($_) for @kids;
         }
+        $out->setDocumentElement($root);
 
-        my $xmlout = $out_dom->toString(1);
-
-        # Clean unwanted XHTML namespaces & editor conversion data attributes
-        $xmlout =~ s{\s*xmlns="http://www\.w3\.org/1999/xhtml"}{}g;
-        $xmlout =~ s{\s*xmlns=""}{}g;
-        $xmlout =~ s{\s*data-xml-tag="[^"]*"}{}g;
-        $xmlout =~ s{\s*data-original-tag="[^"]*"}{}g;
-
-        $xmlout =~ s{</head>(\s*)<body>}{</head>}gs;
-        $xmlout =~ s{</body>(\s*)</book>}{</book>}gs;
-        $xmlout =~ s{<head>((?:(?!</head>).)*?)</head>}{}gs;
-        $xmlout =~ s{<\?xml[^>]*\?>}{}gi;
-        $xmlout =~ s{<!DOCTYPE[^>]*>}{}gi;
-        $xmlout =~ s{<\!--\s*\?xml[^>]*\?>\s*-->}{}gi;
-        $xmlout =~ s{<\!--\s*<\?xml[^>]*\?>\s*-->}{}gi;
-        $xmlout =~ s{<\!--\s*\?xml.*?\?>\s*-->}{}gi;
-
-        if ($xmlout =~ /<book-part[\s>]/i) {
-            # Extract metadata elements that might be inside body and relocate to book-part-meta
-            my $meta_html = "";
-            while ($xmlout =~ s{(<(?:title-group|contrib-group|abstract|kwd-group)[\s>][\s\S]*?<\/(?:title-group|contrib-group|abstract|kwd-group)>)}{}i) {
-                $meta_html .= $1 . "\n";
-            }
-            if ($meta_html) {
-                if ($xmlout =~ /<book-part-meta[^>]*>/i) {
-                    $xmlout =~ s{(<book-part-meta[^>]*>)}{$1\n$meta_html}i;
-                } else {
-                    $xmlout =~ s{(<book-part[^>]*>)}{$1\n<book-part-meta>\n${meta_html}</book-part-meta>}i;
-                }
-            }
-            # Ensure root <book> node has standard NLM BITS DTD attributes
-            $xmlout =~ s{<book\b[^>]*>}{<book xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:mml="http://www.w3.org/1998/Math/MathML" xmlns:xlink="http://www.w3.org/1999/xlink" dtd-version="1.0" xml:lang="en">}i;
-        } else {
-            my $ch_id = "ch10";
-            if ($xmlout =~ /id="(ch\d+)"/i) {
-                $ch_id = $1;
-            } elsif ($xmlout =~ /<label>(\d+)<\/label>/i) {
-                $ch_id = "ch" . $1;
-            }
-
-            my $meta_html = "";
-            while ($xmlout =~ s{(<(?:title-group|contrib-group|abstract|kwd-group)[\s>][\s\S]*?<\/(?:title-group|contrib-group|abstract|kwd-group)>)}{}i) {
-                $meta_html .= $1 . "\n";
-            }
-
-            my $body_html = "";
-            while ($xmlout =~ s{(<(?:sec)[\s>][\s\S]*?<\/(?:sec)>)}{}i) {
-                $body_html .= $1 . "\n";
-            }
-
-            $xmlout =~ s{</?book[^>]*>}{}gi;
-            $xmlout =~ s{</?book-body[^>]*>}{}gi;
-
-            $xmlout = "<book xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" xmlns:xi=\"http://www.w3.org/2001/XInclude\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" dtd-version=\"1.0\" xml:lang=\"en\">\n"
-                    . "<book-body>\n"
-                    . "<book-part id=\"$ch_id\" book-part-type=\"chapter\">\n"
-                    . "<book-part-meta>\n" . $meta_html . "</book-part-meta>\n"
-                    . "<body>\n" . $body_html . $xmlout . "\n</body>\n"
-                    . "</book-part>\n"
-                    . "</book-body>\n"
-                    . "</book>\n";
-        }
-
-        # Prepend XML Declaration & updated DTD path header
-        $xmlout = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                . "<!DOCTYPE book PUBLIC \"-//NLM//DTD BITS Book Interchange DTD v2.0 20130520//EN\" \"app/processing/legacy/wordtoxml/BITS-Book-1.0-DTD/BITS-book1.dtd\">\n"
-                . $xmlout;
-
-        $xmlout =~ s{<strong>}{<bold>}g;
-        $xmlout =~ s{</strong>}{</bold>}g;
-        $xmlout =~ s{<em>}{<italic>}g;
-        $xmlout =~ s{</em>}{</italic>}g;
-        $xmlout =~ s{</sup>}{</sup_script>}g;
-        $xmlout =~ s{ class="([^\ ]+)(\s*)([a-z]*)"}{ class="$1"}g;
-        $xmlout =~ s{<delete[^>]*>((?:(?!</delete>).)*?)</delete>}{}g;
-        $xmlout =~ s{<\!-- QUERY: <query>(\s*)}{<query>}gi;
-        $xmlout =~ s{</query> -->}{</query>}gi;
-        $xmlout =~ s{<\!--\s*<highlight>\s*-->}{<!-- <highlight> -->}gi;
-        $xmlout =~ s{<\!--\s*</highlight>\s*-->}{<!-- </highlight> -->}gi;
-        $xmlout =~ s{<\!--\s*<query[^>]*>\s*-->}{<!-- <query> -->}gi;
-        $xmlout =~ s{<\!--\s*</query>\s*-->}{<!-- </query> -->}gi;
-        $xmlout =~ s{\s+aid:(?:pstyle|cstyle)="[^"]*"}{}gi;
-        $xmlout =~ s{<\!--\s*aid:(?:pstyle|cstyle)="[^"]*"\s*-->}{}gi;
-        $xmlout =~ s{<insert[^>]*>((?:(?!</insert>).)*?)</insert>}{$1}g;
-        $xmlout =~ s{<([^>]+)><\!\-\- aid:pstyle="([^"]+)" \-\->}{<$1 aid:pstyle="$2">}g;
-        $xmlout =~ s{<([^>]+)><\!\-\- aid:cstyle="([^"]+)" \-\->}{<$1 aid:cstyle="$2">}g;
-        $xmlout =~ s{</col>}{}g;
-        $xmlout =~ s{<col ([^>]*)>}{<col $1/>}g;
-        $xmlout =~ s{<col ([^>]*)//>}{<col $1/>}g;
-        $xmlout =~ s{<colgroup>((?:(?!</colgroup>).)*?)</colgroup>(\s*)<table ([^>]*)>}{$2<table $3>\n<colgroup>$1</colgroup>}gs;
-        $xmlout =~ s{<p\/>}{}g;
-        $xmlout =~ s{(<(?:ext-link|uri|graphic|inline-graphic|media)\b[^>]*?)\bhref="}{$1xlink:href="}gi;
-        $xmlout =~ s{(\n+)}{\n}g;
-        save_file($target_out_path, $xmlout);
+        my ($pub, $sys) = ($meta->('xml-doctype-public'), $meta->('xml-doctype-system'));
+        $out->createInternalSubset($root->nodeName, $pub, $sys) if defined $pub || defined $sys;
+        my $xml = $out->toString(0);
+        $xml =~ s{<para}{<p}g;
+        $xml =~ s{</para>}{</p><enter\/>}g;
+        
+        save_file($target_out_path, $xml);
     }
+    print "Written: $target_out_path\n";
 }
-
 print "Conversion complete!\n";
 
+# ================================================================= XML -> XHTML
+sub add_meta {
+    my ($doc, $head, $name, $content) = @_;
+    my $m = $doc->createElement('meta');
+    $m->setAttribute('name', $name);
+    $m->setAttribute('content', $content);
+    $head->appendChild($m);
+}
+
+sub css_class {
+    my ($v) = @_;
+    $v =~ s/^\s+|\s+$//g;
+    $v =~ s/[^A-Za-z0-9_-]/_/g if $OPT{sanitize_classes};
+    return $v;
+}
+
 sub convert_xml_to_xhtml {
-    my ($node, $out_dom, $map_cfg) = @_;
+    my ($node, $out, $map_cfg) = @_;
+    my $type = $node->nodeType;
 
-    # 1. Preserve text nodes
-    return $out_dom->createTextNode($node->nodeValue) if $node->nodeType == XML_TEXT_NODE;
+    return $out->createTextNode($node->nodeValue) if $type == XML_TEXT_NODE || $type == XML_CDATA_SECTION_NODE;
+    return $out->createComment($node->nodeValue)  if $type == XML_COMMENT_NODE;
 
-    # 2. Retain comments (e.g., <!-- aid:pstyle="..." -->) in output tree
-    return $out_dom->createComment($node->nodeValue) if $node->nodeType == XML_COMMENT_NODE;
-
-    return undef unless $node->nodeType == XML_ELEMENT_NODE;
+    if ($type == XML_PI_NODE) {                       # <?tsp ...?>
+        my ($target, $data) = ($node->nodeName, $node->nodeValue);
+        $data = '' unless defined $data;
+        if ($OPT{tsp_mode} eq 'span') {
+            my $s = $out->createElement('span');
+            $s->setAttribute('class', 'tsp');
+            $s->setAttribute('data-pi', length $data ? "$target $data" : $target);
+            $s->setAttribute('contenteditable', 'false');
+            return $s;
+        }
+        return $out->createProcessingInstruction($target, $data);
+    }
+    return undef unless $type == XML_ELEMENT_NODE;
 
     my $tag = $node->nodeName;
 
-    # The query process: XML tag to HTML comment
-    if ($tag eq 'query') {
-        my $xml_str = $node->toString();
-        $xml_str =~ s{^<query>\s*--\s*>}{<query>}gi;
-        $xml_str =~ s{<--\s*</query>}{</query>}gi;
-        $xml_str =~ s{--}{- -}g;
-        return $out_dom->createComment(" QUERY: $xml_str ");
+    # attributes (namespace declarations are not attributes for us)
+    my @attrs = grep { $_->nodeType == XML_ATTRIBUTE_NODE } $node->attributes;
+    my ($pstyle, $cstyle);
+    foreach my $a (@attrs) {
+        $pstyle = $a->nodeValue if $a->nodeName eq $OPT{pstyle_attr};
+        $cstyle = $a->nodeValue if $a->nodeName eq $OPT{cstyle_attr};
     }
-        
-    my $rule_entry = $map_cfg->{$tag};
-    my $rule;
+    # older exports: <!-- aid:pstyle="Head1" --> as a child comment
+    foreach my $c ($node->childNodes) {
+        next unless $c->nodeType == XML_COMMENT_NODE;
+        if ($c->nodeValue =~ /aid:pstyle\s*=\s*"([^"]+)"/) { $pstyle //= $1 }
+        if ($c->nodeValue =~ /aid:cstyle\s*=\s*"([^"]+)"/) { $cstyle //= $1 }
+    }
 
-    if (ref($rule_entry) eq 'ARRAY') {
-        foreach my $candidate (@{$rule_entry}) {
-            if ($candidate->{xpath}) {
-                if ($node->exists($candidate->{xpath})) {
-                    $rule = $candidate;
-                    last;
-                }
-            } elsif ($candidate->{default}) {
-                $rule = $candidate;
+    # which rule applies?
+    my $entry = $map_cfg->{$tag};
+    my $rule;
+    if (ref($entry) eq 'ARRAY') {
+        foreach my $cand (@$entry) {
+            if ($cand->{xpath}) {
+                if ($node->exists($cand->{xpath})) { $rule = $cand; last; }
+            } elsif ($cand->{default}) {
+                $rule = $cand;
             }
         }
     } else {
-        $rule = $rule_entry;
+        $rule = $entry;
     }
 
     my $target_tag;
     if ($rule && $rule->{target_tag}) {
         $target_tag = $rule->{target_tag};
-    } elsif ($tag =~ /^(?:p|div|ul|ol|li|h1|h2|h3|h4|h5|h6|table|tr|td|th|tbody|thead|span|i|b|a|sub|sup)$/i) {
+    } elsif ($tag =~ /^(?:p|div|ul|ol|li|h[1-6]|table|thead|tbody|tfoot|tr|td|th|colgroup|col|caption|span|i|b|a|sub|sup)$/i) {
         $target_tag = lc($tag);
     } else {
-        $target_tag = "span";
+        $target_tag = defined $pstyle ? $OPT{block_default} : $OPT{inline_default};
     }
 
-    my $elem = $out_dom->createElement($target_tag);
+    my $elem = $out->createElement($target_tag);
     $elem->setAttribute('data-xml-tag', $tag);
 
+    # classes: semantic class from config, then the InDesign style names
     my @classes;
     push @classes, $rule->{class} if $rule && $rule->{class};
-
-    # Extract aid:pstyle / aid:cstyle comments into class attribute for styling
-    foreach my $child ($node->childNodes()) {
-        if ($child->nodeType == XML_COMMENT_NODE) {
-            my $comment_text = $child->nodeValue;
-            if ($comment_text =~ /aid:(?:pstyle|cstyle)\s*=\s*"([^"]+)"/) {
-                push @classes, $1;
-            }
-        }
-    }
-
+    my $prefix = $IS_CELL{$target_tag} ? $OPT{cell_class_prefix} : '';
+    push @classes, $prefix . css_class($pstyle) if defined $pstyle && length $pstyle;
+    push @classes, css_class($cstyle)           if defined $cstyle && length $cstyle;
+    my %seen;
+    @classes = grep { !$seen{$_}++ } @classes;
     $elem->setAttribute('class', join(' ', @classes)) if @classes;
 
-    # Handle attributes
-    if ($node->hasAttributes()) {
-        foreach my $attr ($node->attributes()) {
-            my $name  = $attr->nodeName;
-            my $val   = $attr->nodeValue;
+    # the style attributes the old comment form carried must survive the round trip as well
+    $elem->setAttribute('data-ns-aid-pstyle', $pstyle) if defined $pstyle && !grep { $_->nodeName eq $OPT{pstyle_attr} } @attrs;
+    $elem->setAttribute('data-ns-aid-cstyle', $cstyle) if defined $cstyle && !grep { $_->nodeName eq $OPT{cstyle_attr} } @attrs;
 
-            if ($name eq 'xlink:href' || $name eq 'href') {
+    foreach my $a (@attrs) {
+        my $name = $a->nodeName;
+        my $val  = $a->nodeValue;
+        if ($name =~ /^([^:]+):(.+)$/) {              # aid:pstyle, xlink:href, xml:lang ...
+            my ($pfx, $loc) = ($1, $2);
+            $elem->setAttribute("data-ns-$pfx-$loc", $val);
+            if ($loc eq 'href') {                     # visible link target for the browser
                 $val =~ s{^http://(?=https://)}{};
                 $val =~ s{^(?:http://)+}{http://};
                 $val =~ s{^(?:https://)+}{https://};
-
                 $elem->setAttribute('href', $val);
-            } else {
-                $elem->setAttribute($name, $val);
             }
-        }
-    }
-
-    foreach my $child ($node->childNodes()) {
-        my $c = convert_xml_to_xhtml($child, $out_dom, $map_cfg);
-        $elem->appendChild($c) if $c;
-    }
-
-    return $elem;
-}
-
-sub convert_xhtml_to_xml {
-    my ($node, $out_dom, $map_cfg) = @_;
-
-    # Preserve text nodes
-    return $out_dom->createTextNode($node->nodeValue) if $node->nodeType == XML_TEXT_NODE;
-
-    # Preserve comment nodes
-    return $out_dom->createComment($node->nodeValue) if $node->nodeType == XML_COMMENT_NODE;
-
-    return undef unless $node->nodeType == XML_ELEMENT_NODE;
-
-    my $html_tag = $node->nodeName;
-
-    # Priority 1: Read original XML tag name from data-xml-tag
-    my $target_tag = $node->getAttribute('data-xml-tag');
-
-    # Priority 2: Fall back to JSON config mapping
-    if (!$target_tag && exists $map_cfg->{$html_tag}) {
-        if (ref($map_cfg->{$html_tag}) eq 'HASH' && $map_cfg->{$html_tag}->{target_tag}) {
-            $target_tag = $map_cfg->{$html_tag}->{target_tag};
-        } elsif (ref($map_cfg->{$html_tag}) eq 'HASH' && $map_cfg->{$html_tag}->{default}) {
-            $target_tag = $map_cfg->{$html_tag}->{default}->{target_tag};
-        }
-    }
-    $target_tag ||= $html_tag;
-
-    my $elem = $out_dom->createElement($target_tag);
-
-    #revert the query process. comment to xml.
-            if ($node->nodeType == XML_COMMENT_NODE) {
-            my $comment_text = $node->nodeValue;
-            if ($comment_text =~ /^\s*QUERY:\s*(<query.*?>.*?<\/query>)\s*$/s) {
-                my $query_xml_str = $1;
-                my $chunk_parser = XML::LibXML->new();
-                eval {
-                    my $fragment = $chunk_parser->parse_balanced_chunk($query_xml_str);
-                    return $out_dom->importNode($fragment, 1);
-                };
-            }
-            return $out_dom->createComment($comment_text);
-        }
-
-    # Copy original XML attributes, omitting conversion metadata
-    if ($node->hasAttributes()) {
-        foreach my $attr ($node->attributes()) {
-            my $name = $attr->nodeName;
-            $name =~ s/^xlink://i if $target_tag =~ /^(?:ext-link|uri|graphic|inline-graphic|media)$/i;
-            next if $name eq 'class' || $name eq 'data-xml-tag' || $name eq 'data-original-tag' || $name =~ /^data-aid-/ || $name eq 'xmlns' || $name =~ /^xmlns:/;
-            $elem->setAttribute($name, $attr->nodeValue);
-        }
-    }
-
-    if ($target_tag eq 'ext-link' && !$elem->hasAttribute('ext-link-type')) {
-        my $href = $elem->getAttribute('href') || '';
-        if ($href =~ /10\.\d{4,9}\// || $href =~ /doi\.org/i) {
-            $elem->setAttribute('ext-link-type', 'doi');
+        } elsif ($name eq 'class') {
+            $elem->setAttribute('data-attr-class', $val);
         } else {
-            $elem->setAttribute('ext-link-type', 'uri');
+            $elem->setAttribute($name, $val);
         }
     }
 
-    # Recursively convert all children (including comment nodes)
-    foreach my $child ($node->childNodes()) {
-        my $c = convert_xhtml_to_xml($child, $out_dom, $map_cfg);
+    foreach my $child ($node->childNodes) {
+        my $c = convert_xml_to_xhtml($child, $out, $map_cfg);
         $elem->appendChild($c) if $c;
     }
-
     return $elem;
 }
 
-sub save_file {
-    my ($path, $content) = @_;
-    open my $fh, '>:raw', $path or die "Cannot save '$path': $!\n";
-    print $fh $content;
-    close $fh;
+# ================================================================= XHTML -> XML
+sub convert_xhtml_to_xml {                            # returns a LIST of nodes (0 = dropped, many = unwrapped)
+    my ($node, $out, $map_cfg) = @_;
+    my $type = $node->nodeType;
+
+    return $out->createTextNode($node->nodeValue) if $type == XML_TEXT_NODE || $type == XML_CDATA_SECTION_NODE;
+    return $out->createProcessingInstruction($node->nodeName, $node->nodeValue // '') if $type == XML_PI_NODE;
+
+    if ($type == XML_COMMENT_NODE) {
+        # a text/html parser turns <?tsp T v=1?> into the comment "?tsp T v=1?"
+        if ($node->nodeValue =~ /^\?(\S+?)(?:\s+(.*?))?\?$/s) {
+            return $out->createProcessingInstruction($1, $2 // '');
+        }
+        return $out->createComment($node->nodeValue);
+    }
+    return () unless $type == XML_ELEMENT_NODE;
+
+    my $html_tag = lc($node->localname);
+
+    # <span class="tsp" data-pi="tsp T v=1"> marker
+    if ($node->hasAttribute('data-pi')) {
+        my ($t, $d) = split /\s+/, $node->getAttribute('data-pi'), 2;
+        return $out->createProcessingInstruction($t, $d // '');
+    }
+
+    my $target_tag = $node->getAttribute('data-xml-tag');
+    my $rule = $map_cfg->{$html_tag};
+    $rule = (grep { ref $_ eq 'HASH' && $_->{default} } @$rule)[0] if ref($rule) eq 'ARRAY';
+    $rule = undef unless ref($rule) eq 'HASH';
+    $rule = $rule->{default} if $rule && ref($rule->{default}) eq 'HASH';
+
+    if (!$target_tag) {                               # element created in the browser
+        if ($rule && $rule->{unwrap}) {
+            return map { convert_xhtml_to_xml($_, $out, $map_cfg) } $node->childNodes;
+        }
+        $target_tag = ($rule && $rule->{target_tag}) ? $rule->{target_tag} : $html_tag;
+    }
+
+    my $elem = $out->createElement($target_tag);
+    my %have;
+
+    foreach my $a (grep { $_->nodeType == XML_ATTRIBUTE_NODE } $node->attributes) {
+        my $name = $a->nodeName;
+        my $val  = $a->nodeValue;
+        next if $name eq 'class' || $name eq 'data-xml-tag' || $name eq 'data-pi';
+        next if $name =~ /^(?:contenteditable|spellcheck|style|data-tsp.*)$/;
+        if ($name =~ /^data-xmlns-(.+)$/) {            # namespace declarations of the root element
+            my $p = $1;
+            $elem->setNamespace($val, ($p eq '_default' ? undef : $p), 0);
+            next;
+        }
+        if ($name =~ /^data-ns-([^-]+)-(.+)$/) {       # data-ns-aid-pstyle -> aid:pstyle
+            $elem->setAttribute("$1:$2", $val);
+            $have{"$1:$2"} = 1;
+            next;
+        }
+        if ($name eq 'data-attr-class') { $elem->setAttribute('class', $val); next; }
+        if ($name eq 'href') { $have{href} = $val; next; }
+        $elem->setAttribute($name, $val);
+    }
+
+    # links: the (possibly edited) href wins over the stored xlink:href
+    if (defined $have{href} && ($IS_LINK{$target_tag} || exists $have{'xlink:href'})) {
+        $elem->setAttribute('xlink:href', $have{href});
+    } elsif (defined $have{href}) {
+        $elem->setAttribute('href', $have{href});
+    }
+
+    # styles for elements the author created (e.g. <i> -> <italic aid:cstyle="italic">)
+    if ($rule) {
+        $elem->setAttribute($OPT{cstyle_attr}, $rule->{aid_cstyle}) if $rule->{aid_cstyle} && !$have{$OPT{cstyle_attr}};
+        $elem->setAttribute($OPT{pstyle_attr}, $rule->{aid_pstyle}) if $rule->{aid_pstyle} && !$have{$OPT{pstyle_attr}};
+    }
+
+    foreach my $child ($node->childNodes) {
+        $elem->appendChild($_) for convert_xhtml_to_xml($child, $out, $map_cfg);
+    }
+    return $elem;
+}
+
+# ================================================================= generated CSS
+sub base_css {
+    return <<'CSS';
+/* review_base.css - loaded FIRST. All selectors use :where() = zero specificity,
+   so every rule of the InDesign CSS (loaded next) wins over these browser-default resets. */
+:where(html, body) { margin: 0; }
+:where(body)       { padding: 1em; background: #fff; }
+:where(p, h2, ul, ol, li, div, table, figure) { margin: 0; padding: 0; }
+:where(h2)         { font-size: inherit; font-weight: inherit; }
+:where(ul, ol)     { list-style: none; }
+:where(table)      { border-collapse: collapse; width: 100%; }
+:where(td, th)     { vertical-align: top; text-align: left; }
+:where(a)          { color: inherit; text-decoration: none; }
+CSS
+}
+
+sub overlay_css {
+    my $css = <<'CSS';
+/* review_overlay.css - loaded LAST: proof-reading aids. Delete a block if you do not want it. */
+body { max-width: var(--text-width, 46em); margin-left: auto; margin-right: auto; }
+
+/* paragraph-style elements that were mapped to an inline span must still break lines */
+span[data-ns-aid-pstyle] { display: block; }
+
+/* typesetting markers are never shown */
+.tsp { display: none; }
+
+.enter { display: none; }
+
+/* text that exists only for the PDF (separators etc.) - keep in flow, mark lightly */
+.onlyforpdf { background: #f1f1f1; }
+
+/* figures: the EPS/TIFF cannot be shown in a browser, so show a placeholder with the file name */
+.graphic { display: block; box-sizing: border-box; border: 1px dashed #999; color: #666; padding: 2em; text-align: center; font: 12px monospace; }
+.graphic::before { content: "[graphic] " attr(data-ns-xlink-href); }
+
+/* faint table grid so empty cell structure is visible while correcting */
+td, th { border: 1px solid #e3e3e3; }
+
+/* Color highlighting for bibliography & reference elements */
+.string-name   { color: #8b0000 !important; }
+.given-names   { color: #006400 !important; }
+.year          { color: #d97706 !important; }
+.article-title { color: #1e40af !important; }
+.source        { color: #6b21a8 !important; }
+.volume        { color: #0d9488 !important; }
+.issue         { color: #be185d !important; }
+.fpage         { color: #4338ca !important; }
+.lpage         { color: #c05621 !important; }
+.ext-link      { color: #2563eb !important; text-decoration: underline; }
+.chapter-title { color: #047857 !important; font-weight: bold; }
+.collab        { color: #b45309 !important; }
+CSS
+    my $m = $OPT{list_markers} || {};
+    if (%$m) {
+        $css .= "\n/* list markers (InDesign generates them, they are not in the XML) */\n";
+        foreach my $ps (sort keys %$m) {
+            my $c = $m->{$ps};
+            $c =~ s/(["\\])/\\$1/g;
+            $css .= "p." . css_class($ps) . "::before { content: \"$c\\00a0\"; }\n";
+        }
+    }
+    my $n = $OPT{list_numbers} || [];
+    if (@$n) {
+        $css .= "\n/* numbered lists: counter restarts with every <ol> */\nol { counter-reset: tsplist; }\n";
+        foreach my $ps (@$n) {
+            my $cls = css_class($ps);
+            $css .= "li > p.${cls}::before { counter-increment: tsplist; content: counter(tsplist) \".\\00a0\"; }\n";
+        }
+    }
+    return $css;
 }

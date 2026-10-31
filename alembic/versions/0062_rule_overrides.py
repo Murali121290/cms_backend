@@ -1,8 +1,8 @@
 """Add rule_overrides JSON column to project_language_rules.
 
-Revision ID: 0053_rule_overrides
-Revises: 0052_dash_profile_alt_sug
-Create Date: 2026-10-30 00:00:00.000000
+Revision ID: 0062_rule_overrides
+Revises: 0061_dash_profile_alt_sug
+Create Date: 2026-10-31 00:00:01.000000
 
 Scope-C per-project overrides for workbook rules. Sparse map keyed by
 rule ID with values ``{"enabled": bool?, "tool_behaviour": str?}``. A
@@ -18,8 +18,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0053_rule_overrides'
-down_revision: Union[str, Sequence[str], None] = '0052_dash_profile_alt_sug'
+revision: str = '0062_rule_overrides'
+down_revision: Union[str, Sequence[str], None] = '0061_dash_profile_alt_sug'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

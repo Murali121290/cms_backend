@@ -58,28 +58,19 @@ export function DashboardPage() {
 
   const { projects, stats, viewer } = dashboardQuery.data;
   
-  const isAccessibilityUser =
-    viewer?.team === 'Accessibility Team' ||
-    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('accessibility')) ||
-    Boolean(viewer?.roles && (viewer.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')));
+  const perms: string[] = (viewer as any)?.permissions || [];
+  const canViewDashboard = perms.includes('view_books_dashboard') || (viewer as any)?.access_level === 'Admin';
 
-  const isCustomerUser =
-    viewer?.team === 'Customer Team' ||
-    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('customer')) ||
-    Boolean(viewer?.roles && (viewer.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('customer')));
-
-  const hasBodCustomerAccess = Boolean(
-    (viewer as any)?.customer_access && 
-    Array.isArray((viewer as any).customer_access) && 
-    (viewer as any).customer_access.includes('BOD')
-  );
-
-  if (isAccessibilityUser) {
-    return <Navigate to="/post-production" replace />;
-  }
-  
-  if (isCustomerUser && hasBodCustomerAccess) {
-    return <Navigate to="/bod/report" replace />;
+  if (!canViewDashboard) {
+    if (perms.includes('access_post_production')) {
+      return <Navigate to="/post-production" replace />;
+    }
+    if (perms.includes('access_bod')) {
+      return <Navigate to="/bod/report" replace />;
+    }
+    if (perms.includes('view_workspace')) {
+      return <Navigate to="/workspace" replace />;
+    }
   }
 
   const { timeOfDay, dayOfWeek, formattedDate } = getGreeting();

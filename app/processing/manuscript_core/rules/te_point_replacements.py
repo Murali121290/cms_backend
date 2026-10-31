@@ -48,19 +48,17 @@ def get_te_replacement(rule_id: str, m: re.Match) -> str | None:
     # 10. Table/Figure/Box casing (e.g. figure -> Figure)
     if rule_id in ("ref_figure_lower", "ref_table_lower", "ref_box_lower", "ref_chapter_lower"):
         return surface.capitalize()
-    # Plural expansions (e.g. Figs -> Figures)
-    if rule_id == "ref_figs_single": return "Figures"
-    if rule_id == "ref_fig_single": return "Figure"
-    if rule_id == "ref_figs_and": return "Figures"
-    if rule_id == "ref_fig_and": return "Figure"
-    if rule_id == "ref_tabs_single": return "Tables"
-    if rule_id == "ref_tab_single": return "Table"
-    if rule_id == "ref_tabs_and": return "Tables"
-    if rule_id == "ref_tab_and": return "Table"
-    if rule_id == "ref_boxes_single": return "Boxes"
-    if rule_id == "ref_box_single": return "Box"
-    if rule_id == "ref_chapters_single": return "Chapters"
-    if rule_id == "ref_chapter_single": return "Chapter"
+    # Abbreviated labels spelled out (e.g. Figs 3 -> Figures 3). Only the label word is
+    # replaced; the number stays. Unchanged labels (Chapter 8) need no fix.
+    full_label = {
+        "ref_figs_single": "Figures", "ref_fig_single": "Figure", "ref_figs_and": "Figures",
+        "ref_fig_and": "Figure", "ref_tabs_single": "Tables", "ref_tab_single": "Table",
+        "ref_tabs_and": "Tables", "ref_tab_and": "Table", "ref_boxes_single": "Boxes",
+        "ref_box_single": "Box", "ref_chapters_single": "Chapters", "ref_chapter_single": "Chapter",
+    }.get(rule_id)
+    if full_label:
+        fixed = re.sub(r"^[A-Za-z]+\.?", full_label, surface)
+        return fixed if fixed != surface else None
     # Abbreviated plural dotted forms (e.g. Tabs 3.2 -> Tables 3.2, Figs 1.2 -> Figures 1.2)
     if rule_id in ("ref_tabs_dotted", "cap_tabs_dotted"):
         return re.sub(r'\bTabs\.?\b', 'Tables', surface, flags=re.IGNORECASE)
@@ -210,7 +208,10 @@ def get_te_replacement_options(rule_id: str, m: re.Match) -> list[str]:
     nums = re.findall(r'\d+', surface)
     # Percent style
     if rule_id in ("percent_symbol", "percent_word", "per_cent_word", "percent_percentage"):
-        return ["%", "per cent", "percent"]
+        if nums:
+            n = nums[0]
+            return [f"{n}%", f"{n} %", f"{n} percent", f"{n} per cent", f"{n} percentage points"]
+        return ["percentage", "Percentage", "percent", "per cent"]
     # Ellipsis style
     if rule_id in ("ellipsis_symbol", "ellipsis_3dots", "ellipsis_spaced"):
         return ["…", "...", ". . ."]
@@ -227,7 +228,7 @@ def get_te_replacement_options(rule_id: str, m: re.Match) -> list[str]:
     # Number ranges
     if rule_id in ("range_to", "range_endash", "range_hyphen") and len(nums) >= 2:
         n1, n2 = nums[0], nums[1]
-        return [f"{n1} to {n2}", f"{n1}–{n2}", f"{n1}-{n2}"]
+        return [f"{n1}–{n2}", f"{n1} to {n2}", f"from {n1} to {n2}", f"{n1} – {n2}", f"{n1}-{n2}"]
     # Leading zero
     if rule_id == "leading_zero_missing":
         decimal_m = re.search(r'(\.\d+)', surface)

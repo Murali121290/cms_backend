@@ -29,16 +29,27 @@ export function formatDateTime(
 ): string {
   const d = parseUtcDate(dateStr);
   if (!d) return '—';
-  return d.toLocaleString(locale, {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-    ...options,
-  });
+  try {
+    if (options && (options.dateStyle || options.timeStyle)) {
+      return d.toLocaleString(locale, options);
+    }
+    return d.toLocaleString(locale, {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      ...options,
+    });
+  } catch (err) {
+    try {
+      return d.toLocaleString(locale);
+    } catch {
+      return d.toISOString();
+    }
+  }
 }
 
 /**
@@ -51,10 +62,21 @@ export function formatDate(
 ): string {
   const d = parseUtcDate(dateStr);
   if (!d) return '—';
-  return d.toLocaleDateString(locale, {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    ...options,
-  });
+  try {
+    if (options && options.dateStyle) {
+      return d.toLocaleDateString(locale, options);
+    }
+    return d.toLocaleDateString(locale, {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      ...options,
+    });
+  } catch (err) {
+    try {
+      return d.toLocaleDateString(locale);
+    } catch {
+      return d.toISOString().slice(0, 10);
+    }
+  }
 }

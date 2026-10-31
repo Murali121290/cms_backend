@@ -6,11 +6,43 @@ from typing import Dict, Any, List, Optional
 import docx
 
 
+ARTICLE_TYPE_PATTERNS = [
+    r'^(?:review|review\s+article|systematic\s+review(?:\s+and\s+meta-analysis)?|narrative\s+review|scoping\s+review|literature\s+review|mini[- ]review)$',
+    r'^(?:original\s+article|original\s+research|research\s+article|original\s+paper|full\s+length\s+article|regular\s+article)$',
+    r'^(?:case\s+report|case\s+study|clinical\s+case|case\s+series)$',
+    r'^(?:short\s+communication|preliminary\s+communication|brief\s+communication|brief\s+report|rapid\s+communication)$',
+    r'^(?:editorial|guest\s+editorial|editorial\s+note|editor\'s\s+note)$',
+    r'^(?:commentary|expert\s+commentary|invited\s+commentary)$',
+    r'^(?:letter\s+to\s+(?:the\s+)?editor|letter|correspondence|reply)$',
+    r'^(?:special\s+report|special\s+article|special\s+issue\s+article)$',
+    r'^(?:methodology|methods?\s+paper|study\s+protocol|protocol)$',
+    r'^(?:clinical\s+trial|randomized\s+controlled\s+trial)$',
+    r'^(?:perspective|viewpoint|opinion|essay|hypothesis)$',
+]
+ARTICLE_TYPE_REGEX = re.compile('|'.join(ARTICLE_TYPE_PATTERNS), re.IGNORECASE)
+
+
+def is_article_type_heading(text: str) -> bool:
+    """Returns True if the text represents an article type classification rather than a title."""
+    t = text.strip()
+    if not t:
+        return False
+    clean = re.sub(r'[:\.\-\–\—]+$', '', t).strip()
+    if ARTICLE_TYPE_REGEX.match(clean):
+        return True
+    return clean.lower() in [
+        'review', 'review article', 'original article', 'case report', 'case study',
+        'short communication', 'editorial', 'commentary', 'letter to editor', 'letter to the editor',
+        'special report', 'methodology', 'clinical trial', 'perspective', 'viewpoint', 'brief report'
+    ]
+
+
 def extract_docx_metadata_advanced(docx_path: str) -> Dict[str, Any]:
     """
     Automated DOCX Metadata Extractor Module.
     Parses manuscript DOCX to extract:
-    - Article Title
+    - Article Title (validated against article type classification)
+    - Article Type
     - DOI
     - Authors & Affiliations
     - Corresponding Email
@@ -20,6 +52,7 @@ def extract_docx_metadata_advanced(docx_path: str) -> Dict[str, Any]:
     """
     metadata: Dict[str, Any] = {
         "article_title": None,
+        "detected_article_type": None,
         "article_doi": None,
         "lead_author": None,
         "co_authors": [],
@@ -61,17 +94,51 @@ def extract_docx_metadata_advanced(docx_path: str) -> Dict[str, Any]:
         if email_match:
             metadata["corresponding_email"] = email_match.group(0)
 
-        # 4. Extract Article Title
-        # Check paragraph style first (e.g., 'Title', 'Heading 1', 'Article Title')
-        for p in doc.paragraphs:
-            style_name = (p.style.name or '').lower() if p.style else ''
-            if ('title' in style_name or 'heading 1' in style_name) and p.text.strip():
-                metadata["article_title"] = p.text.strip()
+        # 4. Extract Article Type & Real Article Title
+        detected_article_type = None
+        title_candidate = None
+        title_para_idx = -1
+
+        for idx, p in enumerate(paragraphs[:15]):
+            if is_article_type_heading(p):
+                if not detected_article_type:
+                    detected_article_type = p
+                continue
+            if re.match(r'^(?:abstract|keywords?|introduction|doi:|https?://|www\.)\b', p, re.I):
+                break
+            if re.match(r'^(?:vol(?:ume)?\.?\s*\d+|issn\b|page\s*\d+)', p, re.I):
+                continue
+            if any(term in p.lower() for term in ['department of', 'university', 'hospital', 'institute']):
+                continue
+            if not title_candidate and len(p) >= 10:
+                title_candidate = p
+                title_para_idx = idx
                 break
 
-        # Fallback to first non-empty paragraph if no title style matched
-        if not metadata["article_title"] and paragraphs:
-            metadata["article_title"] = paragraphs[0]
+        # Check paragraph style for explicit title style if not matched
+        if not title_candidate:
+            for idx, p in enumerate(doc.paragraphs[:15]):
+                txt = p.text.strip()
+                if not txt or is_article_type_heading(txt):
+                    continue
+                style_name = (p.style.name or '').lower() if p.style else ''
+                if ('title' in style_name or 'heading 1' in style_name) and len(txt) >= 10:
+                    title_candidate = txt
+                    title_para_idx = idx
+                    break
+
+        # Ultimate fallback
+        if not title_candidate and paragraphs:
+            for idx, p in enumerate(paragraphs[:5]):
+                if not is_article_type_heading(p):
+                    title_candidate = p
+                    title_para_idx = idx
+                    break
+            if not title_candidate:
+                title_candidate = paragraphs[0]
+
+        metadata["article_title"] = title_candidate
+        metadata["detected_article_type"] = detected_article_type
 
         # 5. Extract Abstract Block
         abstract_lines = []
@@ -106,23 +173,29 @@ def extract_docx_metadata_advanced(docx_path: str) -> Dict[str, Any]:
                 break
 
         # 7. Extract Authors & Affiliations
-        # Usually between Title and Abstract
-        first_few = paragraphs[1:8]
+        # Scan paragraphs after title_para_idx up to Abstract
+        start_idx = (title_para_idx + 1) if title_para_idx >= 0 else 1
+        post_title_paras = paragraphs[start_idx:start_idx + 8]
         author_candidates = []
         affiliation_candidates = []
 
-        for p in first_few:
+        for p in post_title_paras:
             p_lower = p.lower()
-            if p_lower.startswith(('abstract', 'keywords', 'doi:')):
+            if p_lower.startswith(('abstract', 'summary', 'keywords', 'doi:')):
                 break
-            if any(term in p_lower for term in ['university', 'department', 'institute', 'hospital', 'college', 'school', 'center', 'centre', 'laboratory', 'inc.', 'ltd.']):
+            if any(term in p_lower for term in ['university', 'department', 'institute', 'hospital', 'college', 'school', 'center', 'centre', 'laboratory', 'inc.', 'ltd.', 'via pinto', 'italy', 'usa', 'uk']):
                 affiliation_candidates.append(p)
-            elif '@' not in p and len(p.split()) < 20:
+            elif '@' not in p and len(p.split()) < 35:
                 author_candidates.append(p)
 
         if author_candidates:
-            metadata["lead_author"] = author_candidates[0]
-            if len(author_candidates) > 1:
+            first_author_line = author_candidates[0]
+            authors = [re.sub(r'[\d,\*\†\‡\§]+', '', a).strip() for a in re.split(r'[,;&]|\band\b', first_author_line)]
+            authors = [a for a in authors if a and len(a) > 2]
+            metadata["lead_author"] = authors[0] if authors else first_author_line
+            if len(authors) > 1:
+                metadata["co_authors"] = authors[1:]
+            else:
                 metadata["co_authors"] = author_candidates[1:]
 
         metadata["affiliations"] = affiliation_candidates

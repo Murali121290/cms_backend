@@ -1,0 +1,370 @@
+{
+  "rules": [
+    {
+      "id": "STRUCT001",
+      "name": "EPUB Folder Structure Check",
+      "scope": "book",
+      "enabled": true,
+      "category": "Structure Check"
+    },
+    {
+      "id": "STRUCT002",
+      "name": "Container File Check",
+      "scope": "book",
+      "enabled": true,
+      "category": "Structure Check"
+    },
+    {
+      "id": "STRUCT003",
+      "name": "EPUB Content Folder Check",
+      "scope": "book",
+      "rule_config": {
+        "opf_name": "isbn",
+        "css_folder": "css",
+        "css_file": "stylesheet.css",
+        "xhtml_folder": "xhtml",
+        "images_folder": "images",
+        "nav_file": "nav.xhtml",
+        "toc_file": "toc.ncx"
+      },
+      "enabled": true,
+      "category": "Structure Check"
+    },
+    {
+      "id": "STRUCT004",
+      "name": "EPUB File Extension Check",
+      "scope": "book",
+      "enabled": true,
+      "category": "Structure Check"
+    },
+    {
+      "id": "XHTML001",
+      "name": "XHTML Syntax Check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
+      "id": "CSS002",
+      "name": "CSS File Validation",
+      "target_path": "OEBPS/css",
+      "enabled": true,
+      "file_name_pattern": "*.css",
+      "category": "CSS Check"
+    },
+    {
+      "id": "URL001",
+      "name": "Internal Link Check",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml",
+      "category": "Link Check"
+    },
+    {
+      "id": "URL002",
+      "name": "External Link Check",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml",
+      "category": "Link Check"
+    },
+    {
+      "id": "URL003",
+      "name": "URL Text Match Check",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml",
+      "category": "Link Check"
+    },
+    {
+      "id": "URL006",
+      "name": "Plain text URLs must be wrapped in an <a> tag",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "Link Check"
+    },
+    {
+      "id": "BOD-COV-001",
+      "name": "The cover image must be the jpg file",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "cover.*",
+      "enabled": true,
+      "rule_config": {
+        "allowed_extensions": [
+          "jpg"
+        ]
+      },
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-COV-002",
+      "name": "Cover file must be the first item in the EPUB reading order (spine)",
+      "target_path": "OEBPS",
+      "file_name_pattern": "*.opf",
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-COV-003",
+      "name": "Cover image is exactly 300 DPI",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "cover.*",
+      "enabled": true,
+      "rule_config": {
+        "expected_dpi": 300
+      },
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-COV-004",
+      "name": "Cover shortest axis must be at least 1400 pixels",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "cover.*",
+      "enabled": true,
+      "rule_config": {
+        "min_shortest_axis": 1400
+      },
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-COV-005",
+      "name": "Cover must not exceed 3.2M pixels",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "cover.*",
+      "enabled": true,
+      "rule_config": {
+        "max_total_pixels": 3200000
+      },
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-COV-006",
+      "name": "Cover must not exceed 5 MB file size",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "cover.*",
+      "enabled": true,
+      "rule_config": {
+        "max_file_size_mb": 5
+      },
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-COV-007",
+      "name": "Cover image must have a default alt attribute",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*cover*.xhtml",
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-COV-008",
+      "name": "Cover file declared in OPF metadata (<meta name='cover' content='cover-image' />)",
+      "target_path": "OEBPS",
+      "file_name_pattern": "*.opf",
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-IMG-001",
+      "name": "All body images must be exactly 300 DPI",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.jpg",
+      "enabled": true,
+      "rule_config": {
+        "expected_dpi": 300,
+        "exclude_files": [
+          "cover.jpg"
+        ]
+      },
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-IMG-002",
+      "name": "Images inside the E-Book must have a minimum of 850 pixels in width or height",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.jpg",
+      "enabled": true,
+      "rule_config": {
+        "min_dimension": 850,
+        "exclude_files": [
+          "cover.jpg"
+        ]
+      },
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-IMG-003",
+      "name": "<img> alt attribute must not be empty",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "COM-LINK-001",
+      "name": "citations must be linked to the corresponding block",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*_[cC]hapter*.xhtml",
+        "*_[cC]hap*.xhtml",
+        "*_[cC]h*.xhtml",
+        "*[cC]hapter*.xhtml",
+        "*[cC]hap*.xhtml",
+        "*[cC]h[0-9]*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "citation_regex": "\\b(?:see\\s+)?(?:(?:pages?|pp\\.|p\\.)(?![a-zA-Z])[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-\u2013][ \\t]*\\d{1,4})?|(?:chapter|chap\\.|ch\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)(?:[ \\t]*[\\-\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:figure|fig\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:table|tbl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:exhibit|exh\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:plate|pl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|map(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|box(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:section|sec\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:part|pt\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:appendix|app\\.)(?![a-zA-Z])[ \\t\\-]*([1-9]|10|[A-K]|one|two|three|four|five|six|seven|eight|nine|ten)|(?:illustration|illus\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(appendix))\\b"
+      },
+      "category": "Link Check"
+    },
+    {
+      "id": "TOC-MERGE-001",
+      "name": "TOC Line Merge",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*Contents.xhtml",
+      "enabled": true,
+      "category": "TOC Check"
+    },
+    {
+      "id": "COM-META-006",
+      "name": "accessMode Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "textual",
+          "visual"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-007",
+      "name": "accessModeSufficient Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "textual",
+          "textual,visual"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-008",
+      "name": "accessibilityFeature Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "pageBreakMarkers",
+          "alternativeText",
+          "ARIA",
+          "displayTransformability",
+          "readingOrder",
+          "structuralNavigation",
+          "highContrastDisplay",
+          "tableOfContents"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-011",
+      "name": "dcterms:conformsTo Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_text": "EPUB Accessibility 1.1 - WCAG 2.2 Level AA"
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-012",
+      "name": "a11y:certifiedBy Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_text": "Books on Demand",
+        "require_id": false
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-010",
+      "name": "accessibilityHazard Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "none"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-009",
+      "name": "accessibilitySummary Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_summary": "Dieses E-Book wurde gemäß der W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit geprüft. Es genügt den Anforderungen an Barrierefreiheit zu Inhaltsstruktur, semantischer Auszeichnung und Alternativtexten.",
+        "is_required": true
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-014",
+      "name": "tdm:reservation Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_value": "1"
+      },
+      "category": "Metadata Check"
+    }
+  ],
+  "export": {
+    "filename_format": "{eisbn}_1_ePub_all.ePub"
+  },
+  "upload": {
+    "filename_format": "{eisbn}_1_ePub_all.ePub"
+  },
+  "category_order": [
+    "STRUCTURE CHECK",
+    "METADATA CHECK",
+    "CSS CHECK",
+    "XHTML CHECK",
+    "IMAGE CHECK",
+    "LINK CHECK",
+    "TEXT FORMATTING CHECK"
+  ]
+}

@@ -33,6 +33,8 @@ import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import { ArtValidationModal } from '@/components/ArtValidationModal'
+import { Modal } from '@/components/ui/Modal'
+import { chaptersApi } from '@/api/chapters'
 import { useStageActionsStore } from '@/store/useStageActionsStore'
 
 import {
@@ -40,7 +42,7 @@ import {
   startStructuring,
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
+  startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof, startInddToProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -282,9 +284,11 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, stageName, isAssigned, projectId, chapterId, clientName,
+  row, activeFolder, folderFiles, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, stageName, isAssigned, projectId, chapterId, clientName,
 }: {
   row: FileRow | null
+  activeFolder?: string
+  folderFiles?: FileRow[]
   onOpenReferenceCheck: (file: FileRecord) => void
   onOpenXmlToIndesign: (fileId: number, fileName: string) => void
   onOpenWordToIndesign?: (fileId: number, fileName: string) => void
@@ -304,6 +308,17 @@ function ProcessingActionsMenu({
 
   const fid = row?.db_id
   const fname = row?.file_name.toLowerCase() ?? ''
+
+  const isIndesignFolder = activeFolder === 'indesign' || activeFolder === 'template_indesign' || row?.subfolder?.toLowerCase() === 'indesign'
+
+  // If a specific .indd file is selected, target it. Otherwise, target the first .indd file in the folder.
+  const selectedIsIndd = Boolean(fid && fname.endsWith('.indd'))
+  const folderInddFile = !selectedIsIndd && folderFiles
+    ? folderFiles.find(f => f.file_name.toLowerCase().endsWith('.indd'))
+    : null
+
+  const targetInddFid = selectedIsIndd ? fid : folderInddFile?.db_id
+  const targetInddName = selectedIsIndd ? (row?.file_name || '') : (folderInddFile?.file_name || '')
 
   const isSpringer = Boolean(
     clientName && (clientName.toLowerCase().includes('springer') || clientName.toLowerCase() === 'spr')
@@ -603,6 +618,22 @@ function ProcessingActionsMenu({
           </button>
         )}
 
+        {showAction('inddToProof') && isIndesignFolder && (
+          <button
+            disabled={!targetInddFid}
+            title={targetInddFid ? `Run InDesign to Proof (generates PDF, XHTML, CSS) on ${targetInddName}` : "Requires an InDesign (.indd) file in the InDesign folder"}
+            className={btnCls}
+            onClick={() => targetInddFid && setConfirmStep({
+              actionName: 'InDesign to Proof',
+              jobFn: () => startInddToProof(targetInddFid),
+              pollFileId: targetInddFid,
+              pollProcessType: 'indd_to_proof'
+            })}
+          >
+            <FileCode size={12} className="text-pink-500" /> InDesign to Proof
+          </button>
+        )}
+
         {(fname.endsWith('.indd') || fname.endsWith('.indt')) && (row?.subfolder?.toLowerCase() === 'indesign' || row?.subfolder?.toLowerCase() === 'design' || row?.subfolder?.toLowerCase() === 'template') && (
           <>
             <button
@@ -736,6 +767,25 @@ export function ChapterFilePage({
   }, [activeFolderConfig])
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const [deleteChapterModalOpen, setDeleteChapterModalOpen] = useState(false)
+  const [deletingChapter, setDeletingChapter] = useState(false)
+
+  const handleDeleteChapter = async () => {
+    if (!pid || !cid) return
+    setDeletingChapter(true)
+    try {
+      await chaptersApi.delete(pid, cid)
+      toast.success(`Chapter ${resolvedChapterName} deleted successfully`)
+      if (cliId) {
+        navigate(`/clients/${cliId}/projects/${pid}`)
+      } else {
+        navigate(`/projects/${pid}`)
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || err.message || 'Failed to delete chapter')
+      setDeletingChapter(false)
+    }
+  }
   const activeFolderParam = searchParams.get('folder') as FolderKey | null
   const activeFolder: FolderKey = useMemo(() => {
     return activeFolderParam && activeFolderParam in activeFolderConfig
@@ -755,6 +805,7 @@ export function ChapterFilePage({
   const [globalFilter, setGlobalFilter] = useState('')
   const [showBulkUpload, setShowBulkUpload] = useState(false)
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<FileRow | null>(null)
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [generatingFigurePdf, setGeneratingFigurePdf] = useState(false)
   const [generatingAssessment, setGeneratingAssessment] = useState(false)
@@ -874,7 +925,7 @@ export function ChapterFilePage({
 
   // Open docx viewer (full-screen viewer page)
   function openEditor(row: FileRow) {
-    if (!resolvedIsAssigned) return
+    if (!resolvedIsAssigned && activeFolder !== 'backup') return
     if (row.db_id && /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(row.file_name)) {
       // Pass the current folder so the editor rail is scoped to the same
       // Originals-vs-Converted split the user is viewing here.
@@ -898,6 +949,37 @@ export function ChapterFilePage({
       void filesQuery.refetch()
     } catch {
       toast.error(`Failed to delete '${deleteConfirmRow.file_name}'`)
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  async function confirmBulkDelete() {
+    const targets = selectedRows.filter(r => r.db_id)
+    if (targets.length === 0) return
+    setDeleteLoading(true)
+    let successCount = 0
+    let failCount = 0
+    try {
+      await Promise.all(
+        targets.map(async r => {
+          try {
+            await deleteFile(r.db_id!)
+            successCount++
+          } catch {
+            failCount++
+          }
+        })
+      )
+      if (successCount > 0) {
+        toast.success(`${successCount} file${successCount > 1 ? 's' : ''} deleted successfully`)
+      }
+      if (failCount > 0) {
+        toast.error(`Failed to delete ${failCount} file${failCount > 1 ? 's' : ''}`)
+      }
+      setBulkDeleteConfirmOpen(false)
+      setRowSelection({})
+      void filesQuery.refetch()
     } finally {
       setDeleteLoading(false)
     }
@@ -1033,7 +1115,7 @@ export function ChapterFilePage({
               <span className="w-4" />
             )}
             <FolderIcon name={icon} size={14} color={color} />
-            {fid ? (
+            {fid && activeFolder !== 'backup' ? (
               <button
                 type="button"
                 disabled={!resolvedIsAssigned}
@@ -1119,15 +1201,16 @@ export function ChapterFilePage({
       },
     }),
     ...dynamicCols,
-    ...(activeFolder !== 'backup' ? [col.display({
+    col.display({
       id: 'actions', header: () => <div className="text-center">Actions</div>, size: 130,
       cell: i => {
         const r = i.row.original
         const fid = r.db_id
+        const isBackup = activeFolder === 'backup'
         const hideEdit = /\.(xlsx?|indd)$/i.test(r.file_name)
         return (
           <div className="flex items-center justify-center gap-1">
-            {resolvedIsAssigned && !hideEdit && (
+            {resolvedIsAssigned && !hideEdit && !isBackup && (
               <IconTooltipButton
                 title="Edit"
                 onClick={() => {
@@ -1154,7 +1237,7 @@ export function ChapterFilePage({
                 </a>
               </IconTooltipButton>
             )}
-            {isAdminUser && (
+            {isAdminUser && !isBackup && (
               <IconTooltipButton
                 title="Delete"
                 onClick={() => handleDelete(r)}
@@ -1166,7 +1249,7 @@ export function ChapterFilePage({
           </div>
         )
       },
-    })] : []),
+    }),
     col.display({
       id: 'history', header: 'History', size: 70,
       cell: ({ row }) => (
@@ -1521,6 +1604,18 @@ export function ChapterFilePage({
           </button>
         )}
 
+        {/* Bulk Delete */}
+        {isAdminUser && activeFolder !== 'backup' && selectedCount > 0 && (
+          <button
+            onClick={() => setBulkDeleteConfirmOpen(true)}
+            disabled={deleteLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg transition-colors shadow-sm"
+          >
+            {deleteLoading ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+            Bulk Delete ({selectedCount})
+          </button>
+        )}
+
         {/* Refresh */}
         {filesQuery.data && (
           <button
@@ -1531,6 +1626,8 @@ export function ChapterFilePage({
             <Loader2 size={14} className={filesQuery.isFetching ? 'animate-spin text-primary' : ''} />
           </button>
         )}
+
+
 
         {/* Proceed */}
         {onProceed && (
@@ -1626,6 +1723,8 @@ export function ChapterFilePage({
               {resolvedIsAssigned && (
                 <ProcessingActionsMenu
                   row={selectedCount === 1 ? selectedRows[0] : null}
+                  activeFolder={activeFolder}
+                  folderFiles={table.getFilteredRowModel().rows.map(r => r.original)}
                   onOpenReferenceCheck={setRefCheckFile}
                   onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'xml_to_indesign' })}
                   onOpenWordToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'word_to_indesign' })}
@@ -1796,6 +1895,47 @@ export function ChapterFilePage({
         </div>
       )}
 
+      {/* Bulk Delete confirmation dialog */}
+      {bulkDeleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => !deleteLoading && setBulkDeleteConfirmOpen(false)}>
+          <div className="bg-card border border-border rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                <Trash2 size={16} className="text-red-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-text text-sm">Delete {selectedRows.length} files?</p>
+                <p className="text-xs text-muted mt-0.5">This action cannot be undone.</p>
+              </div>
+            </div>
+            <div className="max-h-48 overflow-y-auto mb-5 bg-surface rounded-lg p-2.5 space-y-1 divide-y divide-border/40 text-xs">
+              {selectedRows.map(r => (
+                <div key={r.file_id || r.file_name} className="py-1 px-1 font-mono text-text truncate">
+                  {r.file_name}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setBulkDeleteConfirmOpen(false)}
+                disabled={deleteLoading}
+                className="px-4 py-1.5 text-sm rounded-lg border border-border text-muted hover:text-text hover:border-text/20 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void confirmBulkDelete()}
+                disabled={deleteLoading}
+                className="px-4 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {deleteLoading ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                Delete {selectedRows.length} files
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── XML / Word to InDesign Conversion Modal ────────────────────────────── */}
       {xmlToIndesignFile && (
         <XmlToIndesignModal
@@ -1819,6 +1959,16 @@ export function ChapterFilePage({
         />
       )}
 
+      {/* ── Delete Chapter Confirmation Modal ──────────────────────────── */}
+      <Modal
+        isOpen={deleteChapterModalOpen}
+        onClose={() => { if (!deletingChapter) setDeleteChapterModalOpen(false) }}
+        onConfirm={handleDeleteChapter}
+        title="Delete Chapter"
+        description={`Are you sure you want to delete chapter "${resolvedChapterName}"? All associated files, pipeline artifacts, and workflow records will be permanently removed.`}
+        confirmLabel={deletingChapter ? "Deleting..." : "Delete"}
+        loading={deletingChapter}
+      />
     </div>
   )
 }

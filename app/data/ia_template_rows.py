@@ -2,10 +2,13 @@
 Master IA template rows for Editorial Stylesheet creation.
 Each entry: (element, subtype, pattern, example_or_None)
 
-Copied from PPH manuscript_core/ia_mapping.py — not imported live.
+IA_TEMPLATE_ROWS is the technical editing engine's live list
+(manuscript_core/ia_mapping.py) plus the rows below that the engine does not
+have, so stylesheets saved from the older copy keep validating.
 """
+from app.processing.manuscript_core.ia_mapping import IA_TEMPLATE_ROWS as _ENGINE_ROWS
 
-IA_TEMPLATE_ROWS: list[tuple[str, str, str, str | None]] = [
+_LEGACY_ROWS: list[tuple[str, str, str, str | None]] = [
     # Figure
     ("Figure", "Caption", "Figure ^#", "Figure 1"),
     ("Figure", "Citation", "Figure ^#", "Figure 1"),
@@ -128,4 +131,10 @@ IA_TEMPLATE_ROWS: list[tuple[str, str, str, str | None]] = [
     ("Inline lists", "General", "(A), (B)…", None),
     ("Inline lists", "General", "(a), (b)…", None),
     ("Inline lists", "General", "(1), (2)…", None),
+]
+
+
+_engine_keys = {row[:3] for row in _ENGINE_ROWS}
+IA_TEMPLATE_ROWS: list[tuple[str, str, str, str | None]] = list(_ENGINE_ROWS) + [
+    row for row in _LEGACY_ROWS if row[:3] not in _engine_keys
 ]

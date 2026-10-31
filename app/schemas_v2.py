@@ -21,10 +21,14 @@ class Viewer(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     roles: list[str]
+    role: str | None = None
+    additional_roles: list[str] = []
+    additional_teams: list[str] = []
     is_active: bool
     team: str | None = None
     designation: str | None = None
     access_level: str | None = "standard"
+    permissions: list[str] = []
 
 
 class SessionAuth(BaseModel):
@@ -132,7 +136,11 @@ class ProjectSummary(BaseModel):
     actual_pages: int | None = None
     isbn_no: str | None = None
     billing_location: str | None = None
+    billing_type: str | None = None
+    alt_text: str | None = None
+    accessibility: str | None = None
     due_date: str | None = None
+    due_date_history: list | None = None
     file_details: dict | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -367,6 +375,8 @@ class AdminUser(BaseModel):
     is_active: bool
     roles: list[AdminUserRole]
     team: str | None = None
+    additional_roles: list[str] = []
+    additional_teams: list[str] = []
     customer_access: list[str] = []
     designation: str | None = None
     role: str | None = None
@@ -396,6 +406,8 @@ class UserCreate(BaseModel):
     role: str | None = None
     designation: str | None = None
     team: str
+    additional_roles: list[str] = []
+    additional_teams: list[str] = []
     customer_access: list[str] = []
     active_status: bool | None = True
 
@@ -404,6 +416,8 @@ class UserUpdate(BaseModel):
     role: str | None = None
     designation: str | None = None
     team: str | None = None
+    additional_roles: list[str] | None = None
+    additional_teams: list[str] | None = None
     password: str | None = None
     customer_access: list[str] | None = None
     active_status: bool | None = None
@@ -802,6 +816,8 @@ class StructuringReviewResponse(BaseModel):
     actions: StructuringReviewActions
     styles: list[str]
     char_styles: list[str] = []
+    client_name: str | None = None
+    tag_set: str | None = None
 
 
 class StructuringSaveRequest(BaseModel):
@@ -829,11 +845,21 @@ class IATemplateRow(BaseModel):
     subtype: str
     pattern: str
     example: str | None = None
+    ce_rule_no: int | None = None
+    ce_option: int | None = None
 
 
 class StylesheetSourceFile(BaseModel):
     id: int
     filename: str
+
+
+class CERuleSetting(BaseModel):
+    """One checklist rule's settings in a stylesheet; omitted fields inherit."""
+    enabled: bool | None = None
+    option: int | str | None = None
+    severity: Literal["Critical", "Major", "Minor", "Informational"] | None = None
+    custom_template: str | None = None
 
 
 class StylesheetSummary(BaseModel):
@@ -848,6 +874,8 @@ class StylesheetSummary(BaseModel):
     selected_ia_rows: list[IARow] = Field(default_factory=list)
     analyzed_file_ids: list[int] = Field(default_factory=list)
     source_files: list[StylesheetSourceFile] = Field(default_factory=list)
+    ce_rules: dict[str, CERuleSetting] = Field(default_factory=dict)
+    style_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 class StylesheetCreateRequest(BaseModel):
@@ -855,6 +883,8 @@ class StylesheetCreateRequest(BaseModel):
     description: str | None = None
     selected_ia_rows: list[IARow] = Field(default_factory=list)
     analyzed_file_ids: list[int] = Field(default_factory=list)
+    ce_rules: dict[str, CERuleSetting] = Field(default_factory=dict)
+    style_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 class StylesheetCreateResponse(BaseModel):
@@ -867,6 +897,8 @@ class StylesheetUpdateRequest(BaseModel):
     description: str | None = None
     selected_ia_rows: list[IARow] | None = None
     analyzed_file_ids: list[int] | None = None
+    ce_rules: dict[str, CERuleSetting] | None = None
+    style_profile: dict[str, Any] | None = None
 
 
 class StylesheetUpdateResponse(BaseModel):
@@ -895,6 +927,26 @@ class IATemplateResponse(BaseModel):
     rows: list[IATemplateRow]
 
 
+class CERule(BaseModel):
+    """One rule of the CE checklist catalog (CE_rules_tool_input.xlsx)."""
+    sno: int
+    name: str
+    group: str
+    description: str = ""
+    options: list[str]
+    handling: str
+    behaviour: str
+    severity: str
+    needs: str = ""
+    notes: str = ""
+    source_point: int | None = None
+    detectable: Literal["auto", "flag", "manual"]
+
+
+class CERulesResponse(BaseModel):
+    rules: list[CERule]
+
+
 # ─── Stylesheet Analysis ──────────────────────────────────────────────────────
 
 
@@ -908,6 +960,8 @@ class TriggeredIARule(BaseModel):
     pattern: str
     count: int
     example_surfaces: list[str] = Field(default_factory=list)
+    ce_rule_no: int | None = None
+    ce_option: int | None = None
 
 
 class AnalyzeFilesForStylesheetResponse(BaseModel):
@@ -1057,6 +1111,7 @@ class ProjectUpdateRequest(BaseModel):
     color: str | None = None
     trim_size: str | None = None
     copyright_year: int | None = None
+    estimated_pages: int | None = None
     actual_pages: int | None = None
     due_date: str | None = None
     division_code: str | None = None
@@ -1064,6 +1119,12 @@ class ProjectUpdateRequest(BaseModel):
     sales_person: str | None = None
     isbn_no: str | None = None
     billing_location: str | None = None
+    billing_type: str | None = None
+    alt_text: str | None = None
+    accessibility: str | None = None
+    reason: str | None = None
+    skipped_stages: dict[str, list[str]] | None = None
+    skipped_stages_history: list[dict[str, Any]] | None = None
 
 
 class UploadZipChapterEntry(BaseModel):

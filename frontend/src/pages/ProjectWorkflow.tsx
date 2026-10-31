@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Search
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Search, Trash2
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -358,25 +358,23 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
                 const fullName = `${fn} ${ln}`.trim()
                 const label = fullName || u.user_name
                 const isSelected = value === u.user_name
-                
+
                 return (
                   <button
                     key={u.id}
                     type="button"
-                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                      isSelected 
-                        ? 'bg-primary/10 text-primary font-medium' 
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                        ? 'bg-primary/10 text-primary font-medium'
                         : 'text-foreground hover:bg-muted/40'
-                    }`}
+                      }`}
                     onClick={(e) => {
                       e.stopPropagation()
                       setIsOpen(false)
                       if (value !== u.user_name) onChange(u.user_name)
                     }}
                   >
-                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
-                      isSelected ? 'text-primary' : 'text-transparent'
-                    }`}>
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                      }`}>
                       {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
                       {!isSelected && <User size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
                     </div>
@@ -473,7 +471,7 @@ function FilterAssigneeDropdown({
               <span className="group-hover:translate-x-0.5 transition-transform duration-200">All Assignees</span>
             </button>
           </div>
-          
+
           <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
             {filteredOptions.length === 0 ? (
               <div className="text-[11px] text-muted-foreground px-2.5 py-3 text-center">No results found</div>
@@ -481,25 +479,23 @@ function FilterAssigneeDropdown({
               filteredOptions.map(u => {
                 const label = getUserDisplayName(u, users)
                 const isSelected = value === u
-                
+
                 return (
                   <button
                     key={u}
                     type="button"
-                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                      isSelected 
-                        ? 'bg-primary/10 text-primary font-medium' 
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                        ? 'bg-primary/10 text-primary font-medium'
                         : 'text-foreground hover:bg-muted/40'
-                    }`}
+                      }`}
                     onClick={(e) => {
                       e.stopPropagation()
                       setIsOpen(false)
                       if (value !== u) onChange(u)
                     }}
                   >
-                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
-                      isSelected ? 'text-primary' : 'text-transparent'
-                    }`}>
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                      }`}>
                       {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
                       {!isSelected && <User size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
                     </div>
@@ -576,7 +572,7 @@ function StageSelectDropdown({
               <span className="group-hover:translate-x-0.5 transition-transform duration-200">{placeholder}</span>
             </button>
           </div>
-          
+
           <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
             {stages.map(s => {
               const isSelected = value === s
@@ -584,20 +580,18 @@ function StageSelectDropdown({
                 <button
                   key={s}
                   type="button"
-                  className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                    isSelected 
-                      ? 'bg-primary/10 text-primary font-medium' 
+                  className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                      ? 'bg-primary/10 text-primary font-medium'
                       : 'text-foreground hover:bg-muted/40'
-                  }`}
+                    }`}
                   onClick={(e) => {
                     e.stopPropagation()
                     setIsOpen(false)
                     if (value !== s) onChange(s)
                   }}
                 >
-                  <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
-                    isSelected ? 'text-primary' : 'text-transparent'
-                  }`}>
+                  <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                    }`}>
                     {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
                     {!isSelected && <Layers size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
                   </div>
@@ -621,9 +615,11 @@ interface ChapterCardProps {
   stageRolesMap: Map<string, string[]>
   onAssigneeChange: (chapter: Chapter, val: string) => Promise<boolean>
   onViewDetails: (chapter: Chapter) => void
+  onDelete?: (chapter: Chapter) => void
+  canDelete?: boolean
 }
 
-function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigneeChange, onViewDetails }: ChapterCardProps) {
+function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigneeChange, onViewDetails, onDelete, canDelete }: ChapterCardProps) {
   const [updating, setUpdating] = useState(false)
 
   const status = statusMeta(chapter.status)
@@ -642,7 +638,14 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
       <div className="px-4 pt-3.5 pb-2.5">
         <div className="flex items-start justify-between gap-2 mb-1">
           <div className="min-w-0 cursor-pointer" onClick={() => onViewDetails(chapter)}>
-            <p className="text-xs font-bold text-primary uppercase tracking-wide hover:underline">{chapter.chapters}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs font-bold text-primary uppercase tracking-wide hover:underline">{chapter.chapters}</p>
+              {(chapter.revision ?? 1) > 1 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                  Rev {chapter.revision}
+                </span>
+              )}
+            </div>
             <p className="text-sm font-medium text-text mt-0.5 line-clamp-2 leading-snug hover:text-primary transition-colors">
               {chapter.chapter_title || chapter.chapters}
             </p>
@@ -655,6 +658,16 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
                 </span>
               )}
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${status.cls}`}>{status.label}</span>
+              {canDelete && onDelete && (
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); onDelete(chapter) }}
+                  title="Delete chapter"
+                  className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors ml-0.5"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
             </div>
             {delayed && (
               <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
@@ -884,6 +897,10 @@ export function ProjectWorkflow() {
   const [batchSelectedChapterIds, setBatchSelectedChapterIds] = useState<Set<number>>(new Set())
   const [batchTemplateId, setBatchTemplateId] = useState<number | ''>('')
 
+  // Chapter Deletion state
+  const [chapterToDelete, setChapterToDelete] = useState<Chapter | null>(null)
+  const [deletingChapter, setDeletingChapter] = useState(false)
+
   useEffect(() => {
     if (!groupProceedModalOpen || !groupProceedStage || selectedGroupProceedChapterIds.size === 0) {
       setGroupProceedConfig(null)
@@ -918,6 +935,7 @@ export function ProjectWorkflow() {
   const [selectedTrackWf, setSelectedTrackWf] = useState('')
   const [allWorkflowNames, setAllWorkflowNames] = useState<string[]>([])
   const [newChapterCategory, setNewChapterCategory] = useState('indesign')
+  const [allowRevision, setAllowRevision] = useState(true)
 
   const DESIGN_UPLOAD_CATEGORIES = [
     { key: 'indesign', label: 'InDesign' },
@@ -1019,6 +1037,9 @@ export function ProjectWorkflow() {
     .filter(c => c.chapters.toLowerCase().includes('art'))
     .sort(sortChapters), [chapters])
 
+  // Check if project has a complete book manuscript (00)
+  const isBookProject = useMemo(() => manuscriptChapters.some(c => c.chapters === '00'), [manuscriptChapters])
+
   const batchTargets = useMemo(() => {
     if (filterStage) {
       return manuscriptChapters.filter(c => c.stage_name === filterStage)
@@ -1048,14 +1069,24 @@ export function ProjectWorkflow() {
 
   // Get active workflow and stages based on the selected tab
   const activeWorkflowName = useMemo(() => {
-    if (activeTab === 'design') return designChapters[0]?.workflow || project?.workflow_name || ''
-    if (activeTab === 'art') return artChapters[0]?.workflow || project?.workflow_name || ''
-    return manuscriptChapters[0]?.workflow || project?.workflow_name || ''
+    const trackWorkflows = ((project?.file_details as Record<string, unknown> | null)?.track_workflows as Record<string, string> | undefined) || {}
+    if (activeTab === 'design') {
+      return designChapters[0]?.workflow || trackWorkflows.design || ''
+    }
+    if (activeTab === 'art') {
+      return artChapters[0]?.workflow || trackWorkflows.art || ''
+    }
+    return manuscriptChapters[0]?.workflow || trackWorkflows.manuscript || project?.workflow_name || ''
   }, [activeTab, designChapters, artChapters, manuscriptChapters, project])
 
   const orderedStages = useMemo(() => {
-    return wfStagesMap[activeWorkflowName] ?? []
-  }, [activeWorkflowName, wfStagesMap])
+    const rawStages = wfStagesMap[activeWorkflowName] ?? []
+    const skippedMap = ((project?.file_details as Record<string, unknown> | null)?.skipped_stages as Record<string, string[]> | undefined) || {}
+    const skippedList = skippedMap[activeTab] || skippedMap['manuscript'] || []
+    if (!skippedList || skippedList.length === 0) return rawStages
+    const skippedSet = new Set(skippedList)
+    return rawStages.filter(s => !skippedSet.has(s.stage_name))
+  }, [activeWorkflowName, wfStagesMap, project, activeTab])
 
   const summary = useMemo(() => {
     const actual = activeChapters.filter(c => c.chapters !== 'CE support')
@@ -1119,8 +1150,8 @@ export function ProjectWorkflow() {
     if (!uName) return new Set()
     const myAssigned = activeChapters.filter(
       c => c.stage_name === stg &&
-           c.current_assignee_name &&
-           c.current_assignee_name.trim().toLowerCase() === uName.toLowerCase()
+        c.current_assignee_name &&
+        c.current_assignee_name.trim().toLowerCase() === uName.toLowerCase()
     )
     return new Set(myAssigned.map(c => c.id))
   }
@@ -1263,9 +1294,9 @@ export function ProjectWorkflow() {
           mode: 'style',
           options: processType === 'structuring'
             ? {
-                structuring_method: 'manual',
-                tag_set: (project?.client_name && (project.client_name.toLowerCase().includes('springer') || project.client_name.toLowerCase() === 'spr')) ? 'springer' : 'lww'
-              }
+              structuring_method: 'manual',
+              tag_set: (project?.client_name && (project.client_name.toLowerCase().includes('springer') || project.client_name.toLowerCase() === 'spr')) ? 'springer' : 'lww'
+            }
             : undefined
         })
       })
@@ -1394,14 +1425,15 @@ export function ProjectWorkflow() {
       }
 
       if (activeTab === 'art') {
-        const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName)
-        setChapters(prev => [...prev, ...result.created])
+        const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName, allowRevision)
+        const refreshed = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+        setChapters(refreshed)
         setIsAddChapterOpen(false)
 
         if (result.created.length > 0 && result.skipped.length > 0) {
-          toast.success(`${result.created.length} Art chapter(s) created, ${result.skipped.length} chapter(s) already exist`)
+          toast.success(`${result.created.length} Art chapter(s) processed, ${result.skipped.length} chapter(s) skipped`)
         } else if (result.created.length > 0) {
-          toast.success(`${result.created.length} Art chapter(s) created successfully`)
+          toast.success(`${result.created.length} Art chapter(s) uploaded successfully`)
         } else if (result.skipped.length > 0) {
           const firstReason = result.skipped[0]?.reason || ''
           if (firstReason.includes('already exist')) {
@@ -1416,14 +1448,15 @@ export function ProjectWorkflow() {
         return
       }
 
-      const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName)
-      setChapters(prev => [...prev, ...result.created])
+      const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName, allowRevision)
+      const refreshed = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+      setChapters(refreshed)
       setIsAddChapterOpen(false)
 
       if (result.created.length > 0 && result.skipped.length > 0) {
-        toast.success(`${result.created.length} chapter(s) created, ${result.skipped.length} chapter(s) already exist`)
+        toast.success(`${result.created.length} chapter(s) processed, ${result.skipped.length} chapter(s) skipped`)
       } else if (result.created.length > 0) {
-        toast.success(`${result.created.length} chapter(s) created successfully`)
+        toast.success(`${result.created.length} chapter(s) uploaded successfully`)
       } else if (result.skipped.length > 0) {
         const firstReason = result.skipped[0]?.reason || ''
         if (firstReason.includes('already exist')) {
@@ -1462,6 +1495,39 @@ export function ProjectWorkflow() {
     const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num, 10).toString()) ?? cmsChapterIdMap.get(num.padStart(2, '0')) ?? null
     if (!cmsId) { toast.error(`Chapter "${num}" has no files yet.`); return }
     navigate(`${clientId ? `/clients/${clientId}/projects/${projectId}` : `/projects/${projectId}`}/chapters/${cmsId}`)
+  }
+
+  async function handleDeleteChapter() {
+    if (!chapterToDelete || !id) return
+    const targetCmsId = cmsChapterIdMap.get(chapterToDelete.chapters) ??
+      cmsChapterIdMap.get(parseInt(chapterToDelete.chapters, 10).toString()) ??
+      cmsChapterIdMap.get(chapterToDelete.chapters.padStart(2, '0')) ??
+      chapterToDelete.id
+
+    setDeletingChapter(true)
+    try {
+      await chaptersApi.delete(id, targetCmsId)
+      toast.success(`Chapter ${chapterToDelete.chapters} deleted successfully`)
+      // Refresh chapters from backend
+      const refreshed = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+      setChapters(refreshed)
+      // Refresh CMS chapter mappings
+      const refreshedCms = await projectsApi.getProjectChapters(id).catch(() => ({ project: null, chapters: [] }))
+      const m = new Map<string, number>()
+      for (const ch of refreshedCms.chapters || []) {
+        if (ch.number != null && ch.id != null) {
+          m.set(ch.number, ch.id)
+          m.set(ch.number.padStart(2, '0'), ch.id)
+          m.set(parseInt(ch.number, 10).toString(), ch.id)
+        }
+      }
+      setCmsChapterIdMap(m)
+      setChapterToDelete(null)
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || err.message || 'Failed to delete chapter')
+    } finally {
+      setDeletingChapter(false)
+    }
   }
 
   async function handleOpenCombineModal() {
@@ -1516,8 +1582,9 @@ export function ProjectWorkflow() {
     <div className="flex flex-col min-h-full relative">
 
       {/* ── Page Header ── */}
-      <div className="px-6 py-4 border-b border-border bg-background flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+      <div className="px-4 sm:px-6 py-3 border-b border-border bg-background flex items-center justify-between gap-4">
+        {/* Left section: back arrow + title & metadata */}
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
             onClick={() => {
               if (clientId) {
@@ -1526,67 +1593,72 @@ export function ProjectWorkflow() {
                 navigate('/clients')
               }
             }}
-            className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors mt-0.5 flex-shrink-0"
+            className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors flex-shrink-0"
           >
             <ArrowLeft size={18} />
           </button>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-lg font-bold text-text">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <h1
+                className="text-base sm:text-lg font-bold text-text truncate shrink min-w-0"
+                title={project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
+              >
                 {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
               </h1>
               {project.status && (
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${statusMeta(project.status).cls}`}>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border shrink-0 ${statusMeta(project.status).cls}`}>
                   {project.status}
                 </span>
               )}
               {project.priority === 'Fast Track' && (
-                <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 shrink-0">
                   <Zap size={10} /> Fast Track
                 </span>
               )}
-              <button
-                onClick={() => setIsInfoOpen(true)}
-                title="View project info"
-                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-2"
-              >
-                <Info size={14} />
-              </button>
-              <button
-                onClick={() => setIsEditOpen(true)}
-                title="Edit project"
-                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
-              >
-                <Edit2 size={14} />
-              </button>
-              <button
-                onClick={() => {
-                  if (project.project_manager !== viewer?.username && !canAccess(['admin'])) {
-                    toast.error('Only the assigned Project Manager can open planning.')
-                    return
-                  }
-                  const contentChapters = chapters.filter(c => c.chapters !== 'Design' && c.chapters !== 'CE support')
-                  if (contentChapters.length === 0) {
-                    navigate(`/projects/${id}/mapping`)
-                  } else {
-                    navigate(`/projects/${id}/planning`)
-                  }
-                }}
-                title="Project planning"
-                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
-              >
-                <Calendar size={14} />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => setIsInfoOpen(true)}
+                  title="View project info"
+                  className="p-1 rounded text-muted hover:text-primary hover:bg-surface transition-colors"
+                >
+                  <Info size={14} />
+                </button>
+                <button
+                  onClick={() => setIsEditOpen(true)}
+                  title="Edit project"
+                  className="p-1 rounded text-muted hover:text-primary hover:bg-surface transition-colors"
+                >
+                  <Edit2 size={14} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (project.project_manager !== viewer?.username && !canAccess(['admin'])) {
+                      toast.error('Only the assigned Project Manager can open planning.')
+                      return
+                    }
+                    const contentChapters = chapters.filter(c => c.chapters !== 'Design' && c.chapters !== 'CE support')
+                    if (contentChapters.length === 0) {
+                      navigate(`/projects/${id}/mapping`)
+                    } else {
+                      navigate(`/projects/${id}/planning`)
+                    }
+                  }}
+                  title="Project planning"
+                  className="p-1 rounded text-muted hover:text-primary hover:bg-surface transition-colors"
+                >
+                  <Calendar size={14} />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-3 mt-1 flex-wrap text-xs text-muted">
-              {(project.code || project.project_code) && <span>{project.code || project.project_code}</span>}
+            <div className="flex items-center gap-2 sm:gap-3 mt-0.5 truncate text-xs text-muted">
+              {(project.code || project.project_code) && <span className="font-medium shrink-0">{project.code || project.project_code}</span>}
               {project.workflow_name && (
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 truncate shrink-0">
                   <Layers size={11} /> {project.workflow_name}
                 </span>
               )}
               {project.project_manager && (
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 truncate shrink-0">
                   <User size={11} /> PM: {getUserDisplayName(project.project_manager, users)}
                 </span>
               )}
@@ -1594,19 +1666,23 @@ export function ProjectWorkflow() {
           </div>
         </div>
 
-        {/* Chapter counts + Stylesheets button */}
-        <div className="flex items-center gap-3 flex-shrink-0 text-xs text-muted">
-          <span className="flex items-center gap-1">
-            <BookOpen size={12} /> {summary.total} chapters
-          </span>
-          {summary.complete > 0 && (
-            <span className="flex items-center gap-1 text-emerald-600">
-              <CheckCircle2 size={12} /> {summary.complete} done
-            </span>
-          )}
+        {/* Right section: chapter counts + action buttons */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 text-xs text-muted whitespace-nowrap">
+          <div className="hidden sm:flex items-center gap-2 shrink-0">
+            {!isBookProject && (
+              <span className="flex items-center gap-1">
+                <BookOpen size={12} /> {summary.total} chapters
+              </span>
+            )}
+            {summary.complete > 0 && (
+              <span className="flex items-center gap-1 text-emerald-600">
+                <CheckCircle2 size={12} /> {summary.complete} done
+              </span>
+            )}
+          </div>
           <button
             onClick={openAddChapter}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors shrink-0"
           >
             <Plus size={12} />
             New Chapter
@@ -1614,7 +1690,7 @@ export function ProjectWorkflow() {
           <button
             onClick={() => navigate(uiPaths.projectStylesheets(id))}
             title={activeStylesheet ? `Active: ${activeStylesheet.name}` : 'No active stylesheet'}
-            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
           >
             <BookMarked size={12} />
             Stylesheets
@@ -1628,7 +1704,7 @@ export function ProjectWorkflow() {
           <button
             onClick={() => navigate(uiPaths.projectRules(id))}
             title="Language-editing rules for this project"
-            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
           >
             <BookMarked size={12} />
             Rules
@@ -1636,7 +1712,7 @@ export function ProjectWorkflow() {
           <button
             onClick={() => navigate(uiPaths.projectTermLists(id))}
             title="Term lists assigned to this project — highlighted during Language Editing"
-            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
           >
             <BookMarked size={12} />
             Term Lists
@@ -1653,8 +1729,8 @@ export function ProjectWorkflow() {
             setFilterStatus('')
           }}
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'manuscript'
-              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
-              : 'text-muted border-transparent hover:bg-accent/40'
+            ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+            : 'text-muted border-transparent hover:bg-accent/40'
             }`}
         >
           📚 Manuscripts ({manuscriptChapters.length})
@@ -1666,8 +1742,8 @@ export function ProjectWorkflow() {
             setFilterStatus('')
           }}
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'art'
-              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
-              : 'text-muted border-transparent hover:bg-accent/40'
+            ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+            : 'text-muted border-transparent hover:bg-accent/40'
             }`}
         >
           📐 Art Tracks ({artChapters.length})
@@ -1679,8 +1755,8 @@ export function ProjectWorkflow() {
             setFilterStatus('')
           }}
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'design'
-              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
-              : 'text-muted border-transparent hover:bg-accent/40'
+            ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+            : 'text-muted border-transparent hover:bg-accent/40'
             }`}
         >
           🎨 Design ({designChapters.length})
@@ -1718,7 +1794,7 @@ export function ProjectWorkflow() {
           </span>
 
           {/* Assignee filter */}
-          <FilterAssigneeDropdown 
+          <FilterAssigneeDropdown
             value={filterAssignee}
             onChange={setFilterAssignee}
             assigneeOptions={assigneeOptions}
@@ -1773,8 +1849,8 @@ export function ProjectWorkflow() {
               const uName = viewer?.username?.trim().toLowerCase()
               const assigned = activeChapters.filter(
                 c => c.stage_name === val &&
-                     c.current_assignee_name &&
-                     c.current_assignee_name.trim().toLowerCase() === uName
+                  c.current_assignee_name &&
+                  c.current_assignee_name.trim().toLowerCase() === uName
               )
               setSelectedGroupProceedChapterIds(new Set(assigned.map(c => c.id)))
             }}
@@ -1962,7 +2038,9 @@ export function ProjectWorkflow() {
                     plannedDueDates={plannedDueDates}
                     stageRolesMap={stageRolesMap}
                     onAssigneeChange={handleAssigneeChange}
-                    onViewDetails={openChapter} />
+                    onViewDetails={openChapter}
+                    canDelete={canAccess(['admin'])}
+                    onDelete={setChapterToDelete} />
                 ))}
               </div>
             )}
@@ -1977,7 +2055,19 @@ export function ProjectWorkflow() {
                     <div key={ch.id} onClick={() => openChapter(ch)} className={`bg-card rounded-xl border border-border shadow-sm hover:shadow-md transition-all flex flex-col gap-1.5 p-3 cursor-pointer ${cardBorderCls(ch)}`}>
                       <div className="flex items-center justify-between gap-1">
                         <span className="text-xs font-bold text-primary uppercase">{ch.chapters}</span>
-                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
+                        <div className="flex items-center gap-1">
+                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
+                          {canAccess(['admin']) && (
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); setChapterToDelete(ch) }}
+                              title="Delete chapter"
+                              className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <p className="text-xs font-medium text-text line-clamp-2 leading-snug">{ch.chapter_title || ch.chapters}</p>
                       {ch.stage_name && <span className="text-[9px] bg-primary/10 text-primary rounded px-1.5 py-0.5 w-fit font-semibold">{ch.stage_name}</span>}
@@ -2010,7 +2100,14 @@ export function ProjectWorkflow() {
                   return (
                     <div key={ch.id} onClick={() => openChapter(ch)}
                       className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''} ${cardBorderCls(ch).replace('border-l-4', 'border-l-[3px]')}`}>
-                      <span className="text-xs font-bold text-primary uppercase w-8 flex-shrink-0">{ch.chapters}</span>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <span className="text-xs font-bold text-primary uppercase w-8">{ch.chapters}</span>
+                        {(ch.revision ?? 1) > 1 && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                            Rev {ch.revision}
+                          </span>
+                        )}
+                      </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-text truncate">{ch.chapter_title || ch.chapters}</p>
                       </div>
@@ -2026,6 +2123,16 @@ export function ProjectWorkflow() {
                         stageRolesMap={stageRolesMap}
                       />
                       <span className={`text-xs flex-shrink-0 ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</span>
+                      {canAccess(['admin']) && (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setChapterToDelete(ch) }}
+                          title="Delete chapter"
+                          className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors flex-shrink-0"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                       <ChevronRight size={14} className="text-muted flex-shrink-0" />
                     </div>
                   )
@@ -2039,7 +2146,7 @@ export function ProjectWorkflow() {
                 <table className="w-full text-sm border-collapse min-w-max">
                   <thead>
                     <tr className="border-b border-border bg-surface">
-                      {['#', 'Title', 'Stage', 'Status', 'Assignee', 'Due Date', 'MS Pages', 'Delayed'].map(h => (
+                      {['#', 'Title', 'Stage', 'Status', 'Assignee', 'Due Date', 'MS Pages', 'Delayed', ...(canAccess(['admin']) ? ['Action'] : [])].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -2050,7 +2157,16 @@ export function ProjectWorkflow() {
                       const { due, delayed } = getEffectiveDue(ch, plannedDueDates)
                       return (
                         <tr key={ch.id} onClick={() => openChapter(ch)} className={`cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''}`}>
-                          <td className="px-4 py-3 font-bold text-primary text-xs uppercase">{ch.chapters}</td>
+                          <td className="px-4 py-3 font-bold text-primary text-xs uppercase">
+                            <div className="flex items-center gap-1.5">
+                              <span>{ch.chapters}</span>
+                              {(ch.revision ?? 1) > 1 && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                                  Rev {ch.revision}
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 font-semibold text-text max-w-xs truncate">{ch.chapter_title || ch.chapters}</td>
                           <td className="px-4 py-3 text-xs">
                             {ch.stage_name
@@ -2070,6 +2186,18 @@ export function ProjectWorkflow() {
                               ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">Delayed</span>
                               : <span className="text-[10px] text-muted">—</span>}
                           </td>
+                          {canAccess(['admin']) && (
+                            <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => setChapterToDelete(ch)}
+                                title="Delete chapter"
+                                className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       )
                     })}
@@ -2674,6 +2802,27 @@ export function ProjectWorkflow() {
             />
           </div>
 
+          {(activeTab === 'manuscript' || activeTab === 'art') && (
+            <div className="flex items-start gap-2.5 p-3 rounded-lg bg-surface border border-border">
+              <input
+                id="allow-revision-checkbox"
+                type="checkbox"
+                checked={allowRevision}
+                onChange={e => setAllowRevision(e.target.checked)}
+                disabled={addingChapter}
+                className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary/40 cursor-pointer"
+              />
+              <label htmlFor="allow-revision-checkbox" className="text-xs cursor-pointer select-none">
+                <span className="font-semibold text-text block">
+                  Upload as new revision if chapter already exists
+                </span>
+                <span className="text-[11px] text-muted block mt-0.5">
+                  Backs up existing chapter files (e.g. <code>_old_v1</code>), resets chapter to starting stage for planning approval, and increments revision count.
+                </span>
+              </label>
+            </div>
+          )}
+
           {addChapterError && (
             <p className="text-xs text-danger flex items-center gap-1.5">
               <AlertCircle size={12} /> {addChapterError}
@@ -2799,6 +2948,17 @@ export function ProjectWorkflow() {
 
         </div>
       </Modal>
+
+      {/* Delete Chapter Confirmation Modal */}
+      <Modal
+        isOpen={chapterToDelete !== null}
+        onClose={() => { if (!deletingChapter) setChapterToDelete(null) }}
+        onConfirm={handleDeleteChapter}
+        title="Delete Chapter"
+        description={`Are you sure you want to delete chapter "${chapterToDelete?.chapters}"? All associated files, pipeline artifacts, and workflow records will be permanently removed.`}
+        confirmLabel={deletingChapter ? "Deleting..." : "Delete"}
+        loading={deletingChapter}
+      />
 
     </div>
   )

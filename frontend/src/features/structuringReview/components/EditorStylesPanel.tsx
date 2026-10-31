@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
-import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert, GripVertical, Pencil, Edit2, ArrowRight } from "lucide-react";
+import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert, GripVertical, Pencil, Edit2, ArrowRight, Keyboard, Sparkles } from "lucide-react";
 import type { Node as PmNode, Mark as PmMark } from "@tiptap/pm/model";
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { NewStyleDialog } from "./NewStyleDialog";
+import { getShortcutBadgeForStyle } from "../shortcuts/shortcutsStorage";
 
 // ── Pipeline progress types ───────────────────────────────────────────────────
 
@@ -72,6 +73,9 @@ interface StylesPanelProps {
   fileId?: number | null;
   charStyles?: string[];
   visibleTabs?: PanelTab[];
+  clientKey?: string;
+  onOpenQuickPalette?: () => void;
+  onOpenShortcutsDialog?: () => void;
 }
 
 // Default character styles derived from the pipeline's bib/cite style map
@@ -79,9 +83,11 @@ const DEFAULT_CHAR_STYLES: { group: string; styles: string[] }[] = [
   {
     group: "Bibliography",
     styles: [
-      "bib_article", "bib_book", "bib_chapterno", "bib_chaptertitle",
-      "bib_doi", "bib_journal", "bib_publisher", "bib_title",
-      "bib_volume", "bib_year", "bib_fname", "bib_surname", "bib_url",
+      "bib_surname", "bib_fname", "bib_article", "bib_journal",
+      "bib_year", "bib_volume", "bib_issue", "bib_fpage", "bib_lpage",
+      "bib_book", "bib_chaptertitle", "bib_title", "bib_url", "bib_doi",
+      "bib_ed-surname", "bib_ed-fname", "bib_editionno", "bib_organization",
+      "bib_chapterno", "bib_publisher",
     ],
   },
   {
@@ -143,6 +149,9 @@ export function StylesPanel({
   fileId,
   charStyles,
   visibleTabs,
+  clientKey = "publisher",
+  onOpenQuickPalette,
+  onOpenShortcutsDialog,
 }: StylesPanelProps) {
 
   // ── Shared ────────────────────────────────────────────────────────────────
@@ -1200,11 +1209,33 @@ export function StylesPanel({
                   {currentStyle}
                 </span>
               </div>
-              {checkedIds.size > 0 && (
-                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-900 rounded text-[8px] font-semibold">
-                  Bulk apply active
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {checkedIds.size > 0 && (
+                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-900 rounded text-[8px] font-semibold">
+                    Bulk apply active
+                  </span>
+                )}
+                {onOpenQuickPalette && (
+                  <button
+                    type="button"
+                    onClick={onOpenQuickPalette}
+                    className="p-1 rounded text-slate-500 hover:text-amber-700 hover:bg-amber-100/60 cursor-pointer border-none bg-transparent transition-colors"
+                    title="Quick Style Palette (Alt+S)"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {onOpenShortcutsDialog && (
+                  <button
+                    type="button"
+                    onClick={onOpenShortcutsDialog}
+                    className="p-1 rounded text-slate-500 hover:text-blue-700 hover:bg-blue-100/60 cursor-pointer border-none bg-transparent transition-colors"
+                    title="Style Shortcuts Manager"
+                  >
+                    <Keyboard className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="px-3 py-2 border-b border-border">
@@ -1265,54 +1296,87 @@ export function StylesPanel({
                   {searchQuery ? "No matching styles found" : "No styles available"}
                 </div>
               ) : (
-                filteredStyles.map((style) => (
-                  <button
-                    key={style}
-                    onClick={() => applyStyle(style)}
-                    className={`group w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-all border relative cursor-pointer
-                      ${currentStyle === style
-                        ? "bg-emerald-100 border-emerald-400 text-emerald-900 ring-2 ring-emerald-300"
-                        : "bg-background border-border text-text hover:bg-sidebar/5 hover:border-border"}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <span className="font-mono text-[11px] font-semibold tracking-wide text-slate-800">
-                          <HighlightedText text={style} highlight={searchQuery} />
-                        </span>
-                        <p className="text-[10px] text-muted mt-0.5">
-                          {style === "Normal" || style === "Body Text"
-                            ? "Regular paragraph"
-                            : style.startsWith("H")
-                              ? `Heading ${style.substring(1)}`
-                              : "Custom style"}
-                        </p>
+                filteredStyles.map((style) => {
+                  const shortcutBadge = getShortcutBadgeForStyle(style, clientKey);
+                  return (
+                    <button
+                      key={style}
+                      onClick={() => applyStyle(style)}
+                      className={`group w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-all border relative cursor-pointer
+                        ${currentStyle === style
+                          ? "bg-emerald-100 border-emerald-400 text-emerald-900 ring-2 ring-emerald-300"
+                          : "bg-background border-border text-text hover:bg-sidebar/5 hover:border-border"}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-[11px] font-semibold tracking-wide text-slate-800">
+                              <HighlightedText text={style} highlight={searchQuery} />
+                            </span>
+                            {shortcutBadge && (
+                              <kbd className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-300 shadow-2xs">
+                                {shortcutBadge}
+                              </kbd>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted mt-0.5">
+                            {style === "Normal" || style === "Body Text"
+                              ? "Regular paragraph"
+                              : style.startsWith("H") || style.startsWith("Head")
+                                ? `Heading style`
+                                : "Custom style"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 ml-2 shrink-0">
+                          {currentStyle === style && (
+                            <span className="w-2 h-2 rounded-full bg-emerald-600" />
+                          )}
+                          {currentStyle !== style && (
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-text/10 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                              Apply
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 ml-2 shrink-0">
-                        {currentStyle === style && (
-                          <span className="w-2 h-2 rounded-full bg-emerald-600" />
-                        )}
-                        {currentStyle !== style && (
-                          <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-text/10 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                            Apply
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                ))
+                    </button>
+                  );
+                })
               )}
             </div>
 
-            <div className="border-t border-border p-3">
+            <div className="border-t border-border p-3 flex gap-2">
               <Button
                 variant="secondary"
                 size="sm"
                 leftIcon={<Plus className="w-3 h-3" />}
-                className="w-full text-[11px]"
+                className="flex-1 text-[11px]"
                 onClick={() => setIsDialogOpen(true)}
               >
                 New Style
               </Button>
+              {onOpenQuickPalette && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="text-[11px] text-slate-700 hover:text-slate-900 px-2.5"
+                  onClick={onOpenQuickPalette}
+                  title="Quick Style Palette (Alt+S)"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-500 mr-1" />
+                  <kbd className="font-mono text-[9px] bg-slate-100 border border-slate-300 px-1 py-0.2 rounded font-semibold text-slate-600">Alt+S</kbd>
+                </Button>
+              )}
+              {onOpenShortcutsDialog && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="text-[11px] px-2 text-slate-700"
+                  onClick={onOpenShortcutsDialog}
+                  title="Style Shortcuts Manager"
+                >
+                  <Keyboard className="w-3.5 h-3.5" />
+                </Button>
+              )}
             </div>
 
             <NewStyleDialog
@@ -1340,11 +1404,23 @@ export function StylesPanel({
                   <span className="text-[10px] text-muted italic">none</span>
                 )}
               </div>
-              {checkedIds.size > 0 && (
-                <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-900 rounded text-[8px] font-semibold">
-                  Bulk apply active
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {checkedIds.size > 0 && (
+                  <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-900 rounded text-[8px] font-semibold">
+                    Bulk apply active
+                  </span>
+                )}
+                {onOpenShortcutsDialog && (
+                  <button
+                    type="button"
+                    onClick={onOpenShortcutsDialog}
+                    className="p-1 rounded text-slate-500 hover:text-blue-700 hover:bg-blue-100/60 cursor-pointer border-none bg-transparent transition-colors"
+                    title="Style Shortcuts Manager"
+                  >
+                    <Keyboard className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto styles-scrollbar p-3 space-y-3">
@@ -1354,41 +1430,63 @@ export function StylesPanel({
                     {group}
                   </p>
                   <div className="space-y-1">
-                    {groupStyles.map((cls) => (
-                      <button
-                        key={cls}
-                        onClick={() => applyCharStyle(cls)}
-                        className={`w-full text-left px-3 py-1.5 rounded-md text-[11px] font-mono border transition-all cursor-pointer
-                          flex items-center justify-between
-                          ${activeCharStyle === cls
-                            ? "bg-emerald-100 border-emerald-400 text-emerald-900 ring-2 ring-emerald-300"
-                            : "bg-background border-border text-text hover:bg-sidebar/5"}`}
-                      >
-                        <span>{cls}</span>
-                        {activeCharStyle === cls && (
-                          <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
-                        )}
-                      </button>
-                    ))}
+                    {groupStyles.map((cls) => {
+                      const charBadge = getShortcutBadgeForStyle(cls, clientKey);
+                      return (
+                        <button
+                          key={cls}
+                          onClick={() => applyCharStyle(cls)}
+                          className={`w-full text-left px-3 py-1.5 rounded-md text-[11px] font-mono border transition-all cursor-pointer
+                            flex items-center justify-between
+                            ${activeCharStyle === cls
+                              ? "bg-emerald-100 border-emerald-400 text-emerald-900 ring-2 ring-emerald-300"
+                              : "bg-background border-border text-text hover:bg-sidebar/5"}`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                            <span className="truncate">{cls}</span>
+                            {charBadge && (
+                              <kbd className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-300 shadow-2xs shrink-0">
+                                {charBadge}
+                              </kbd>
+                            )}
+                          </div>
+                          {activeCharStyle === cls && (
+                            <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0 ml-2" />
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ))}
             </div>
 
-            {activeCharStyle && (
-              <div className="border-t border-border p-3">
+            <div className="border-t border-border p-3 space-y-2">
+              {activeCharStyle && (
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="w-full text-[11px] border-rose-200 text-rose-700 hover:bg-rose-50"
+                  className="w-full text-[11px] border-rose-200 text-rose-700 hover:bg-rose-50 flex items-center justify-center gap-2"
                   onClick={() => {
                     editorRef.current?.editor?.chain().focus().unsetMark("charStyle").run();
                   }}
                 >
-                  Remove Character Style
+                  <span>Remove Character Style</span>
+                  <kbd className="font-mono text-[9px] bg-rose-100/70 border border-rose-300 px-1 py-0.2 rounded text-rose-800">Alt+Shift+0</kbd>
                 </Button>
-              </div>
-            )}
+              )}
+              {onOpenShortcutsDialog && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full text-[11px] text-slate-700 hover:text-slate-900 flex items-center justify-center gap-1.5"
+                  onClick={onOpenShortcutsDialog}
+                >
+                  <Keyboard className="w-3.5 h-3.5" />
+                  <span>Configure Character Shortcuts</span>
+                </Button>
+              )}
+            </div>
           </>
         )}
 

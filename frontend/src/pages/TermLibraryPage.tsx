@@ -59,8 +59,9 @@ export function TermLibraryPage() {
     <div className="min-h-screen bg-slate-50">
       <header className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white px-6 py-5 shadow-md">
         <div className="max-w-7xl mx-auto flex items-center gap-4">
-          <button onClick={() => navigate(-1)}
-            className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center">
+          <button onClick={() => navigate('/settings')}
+            title="Back to Settings"
+            className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center transition">
             <ArrowLeft size={16} />
           </button>
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg">

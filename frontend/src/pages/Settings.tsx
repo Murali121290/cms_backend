@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Users, Building2, Shield, Sliders, Layers, Workflow, ChevronRight, Activity, Mail } from 'lucide-react'
+import { Users, Building2, Shield, Sliders, Layers, Workflow, ChevronRight, Activity, Mail, BookMarked } from 'lucide-react'
 
 const settingsCards = [
   {
@@ -49,6 +49,14 @@ const settingsCards = [
     description: 'Define system roles and team-based access control',
     color: 'bg-purple-50',
     iconColor: 'text-purple-600',
+  },
+  {
+    to: '/settings/term-lists',
+    icon: BookMarked,
+    title: 'Term Library',
+    description: 'Manage generic and client-specific term lists and vocabulary',
+    color: 'bg-orange-50',
+    iconColor: 'text-orange-600',
   },
   {
     to: '/settings/system',

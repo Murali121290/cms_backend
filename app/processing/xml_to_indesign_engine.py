@@ -104,75 +104,16 @@ class XMLToInDesignEngine:
                                     continue
                                 zf.write(full_file_path, rel_path)
                                 
-                # Add Chapter Art files (Links) packaged under 'artfile/'
-                art_folder = None
-                
-                # Candidate 1: chapter_dir/Art
-                c1 = os.path.join(chapter_dir, "Art")
-                if os.path.exists(c1) and os.path.isdir(c1) and len(os.listdir(c1)) > 0:
-                    art_folder = c1
-                
-                # Candidate 2: lowercase art folder
-                if not art_folder:
-                    c2 = os.path.join(chapter_dir, "art")
-                    if os.path.exists(c2) and os.path.isdir(c2) and len(os.listdir(c2)) > 0:
-                        art_folder = c2
-                        
-                # Candidate 3: Search project level for chapter art folders like "Ch 01 - Art/Art"
-                if not art_folder:
-                    ch_num = chapter.number.strip()
-                    ch_num_clean = ch_num.lstrip('0') if ch_num.lstrip('0') else '0'
-                    ch_num_padded = ch_num.zfill(2)
-                    
-                    possible_names = [
-                        f"Ch {ch_num} - Art",
-                        f"Ch {ch_num_clean} - Art",
-                        f"Ch {ch_num_padded} - Art",
-                        f"Ch_{ch_num}_Art",
-                        f"Ch_{ch_num_clean}_Art",
-                        f"Ch_{ch_num_padded}_Art",
-                        f"Chapter {ch_num} - Art",
-                        f"Chapter {ch_num_clean} - Art",
-                        f"Chapter {ch_num_padded} - Art",
-                        f"Ch {ch_num}",
-                        f"Ch {ch_num_clean}",
-                        f"Ch {ch_num_padded}",
-                        f"Chapter {ch_num}",
-                        f"Chapter {ch_num_clean}",
-                        f"Chapter {ch_num_padded}",
-                    ]
-                    
-                    if os.path.exists(project_dir):
-                        for entry in os.listdir(project_dir):
-                            entry_path = os.path.join(project_dir, entry)
-                            if os.path.isdir(entry_path):
-                                entry_lower = entry.lower()
-                                matched = False
-                                for name in possible_names:
-                                    if entry_lower == name.lower():
-                                        matched = True
-                                        break
-                                if matched:
-                                    for sub in ["Art", "art"]:
-                                        sub_path = os.path.join(entry_path, sub)
-                                        if os.path.exists(sub_path) and os.path.isdir(sub_path) and len(os.listdir(sub_path)) > 0:
-                                            art_folder = sub_path
-                                            break
-                                    if art_folder:
-                                        break
-
-                # Fallback: if no folder with files is found, fallback to existing empty folder (for logging/structure)
-                if not art_folder:
-                    c1 = os.path.join(chapter_dir, "Art")
-                    if os.path.exists(c1) and os.path.isdir(c1):
-                        art_folder = c1
-                    else:
-                        c2 = os.path.join(chapter_dir, "art")
-                        if os.path.exists(c2) and os.path.isdir(c2):
-                            art_folder = c2
+                # Add Chapter Art files packaged under 'artfile/'
+                from app.services.file_service import resolve_chapter_art_folder
+                art_folder = resolve_chapter_art_folder(
+                    project_dir=project_dir,
+                    chapter_dir=chapter_dir,
+                    chapter_number=chapter.number,
+                )
 
                 if art_folder and os.path.exists(art_folder):
-                    logger.info(f"Packaging art files from folder: {art_folder}")
+                    logger.info(f"Packaging art files from folder: {art_folder} into artfile/")
                     for root, _, files in os.walk(art_folder):
                         for file in files:
                             full_file_path = os.path.join(root, file)

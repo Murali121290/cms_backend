@@ -25,7 +25,13 @@ _GENERIC_SUB_RULES = {
     "num_single_numeral", "num_single_spelled",
     "num_double_numeral", "num_double_spelled",
     "num_zero_numeral", "num_zero_spelled",
-    "range_to", "range_endash", "range_hyphen"
+    "range_to", "range_endash", "range_hyphen",
+    # Broad detectors that the CE checklist detectors refine (p<0.05, 2 x 10^5,
+    # 25KGS, TBD): suppressed where they overlap a more specific finding.
+    "cmp_gt_sym", "cmp_lt_sym", "abbrev_body", "leading_zero_present",
+    "unit_mg_abbr", "unit_kg_abbr", "unit_ml_abbr", "unit_mcg_abbr", "unit_mm_abbr",
+    "unit_cm_abbr", "unit_km_abbr", "unit_hour_h", "unit_hour_hr", "unit_min_abbr",
+    "unit_sec_s", "unit_sec_abbr", "thousands_nosep",
 }
 
 
@@ -86,7 +92,7 @@ def resolve_finding_overlaps(findings: list[Finding]) -> list[Finding]:
     return resolved
 
 
-def _run_all_rules(seg: Segment) -> list[Finding]:
+def _run_all_rules(seg: Segment, include_language: bool = False) -> list[Finding]:
     findings: list[Finding] = []
 
     # Run citation and caption label detection on captions even if they are otherwise excluded
@@ -104,9 +110,14 @@ def _run_all_rules(seg: Segment) -> list[Finding]:
     if seg.excluded:
         return resolve_finding_overlaps(findings)
     findings.extend(run_te_rules(seg))
-    findings.extend(run_spelling_rules(seg))
-    findings.extend(run_compound_rules(seg))
-    findings.extend(run_bias_rules(seg))
+    
+    # Language editing rules (spelling, compounds, bias) belong to Language Editing studio
+    if include_language:
+        findings.extend(run_spelling_rules(seg))
+        findings.extend(run_compound_rules(seg))
+        findings.extend(run_bias_rules(seg))
+
+    # Mechanical editing points (formatting, syntax style, punctuation, articles, jargon)
     findings.extend(run_article_rules(seg))
     findings.extend(run_pronoun_check(seg))
     findings.extend(run_clinical_jargon(seg))
@@ -120,7 +131,48 @@ def _run_all_rules(seg: Segment) -> list[Finding]:
     return resolve_finding_overlaps(findings)
 
 
-def analyze_manuscript(chapters: list[dict]) -> dict[str, Any]:
+_DUPLICATE_MIN_CHARS = 80
+
+
+def _duplicate_paragraphs(segments: list[Segment]) -> list[Finding]:
+    """CE rule 84: flag the second and later copies of a repeated paragraph."""
+    from manuscript_core.rules.finding_builder import build_finding
+
+    seen: dict[str, Segment] = {}
+    out: list[Finding] = []
+    for seg in segments:
+        if seg.excluded or seg.region in ("front", "references") or seg.source == "table":
+            continue
+        key = " ".join(seg.text.lower().split())
+        if len(key) < _DUPLICATE_MIN_CHARS:
+            continue
+        first = seen.setdefault(key, seg)
+        if first is not seg:
+            out.append(build_finding(
+                seg, 0, len(seg.text.rstrip()), "duplicate_paragraph",
+                f"Duplicate of a paragraph in {first.chapter_name}", "duplicate_content",
+                option_replacements={"1": None, "2": None, "3": "QUERY"},
+            ))
+    return out
+
+
+def _unit_majority_options(findings: list[Finding]) -> None:
+    """CE rule 4, Option 2: use the unit form the manuscript uses most (unit_mg_*, unit_hour_*, ...)."""
+    families: dict[str, list[Finding]] = defaultdict(list)
+    for f in findings:
+        if f.ce_rule_no == 4 and f.rule_id.startswith("unit_"):
+            families[f.rule_id.split("_")[1]].append(f)
+    for group in families.values():
+        counts = Counter(f.surface for f in group).most_common(2)
+        if not counts or (len(counts) > 1 and counts[0][1] == counts[1][1]):
+            continue  # no clear majority: leave Option 2 unset so the finding is only flagged
+        dominant = counts[0][0]
+        for f in group:
+            if f.surface != dominant:
+                f.option_replacements = {**f.option_replacements, "2": dominant}
+
+
+def analyze_manuscript(chapters: list[dict], include_language: bool = False) -> dict[str, Any]:
     """chapters is a list of {index, filename, path} dicts.
 
     Returns a dashboard-ready dict with:
@@ -145,7 +197,7 @@ def analyze_manuscript(chapters: list[dict]) -> dict[str, Any]:
 
         ch_findings: list[Finding] = []
         for seg in segments:
-            ch_findings.extend(_run_all_rules(seg))
+            ch_findings.extend(_run_all_rules(seg, include_language=include_language))
 
         all_findings.extend(ch_findings)
 
@@ -166,6 +218,10 @@ def analyze_manuscript(chapters: list[dict]) -> dict[str, Any]:
                 "role": ch.get("role", ""),
             }
         )
+
+    # --- Document-level CE checks ---
+    all_findings.extend(_duplicate_paragraphs(all_segments))
+    _unit_majority_options(all_findings)
 
     # --- Aggregate by category -> canonical -> list of findings ---
     by_category: dict[str, dict[str, list[Finding]]] = defaultdict(lambda: defaultdict(list))

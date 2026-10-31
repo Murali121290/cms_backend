@@ -57,7 +57,17 @@ class JournalWorkflowCreate(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     description: Optional[str] = None
     stage_numbers: List[int] = Field(min_length=1)
+    custom_stages: Optional[List[str]] = None
     is_default: bool = False
+
+
+class JournalWorkflowUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=150)
+    description: Optional[str] = None
+    stage_numbers: Optional[List[int]] = None
+    custom_stages: Optional[List[str]] = None
+    is_default: Optional[bool] = None
+    is_active: Optional[bool] = None
 
 
 class JournalWorkflowResponse(BaseModel):
@@ -65,9 +75,23 @@ class JournalWorkflowResponse(BaseModel):
     name: str
     description: Optional[str] = None
     stage_numbers: List[int]
+    custom_stages: Optional[List[str]] = None
     stages: List[str]
     is_default: bool
     is_active: bool
+    journals_count: int = 0
+
+
+class JournalWorkflowAssignment(BaseModel):
+    workflow_id: int
+
+
+class MasterJournalStage(BaseModel):
+    id: int
+    stage_name: str
+    short_name: str
+    description: Optional[str] = None
+    roles: List[str] = Field(default_factory=list)
 
 
 # Overview rows for the client -> journal -> article pages

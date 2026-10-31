@@ -126,6 +126,24 @@ async def process_upload(
         if m:
             eisbn_extracted = m.group(1)
 
+        # Detect language from OPF (e.g. content.opf)
+        detected_language = None
+        try:
+            import glob
+            import xml.etree.ElementTree as ET
+            opf_matches = glob.glob(os.path.join(epub_extract_path, "**", "*.opf"), recursive=True)
+            if opf_matches:
+                opf_file = opf_matches[0]
+                tree = ET.parse(opf_file)
+                root = tree.getroot()
+                # Find dc:language element regardless of XML namespace
+                for elem in root.iter():
+                    if elem.tag.endswith("language") and elem.text and elem.text.strip():
+                        detected_language = elem.text.strip()
+                        break
+        except Exception:
+            pass
+
         return {
             "status": True,
             "message": "Upload successful",
@@ -136,6 +154,7 @@ async def process_upload(
             "pdf_file": pdf_path,
             "total_files": total_files,
             "eisbn_extracted": eisbn_extracted,
+            "language": detected_language,
         }
 
     except zipfile.BadZipFile:

@@ -448,6 +448,12 @@
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.jpg",
       "enabled": true,
+      "rule_config": {
+        "max_pixels": 4000000,
+        "exclude_files": [
+          "cover.jpg"
+        ]
+      },
       "category": "Image Check"
     },
     {

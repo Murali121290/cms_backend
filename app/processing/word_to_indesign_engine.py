@@ -123,46 +123,23 @@ class WordToInDesignEngine:
                                     continue
                                 zf.write(full_file_path, rel_path)
 
-                # Add Chapter Art files (Links) packaged under 'artfile/'
-                art_folder = None
-                c1 = os.path.join(chapter_dir, "Art")
-                if os.path.exists(c1) and os.path.isdir(c1) and len(os.listdir(c1)) > 0:
-                    art_folder = c1
-                if not art_folder:
-                    c2 = os.path.join(chapter_dir, "art")
-                    if os.path.exists(c2) and os.path.isdir(c2) and len(os.listdir(c2)) > 0:
-                        art_folder = c2
-
-                # Project level search for chapter art folders
-                if not art_folder:
-                    ch_num = chapter.number.strip()
-                    ch_num_clean = ch_num.lstrip('0') if ch_num.lstrip('0') else '0'
-                    ch_num_padded = ch_num.zfill(2)
-                    possible_names = [
-                        f"Ch {ch_num} - Art", f"Ch {ch_num_clean} - Art", f"Ch {ch_num_padded} - Art",
-                        f"Ch_{ch_num}_Art", f"Ch_{ch_num_clean}_Art", f"Ch_{ch_num_padded}_Art",
-                        f"Chapter {ch_num} - Art", f"Chapter {ch_num_clean} - Art", f"Chapter {ch_num_padded} - Art",
-                    ]
-                    if os.path.exists(project_dir):
-                        for entry in os.listdir(project_dir):
-                            entry_path = os.path.join(project_dir, entry)
-                            if os.path.isdir(entry_path):
-                                if entry.lower() in [n.lower() for n in possible_names]:
-                                    for sub in ["Art", "art"]:
-                                        sub_path = os.path.join(entry_path, sub)
-                                        if os.path.exists(sub_path) and os.path.isdir(sub_path) and len(os.listdir(sub_path)) > 0:
-                                            art_folder = sub_path
-                                            break
-                                    if art_folder:
-                                        break
+                # Add Chapter Art files packaged under 'artfile/'
+                from app.services.file_service import resolve_chapter_art_folder
+                art_folder = resolve_chapter_art_folder(
+                    project_dir=project_dir,
+                    chapter_dir=chapter_dir,
+                    chapter_number=chapter.number,
+                )
 
                 if art_folder and os.path.exists(art_folder):
-                    logger.info(f"Packaging art files from folder: {art_folder}")
+                    logger.info(f"Packaging art files from folder: {art_folder} into artfile/")
                     for root, _, files in os.walk(art_folder):
                         for file in files:
                             full_file_path = os.path.join(root, file)
                             rel_path = os.path.relpath(full_file_path, art_folder)
                             zf.write(full_file_path, os.path.join("artfile", rel_path))
+                else:
+                    logger.warning(f"Could not locate art folder for chapter {chapter.number} (searched project dir {project_dir})")
 
             # 5. Call InDesign Server using Redis Lock
             if not settings.INDESIGN_SERVER_URL:
@@ -268,6 +245,18 @@ class WordToInDesignEngine:
                                 src_art_path = os.path.join(root_art, art_file)
                                 rel_art_path = os.path.relpath(src_art_path, art_folder)
                                 dst_art_path = os.path.join(target_art_dir, rel_art_path)
+                                os.makedirs(os.path.dirname(dst_art_path), exist_ok=True)
+                                shutil.copy2(src_art_path, dst_art_path)
+
+                    # Also ensure chapter_dir/Art has the art files if not already there
+                    ch_art_dir = os.path.join(chapter_dir, "Art")
+                    if os.path.abspath(ch_art_dir) != os.path.abspath(art_folder):
+                        os.makedirs(ch_art_dir, exist_ok=True)
+                        for root_art, _, art_files in os.walk(art_folder):
+                            for art_file in art_files:
+                                src_art_path = os.path.join(root_art, art_file)
+                                rel_art_path = os.path.relpath(src_art_path, art_folder)
+                                dst_art_path = os.path.join(ch_art_dir, rel_art_path)
                                 os.makedirs(os.path.dirname(dst_art_path), exist_ok=True)
                                 shutil.copy2(src_art_path, dst_art_path)
 

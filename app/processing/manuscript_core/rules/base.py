@@ -28,6 +28,18 @@ class Finding:
     match_start: int = 0
     match_end: int = 0
     replacement_options: list[str] = field(default_factory=list)
+    # CE checklist link (CE_rules_tool_input.xlsx); empty when the rule is not in the checklist.
+    ce_rule_no: int | None = None
+    ce_rule_nos: list[int] = field(default_factory=list)
+    ce_rule_name: str = ""
+    ce_group: str = ""
+    ce_severity: str = ""
+    ce_handling: str = ""
+    ce_options: list[str] = field(default_factory=list)
+    ce_query: bool = False
+    option_replacements: dict = field(default_factory=dict)  # {"1"|"2"|"3": str | None | "QUERY"}
+    ce_steps: dict | None = None  # composite unit edit, see ce_rules.choose_replacement
+    in_checklist: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -49,6 +61,17 @@ class Finding:
             "match_start": self.match_start,
             "match_end": self.match_end,
             "replacement_options": self.replacement_options,
+            "ce_rule_no": self.ce_rule_no,
+            "ce_rule_nos": self.ce_rule_nos,
+            "ce_rule_name": self.ce_rule_name,
+            "ce_group": self.ce_group,
+            "ce_severity": self.ce_severity,
+            "ce_handling": self.ce_handling,
+            "ce_options": self.ce_options,
+            "ce_query": self.ce_query,
+            "option_replacements": self.option_replacements,
+            "ce_steps": self.ce_steps,
+            "in_checklist": self.in_checklist,
         }
 
 

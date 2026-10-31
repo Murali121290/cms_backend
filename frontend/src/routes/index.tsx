@@ -227,7 +227,7 @@ const router = createBrowserRouter([
       { path: 'projects/:projectId/stylesheets', element: <StylesheetsPage /> },
       { path: 'projects/:projectId/rules', element: <ProjectRulesPage /> },
       { path: 'clients/:clientId/projects/:projectId/rules', element: <ProjectRulesPage /> },
-      { path: 'term-lists', element: <TermLibraryPage /> },
+      { path: 'term-lists', element: <Navigate to="/settings/term-lists" replace /> },
       { path: 'projects/:projectId/term-lists', element: <ProjectTermListsPage /> },
       { path: 'clients/:clientId/projects/:projectId/term-lists', element: <ProjectTermListsPage /> },
       { path: 'projects/:projectId/image-review', element: <ImageReviewPage /> },
@@ -242,6 +242,7 @@ const router = createBrowserRouter([
       { path: 'settings/workflow', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><WorkflowManagement /></RoleGuard> },
       { path: 'settings/system', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Placeholder title="System Settings" /></RoleGuard> },
       { path: 'settings/queues', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><QueueManagement /></RoleGuard> },
+      { path: 'settings/term-lists', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><TermLibraryPage /></RoleGuard> },
     ],
   },
 ])

@@ -170,19 +170,32 @@ def _style_name_to_id(name: str) -> str:
     return name.replace(" ", "_").replace("-", "_")
 
 
-def inject_publisher_styles(docx_path: str, save_path: str = None) -> None:
+def inject_publisher_styles(
+    docx_path: str,
+    save_path: str = None,
+    client_name: str = None,
+    styles: list = None,
+) -> None:
     """
-    Inject all publisher styles into the DOCX as paragraph styles.
+    Inject publisher/client styles into the DOCX as paragraph styles.
     Each style is set to Times New Roman, 12pt, 2.0 line spacing.
     Skips styles that already exist (safe to call multiple times).
     """
+    if styles:
+        styles_to_inject = styles
+    elif client_name:
+        from app.utils.client_styles import get_paragraph_styles_for_client
+        styles_to_inject = get_paragraph_styles_for_client(client_name)
+    else:
+        styles_to_inject = PUBLISHER_STYLES
+
     doc = Document(docx_path)
     existing = {s.name for s in doc.styles}
 
     added = 0
     skipped = 0
 
-    for tag in PUBLISHER_STYLES:
+    for tag in styles_to_inject:
         if tag in existing:
             skipped += 1
             continue

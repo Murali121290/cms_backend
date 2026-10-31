@@ -16,6 +16,8 @@ import {
   MessageSquare,
   Minimize2,
   X,
+  Keyboard,
+  Sparkles,
 } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
@@ -41,6 +43,10 @@ import { ReferenceReviewSidePanel } from "@/features/referenceReview/components/
 import { DesignPdfViewer } from "@/features/structuringReview/components/DesignPdfViewer";
 import { getChapterFiles, getProjectChapters } from "@/api/projects";
 import { getPersistedCustomStyles, savePersistedCustomStyle } from "@/utils/customStylesStorage";
+import { useStyleShortcuts } from "@/features/structuringReview/shortcuts/useStyleShortcuts";
+import { resolveClientKey } from "@/features/structuringReview/shortcuts/shortcutsStorage";
+import { QuickStylePalette } from "@/features/structuringReview/components/QuickStylePalette";
+import { StyleShortcutsDialog } from "@/features/structuringReview/components/StyleShortcutsDialog";
 
 type StructuringTab = "overview" | "editor" | "onlyoffice" | "collabora";
 
@@ -283,6 +289,21 @@ export function StructuringReviewPage() {
   const onlyofficeRef = useRef<OnlyOfficeEditorHandle>(null);
   const [ooConnector, setOoConnector] = useState<any>(null);
   const collaboraIframeRef = useRef<HTMLIFrameElement>(null);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [isShortcutsDialogOpen, setIsShortcutsDialogOpen] = useState(false);
+
+  const clientKey = resolveClientKey(
+    reviewQuery.data?.client_name,
+    reviewQuery.data?.tag_set,
+    stylesQuery.data || reviewQuery.data?.styles
+  );
+
+  useStyleShortcuts({
+    editorRef,
+    clientKey,
+    onOpenPalette: () => setIsPaletteOpen((prev) => !prev),
+    enabled: Boolean(reviewQuery.data && (activeTab === "editor" || isFullscreen)),
+  });
 
   useDocumentTitle(
     normalizedFileId === null
@@ -736,6 +757,9 @@ export function StructuringReviewPage() {
                   editorRef={editorRef}
                   isDesignViewActive={isDesignSplitActive}
                   onToggleDesignView={() => setIsDesignSplitActive((prev) => !prev)}
+                  clientKey={clientKey}
+                  onOpenQuickPalette={() => setIsPaletteOpen(true)}
+                  onOpenShortcutsDialog={() => setIsShortcutsDialogOpen(true)}
                   onOpenVersion={(versionId) => {
                     if (normalizedProjectId && (normalizedChapterId || journal)) {
                       navigate(reviewPath(versionId, "editor"));
@@ -744,20 +768,41 @@ export function StructuringReviewPage() {
                 />
               }
               toolbarExtras={
-                <button
-                  type="button"
-                  aria-pressed={showReferencePanel}
-                  onClick={() => setShowReferencePanel((prev) => !prev)}
-                  title="Reference Review — citations, references, and validation"
-                  className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border shrink-0 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer ${
-                    showReferencePanel
-                      ? "bg-orange-600 text-white border-orange-500"
-                      : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-slate-100"
-                  }`}
-                >
-                  <Library className="w-3.5 h-3.5" />
-                  Reference Review
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsPaletteOpen(true)}
+                    title="Quick Style Palette (Alt+S)"
+                    className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border shrink-0 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-slate-100"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    Palette
+                    <kbd className="text-[9px] bg-slate-800 border border-slate-700 px-1 py-0.2 rounded text-slate-400 font-mono">Alt+S</kbd>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsShortcutsDialogOpen(true)}
+                    title="Style Shortcuts Manager"
+                    className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border shrink-0 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-slate-100"
+                  >
+                    <Keyboard className="w-3.5 h-3.5 text-blue-400" />
+                    Shortcuts
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={showReferencePanel}
+                    onClick={() => setShowReferencePanel((prev) => !prev)}
+                    title="Reference Review — citations, references, and validation"
+                    className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border shrink-0 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer ${
+                      showReferencePanel
+                        ? "bg-orange-600 text-white border-orange-500"
+                        : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-slate-100"
+                    }`}
+                  >
+                    <Library className="w-3.5 h-3.5" />
+                    Reference Review
+                  </button>
+                </div>
               }
             />
               </>
@@ -864,6 +909,23 @@ export function StructuringReviewPage() {
           </Button>
         </div>
       )}
+
+      {/* Quick Style Palette Modal */}
+      <QuickStylePalette
+        isOpen={isPaletteOpen}
+        onClose={() => setIsPaletteOpen(false)}
+        editorRef={editorRef}
+        clientKey={clientKey}
+        allStyles={allStyles}
+        charStyles={review?.char_styles}
+      />
+
+      {/* Style Shortcuts Configuration Dialog */}
+      <StyleShortcutsDialog
+        isOpen={isShortcutsDialogOpen}
+        onClose={() => setIsShortcutsDialogOpen(false)}
+        activeClientKey={clientKey}
+      />
     </main>
   );
 }

@@ -37,6 +37,29 @@ def _deserialize_file_ids(raw: str | None) -> list[int]:
         return []
 
 
+def _deserialize_dict(raw: str | None) -> dict:
+    try:
+        data = json.loads(raw or "{}")
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _clean_ce_rules(ce_rules: dict | None) -> dict:
+    """Keep only known checklist rules and valid values (see ce_rules.validate_ce_rules)."""
+    from app.processing.manuscript_core.rules.ce_rules import validate_ce_rules
+
+    raw = {
+        str(k): (v.model_dump(exclude_none=True) if hasattr(v, "model_dump") else v)
+        for k, v in (ce_rules or {}).items()
+    }
+    return validate_ce_rules(raw)
+
+
+def stylesheet_ce_rules(ss: ProjectStylesheet | None) -> dict:
+    return _deserialize_dict(getattr(ss, "ce_rules", None)) if ss else {}
+
+
 def _serialize_stylesheet(
     ss: ProjectStylesheet,
     db: Session | None = None,
@@ -70,6 +93,8 @@ def _serialize_stylesheet(
         selected_ia_rows=_deserialize_ia_rows(ss.selected_ia_rows),
         analyzed_file_ids=file_ids,
         source_files=source_files,
+        ce_rules=_deserialize_dict(getattr(ss, "ce_rules", None)),
+        style_profile=_deserialize_dict(getattr(ss, "style_profile", None)),
     )
 
 
@@ -224,6 +249,8 @@ def create_stylesheet(
     selected_ia_rows: list[schemas_v2.IARow],
     created_by_id: int | None,
     analyzed_file_ids: list[int] | None = None,
+    ce_rules: dict | None = None,
+    style_profile: dict | None = None,
 ) -> ProjectStylesheet:
     ss = ProjectStylesheet(
         project_id=project_id,
@@ -231,6 +258,8 @@ def create_stylesheet(
         description=description,
         selected_ia_rows=json.dumps([r.model_dump() for r in selected_ia_rows]),
         analyzed_file_ids=json.dumps(analyzed_file_ids or []),
+        ce_rules=json.dumps(_clean_ce_rules(ce_rules)),
+        style_profile=json.dumps(style_profile or {}),
         is_active=False,
         created_at=datetime.now(timezone.utc),
         created_by_id=created_by_id,
@@ -251,6 +280,8 @@ def update_stylesheet(
     description: str | None,
     selected_ia_rows: list[schemas_v2.IARow] | None,
     analyzed_file_ids: list[int] | None = None,
+    ce_rules: dict | None = None,
+    style_profile: dict | None = None,
 ) -> ProjectStylesheet | None:
     ss = (
         db.query(ProjectStylesheet)
@@ -270,6 +301,10 @@ def update_stylesheet(
         ss.selected_ia_rows = json.dumps([r.model_dump() for r in selected_ia_rows])
     if analyzed_file_ids is not None:
         ss.analyzed_file_ids = json.dumps(analyzed_file_ids)
+    if ce_rules is not None:
+        ss.ce_rules = json.dumps(_clean_ce_rules(ce_rules))
+    if style_profile is not None:
+        ss.style_profile = json.dumps(style_profile)
     db.commit()
     db.refresh(ss)
     _save_stylesheet_to_disk(db, ss)

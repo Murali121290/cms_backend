@@ -1,7 +1,7 @@
 """Term Lists feature — client-specific and generic term lists with per-project assignment.
 
-Revision ID: 0047_term_lists
-Revises: 0046_merge_heads
+Revision ID: 0051_term_lists
+Revises: 0050_stage_pages_levels
 Create Date: 2026-10-09 00:10:00.000000
 
 Adds:
@@ -17,8 +17,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0047_term_lists'
-down_revision: Union[str, Sequence[str], None] = '0046_merge_heads'
+revision: str = '0051_term_lists'
+down_revision: Union[str, Sequence[str], None] = '0050_stage_pages_levels'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
