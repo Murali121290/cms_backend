@@ -1,0 +1,213 @@
+{
+  "_meta": {
+    "generated_by": "scripts/import_abbreviations_workbook.py",
+    "source_file": "abbrev_wb.xlsx",
+    "source_sha256": "811b824e2d9e0ea0ca6db3e4af23904d541f3979744ceee47eb36e07df90a7f1"
+  },
+  "expansion_rules": [
+    {
+      "action": "Replace the first use with the expansion followed by the abbreviation in parentheses. Keep the later uses.",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "An intensive care unit (ICU) nurse checked the magnetic resonance imaging (MRI) results. The ICU team reviewed the MRI.",
+      "example_before": "An ICU nurse checked the MRI results. The ICU team reviewed the MRI.",
+      "exceptions": "Rule N and Do not abbreviate entries. Rule G entries when audience is professional. Text in quotations, URLs, names.",
+      "id": "AB01",
+      "name": "First use without a definition",
+      "run_in_reference_code": "Yes",
+      "tool_behaviour": "flag",
+      "trigger": "An abbreviation appears and is never defined, and it is used at least twice (minUses)."
+    },
+    {
+      "action": "Replace the repeated full term with the abbreviation.",
+      "behaviour_raw": "Auto-fix when the definition is in the same scope",
+      "example_after": "The patient was admitted to the intensive care unit (ICU) after surgery. The ICU staff reviewed the chart.",
+      "example_before": "The patient was admitted to the intensive care unit after surgery. The intensive care unit staff reviewed the chart.",
+      "exceptions": "Quotations. A new scope (a new chapter or the body after an abstract) starts again at AB01.",
+      "id": "AB02",
+      "name": "Expansion repeated after the abbreviation is defined",
+      "run_in_reference_code": "Yes",
+      "tool_behaviour": "auto_replace",
+      "trigger": "The full term appears again after the abbreviation was introduced."
+    },
+    {
+      "action": "Move the definition to the first use. Replace the later definition with the abbreviation.",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "The intensive care unit (ICU) was full. Patients in the ICU were stable.",
+      "example_before": "The ICU was full. Patients in the intensive care unit (ICU) were stable.",
+      "exceptions": "Definitions inside a different scope.",
+      "id": "AB03",
+      "name": "Abbreviation used before it is defined",
+      "run_in_reference_code": "Yes",
+      "tool_behaviour": "flag",
+      "trigger": "The abbreviation appears first without a definition and a definition appears later."
+    },
+    {
+      "action": "Keep the first. Replace each later definition with the abbreviation.",
+      "behaviour_raw": "Auto-fix",
+      "example_after": "Intensive care unit (ICU) beds were full. The ICU opened more beds.",
+      "example_before": "Intensive care unit (ICU) beds were full. The intensive care unit (ICU) opened more beds.",
+      "exceptions": "A new scope.",
+      "id": "AB04",
+      "name": "Definition repeated",
+      "run_in_reference_code": "Yes",
+      "tool_behaviour": "auto_replace",
+      "trigger": "The full term with the abbreviation in parentheses appears more than once in the same scope."
+    },
+    {
+      "action": "Spell the term out and drop the abbreviation and its parentheses.",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "The patient was transferred to the postanesthesia care unit.",
+      "example_before": "The patient was transferred to the PACU.",
+      "exceptions": "Abbreviations that are listed as No expansion needed.",
+      "id": "AB05",
+      "name": "Single use",
+      "run_in_reference_code": "Yes",
+      "tool_behaviour": "flag",
+      "trigger": "An abbreviation or a definition is used only once in the scope."
+    },
+    {
+      "action": "Suggest the preferred form from Abbreviation_List and apply it throughout.",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "(not run: needs a synonym table, see section 14 of the README)",
+      "example_before": "The ECG and the EKG were reviewed.",
+      "exceptions": "Quotations.",
+      "id": "AB06",
+      "name": "Inconsistent abbreviations for one term",
+      "run_in_reference_code": "No",
+      "tool_behaviour": "flag",
+      "trigger": "Two abbreviations (for example ECG and EKG) or a mix of the abbreviation and the full term is used for the same thing."
+    },
+    {
+      "action": "Use Context_Rules to pick the meaning. Ask the author when the cues do not decide. If both are needed, spell one out.",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "(see Test_Cases, Context tests)",
+      "example_before": "PE: lungs clear. Heparin for PE after a DVT.",
+      "exceptions": "Single-meaning abbreviations.",
+      "id": "AB07",
+      "name": "One abbreviation with two meanings in a document",
+      "run_in_reference_code": "Partly",
+      "tool_behaviour": "flag",
+      "trigger": "The same abbreviation stands for different terms in the same scope."
+    },
+    {
+      "action": "Offer the spelled-out replacement from Do_Not_Use.",
+      "behaviour_raw": "Flag and suggest. Never auto-fix a dose",
+      "example_after": "Give 10 units of insulin.",
+      "example_before": "Give 10 U of insulin.",
+      "exceptions": "Use only inside medication orders and doses, not statistics.",
+      "id": "AB08",
+      "name": "Do-not-use abbreviation",
+      "run_in_reference_code": "Yes (regex)",
+      "tool_behaviour": "flag",
+      "trigger": "A notation from Do_Not_Use appears."
+    },
+    {
+      "action": "Remove the apostrophe: ICUs.",
+      "behaviour_raw": "Auto-fix",
+      "example_after": "The ICUs were closed overnight.",
+      "example_before": "The ICU's were closed overnight.",
+      "exceptions": "Possessives such as the ICU's staff are not flagged because a noun follows.",
+      "id": "AB09",
+      "name": "Apostrophe in a plural abbreviation",
+      "run_in_reference_code": "Yes (regex)",
+      "tool_behaviour": "auto_replace",
+      "trigger": "An abbreviation followed by 's and a plural verb."
+    },
+    {
+      "action": "Use the Article column for abbreviations and the sound rule for expansions.",
+      "behaviour_raw": "Auto-fix when the abbreviation or expansion is changed",
+      "example_after": "She had a magnetic resonance imaging (MRI) scan. An MRI was repeated.",
+      "example_before": "She had a magnetic resonance imaging scan. A magnetic resonance imaging was repeated.",
+      "exceptions": "Quotations.",
+      "id": "AB10",
+      "name": "Article agreement",
+      "run_in_reference_code": "Yes",
+      "tool_behaviour": "auto_replace",
+      "trigger": "a or an before an abbreviation or an expansion that does not match its sound."
+    },
+    {
+      "action": "Spell it out. Keep only universally known ones (for example DNA, HIV).",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "Outcomes after coronary artery bypass graft in chronic obstructive pulmonary disease",
+      "example_before": "Outcomes after CABG in COPD",
+      "exceptions": "Entries marked No expansion needed.",
+      "id": "AB11",
+      "name": "Abbreviation in a title or heading",
+      "run_in_reference_code": "No",
+      "tool_behaviour": "flag",
+      "trigger": "An abbreviation in a title, subtitle or heading."
+    },
+    {
+      "action": "Define it again at its first use in the body.",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "(body) The intensive care unit (ICU) ...",
+      "example_before": "(abstract) ... intensive care unit (ICU) ... (body) The ICU ...",
+      "exceptions": "Short documents with no abstract.",
+      "id": "AB12",
+      "name": "Abstract and body are separate scopes",
+      "run_in_reference_code": "No",
+      "tool_behaviour": "flag",
+      "trigger": "An abbreviation defined in the abstract is used in the body with no definition."
+    },
+    {
+      "action": "Remove the periods: ER, MRI.",
+      "behaviour_raw": "Auto-fix",
+      "example_after": "The MRI was normal.",
+      "example_before": "The M.R.I. was normal.",
+      "exceptions": "Latin abbreviations such as e.g. and i.e. and a.m. and p.m., and the earlier Springer rules.",
+      "id": "AB13",
+      "name": "Periods in an initialism",
+      "run_in_reference_code": "No",
+      "tool_behaviour": "auto_replace",
+      "trigger": "Letters separated by periods (E.R., M.R.I.)."
+    },
+    {
+      "action": "Use lowercase unless the term is a proper noun or an organization name.",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "The intensive care unit (ICU) opened.",
+      "example_before": "The Intensive Care Unit (ICU) opened.",
+      "exceptions": "Organization names and titles.",
+      "id": "AB14",
+      "name": "Case of the expansion",
+      "run_in_reference_code": "No",
+      "tool_behaviour": "flag",
+      "trigger": "A common term written with capitals (Intensive Care Unit)."
+    },
+    {
+      "action": "Add the definition in the table note or figure legend. Do not rely on the body.",
+      "behaviour_raw": "Flag and suggest",
+      "example_after": "Table note: BMI, body mass index.",
+      "example_before": "Table cell: BMI 31",
+      "exceptions": "Abbreviations in the abbreviation list.",
+      "id": "AB15",
+      "name": "Tables and figures",
+      "run_in_reference_code": "No",
+      "tool_behaviour": "flag",
+      "trigger": "An abbreviation used in a table or figure with no note."
+    },
+    {
+      "action": "Optionally define again at first use in each chapter or section (setting scopeReset).",
+      "behaviour_raw": "Setting",
+      "example_after": "(chapter 3) The intensive care unit (ICU) ...",
+      "example_before": "(chapter 3) The ICU ...",
+      "exceptions": "Short documents.",
+      "id": "AB16",
+      "name": "Scope reset",
+      "run_in_reference_code": "No",
+      "tool_behaviour": "flag",
+      "trigger": "A long document."
+    },
+    {
+      "action": "Leave as written. Do not add a definition.",
+      "behaviour_raw": "No action",
+      "example_after": "The patient has HIV.",
+      "example_before": "The patient has HIV.",
+      "exceptions": "None.",
+      "id": "AB17",
+      "name": "Never expand",
+      "run_in_reference_code": "Yes (list)",
+      "tool_behaviour": "flag",
+      "trigger": "Unit symbols, chemical symbols, credentials and universally known abbreviations (rule N)."
+    }
+  ]
+}

@@ -1,0 +1,3208 @@
+{
+  "_meta": {
+    "generated_by": "scripts/import_abbreviations_workbook.py",
+    "source_file": "abbrev_wb.xlsx",
+    "source_sha256": "811b824e2d9e0ea0ca6db3e4af23904d541f3979744ceee47eb36e07df90a7f1"
+  },
+  "context_rules": [
+    {
+      "abbreviation": "AACN",
+      "cue_regex": "\\b(?:baccalaureate|essentials|curriculum|deans|schools\\ of\\ nursing|nursing\\ education|accreditation)\\w*",
+      "cue_words": [
+        "baccalaureate",
+        "essentials",
+        "curriculum",
+        "deans",
+        "schools of nursing",
+        "nursing education",
+        "accreditation"
+      ],
+      "id": "CX-001",
+      "meaning": "American Association of Colleges of Nursing",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "AACN",
+      "cue_regex": "\\b(?:critical\\ care|ICU|certification|CCRN|beacon|critical\\-care\\ nurses)\\w*",
+      "cue_words": [
+        "critical care",
+        "ICU",
+        "certification",
+        "CCRN",
+        "beacon",
+        "critical-care nurses"
+      ],
+      "id": "CX-002",
+      "meaning": "American Association of Critical-Care Nurses",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "ABCDE",
+      "cue_regex": "\\b(?:trauma|emergency|resuscitation|primary\\ survey|airway|breathing|circulation)\\w*",
+      "cue_words": [
+        "trauma",
+        "emergency",
+        "resuscitation",
+        "primary survey",
+        "airway",
+        "breathing",
+        "circulation"
+      ],
+      "id": "CX-003",
+      "meaning": "airway, breathing, circulation, disability, and exposure",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "ABCDE",
+      "cue_regex": "\\b(?:melanoma|skin|lesion|mole|dermatology|pigmented|nevus)\\w*",
+      "cue_words": [
+        "melanoma",
+        "skin",
+        "lesion",
+        "mole",
+        "dermatology",
+        "pigmented",
+        "nevus"
+      ],
+      "id": "CX-004",
+      "meaning": "asymmetry, border, color, diameter, and evolving",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "AC",
+      "cue_regex": "\\b(?:shoulder|joint|separation|clavicle|sprain|dislocation)\\w*",
+      "cue_words": [
+        "shoulder",
+        "joint",
+        "separation",
+        "clavicle",
+        "sprain",
+        "dislocation"
+      ],
+      "id": "CX-005",
+      "meaning": "acromioclavicular",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Musculoskeletal and rehabilitation"
+    },
+    {
+      "abbreviation": "AC",
+      "cue_regex": "\\b(?:ventilator|tidal\\ volume|mode|PEEP|intubated|mechanical\\ ventilation)\\w*",
+      "cue_words": [
+        "ventilator",
+        "tidal volume",
+        "mode",
+        "PEEP",
+        "intubated",
+        "mechanical ventilation"
+      ],
+      "id": "CX-006",
+      "meaning": "assist-control",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "AC",
+      "cue_regex": "\\b(?:insulin|glucose|meals|mealtime|tablet|mg|dose)\\w*",
+      "cue_words": [
+        "insulin",
+        "glucose",
+        "meals",
+        "mealtime",
+        "tablet",
+        "mg",
+        "dose"
+      ],
+      "id": "CX-007",
+      "meaning": "before meals",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Pharmacology and medication administration"
+    },
+    {
+      "abbreviation": "ACE",
+      "cue_regex": "\\b(?:childhood|trauma|abuse|neglect|trauma\\-informed|resilience|adversity)\\w*",
+      "cue_words": [
+        "childhood",
+        "trauma",
+        "abuse",
+        "neglect",
+        "trauma-informed",
+        "resilience",
+        "adversity"
+      ],
+      "id": "CX-008",
+      "meaning": "adverse childhood experience",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Endocrine and metabolic"
+    },
+    {
+      "abbreviation": "ACE",
+      "cue_regex": "\\b(?:inhibitor|hypertension|blood\\ pressure|enzyme|lisinopril|cough|ARB)\\w*",
+      "cue_words": [
+        "inhibitor",
+        "hypertension",
+        "blood pressure",
+        "enzyme",
+        "lisinopril",
+        "cough",
+        "ARB"
+      ],
+      "id": "CX-009",
+      "meaning": "angiotensin-converting enzyme",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Laboratory, diagnostics and imaging"
+    },
+    {
+      "abbreviation": "ACS",
+      "cue_regex": "\\b(?:troponin|chest\\ pain|ECG|cardiac|unstable\\ angina|coronary|STEMI)\\w*",
+      "cue_words": [
+        "troponin",
+        "chest pain",
+        "ECG",
+        "cardiac",
+        "unstable angina",
+        "coronary",
+        "STEMI"
+      ],
+      "id": "CX-010",
+      "meaning": "acute coronary syndrome",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "ACS",
+      "cue_regex": "\\b(?:screening|guidelines|cancer\\ society|mammography|colonoscopy|recommends)\\w*",
+      "cue_words": [
+        "screening",
+        "guidelines",
+        "cancer society",
+        "mammography",
+        "colonoscopy",
+        "recommends"
+      ],
+      "id": "CX-011",
+      "meaning": "American Cancer Society",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "AD",
+      "cue_regex": "\\b(?:living\\ will|code\\ status|proxy|power\\ of\\ attorney|end\\ of\\ life|wishes|resuscitation)\\w*",
+      "cue_words": [
+        "living will",
+        "code status",
+        "proxy",
+        "power of attorney",
+        "end of life",
+        "wishes",
+        "resuscitation"
+      ],
+      "id": "CX-012",
+      "meaning": "advance directive",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "AD",
+      "cue_regex": "\\b(?:dementia|memory|cognitive|cholinesterase|amyloid|caregiver|donepezil)\\w*",
+      "cue_words": [
+        "dementia",
+        "memory",
+        "cognitive",
+        "cholinesterase",
+        "amyloid",
+        "caregiver",
+        "donepezil"
+      ],
+      "id": "CX-013",
+      "meaning": "Alzheimer disease",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "ADA",
+      "cue_regex": "\\b(?:diabetes|standards\\ of\\ care|glycemic|HbA1c|glucose|insulin)\\w*",
+      "cue_words": [
+        "diabetes",
+        "standards of care",
+        "glycemic",
+        "HbA1c",
+        "glucose",
+        "insulin"
+      ],
+      "id": "CX-014",
+      "meaning": "American Diabetes Association",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "ADA",
+      "cue_regex": "\\b(?:disability|accommodation|accessibility|law|compliance|employer|discrimination)\\w*",
+      "cue_words": [
+        "disability",
+        "accommodation",
+        "accessibility",
+        "law",
+        "compliance",
+        "employer",
+        "discrimination"
+      ],
+      "id": "CX-015",
+      "meaning": "Americans with Disabilities Act",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "AED",
+      "cue_regex": "\\b(?:seizure|epilepsy|phenytoin|levetiracetam|anticonvulsant|serum\\ level|monotherapy)\\w*",
+      "cue_words": [
+        "seizure",
+        "epilepsy",
+        "phenytoin",
+        "levetiracetam",
+        "anticonvulsant",
+        "serum level",
+        "monotherapy"
+      ],
+      "id": "CX-016",
+      "meaning": "antiepileptic drug",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "AED",
+      "cue_regex": "\\b(?:shock|cardiac\\ arrest|CPR|defibrillation|pads|public\\ access|bystander)\\w*",
+      "cue_words": [
+        "shock",
+        "cardiac arrest",
+        "CPR",
+        "defibrillation",
+        "pads",
+        "public access",
+        "bystander"
+      ],
+      "id": "CX-017",
+      "meaning": "automated external defibrillator",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "AF",
+      "cue_regex": "\\b(?:pregnancy|fetal|index|oligohydramnios|ultrasound|membranes|gestation)\\w*",
+      "cue_words": [
+        "pregnancy",
+        "fetal",
+        "index",
+        "oligohydramnios",
+        "ultrasound",
+        "membranes",
+        "gestation"
+      ],
+      "id": "CX-018",
+      "meaning": "amniotic fluid",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "AF",
+      "cue_regex": "\\b(?:rhythm|anticoagulation|stroke|cardioversion|rate\\ control|ECG|palpitations|warfarin)\\w*",
+      "cue_words": [
+        "rhythm",
+        "anticoagulation",
+        "stroke",
+        "cardioversion",
+        "rate control",
+        "ECG",
+        "palpitations",
+        "warfarin"
+      ],
+      "id": "CX-019",
+      "meaning": "atrial fibrillation",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "AHA",
+      "cue_regex": "\\b(?:guidelines|CPR|stroke|heart|cardiovascular|ACLS|scientific\\ statement)\\w*",
+      "cue_words": [
+        "guidelines",
+        "CPR",
+        "stroke",
+        "heart",
+        "cardiovascular",
+        "ACLS",
+        "scientific statement"
+      ],
+      "id": "CX-020",
+      "meaning": "American Heart Association",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "AHA",
+      "cue_regex": "\\b(?:hospital|survey|hospitals|health\\ systems|advocacy|members)\\w*",
+      "cue_words": [
+        "hospital",
+        "survey",
+        "hospitals",
+        "health systems",
+        "advocacy",
+        "members"
+      ],
+      "id": "CX-021",
+      "meaning": "American Hospital Association",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "AI",
+      "cue_regex": "\\b(?:murmur|valve|regurgitation|aortic|diastolic|echocardiogram|heart)\\w*",
+      "cue_words": [
+        "murmur",
+        "valve",
+        "regurgitation",
+        "aortic",
+        "diastolic",
+        "echocardiogram",
+        "heart"
+      ],
+      "id": "CX-022",
+      "meaning": "aortic insufficiency",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "AI",
+      "cue_regex": "\\b(?:machine|algorithm|model|generative|technology|chatbot|automation)\\w*",
+      "cue_words": [
+        "machine",
+        "algorithm",
+        "model",
+        "generative",
+        "technology",
+        "chatbot",
+        "automation"
+      ],
+      "id": "CX-023",
+      "meaning": "artificial intelligence",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "General and common"
+    },
+    {
+      "abbreviation": "ALS",
+      "cue_regex": "\\b(?:ACLS|resuscitation|paramedic|cardiac\\ arrest|ambulance|airway|defibrillation)\\w*",
+      "cue_words": [
+        "ACLS",
+        "resuscitation",
+        "paramedic",
+        "cardiac arrest",
+        "ambulance",
+        "airway",
+        "defibrillation"
+      ],
+      "id": "CX-024",
+      "meaning": "advanced life support",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "ALS",
+      "cue_regex": "\\b(?:motor\\ neuron|weakness|riluzole|neurodegenerative|progressive|muscle|bulbar)\\w*",
+      "cue_words": [
+        "motor neuron",
+        "weakness",
+        "riluzole",
+        "neurodegenerative",
+        "progressive",
+        "muscle",
+        "bulbar"
+      ],
+      "id": "CX-025",
+      "meaning": "amyotrophic lateral sclerosis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "AMA",
+      "cue_regex": "\\b(?:left|discharge|refused|patient\\ left|form|signed|leave)\\w*",
+      "cue_words": [
+        "left",
+        "discharge",
+        "refused",
+        "patient left",
+        "form",
+        "signed",
+        "leave"
+      ],
+      "id": "CX-026",
+      "meaning": "against medical advice",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "AMA",
+      "cue_regex": "\\b(?:journal|JAMA|physicians|policy|style\\ manual|ethics|house\\ of\\ delegates)\\w*",
+      "cue_words": [
+        "journal",
+        "JAMA",
+        "physicians",
+        "policy",
+        "style manual",
+        "ethics",
+        "house of delegates"
+      ],
+      "id": "CX-027",
+      "meaning": "American Medical Association",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "ANA",
+      "cue_regex": "\\b(?:code\\ of\\ ethics|standards|nursing\\ practice|scope|nurses|position\\ statement)\\w*",
+      "cue_words": [
+        "code of ethics",
+        "standards",
+        "nursing practice",
+        "scope",
+        "nurses",
+        "position statement"
+      ],
+      "id": "CX-028",
+      "meaning": "American Nurses Association",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "ANA",
+      "cue_regex": "\\b(?:lupus|titer|autoimmune|serology|test|positive|rheumatology)\\w*",
+      "cue_words": [
+        "lupus",
+        "titer",
+        "autoimmune",
+        "serology",
+        "test",
+        "positive",
+        "rheumatology"
+      ],
+      "id": "CX-029",
+      "meaning": "antinuclear antibody",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Laboratory, diagnostics and imaging"
+    },
+    {
+      "abbreviation": "APA",
+      "cue_regex": "\\b(?:DSM|psychiatry|psychiatric|diagnostic|guideline|treatment|disorders)\\w*",
+      "cue_words": [
+        "DSM",
+        "psychiatry",
+        "psychiatric",
+        "diagnostic",
+        "guideline",
+        "treatment",
+        "disorders"
+      ],
+      "id": "CX-030",
+      "meaning": "American Psychiatric Association",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "APA",
+      "cue_regex": "\\b(?:citation|style|references|7th\\ edition|publication\\ manual|psychology|cite)\\w*",
+      "cue_words": [
+        "citation",
+        "style",
+        "references",
+        "7th edition",
+        "publication manual",
+        "psychology",
+        "cite"
+      ],
+      "id": "CX-031",
+      "meaning": "American Psychological Association",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "ARF",
+      "cue_regex": "\\b(?:creatinine|urine\\ output|dialysis|kidney|BUN|oliguria|renal)\\w*",
+      "cue_words": [
+        "creatinine",
+        "urine output",
+        "dialysis",
+        "kidney",
+        "BUN",
+        "oliguria",
+        "renal"
+      ],
+      "id": "CX-032",
+      "meaning": "acute renal failure",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "ARF",
+      "cue_regex": "\\b(?:ventilation|hypoxemia|oxygen|intubation|PaO2|hypercapnia|respiratory)\\w*",
+      "cue_words": [
+        "ventilation",
+        "hypoxemia",
+        "oxygen",
+        "intubation",
+        "PaO2",
+        "hypercapnia",
+        "respiratory"
+      ],
+      "id": "CX-033",
+      "meaning": "acute respiratory failure",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "AROM",
+      "cue_regex": "\\b(?:joint|exercise|muscle|flexion|extension|patient\\ moves|active)\\w*",
+      "cue_words": [
+        "joint",
+        "exercise",
+        "muscle",
+        "flexion",
+        "extension",
+        "patient moves",
+        "active"
+      ],
+      "id": "CX-034",
+      "meaning": "active range of motion",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "AROM",
+      "cue_regex": "\\b(?:labor|amniotic|dilation|fetal\\ heart\\ rate|cervix|induction|amniotomy)\\w*",
+      "cue_words": [
+        "labor",
+        "amniotic",
+        "dilation",
+        "fetal heart rate",
+        "cervix",
+        "induction",
+        "amniotomy"
+      ],
+      "id": "CX-035",
+      "meaning": "artificial rupture of membranes",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "ASA",
+      "cue_regex": "\\b(?:physical\\ status|class|anesthesia|surgery|preoperative|anesthesiologist)\\w*",
+      "cue_words": [
+        "physical status",
+        "class",
+        "anesthesia",
+        "surgery",
+        "preoperative",
+        "anesthesiologist"
+      ],
+      "id": "CX-036",
+      "meaning": "American Society of Anesthesiologists",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Pharmacology and medication administration"
+    },
+    {
+      "abbreviation": "ASA",
+      "cue_regex": "\\b(?:tablet|mg|antiplatelet|daily|81|enteric|take|dose)\\w*",
+      "cue_words": [
+        "tablet",
+        "mg",
+        "antiplatelet",
+        "daily",
+        "81",
+        "enteric",
+        "take",
+        "dose"
+      ],
+      "id": "CX-037",
+      "meaning": "aspirin",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Pharmacology and medication administration"
+    },
+    {
+      "abbreviation": "ASD",
+      "cue_regex": "\\b(?:congenital|heart|septum|murmur|closure|shunt|cardiac)\\w*",
+      "cue_words": [
+        "congenital",
+        "heart",
+        "septum",
+        "murmur",
+        "closure",
+        "shunt",
+        "cardiac"
+      ],
+      "id": "CX-038",
+      "meaning": "atrial septal defect",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "ASD",
+      "cue_regex": "\\b(?:autism|social\\ communication|behavior|screening|developmental|M\\-CHAT|child)\\w*",
+      "cue_words": [
+        "autism",
+        "social communication",
+        "behavior",
+        "screening",
+        "developmental",
+        "M-CHAT",
+        "child"
+      ],
+      "id": "CX-039",
+      "meaning": "autism spectrum disorder",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "AST",
+      "cue_regex": "\\b(?:culture|resistance|isolate|MIC|organism|antibiotic|laboratory)\\w*",
+      "cue_words": [
+        "culture",
+        "resistance",
+        "isolate",
+        "MIC",
+        "organism",
+        "antibiotic",
+        "laboratory"
+      ],
+      "id": "CX-040",
+      "meaning": "antimicrobial susceptibility testing",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Gastrointestinal and hepatic"
+    },
+    {
+      "abbreviation": "AST",
+      "cue_regex": "\\b(?:liver|ALT|enzyme|hepatic|transaminase|elevated|hepatitis)\\w*",
+      "cue_words": [
+        "liver",
+        "ALT",
+        "enzyme",
+        "hepatic",
+        "transaminase",
+        "elevated",
+        "hepatitis"
+      ],
+      "id": "CX-041",
+      "meaning": "aspartate aminotransferase",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Gastrointestinal and hepatic"
+    },
+    {
+      "abbreviation": "BPD",
+      "cue_regex": "\\b(?:dialectical|self\\-harm|personality|emotion|DBT|psychiatric|therapy)\\w*",
+      "cue_words": [
+        "dialectical",
+        "self-harm",
+        "personality",
+        "emotion",
+        "DBT",
+        "psychiatric",
+        "therapy"
+      ],
+      "id": "CX-042",
+      "meaning": "borderline personality disorder",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "BPD",
+      "cue_regex": "\\b(?:preterm|oxygen|neonate|infant|ventilator|premature|lung)\\w*",
+      "cue_words": [
+        "preterm",
+        "oxygen",
+        "neonate",
+        "infant",
+        "ventilator",
+        "premature",
+        "lung"
+      ],
+      "id": "CX-043",
+      "meaning": "bronchopulmonary dysplasia",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "BS",
+      "cue_regex": "\\b(?:glucose|insulin|diabetic|fasting|meter|mg/dL|checked)\\w*",
+      "cue_words": [
+        "glucose",
+        "insulin",
+        "diabetic",
+        "fasting",
+        "meter",
+        "mg/dL",
+        "checked"
+      ],
+      "id": "CX-044",
+      "meaning": "blood sugar",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "BS",
+      "cue_regex": "\\b(?:abdomen|hypoactive|hyperactive|quadrant|auscultate|distended|active)\\w*",
+      "cue_words": [
+        "abdomen",
+        "hypoactive",
+        "hyperactive",
+        "quadrant",
+        "auscultate",
+        "distended",
+        "active"
+      ],
+      "id": "CX-045",
+      "meaning": "bowel sounds",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "BS",
+      "cue_regex": "\\b(?:auscultation|lungs|clear|wheeze|crackles|lung|diminished)\\w*",
+      "cue_words": [
+        "auscultation",
+        "lungs",
+        "clear",
+        "wheeze",
+        "crackles",
+        "lung",
+        "diminished"
+      ],
+      "id": "CX-046",
+      "meaning": "breath sounds",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "CA",
+      "cue_regex": "\\b(?:tumor|chemotherapy|oncology|metastasis|malignant|biopsy|breast)\\w*",
+      "cue_words": [
+        "tumor",
+        "chemotherapy",
+        "oncology",
+        "metastasis",
+        "malignant",
+        "biopsy",
+        "breast"
+      ],
+      "id": "CX-047",
+      "meaning": "cancer",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Hematology and oncology"
+    },
+    {
+      "abbreviation": "CA",
+      "cue_regex": "\\b(?:CPR|resuscitation|code|ROSC|defibrillation|pulseless|arrest)\\w*",
+      "cue_words": [
+        "CPR",
+        "resuscitation",
+        "code",
+        "ROSC",
+        "defibrillation",
+        "pulseless",
+        "arrest"
+      ],
+      "id": "CX-048",
+      "meaning": "cardiac arrest",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "CA",
+      "cue_regex": "\\b(?:stenosis|stent|bypass|angiography|left\\ anterior|occlusion|disease)\\w*",
+      "cue_words": [
+        "stenosis",
+        "stent",
+        "bypass",
+        "angiography",
+        "left anterior",
+        "occlusion",
+        "disease"
+      ],
+      "id": "CX-049",
+      "meaning": "coronary artery",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "CC",
+      "cue_regex": "\\b(?:presents|complains|reason\\ for\\ visit|HPI|presenting|patient\\ states)\\w*",
+      "cue_words": [
+        "presents",
+        "complains",
+        "reason for visit",
+        "HPI",
+        "presenting",
+        "patient states"
+      ],
+      "id": "CX-050",
+      "meaning": "chief complaint",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "CC",
+      "cue_regex": "\\b(?:ICU|intensive|ventilator|vasopressor|critically\\ ill|unit|nursing)\\w*",
+      "cue_words": [
+        "ICU",
+        "intensive",
+        "ventilator",
+        "vasopressor",
+        "critically ill",
+        "unit",
+        "nursing"
+      ],
+      "id": "CX-051",
+      "meaning": "critical care",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "CE",
+      "cue_regex": "\\b(?:BCE|century|year|historical|ancient|millennium|AD)\\w*",
+      "cue_words": [
+        "BCE",
+        "century",
+        "year",
+        "historical",
+        "ancient",
+        "millennium",
+        "AD"
+      ],
+      "id": "CX-052",
+      "meaning": "common era",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "General and common"
+    },
+    {
+      "abbreviation": "CE",
+      "cue_regex": "\\b(?:credits|hours|course|license\\ renewal|CEU|certificate|contact\\ hours)\\w*",
+      "cue_words": [
+        "credits",
+        "hours",
+        "course",
+        "license renewal",
+        "CEU",
+        "certificate",
+        "contact hours"
+      ],
+      "id": "CX-053",
+      "meaning": "continuing education",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Education and professional"
+    },
+    {
+      "abbreviation": "CF",
+      "cue_regex": "\\b(?:serology|antibody|titer|assay|antigen|laboratory|test)\\w*",
+      "cue_words": [
+        "serology",
+        "antibody",
+        "titer",
+        "assay",
+        "antigen",
+        "laboratory",
+        "test"
+      ],
+      "id": "CX-054",
+      "meaning": "complement fixation",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "CF",
+      "cue_regex": "\\b(?:CFTR|sweat|pancreatic|mucus|lung|genetic|chloride)\\w*",
+      "cue_words": [
+        "CFTR",
+        "sweat",
+        "pancreatic",
+        "mucus",
+        "lung",
+        "genetic",
+        "chloride"
+      ],
+      "id": "CX-055",
+      "meaning": "cystic fibrosis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "CI",
+      "cue_regex": "\\b(?:cardiac\\ output|body\\ surface|hemodynamic|L/min|Swan\\-Ganz|perfusion|monitoring)\\w*",
+      "cue_words": [
+        "cardiac output",
+        "body surface",
+        "hemodynamic",
+        "L/min",
+        "Swan-Ganz",
+        "perfusion",
+        "monitoring"
+      ],
+      "id": "CX-056",
+      "meaning": "cardiac index",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "CI",
+      "cue_regex": "\\b(?:95%|p\\ value|study|odds|hazard|estimate|statistical|ratio)\\w*",
+      "cue_words": [
+        "95%",
+        "p value",
+        "study",
+        "odds",
+        "hazard",
+        "estimate",
+        "statistical",
+        "ratio"
+      ],
+      "id": "CX-057",
+      "meaning": "confidence interval",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Research and statistics"
+    },
+    {
+      "abbreviation": "CMS",
+      "cue_regex": "\\b(?:Medicare|Medicaid|reimbursement|payment|regulations|hospital\\ compare|quality\\ measures)\\w*",
+      "cue_words": [
+        "Medicare",
+        "Medicaid",
+        "reimbursement",
+        "payment",
+        "regulations",
+        "hospital compare",
+        "quality measures"
+      ],
+      "id": "CX-058",
+      "meaning": "Centers for Medicare & Medicaid Services",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "CMS",
+      "cue_regex": "\\b(?:neurovascular|extremity|pulse|cast|fracture|splint|distal|check)\\w*",
+      "cue_words": [
+        "neurovascular",
+        "extremity",
+        "pulse",
+        "cast",
+        "fracture",
+        "splint",
+        "distal",
+        "check"
+      ],
+      "id": "CX-059",
+      "meaning": "circulation, movement, and sensation",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "CNS",
+      "cue_regex": "\\b(?:brain|spinal\\ cord|neurological|depressant|cerebral|CSF|lesion)\\w*",
+      "cue_words": [
+        "brain",
+        "spinal cord",
+        "neurological",
+        "depressant",
+        "cerebral",
+        "CSF",
+        "lesion"
+      ],
+      "id": "CX-060",
+      "meaning": "central nervous system",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "CNS",
+      "cue_regex": "\\b(?:advanced\\ practice|APRN|specialty|unit|role|nurse\\ specialist|consultation)\\w*",
+      "cue_words": [
+        "advanced practice",
+        "APRN",
+        "specialty",
+        "unit",
+        "role",
+        "nurse specialist",
+        "consultation"
+      ],
+      "id": "CX-061",
+      "meaning": "clinical nurse specialist",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Care settings, roles and credentials"
+    },
+    {
+      "abbreviation": "CO",
+      "cue_regex": "\\b(?:poisoning|exposure|carboxyhemoglobin|fire|smoke|detector|inhalation)\\w*",
+      "cue_words": [
+        "poisoning",
+        "exposure",
+        "carboxyhemoglobin",
+        "fire",
+        "smoke",
+        "detector",
+        "inhalation"
+      ],
+      "id": "CX-062",
+      "meaning": "carbon monoxide",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "CO",
+      "cue_regex": "\\b(?:stroke\\ volume|heart\\ rate|L/min|hemodynamic|perfusion|monitoring|cardiac)\\w*",
+      "cue_words": [
+        "stroke volume",
+        "heart rate",
+        "L/min",
+        "hemodynamic",
+        "perfusion",
+        "monitoring",
+        "cardiac"
+      ],
+      "id": "CX-063",
+      "meaning": "cardiac output",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "CP",
+      "cue_regex": "\\b(?:spastic|motor|child|developmental|birth|muscle\\ tone|cerebral)\\w*",
+      "cue_words": [
+        "spastic",
+        "motor",
+        "child",
+        "developmental",
+        "birth",
+        "muscle tone",
+        "cerebral"
+      ],
+      "id": "CX-064",
+      "meaning": "cerebral palsy",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "CP",
+      "cue_regex": "\\b(?:radiating|angina|pressure|ECG|troponin|MI|presenting)\\w*",
+      "cue_words": [
+        "radiating",
+        "angina",
+        "pressure",
+        "ECG",
+        "troponin",
+        "MI",
+        "presenting"
+      ],
+      "id": "CX-065",
+      "meaning": "chest pain",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "CRT",
+      "cue_regex": "\\b(?:seconds|nail\\ bed|perfusion|peripheral|pediatric|cap\\ refill|capillary)\\w*",
+      "cue_words": [
+        "seconds",
+        "nail bed",
+        "perfusion",
+        "peripheral",
+        "pediatric",
+        "cap refill",
+        "capillary"
+      ],
+      "id": "CX-066",
+      "meaning": "capillary refill time",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "CRT",
+      "cue_regex": "\\b(?:pacemaker|biventricular|heart\\ failure|device|QRS|ICD|implant)\\w*",
+      "cue_words": [
+        "pacemaker",
+        "biventricular",
+        "heart failure",
+        "device",
+        "QRS",
+        "ICD",
+        "implant"
+      ],
+      "id": "CX-067",
+      "meaning": "cardiac resynchronization therapy",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "CVA",
+      "cue_regex": "\\b(?:stroke|hemiparesis|aphasia|thrombus|infarct|tPA|deficit)\\w*",
+      "cue_words": [
+        "stroke",
+        "hemiparesis",
+        "aphasia",
+        "thrombus",
+        "infarct",
+        "tPA",
+        "deficit"
+      ],
+      "id": "CX-068",
+      "meaning": "cerebrovascular accident",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "CVA",
+      "cue_regex": "\\b(?:tenderness|flank|kidney|pyelonephritis|percussion|back|angle)\\w*",
+      "cue_words": [
+        "tenderness",
+        "flank",
+        "kidney",
+        "pyelonephritis",
+        "percussion",
+        "back",
+        "angle"
+      ],
+      "id": "CX-069",
+      "meaning": "costovertebral angle",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "DM",
+      "cue_regex": "\\b(?:rash|muscle\\ weakness|heliotrope|autoimmune|myopathy|skin|inflammatory)\\w*",
+      "cue_words": [
+        "rash",
+        "muscle weakness",
+        "heliotrope",
+        "autoimmune",
+        "myopathy",
+        "skin",
+        "inflammatory"
+      ],
+      "id": "CX-070",
+      "meaning": "dermatomyositis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Endocrine and metabolic"
+    },
+    {
+      "abbreviation": "DM",
+      "cue_regex": "\\b(?:insulin|glucose|HbA1c|hyperglycemia|type\\ 2|diabetic|metformin)\\w*",
+      "cue_words": [
+        "insulin",
+        "glucose",
+        "HbA1c",
+        "hyperglycemia",
+        "type 2",
+        "diabetic",
+        "metformin"
+      ],
+      "id": "CX-071",
+      "meaning": "diabetes mellitus",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Endocrine and metabolic"
+    },
+    {
+      "abbreviation": "ED",
+      "cue_regex": "\\b(?:anorexia|bulimia|binge|restriction|weight|purging|body\\ image)\\w*",
+      "cue_words": [
+        "anorexia",
+        "bulimia",
+        "binge",
+        "restriction",
+        "weight",
+        "purging",
+        "body image"
+      ],
+      "id": "CX-072",
+      "meaning": "eating disorder",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "ED",
+      "cue_regex": "\\b(?:triage|arrived|admitted|visit|trauma|presented|ambulance)\\w*",
+      "cue_words": [
+        "triage",
+        "arrived",
+        "admitted",
+        "visit",
+        "trauma",
+        "presented",
+        "ambulance"
+      ],
+      "id": "CX-073",
+      "meaning": "emergency department",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Care settings, roles and credentials"
+    },
+    {
+      "abbreviation": "ED",
+      "cue_regex": "\\b(?:sildenafil|sexual|erection|urology|impotence|prostate|men)\\w*",
+      "cue_words": [
+        "sildenafil",
+        "sexual",
+        "erection",
+        "urology",
+        "impotence",
+        "prostate",
+        "men"
+      ],
+      "id": "CX-074",
+      "meaning": "erectile dysfunction",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "ER",
+      "cue_regex": "\\b(?:arrived|triage|visit|waiting|taken|physician|ambulance)\\w*",
+      "cue_words": [
+        "arrived",
+        "triage",
+        "visit",
+        "waiting",
+        "taken",
+        "physician",
+        "ambulance"
+      ],
+      "id": "CX-075",
+      "meaning": "emergency room",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Care settings, roles and credentials"
+    },
+    {
+      "abbreviation": "ER",
+      "cue_regex": "\\b(?:breast|tumor|positive|HER2|hormone|tamoxifen|immunohistochemistry)\\w*",
+      "cue_words": [
+        "breast",
+        "tumor",
+        "positive",
+        "HER2",
+        "hormone",
+        "tamoxifen",
+        "immunohistochemistry"
+      ],
+      "id": "CX-076",
+      "meaning": "estrogen receptor",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Hematology and oncology"
+    },
+    {
+      "abbreviation": "GAD",
+      "cue_regex": "\\b(?:worry|anxiety|GAD\\-7|SSRI|restlessness|psychiatric|excessive)\\w*",
+      "cue_words": [
+        "worry",
+        "anxiety",
+        "GAD-7",
+        "SSRI",
+        "restlessness",
+        "psychiatric",
+        "excessive"
+      ],
+      "id": "CX-077",
+      "meaning": "generalized anxiety disorder",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "GAD",
+      "cue_regex": "\\b(?:antibody|autoimmune|type\\ 1|islet|assay|stiff|enzyme)\\w*",
+      "cue_words": [
+        "antibody",
+        "autoimmune",
+        "type 1",
+        "islet",
+        "assay",
+        "stiff",
+        "enzyme"
+      ],
+      "id": "CX-078",
+      "meaning": "glutamic acid decarboxylase",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "HCP",
+      "cue_regex": "\\b(?:provider|clinician|physician|nurse\\ practitioner|contact|notify|advise)\\w*",
+      "cue_words": [
+        "provider",
+        "clinician",
+        "physician",
+        "nurse practitioner",
+        "contact",
+        "notify",
+        "advise"
+      ],
+      "id": "CX-079",
+      "meaning": "health care provider",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "HCP",
+      "cue_regex": "\\b(?:appointed|decision|advance\\ directive|proxy|surrogate|agent|incapacitated)\\w*",
+      "cue_words": [
+        "appointed",
+        "decision",
+        "advance directive",
+        "proxy",
+        "surrogate",
+        "agent",
+        "incapacitated"
+      ],
+      "id": "CX-080",
+      "meaning": "health care proxy",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "HD",
+      "cue_regex": "\\b(?:dialysis|fistula|renal|access|session|catheter|kidney)\\w*",
+      "cue_words": [
+        "dialysis",
+        "fistula",
+        "renal",
+        "access",
+        "session",
+        "catheter",
+        "kidney"
+      ],
+      "id": "CX-081",
+      "meaning": "hemodialysis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "HD",
+      "cue_regex": "\\b(?:chorea|genetic|CAG|neurodegenerative|movement|inherited|family)\\w*",
+      "cue_words": [
+        "chorea",
+        "genetic",
+        "CAG",
+        "neurodegenerative",
+        "movement",
+        "inherited",
+        "family"
+      ],
+      "id": "CX-082",
+      "meaning": "Huntington disease",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "HHS",
+      "cue_regex": "\\b(?:glucose|dehydration|osmolality|diabetes|insulin|coma|hyperglycemic)\\w*",
+      "cue_words": [
+        "glucose",
+        "dehydration",
+        "osmolality",
+        "diabetes",
+        "insulin",
+        "coma",
+        "hyperglycemic"
+      ],
+      "id": "CX-083",
+      "meaning": "hyperosmolar hyperglycemic state",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Endocrine and metabolic"
+    },
+    {
+      "abbreviation": "HHS",
+      "cue_regex": "\\b(?:federal|department|secretary|regulations|agency|Medicare|government)\\w*",
+      "cue_words": [
+        "federal",
+        "department",
+        "secretary",
+        "regulations",
+        "agency",
+        "Medicare",
+        "government"
+      ],
+      "id": "CX-084",
+      "meaning": "US Department of Health and Human Services",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "HI",
+      "cue_regex": "\\b(?:hearing|deaf|audiology|communication|interpreter|aids|impairment)\\w*",
+      "cue_words": [
+        "hearing",
+        "deaf",
+        "audiology",
+        "communication",
+        "interpreter",
+        "aids",
+        "impairment"
+      ],
+      "id": "CX-085",
+      "meaning": "hearing impaired",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "HI",
+      "cue_regex": "\\b(?:SI|suicidal|psychiatric|safety|threat|mental\\ status|denies)\\w*",
+      "cue_words": [
+        "SI",
+        "suicidal",
+        "psychiatric",
+        "safety",
+        "threat",
+        "mental status",
+        "denies"
+      ],
+      "id": "CX-086",
+      "meaning": "homicidal ideation",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "HR",
+      "cue_regex": "\\b(?:survival|Cox|confidence\\ interval|CI|risk|study|95%)\\w*",
+      "cue_words": [
+        "survival",
+        "Cox",
+        "confidence interval",
+        "CI",
+        "risk",
+        "study",
+        "95%"
+      ],
+      "id": "CX-087",
+      "meaning": "hazard ratio",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Research and statistics"
+    },
+    {
+      "abbreviation": "HR",
+      "cue_regex": "\\b(?:bpm|pulse|tachycardia|bradycardia|vital\\ signs|beats|BP)\\w*",
+      "cue_words": [
+        "bpm",
+        "pulse",
+        "tachycardia",
+        "bradycardia",
+        "vital signs",
+        "beats",
+        "BP"
+      ],
+      "id": "CX-088",
+      "meaning": "heart rate",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "HR",
+      "cue_regex": "\\b(?:employee|hiring|department|personnel|policy|staff|recruitment)\\w*",
+      "cue_words": [
+        "employee",
+        "hiring",
+        "department",
+        "personnel",
+        "policy",
+        "staff",
+        "recruitment"
+      ],
+      "id": "CX-089",
+      "meaning": "human resources",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "General and common"
+    },
+    {
+      "abbreviation": "ICD",
+      "cue_regex": "\\b(?:shock|device|arrhythmia|ventricular|implanted|pacemaker|defibrillator)\\w*",
+      "cue_words": [
+        "shock",
+        "device",
+        "arrhythmia",
+        "ventricular",
+        "implanted",
+        "pacemaker",
+        "defibrillator"
+      ],
+      "id": "CX-090",
+      "meaning": "implantable cardioverter-defibrillator",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "ICD",
+      "cue_regex": "\\b(?:code|coding|diagnosis\\ code|billing|ICD\\-10|classification|reimbursement)\\w*",
+      "cue_words": [
+        "code",
+        "coding",
+        "diagnosis code",
+        "billing",
+        "ICD-10",
+        "classification",
+        "reimbursement"
+      ],
+      "id": "CX-091",
+      "meaning": "International Classification of Diseases",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Organizations, regulation and standards"
+    },
+    {
+      "abbreviation": "ID",
+      "cue_regex": "\\b(?:wristband|name|badge|patient\\ identification|verify|two\\ identifiers|date\\ of\\ birth)\\w*",
+      "cue_words": [
+        "wristband",
+        "name",
+        "badge",
+        "patient identification",
+        "verify",
+        "two identifiers",
+        "date of birth"
+      ],
+      "id": "CX-092",
+      "meaning": "identification",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "ID",
+      "cue_regex": "\\b(?:consult|specialist|antibiotic|infection|physician|service|infectious)\\w*",
+      "cue_words": [
+        "consult",
+        "specialist",
+        "antibiotic",
+        "infection",
+        "physician",
+        "service",
+        "infectious"
+      ],
+      "id": "CX-093",
+      "meaning": "infectious disease",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "General and common"
+    },
+    {
+      "abbreviation": "ID",
+      "cue_regex": "\\b(?:injection|skin|wheal|tuberculin|vaccine|route|needle)\\w*",
+      "cue_words": [
+        "injection",
+        "skin",
+        "wheal",
+        "tuberculin",
+        "vaccine",
+        "route",
+        "needle"
+      ],
+      "id": "CX-094",
+      "meaning": "intradermal",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Pharmacology and medication administration"
+    },
+    {
+      "abbreviation": "IVF",
+      "cue_regex": "\\b(?:fertility|embryo|infertility|conception|clinic|pregnancy|couples)\\w*",
+      "cue_words": [
+        "fertility",
+        "embryo",
+        "infertility",
+        "conception",
+        "clinic",
+        "pregnancy",
+        "couples"
+      ],
+      "id": "CX-095",
+      "meaning": "in vitro fertilization",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Obstetrics, neonatal and pediatric"
+    },
+    {
+      "abbreviation": "IVF",
+      "cue_regex": "\\b(?:bolus|normal\\ saline|hydration|rate|mL/hr|infusion|maintenance)\\w*",
+      "cue_words": [
+        "bolus",
+        "normal saline",
+        "hydration",
+        "rate",
+        "mL/hr",
+        "infusion",
+        "maintenance"
+      ],
+      "id": "CX-096",
+      "meaning": "intravenous fluids",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "LA",
+      "cue_regex": "\\b(?:enlargement|echocardiogram|atrial|appendage|mitral|size|dilated)\\w*",
+      "cue_words": [
+        "enlargement",
+        "echocardiogram",
+        "atrial",
+        "appendage",
+        "mitral",
+        "size",
+        "dilated"
+      ],
+      "id": "CX-097",
+      "meaning": "left atrium",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "LA",
+      "cue_regex": "\\b(?:lidocaine|injection|numbing|procedure|anesthetic|sedation|infiltration)\\w*",
+      "cue_words": [
+        "lidocaine",
+        "injection",
+        "numbing",
+        "procedure",
+        "anesthetic",
+        "sedation",
+        "infiltration"
+      ],
+      "id": "CX-098",
+      "meaning": "local anesthesia",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "LOC",
+      "cue_regex": "\\b(?:alert|responsive|assessment|GCS|oriented|neurological\\ check|decreased)\\w*",
+      "cue_words": [
+        "alert",
+        "responsive",
+        "assessment",
+        "GCS",
+        "oriented",
+        "neurological check",
+        "decreased"
+      ],
+      "id": "CX-099",
+      "meaning": "level of consciousness",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "LOC",
+      "cue_regex": "\\b(?:syncope|fainted|unresponsive|seconds|head\\ injury|fall|witnessed)\\w*",
+      "cue_words": [
+        "syncope",
+        "fainted",
+        "unresponsive",
+        "seconds",
+        "head injury",
+        "fall",
+        "witnessed"
+      ],
+      "id": "CX-100",
+      "meaning": "loss of consciousness",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "MA",
+      "cue_regex": "\\b(?:degree|university|graduate|thesis|humanities|education|earned)\\w*",
+      "cue_words": [
+        "degree",
+        "university",
+        "graduate",
+        "thesis",
+        "humanities",
+        "education",
+        "earned"
+      ],
+      "id": "CX-101",
+      "meaning": "Master of Arts",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "General and common"
+    },
+    {
+      "abbreviation": "MA",
+      "cue_regex": "\\b(?:clinic|rooming|office|vital\\ signs|assistant|certified|intake)\\w*",
+      "cue_words": [
+        "clinic",
+        "rooming",
+        "office",
+        "vital signs",
+        "assistant",
+        "certified",
+        "intake"
+      ],
+      "id": "CX-102",
+      "meaning": "medical assistant",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Education and professional"
+    },
+    {
+      "abbreviation": "MAP",
+      "cue_regex": "\\b(?:ventilator|oxygenation|high\\-frequency|airway|oscillator|setting|ventilation)\\w*",
+      "cue_words": [
+        "ventilator",
+        "oxygenation",
+        "high-frequency",
+        "airway",
+        "oscillator",
+        "setting",
+        "ventilation"
+      ],
+      "id": "CX-103",
+      "meaning": "mean airway pressure",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "MAP",
+      "cue_regex": "\\b(?:blood\\ pressure|vasopressor|goal|perfusion|norepinephrine|sepsis|mmHg)\\w*",
+      "cue_words": [
+        "blood pressure",
+        "vasopressor",
+        "goal",
+        "perfusion",
+        "norepinephrine",
+        "sepsis",
+        "mmHg"
+      ],
+      "id": "CX-104",
+      "meaning": "mean arterial pressure",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "MCL",
+      "cue_regex": "\\b(?:knee|sprain|valgus|tear|ligament|injury|athlete)\\w*",
+      "cue_words": [
+        "knee",
+        "sprain",
+        "valgus",
+        "tear",
+        "ligament",
+        "injury",
+        "athlete"
+      ],
+      "id": "CX-105",
+      "meaning": "medial collateral ligament",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Musculoskeletal and rehabilitation"
+    },
+    {
+      "abbreviation": "MCL",
+      "cue_regex": "\\b(?:apical|intercostal\\ space|auscultation|fifth|landmark|palpation|line)\\w*",
+      "cue_words": [
+        "apical",
+        "intercostal space",
+        "auscultation",
+        "fifth",
+        "landmark",
+        "palpation",
+        "line"
+      ],
+      "id": "CX-106",
+      "meaning": "midclavicular line",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "ML",
+      "cue_regex": "\\b(?:algorithm|model|training|prediction|data|artificial|classification)\\w*",
+      "cue_words": [
+        "algorithm",
+        "model",
+        "training",
+        "prediction",
+        "data",
+        "artificial",
+        "classification"
+      ],
+      "id": "CX-107",
+      "meaning": "machine learning",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "General and common"
+    },
+    {
+      "abbreviation": "ML",
+      "cue_regex": "\\b(?:estimation|parameter|regression|statistical|model\\ fit|likelihood|estimate)\\w*",
+      "cue_words": [
+        "estimation",
+        "parameter",
+        "regression",
+        "statistical",
+        "model fit",
+        "likelihood",
+        "estimate"
+      ],
+      "id": "CX-108",
+      "meaning": "maximum likelihood",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Research and statistics"
+    },
+    {
+      "abbreviation": "MS",
+      "cue_regex": "\\b(?:murmur|valve|rheumatic|atrial|diastolic|echocardiogram|mitral)\\w*",
+      "cue_words": [
+        "murmur",
+        "valve",
+        "rheumatic",
+        "atrial",
+        "diastolic",
+        "echocardiogram",
+        "mitral"
+      ],
+      "id": "CX-109",
+      "meaning": "mitral stenosis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "MS",
+      "cue_regex": "\\b(?:demyelinating|relapsing|MRI|lesions|interferon|fatigue|neurologic)\\w*",
+      "cue_words": [
+        "demyelinating",
+        "relapsing",
+        "MRI",
+        "lesions",
+        "interferon",
+        "fatigue",
+        "neurologic"
+      ],
+      "id": "CX-110",
+      "meaning": "multiple sclerosis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "NS",
+      "cue_regex": "\\b(?:IV|bolus|flush|mL|infusion|fluid|sodium\\ chloride)\\w*",
+      "cue_words": [
+        "IV",
+        "bolus",
+        "flush",
+        "mL",
+        "infusion",
+        "fluid",
+        "sodium chloride"
+      ],
+      "id": "CX-111",
+      "meaning": "normal saline",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "NS",
+      "cue_regex": "\\b(?:clinical|student|preceptor|faculty|program|practicum|school)\\w*",
+      "cue_words": [
+        "clinical",
+        "student",
+        "preceptor",
+        "faculty",
+        "program",
+        "practicum",
+        "school"
+      ],
+      "id": "CX-112",
+      "meaning": "nursing student",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "NVD",
+      "cue_regex": "\\b(?:gastroenteritis|symptoms|dehydration|abdominal|stomach|fever|illness)\\w*",
+      "cue_words": [
+        "gastroenteritis",
+        "symptoms",
+        "dehydration",
+        "abdominal",
+        "stomach",
+        "fever",
+        "illness"
+      ],
+      "id": "CX-113",
+      "meaning": "nausea, vomiting, and diarrhea",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "NVD",
+      "cue_regex": "\\b(?:labor|birth|postpartum|newborn|delivered|gestation|pregnancy)\\w*",
+      "cue_words": [
+        "labor",
+        "birth",
+        "postpartum",
+        "newborn",
+        "delivered",
+        "gestation",
+        "pregnancy"
+      ],
+      "id": "CX-114",
+      "meaning": "normal vaginal delivery",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Obstetrics, neonatal and pediatric"
+    },
+    {
+      "abbreviation": "OR",
+      "cue_regex": "\\b(?:confidence\\ interval|CI|regression|association|95%|logistic|adjusted)\\w*",
+      "cue_words": [
+        "confidence interval",
+        "CI",
+        "regression",
+        "association",
+        "95%",
+        "logistic",
+        "adjusted"
+      ],
+      "id": "CX-115",
+      "meaning": "odds ratio",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Research and statistics"
+    },
+    {
+      "abbreviation": "OR",
+      "cue_regex": "\\b(?:surgery|surgical|scrub|anesthesia|transferred|theater|procedure)\\w*",
+      "cue_words": [
+        "surgery",
+        "surgical",
+        "scrub",
+        "anesthesia",
+        "transferred",
+        "theater",
+        "procedure"
+      ],
+      "id": "CX-116",
+      "meaning": "operating room",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Care settings, roles and credentials"
+    },
+    {
+      "abbreviation": "PA",
+      "cue_regex": "\\b(?:clinic|supervising|practice|PA\\-C|provider|certified|physician)\\w*",
+      "cue_words": [
+        "clinic",
+        "supervising",
+        "practice",
+        "PA-C",
+        "provider",
+        "certified",
+        "physician"
+      ],
+      "id": "CX-117",
+      "meaning": "physician assistant",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Care settings, roles and credentials"
+    },
+    {
+      "abbreviation": "PA",
+      "cue_regex": "\\b(?:chest\\ x\\-ray|radiograph|view|lateral|film|projection|imaging)\\w*",
+      "cue_words": [
+        "chest x-ray",
+        "radiograph",
+        "view",
+        "lateral",
+        "film",
+        "projection",
+        "imaging"
+      ],
+      "id": "CX-118",
+      "meaning": "posteroanterior",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "PA",
+      "cue_regex": "\\b(?:catheter|pressure|wedge|hypertension|Swan|thrombus|pulmonary)\\w*",
+      "cue_words": [
+        "catheter",
+        "pressure",
+        "wedge",
+        "hypertension",
+        "Swan",
+        "thrombus",
+        "pulmonary"
+      ],
+      "id": "CX-119",
+      "meaning": "pulmonary artery",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "PC",
+      "cue_regex": "\\b(?:postprandial|glucose|meals|insulin|dose|mealtime|tablets)\\w*",
+      "cue_words": [
+        "postprandial",
+        "glucose",
+        "meals",
+        "insulin",
+        "dose",
+        "mealtime",
+        "tablets"
+      ],
+      "id": "CX-120",
+      "meaning": "after meals",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Pharmacology and medication administration"
+    },
+    {
+      "abbreviation": "PC",
+      "cue_regex": "\\b(?:ventilator|mode|inspiratory|tidal\\ volume|ventilation|setting|breaths)\\w*",
+      "cue_words": [
+        "ventilator",
+        "mode",
+        "inspiratory",
+        "tidal volume",
+        "ventilation",
+        "setting",
+        "breaths"
+      ],
+      "id": "CX-121",
+      "meaning": "pressure control",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "PCA",
+      "cue_regex": "\\b(?:pump|morphine|hydromorphone|pain|bolus|lockout|analgesia)\\w*",
+      "cue_words": [
+        "pump",
+        "morphine",
+        "hydromorphone",
+        "pain",
+        "bolus",
+        "lockout",
+        "analgesia"
+      ],
+      "id": "CX-122",
+      "meaning": "patient-controlled analgesia",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "PCA",
+      "cue_regex": "\\b(?:stroke|occipital|infarct|vascular|visual|circle\\ of\\ Willis|artery)\\w*",
+      "cue_words": [
+        "stroke",
+        "occipital",
+        "infarct",
+        "vascular",
+        "visual",
+        "circle of Willis",
+        "artery"
+      ],
+      "id": "CX-123",
+      "meaning": "posterior cerebral artery",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "PCA",
+      "cue_regex": "\\b(?:variance|components|factor|dimension|statistical|data|loadings)\\w*",
+      "cue_words": [
+        "variance",
+        "components",
+        "factor",
+        "dimension",
+        "statistical",
+        "data",
+        "loadings"
+      ],
+      "id": "CX-124",
+      "meaning": "principal component analysis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Research and statistics"
+    },
+    {
+      "abbreviation": "PD",
+      "cue_regex": "\\b(?:tremor|levodopa|rigidity|dopamine|bradykinesia|gait|carbidopa)\\w*",
+      "cue_words": [
+        "tremor",
+        "levodopa",
+        "rigidity",
+        "dopamine",
+        "bradykinesia",
+        "gait",
+        "carbidopa"
+      ],
+      "id": "CX-125",
+      "meaning": "Parkinson disease",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "PD",
+      "cue_regex": "\\b(?:dialysate|abdomen|catheter|exchange|peritonitis|renal|home)\\w*",
+      "cue_words": [
+        "dialysate",
+        "abdomen",
+        "catheter",
+        "exchange",
+        "peritonitis",
+        "renal",
+        "home"
+      ],
+      "id": "CX-126",
+      "meaning": "peritoneal dialysis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "PDA",
+      "cue_regex": "\\b(?:neonate|preterm|murmur|ductus|indomethacin|closure|infant)\\w*",
+      "cue_words": [
+        "neonate",
+        "preterm",
+        "murmur",
+        "ductus",
+        "indomethacin",
+        "closure",
+        "infant"
+      ],
+      "id": "CX-127",
+      "meaning": "patent ductus arteriosus",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "PDA",
+      "cue_regex": "\\b(?:coronary|angiography|right\\ coronary|inferior|infarct|stent|artery)\\w*",
+      "cue_words": [
+        "coronary",
+        "angiography",
+        "right coronary",
+        "inferior",
+        "infarct",
+        "stent",
+        "artery"
+      ],
+      "id": "CX-128",
+      "meaning": "posterior descending artery",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "PE",
+      "cue_regex": "\\b(?:findings|assessment|head\\ to\\ toe|inspection|auscultation|lungs|abdomen)\\w*",
+      "cue_words": [
+        "findings",
+        "assessment",
+        "head to toe",
+        "inspection",
+        "auscultation",
+        "lungs",
+        "abdomen"
+      ],
+      "id": "CX-129",
+      "meaning": "physical examination",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "PE",
+      "cue_regex": "\\b(?:clot|anticoagulation|dyspnea|CT\\ angiography|DVT|hypoxia|heparin)\\w*",
+      "cue_words": [
+        "clot",
+        "anticoagulation",
+        "dyspnea",
+        "CT angiography",
+        "DVT",
+        "hypoxia",
+        "heparin"
+      ],
+      "id": "CX-130",
+      "meaning": "pulmonary embolism",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "PEP",
+      "cue_regex": "\\b(?:airway\\ clearance|mucus|device|therapy|secretions|mask|expiratory)\\w*",
+      "cue_words": [
+        "airway clearance",
+        "mucus",
+        "device",
+        "therapy",
+        "secretions",
+        "mask",
+        "expiratory"
+      ],
+      "id": "CX-131",
+      "meaning": "positive expiratory pressure",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "PEP",
+      "cue_regex": "\\b(?:exposure|HIV|needlestick|antiretroviral|72\\ hours|rabies|prophylaxis)\\w*",
+      "cue_words": [
+        "exposure",
+        "HIV",
+        "needlestick",
+        "antiretroviral",
+        "72 hours",
+        "rabies",
+        "prophylaxis"
+      ],
+      "id": "CX-132",
+      "meaning": "postexposure prophylaxis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Infectious disease and immunology"
+    },
+    {
+      "abbreviation": "PNS",
+      "cue_regex": "\\b(?:vagal|rest|digest|autonomic|heart\\ rate|sympathetic|acetylcholine)\\w*",
+      "cue_words": [
+        "vagal",
+        "rest",
+        "digest",
+        "autonomic",
+        "heart rate",
+        "sympathetic",
+        "acetylcholine"
+      ],
+      "id": "CX-133",
+      "meaning": "parasympathetic nervous system",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "PNS",
+      "cue_regex": "\\b(?:nerves|neuropathy|motor|sensory|somatic|neuron|peripheral)\\w*",
+      "cue_words": [
+        "nerves",
+        "neuropathy",
+        "motor",
+        "sensory",
+        "somatic",
+        "neuron",
+        "peripheral"
+      ],
+      "id": "CX-134",
+      "meaning": "peripheral nervous system",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Neurological"
+    },
+    {
+      "abbreviation": "POA",
+      "cue_regex": "\\b(?:legal|document|agent|durable|financial|decisions|attorney)\\w*",
+      "cue_words": [
+        "legal",
+        "document",
+        "agent",
+        "durable",
+        "financial",
+        "decisions",
+        "attorney"
+      ],
+      "id": "CX-135",
+      "meaning": "power of attorney",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "POA",
+      "cue_regex": "\\b(?:indicator|hospital\\-acquired|coding|pressure\\ injury|billing|admission|condition)\\w*",
+      "cue_words": [
+        "indicator",
+        "hospital-acquired",
+        "coding",
+        "pressure injury",
+        "billing",
+        "admission",
+        "condition"
+      ],
+      "id": "CX-136",
+      "meaning": "present on admission",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "PPD",
+      "cue_regex": "\\b(?:mother|postpartum|EPDS|mood|baby|depression|screening)\\w*",
+      "cue_words": [
+        "mother",
+        "postpartum",
+        "EPDS",
+        "mood",
+        "baby",
+        "depression",
+        "screening"
+      ],
+      "id": "CX-137",
+      "meaning": "postpartum depression",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Obstetrics, neonatal and pediatric"
+    },
+    {
+      "abbreviation": "PPD",
+      "cue_regex": "\\b(?:tuberculin|skin\\ test|induration|TB|positive|read|mm)\\w*",
+      "cue_words": [
+        "tuberculin",
+        "skin test",
+        "induration",
+        "TB",
+        "positive",
+        "read",
+        "mm"
+      ],
+      "id": "CX-138",
+      "meaning": "purified protein derivative",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Infectious disease and immunology"
+    },
+    {
+      "abbreviation": "PR",
+      "cue_regex": "\\b(?:suppository|rectal|administration|route|enema|medication|dose)\\w*",
+      "cue_words": [
+        "suppository",
+        "rectal",
+        "administration",
+        "route",
+        "enema",
+        "medication",
+        "dose"
+      ],
+      "id": "CX-139",
+      "meaning": "per rectum",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Hematology and oncology"
+    },
+    {
+      "abbreviation": "PR",
+      "cue_regex": "\\b(?:breast|tumor|hormone|ER|HER2|immunohistochemistry|receptor)\\w*",
+      "cue_words": [
+        "breast",
+        "tumor",
+        "hormone",
+        "ER",
+        "HER2",
+        "immunohistochemistry",
+        "receptor"
+      ],
+      "id": "CX-140",
+      "meaning": "progesterone receptor",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Hematology and oncology"
+    },
+    {
+      "abbreviation": "PR",
+      "cue_regex": "\\b(?:pulse|beats|vital\\ signs|radial|rhythm|heart|minute)\\w*",
+      "cue_words": [
+        "pulse",
+        "beats",
+        "vital signs",
+        "radial",
+        "rhythm",
+        "heart",
+        "minute"
+      ],
+      "id": "CX-141",
+      "meaning": "pulse rate",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Hematology and oncology"
+    },
+    {
+      "abbreviation": "PROM",
+      "cue_regex": "\\b(?:therapist|joint|assist|exercise|flexion|nurse\\ moves|passive)\\w*",
+      "cue_words": [
+        "therapist",
+        "joint",
+        "assist",
+        "exercise",
+        "flexion",
+        "nurse moves",
+        "passive"
+      ],
+      "id": "CX-142",
+      "meaning": "passive range of motion",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "PROM",
+      "cue_regex": "\\b(?:pregnancy|gestation|labor|amniotic|infection|weeks|membranes)\\w*",
+      "cue_words": [
+        "pregnancy",
+        "gestation",
+        "labor",
+        "amniotic",
+        "infection",
+        "weeks",
+        "membranes"
+      ],
+      "id": "CX-143",
+      "meaning": "premature rupture of membranes",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Obstetrics, neonatal and pediatric"
+    },
+    {
+      "abbreviation": "PT",
+      "cue_regex": "\\b(?:rehabilitation|gait|exercise|mobility|strength|therapist|referral)\\w*",
+      "cue_words": [
+        "rehabilitation",
+        "gait",
+        "exercise",
+        "mobility",
+        "strength",
+        "therapist",
+        "referral"
+      ],
+      "id": "CX-144",
+      "meaning": "physical therapy",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Musculoskeletal and rehabilitation"
+    },
+    {
+      "abbreviation": "PT",
+      "cue_regex": "\\b(?:INR|warfarin|coagulation|bleeding|anticoagulant|lab|clotting)\\w*",
+      "cue_words": [
+        "INR",
+        "warfarin",
+        "coagulation",
+        "bleeding",
+        "anticoagulant",
+        "lab",
+        "clotting"
+      ],
+      "id": "CX-145",
+      "meaning": "prothrombin time",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Hematology and oncology"
+    },
+    {
+      "abbreviation": "PVR",
+      "cue_regex": "\\b(?:bladder|scan|retention|urinary|mL|catheter|void)\\w*",
+      "cue_words": [
+        "bladder",
+        "scan",
+        "retention",
+        "urinary",
+        "mL",
+        "catheter",
+        "void"
+      ],
+      "id": "CX-146",
+      "meaning": "postvoid residual",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "PVR",
+      "cue_regex": "\\b(?:pulmonary\\ hypertension|Swan|hemodynamic|Wood\\ units|catheterization|cardiac|resistance)\\w*",
+      "cue_words": [
+        "pulmonary hypertension",
+        "Swan",
+        "hemodynamic",
+        "Wood units",
+        "catheterization",
+        "cardiac",
+        "resistance"
+      ],
+      "id": "CX-147",
+      "meaning": "pulmonary vascular resistance",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "RA",
+      "cue_regex": "\\b(?:joint|methotrexate|swelling|autoimmune|rheumatology|RF|stiffness)\\w*",
+      "cue_words": [
+        "joint",
+        "methotrexate",
+        "swelling",
+        "autoimmune",
+        "rheumatology",
+        "RF",
+        "stiffness"
+      ],
+      "id": "CX-148",
+      "meaning": "rheumatoid arthritis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Musculoskeletal and rehabilitation"
+    },
+    {
+      "abbreviation": "RA",
+      "cue_regex": "\\b(?:heart|pressure|chamber|atrial|venous|catheter|cardiac)\\w*",
+      "cue_words": [
+        "heart",
+        "pressure",
+        "chamber",
+        "atrial",
+        "venous",
+        "catheter",
+        "cardiac"
+      ],
+      "id": "CX-149",
+      "meaning": "right atrium",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "RA",
+      "cue_regex": "\\b(?:oxygen|SpO2|saturation|breathing|nasal\\ cannula|on|sat)\\w*",
+      "cue_words": [
+        "oxygen",
+        "SpO2",
+        "saturation",
+        "breathing",
+        "nasal cannula",
+        "on",
+        "sat"
+      ],
+      "id": "CX-150",
+      "meaning": "room air",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "RCA",
+      "cue_regex": "\\b(?:stenosis|stent|angiography|inferior|coronary|occlusion|artery)\\w*",
+      "cue_words": [
+        "stenosis",
+        "stent",
+        "angiography",
+        "inferior",
+        "coronary",
+        "occlusion",
+        "artery"
+      ],
+      "id": "CX-151",
+      "meaning": "right coronary artery",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "RCA",
+      "cue_regex": "\\b(?:event|error|safety|incident|sentinel|analysis\\ team|near\\ miss)\\w*",
+      "cue_words": [
+        "event",
+        "error",
+        "safety",
+        "incident",
+        "sentinel",
+        "analysis team",
+        "near miss"
+      ],
+      "id": "CX-152",
+      "meaning": "root cause analysis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Nursing practice and documentation"
+    },
+    {
+      "abbreviation": "RF",
+      "cue_regex": "\\b(?:kidney|dialysis|creatinine|BUN|acute|chronic|urine)\\w*",
+      "cue_words": [
+        "kidney",
+        "dialysis",
+        "creatinine",
+        "BUN",
+        "acute",
+        "chronic",
+        "urine"
+      ],
+      "id": "CX-153",
+      "meaning": "renal failure",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Pharmacology and medication administration"
+    },
+    {
+      "abbreviation": "RF",
+      "cue_regex": "\\b(?:arthritis|antibody|serology|positive|lab|titer|rheumatoid)\\w*",
+      "cue_words": [
+        "arthritis",
+        "antibody",
+        "serology",
+        "positive",
+        "lab",
+        "titer",
+        "rheumatoid"
+      ],
+      "id": "CX-154",
+      "meaning": "rheumatoid factor",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Laboratory, diagnostics and imaging"
+    },
+    {
+      "abbreviation": "RF",
+      "cue_regex": "\\b(?:risk|associated|factors|smoking|hypertension|increased|modifiable)\\w*",
+      "cue_words": [
+        "risk",
+        "associated",
+        "factors",
+        "smoking",
+        "hypertension",
+        "increased",
+        "modifiable"
+      ],
+      "id": "CX-155",
+      "meaning": "risk factor",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Pharmacology and medication administration"
+    },
+    {
+      "abbreviation": "ROM",
+      "cue_regex": "\\b(?:joint|flexion|extension|limited|full|exercises|passive)\\w*",
+      "cue_words": [
+        "joint",
+        "flexion",
+        "extension",
+        "limited",
+        "full",
+        "exercises",
+        "passive"
+      ],
+      "id": "CX-156",
+      "meaning": "range of motion",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "ROM",
+      "cue_regex": "\\b(?:labor|amniotic|fluid|pregnancy|gestation|spontaneous|premature)\\w*",
+      "cue_words": [
+        "labor",
+        "amniotic",
+        "fluid",
+        "pregnancy",
+        "gestation",
+        "spontaneous",
+        "premature"
+      ],
+      "id": "CX-157",
+      "meaning": "rupture of membranes",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "RR",
+      "cue_regex": "\\b(?:study|ratio|confidence\\ interval|exposure|cohort|incidence|95%)\\w*",
+      "cue_words": [
+        "study",
+        "ratio",
+        "confidence interval",
+        "exposure",
+        "cohort",
+        "incidence",
+        "95%"
+      ],
+      "id": "CX-158",
+      "meaning": "relative risk",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Research and statistics"
+    },
+    {
+      "abbreviation": "RR",
+      "cue_regex": "\\b(?:breaths\\ per\\ minute|vital\\ signs|tachypnea|respirations|oxygen|rapid|respiratory)\\w*",
+      "cue_words": [
+        "breaths per minute",
+        "vital signs",
+        "tachypnea",
+        "respirations",
+        "oxygen",
+        "rapid",
+        "respiratory"
+      ],
+      "id": "CX-159",
+      "meaning": "respiratory rate",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Patient assessment and vital signs"
+    },
+    {
+      "abbreviation": "RT",
+      "cue_regex": "\\b(?:radiotherapy|oncology|tumor|Gy|treatment|fractions|cancer)\\w*",
+      "cue_words": [
+        "radiotherapy",
+        "oncology",
+        "tumor",
+        "Gy",
+        "treatment",
+        "fractions",
+        "cancer"
+      ],
+      "id": "CX-160",
+      "meaning": "radiation therapy",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "RT",
+      "cue_regex": "\\b(?:ventilator|breathing\\ treatment|therapist|nebulizer|airway|consult|respiratory)\\w*",
+      "cue_words": [
+        "ventilator",
+        "breathing treatment",
+        "therapist",
+        "nebulizer",
+        "airway",
+        "consult",
+        "respiratory"
+      ],
+      "id": "CX-161",
+      "meaning": "respiratory therapist",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "RV",
+      "cue_regex": "\\b(?:lung\\ volumes|spirometry|air|pulmonary\\ function|TLC|capacity|plethysmography)\\w*",
+      "cue_words": [
+        "lung volumes",
+        "spirometry",
+        "air",
+        "pulmonary function",
+        "TLC",
+        "capacity",
+        "plethysmography"
+      ],
+      "id": "CX-162",
+      "meaning": "residual volume",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "RV",
+      "cue_regex": "\\b(?:heart|function|hypertrophy|strain|echocardiogram|ventricular|pressure)\\w*",
+      "cue_words": [
+        "heart",
+        "function",
+        "hypertrophy",
+        "strain",
+        "echocardiogram",
+        "ventricular",
+        "pressure"
+      ],
+      "id": "CX-163",
+      "meaning": "right ventricle",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Cardiovascular"
+    },
+    {
+      "abbreviation": "SAD",
+      "cue_regex": "\\b(?:winter|light\\ therapy|season|depression|daylight|mood|seasonal)\\w*",
+      "cue_words": [
+        "winter",
+        "light therapy",
+        "season",
+        "depression",
+        "daylight",
+        "mood",
+        "seasonal"
+      ],
+      "id": "CX-164",
+      "meaning": "seasonal affective disorder",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "SAD",
+      "cue_regex": "\\b(?:social\\ situations|fear|judgment|anxiety|avoidance|performance|embarrassment)\\w*",
+      "cue_words": [
+        "social situations",
+        "fear",
+        "judgment",
+        "anxiety",
+        "avoidance",
+        "performance",
+        "embarrassment"
+      ],
+      "id": "CX-165",
+      "meaning": "social anxiety disorder",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "SCD",
+      "cue_regex": "\\b(?:DVT\\ prophylaxis|legs|postoperative|sleeves|immobile|application|thrombosis)\\w*",
+      "cue_words": [
+        "DVT prophylaxis",
+        "legs",
+        "postoperative",
+        "sleeves",
+        "immobile",
+        "application",
+        "thrombosis"
+      ],
+      "id": "CX-166",
+      "meaning": "sequential compression device",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Hematology and oncology"
+    },
+    {
+      "abbreviation": "SCD",
+      "cue_regex": "\\b(?:crisis|hemoglobin|vaso\\-occlusive|hydroxyurea|genetic|pain|anemia)\\w*",
+      "cue_words": [
+        "crisis",
+        "hemoglobin",
+        "vaso-occlusive",
+        "hydroxyurea",
+        "genetic",
+        "pain",
+        "anemia"
+      ],
+      "id": "CX-167",
+      "meaning": "sickle cell disease",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Hematology and oncology"
+    },
+    {
+      "abbreviation": "SI",
+      "cue_regex": "\\b(?:units|metric|measurement|SI\\ units|conversion|mmol|standard)\\w*",
+      "cue_words": [
+        "units",
+        "metric",
+        "measurement",
+        "SI units",
+        "conversion",
+        "mmol",
+        "standard"
+      ],
+      "id": "CX-168",
+      "meaning": "International System of Units",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "General and common"
+    },
+    {
+      "abbreviation": "SI",
+      "cue_regex": "\\b(?:joint|pelvis|back\\ pain|hip|ligament|injection|sacroiliac)\\w*",
+      "cue_words": [
+        "joint",
+        "pelvis",
+        "back pain",
+        "hip",
+        "ligament",
+        "injection",
+        "sacroiliac"
+      ],
+      "id": "CX-169",
+      "meaning": "sacroiliac",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Musculoskeletal and rehabilitation"
+    },
+    {
+      "abbreviation": "SI",
+      "cue_regex": "\\b(?:suicide|self\\-harm|risk|safety\\ plan|depression|thoughts|denies)\\w*",
+      "cue_words": [
+        "suicide",
+        "self-harm",
+        "risk",
+        "safety plan",
+        "depression",
+        "thoughts",
+        "denies"
+      ],
+      "id": "CX-170",
+      "meaning": "suicidal ideation",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Mental health"
+    },
+    {
+      "abbreviation": "TG",
+      "cue_regex": "\\b(?:thyroid\\ cancer|thyroidectomy|tumor\\ marker|thyroid|antibodies|levels|follow\\-up)\\w*",
+      "cue_words": [
+        "thyroid cancer",
+        "thyroidectomy",
+        "tumor marker",
+        "thyroid",
+        "antibodies",
+        "levels",
+        "follow-up"
+      ],
+      "id": "CX-171",
+      "meaning": "thyroglobulin",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Endocrine and metabolic"
+    },
+    {
+      "abbreviation": "TG",
+      "cue_regex": "\\b(?:lipid\\ panel|cholesterol|fasting|LDL|HDL|hypertriglyceridemia|lipids)\\w*",
+      "cue_words": [
+        "lipid panel",
+        "cholesterol",
+        "fasting",
+        "LDL",
+        "HDL",
+        "hypertriglyceridemia",
+        "lipids"
+      ],
+      "id": "CX-172",
+      "meaning": "triglyceride",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Endocrine and metabolic"
+    },
+    {
+      "abbreviation": "TLC",
+      "cue_regex": "\\b(?:diet|cholesterol|exercise|weight|lifestyle|lipid|changes)\\w*",
+      "cue_words": [
+        "diet",
+        "cholesterol",
+        "exercise",
+        "weight",
+        "lifestyle",
+        "lipid",
+        "changes"
+      ],
+      "id": "CX-173",
+      "meaning": "therapeutic lifestyle changes",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "TLC",
+      "cue_regex": "\\b(?:spirometry|lung\\ volumes|restrictive|obstructive|pulmonary\\ function|liters|plethysmography)\\w*",
+      "cue_words": [
+        "spirometry",
+        "lung volumes",
+        "restrictive",
+        "obstructive",
+        "pulmonary function",
+        "liters",
+        "plethysmography"
+      ],
+      "id": "CX-174",
+      "meaning": "total lung capacity",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Respiratory"
+    },
+    {
+      "abbreviation": "UA",
+      "cue_regex": "\\b(?:gout|serum|urate|allopurinol|joint|level|hyperuricemia)\\w*",
+      "cue_words": [
+        "gout",
+        "serum",
+        "urate",
+        "allopurinol",
+        "joint",
+        "level",
+        "hyperuricemia"
+      ],
+      "id": "CX-175",
+      "meaning": "uric acid",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "UA",
+      "cue_regex": "\\b(?:urine|specimen|dipstick|leukocytes|nitrite|culture|clean\\ catch)\\w*",
+      "cue_words": [
+        "urine",
+        "specimen",
+        "dipstick",
+        "leukocytes",
+        "nitrite",
+        "culture",
+        "clean catch"
+      ],
+      "id": "CX-176",
+      "meaning": "urinalysis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Renal, urinary and fluids and electrolytes"
+    },
+    {
+      "abbreviation": "UC",
+      "cue_regex": "\\b(?:colon|bowel|IBD|flare|colonoscopy|mesalamine|inflammatory)\\w*",
+      "cue_words": [
+        "colon",
+        "bowel",
+        "IBD",
+        "flare",
+        "colonoscopy",
+        "mesalamine",
+        "inflammatory"
+      ],
+      "id": "CX-177",
+      "meaning": "ulcerative colitis",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Gastrointestinal and hepatic"
+    },
+    {
+      "abbreviation": "UC",
+      "cue_regex": "\\b(?:clinic|walk\\-in|visit|after\\ hours|urgent|center|referred)\\w*",
+      "cue_words": [
+        "clinic",
+        "walk-in",
+        "visit",
+        "after hours",
+        "urgent",
+        "center",
+        "referred"
+      ],
+      "id": "CX-178",
+      "meaning": "urgent care",
+      "note": "Score = number of distinct cue stems found within about 100 characters either side. Pick a meaning only if it clearly beats the others",
+      "rule_when_no_cue": "Ask the author. Show every meaning in the dropdown. Never auto-expand",
+      "subject_area": "Gastrointestinal and hepatic"
+    }
+  ]
+}
