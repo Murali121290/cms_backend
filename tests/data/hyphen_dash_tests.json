@@ -1,0 +1,1395 @@
+{
+  "_meta": {
+    "generated_by": "scripts/import_hyphen_dash_workbook.py",
+    "source_file": "hyphen_dash_wb.xlsx",
+    "source_sha256": "3d81ce61f0cbffce8698fe620f2d8f1e57805136c92fab1944cb1cd82f0368aa"
+  },
+  "test_cases": [
+    {
+      "expected": "See pages 10–20 for details.",
+      "id": "T-001",
+      "input": "See pages 10-20 for details.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D01",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "Table 2-3 lists the doses.",
+      "id": "T-002",
+      "input": "Table 2-3 lists the doses.",
+      "notes": "Output must equal input for this rule",
+      "source": "D01",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "The year 2024-05-12 was the date.",
+      "id": "T-003",
+      "input": "The year 2024-05-12 was the date.",
+      "notes": "Output must equal input for this rule",
+      "source": "D01",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Rates rose in 2019–2021.",
+      "id": "T-004",
+      "input": "Rates rose in 2019-2021.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D02",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The date was 2019-05-06.",
+      "id": "T-005",
+      "input": "The date was 2019-05-06.",
+      "notes": "Output must equal input for this rule",
+      "source": "D02",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "ISSN 1234-5678 is listed.",
+      "id": "T-006",
+      "input": "ISSN 1234-5678 is listed.",
+      "notes": "Output must equal input for this rule",
+      "source": "D02",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Take 10–20 mg daily.",
+      "id": "T-007",
+      "input": "Take 10 - 20 mg daily.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D03",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "5 - 3 = 2",
+      "id": "T-008",
+      "input": "5 - 3 = 2",
+      "notes": "Output must equal input for this rule",
+      "source": "D03",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Step 1 - Open the file.",
+      "id": "T-009",
+      "input": "Step 1 - Open the file.",
+      "notes": "Output must equal input for this rule",
+      "source": "D03",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Patients from 10 to 20 years were included.",
+      "id": "T-010",
+      "input": "Patients from 10-20 years were included.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D04a",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "from 2019 to 2021",
+      "id": "T-011",
+      "input": "from 2019 to 2021",
+      "notes": "Output must equal input for this rule",
+      "source": "D04a",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "from 10 to 20",
+      "id": "T-012",
+      "input": "from 10 to 20",
+      "notes": "Output must equal input for this rule",
+      "source": "D04a",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Aged between 18 and 25 years.",
+      "id": "T-013",
+      "input": "Aged between 18–25 years.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D04b",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "between 18 and 25",
+      "id": "T-014",
+      "input": "between 18 and 25",
+      "notes": "Output must equal input for this rule",
+      "source": "D04b",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "between groups",
+      "id": "T-015",
+      "input": "between groups",
+      "notes": "Output must equal input for this rule",
+      "source": "D04b",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "The study ran May–June.",
+      "id": "T-016",
+      "input": "The study ran May-June.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D05a",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "Mary-Jane attended.",
+      "id": "T-017",
+      "input": "Mary-Jane attended.",
+      "notes": "Output must equal input for this rule",
+      "source": "D05a",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "June 5 and July 7",
+      "id": "T-018",
+      "input": "June 5 and July 7",
+      "notes": "Output must equal input for this rule",
+      "source": "D05a",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Open Monday–Friday.",
+      "id": "T-019",
+      "input": "Open Monday-Friday.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D05b",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "Monday and Friday",
+      "id": "T-020",
+      "input": "Monday and Friday",
+      "notes": "Output must equal input for this rule",
+      "source": "D05b",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Sunday-school",
+      "id": "T-021",
+      "input": "Sunday-school",
+      "notes": "Output must equal input for this rule",
+      "source": "D05b",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "The panel voted in a 5–4 decision.",
+      "id": "T-022",
+      "input": "The panel voted in a 5-4 decision.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D06",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "a 24-hour vote",
+      "id": "T-023",
+      "input": "a 24-hour vote",
+      "notes": "Output must equal input for this rule",
+      "source": "D06",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "5 votes",
+      "id": "T-024",
+      "input": "5 votes",
+      "notes": "Output must equal input for this rule",
+      "source": "D06",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Pages 10–20.",
+      "id": "T-025",
+      "input": "Pages 10—20.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D07",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "Wait—what happened?",
+      "id": "T-026",
+      "input": "Wait—what happened?",
+      "notes": "Output must equal input for this rule",
+      "source": "D07",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "word—word",
+      "id": "T-027",
+      "input": "word—word",
+      "notes": "Output must equal input for this rule",
+      "source": "D07",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Give 10–20 mg.",
+      "id": "T-028",
+      "input": "Give 10-20 mg.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D08",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "Call 555-1234 today.",
+      "id": "T-029",
+      "input": "Call 555-1234 today.",
+      "notes": "Output must equal input for this rule",
+      "source": "D08",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "The date was 5-12-2024.",
+      "id": "T-030",
+      "input": "The date was 5-12-2024.",
+      "notes": "Output must equal input for this rule",
+      "source": "D08",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "COVID-19 and HIV-1",
+      "id": "T-031",
+      "input": "COVID-19 and HIV-1",
+      "notes": "Output must equal input for this rule",
+      "source": "D08",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "an obsessive-compulsive pattern",
+      "id": "T-032",
+      "input": "an obsessive–compulsive pattern",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D09",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "pages 10–20",
+      "id": "T-033",
+      "input": "pages 10–20",
+      "notes": "Output must equal input for this rule",
+      "source": "D09",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "New York–London",
+      "id": "T-034",
+      "input": "New York–London",
+      "notes": "Output must equal input for this rule",
+      "source": "D09",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Michaelis–Menten",
+      "id": "T-035",
+      "input": "Michaelis–Menten",
+      "notes": "Output must equal input for this rule",
+      "source": "D09",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "The result—however small—mattered.",
+      "id": "T-036",
+      "input": "The result - however small - mattered.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D10",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "pre- and post-test",
+      "id": "T-037",
+      "input": "pre- and post-test",
+      "notes": "Output must equal input for this rule",
+      "source": "D10",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "well-being",
+      "id": "T-038",
+      "input": "well-being",
+      "notes": "Output must equal input for this rule",
+      "source": "D10",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Wait—no.",
+      "id": "T-039",
+      "input": "Wait--no.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D11",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "use --help",
+      "id": "T-040",
+      "input": "use --help",
+      "notes": "Output must equal input for this rule",
+      "source": "D11",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a --b",
+      "id": "T-041",
+      "input": "a --b",
+      "notes": "Output must equal input for this rule",
+      "source": "D11",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "The study—though small—worked.",
+      "id": "T-042",
+      "input": "The study – though small – worked.",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D12",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "10 – 20",
+      "id": "T-043",
+      "input": "10 – 20",
+      "notes": "Output must equal input for this rule",
+      "source": "D12",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "pages 5 – 9",
+      "id": "T-044",
+      "input": "pages 5 – 9",
+      "notes": "Output must equal input for this rule",
+      "source": "D12",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a well-known result",
+      "id": "T-045",
+      "input": "a well- known result",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D13",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "pre- and post-test",
+      "id": "T-046",
+      "input": "pre- and post-test",
+      "notes": "Output must equal input for this rule",
+      "source": "D13",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "short- or long-term",
+      "id": "T-047",
+      "input": "short- or long-term",
+      "notes": "Output must equal input for this rule",
+      "source": "D13",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a well-known result",
+      "id": "T-048",
+      "input": "a well -known result",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "D14",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "state-of-the-art",
+      "id": "T-049",
+      "input": "state-of-the-art",
+      "notes": "Output must equal input for this rule",
+      "source": "D14",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "pre- and post-test",
+      "id": "T-050",
+      "input": "pre- and post-test",
+      "notes": "Output must equal input for this rule",
+      "source": "D14",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a highly effective drug",
+      "id": "T-051",
+      "input": "a highly-effective drug",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H01",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "family-centered care",
+      "id": "T-052",
+      "input": "family-centered care",
+      "notes": "Output must equal input for this rule",
+      "source": "H01",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "early-onset disease",
+      "id": "T-053",
+      "input": "early-onset disease",
+      "notes": "Output must equal input for this rule",
+      "source": "H01",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "Italy-based",
+      "id": "T-054",
+      "input": "Italy-based",
+      "notes": "Output must equal input for this rule",
+      "source": "H01",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a more effective approach",
+      "id": "T-055",
+      "input": "a more-effective approach",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H02",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "so-called",
+      "id": "T-056",
+      "input": "so-called",
+      "notes": "Output must equal input for this rule",
+      "source": "H02",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "more-or-less",
+      "id": "T-057",
+      "input": "more-or-less",
+      "notes": "Output must equal input for this rule",
+      "source": "H02",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "much-needed",
+      "id": "T-058",
+      "input": "much-needed",
+      "notes": "Output must equal input for this rule",
+      "source": "H02",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a 5-year-old child",
+      "id": "T-059",
+      "input": "a 5 year old child",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H03a",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "5 years old",
+      "id": "T-060",
+      "input": "5 years old",
+      "notes": "Output must equal input for this rule",
+      "source": "H03a",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "3 months old",
+      "id": "T-061",
+      "input": "3 months old",
+      "notes": "Output must equal input for this rule",
+      "source": "H03a",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a 5-year-old child",
+      "id": "T-062",
+      "input": "a 5-year old child",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H03b",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "5-year-old",
+      "id": "T-063",
+      "input": "5-year-old",
+      "notes": "Output must equal input for this rule",
+      "source": "H03b",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "5 years old",
+      "id": "T-064",
+      "input": "5 years old",
+      "notes": "Output must equal input for this rule",
+      "source": "H03b",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a 3-month follow-up",
+      "id": "T-065",
+      "input": "a 3 month follow-up",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H03c",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "3 months follow-up",
+      "id": "T-066",
+      "input": "3 months follow-up",
+      "notes": "Output must equal input for this rule",
+      "source": "H03c",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "12 weeks of therapy",
+      "id": "T-067",
+      "input": "12 weeks of therapy",
+      "notes": "Output must equal input for this rule",
+      "source": "H03c",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "twenty-one patients",
+      "id": "T-068",
+      "input": "twenty one patients",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H04",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "twenty percent",
+      "id": "T-069",
+      "input": "twenty percent",
+      "notes": "Output must equal input for this rule",
+      "source": "H04",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "one hundred and twenty",
+      "id": "T-070",
+      "input": "one hundred and twenty",
+      "notes": "Output must equal input for this rule",
+      "source": "H04",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "two-thirds of patients",
+      "id": "T-071",
+      "input": "two thirds of patients",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H05",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "a third of patients",
+      "id": "T-072",
+      "input": "a third of patients",
+      "notes": "Output must equal input for this rule",
+      "source": "H05",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "second quarter",
+      "id": "T-073",
+      "input": "second quarter",
+      "notes": "Output must equal input for this rule",
+      "source": "H05",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "the president-elect",
+      "id": "T-074",
+      "input": "the president elect",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H06",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "elect a president",
+      "id": "T-075",
+      "input": "elect a president",
+      "notes": "Output must equal input for this rule",
+      "source": "H06",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "not elected",
+      "id": "T-076",
+      "input": "not elected",
+      "notes": "Output must equal input for this rule",
+      "source": "H06",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "his ex-wife",
+      "id": "T-077",
+      "input": "his ex wife",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H07",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "ex officio",
+      "id": "T-078",
+      "input": "ex officio",
+      "notes": "Output must equal input for this rule",
+      "source": "H07",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "index wife",
+      "id": "T-079",
+      "input": "index wife",
+      "notes": "Output must equal input for this rule",
+      "source": "H07",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "her mother-in-law",
+      "id": "T-080",
+      "input": "her mother in law",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H08",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "in-law",
+      "id": "T-081",
+      "input": "in-law",
+      "notes": "Output must equal input for this rule",
+      "source": "H08",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "law and order",
+      "id": "T-082",
+      "input": "law and order",
+      "notes": "Output must equal input for this rule",
+      "source": "H08",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "in the mid-1990s",
+      "id": "T-083",
+      "input": "in the mid 1990s",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H09",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "mid air",
+      "id": "T-084",
+      "input": "mid air",
+      "notes": "Output must equal input for this rule",
+      "source": "H09",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "mid-October",
+      "id": "T-085",
+      "input": "mid-October",
+      "notes": "Output must equal input for this rule",
+      "source": "H09",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "non-English speakers",
+      "id": "T-086",
+      "input": "non English speakers",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H10",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "Post Office",
+      "id": "T-087",
+      "input": "Post Office",
+      "notes": "Output must equal input for this rule",
+      "source": "H10",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "pre existing",
+      "id": "T-088",
+      "input": "pre existing",
+      "notes": "Output must equal input for this rule",
+      "source": "H10",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "pre-2020 data",
+      "id": "T-089",
+      "input": "pre–2020 data",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "H11",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "pre-2020",
+      "id": "T-090",
+      "input": "pre-2020",
+      "notes": "Output must equal input for this rule",
+      "source": "H11",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "post–World War II",
+      "id": "T-091",
+      "input": "post–World War II",
+      "notes": "Output must equal input for this rule",
+      "source": "H11",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "treatment",
+      "id": "T-092",
+      "input": "treat­ment",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "C01",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "well-being",
+      "id": "T-093",
+      "input": "well-being",
+      "notes": "Output must equal input for this rule",
+      "source": "C01",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "pages 10–20",
+      "id": "T-094",
+      "input": "pages 10–20",
+      "notes": "Output must equal input for this rule",
+      "source": "C01",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "well-being",
+      "id": "T-095",
+      "input": "well‑being",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "C02",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "well-being",
+      "id": "T-096",
+      "input": "well-being",
+      "notes": "Output must equal input for this rule",
+      "source": "C02",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "10–20",
+      "id": "T-097",
+      "input": "10‒20",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "C03",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "10–20",
+      "id": "T-098",
+      "input": "10–20",
+      "notes": "Output must equal input for this rule",
+      "source": "C03",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "wait—no",
+      "id": "T-099",
+      "input": "wait―no",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "C04",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "wait—no",
+      "id": "T-100",
+      "input": "wait—no",
+      "notes": "Output must equal input for this rule",
+      "source": "C04",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a change of −5 points",
+      "id": "T-101",
+      "input": "a change of -5 points",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "O01",
+      "style_profile": "optional_typographic_minus",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "pages 10-20",
+      "id": "T-102",
+      "input": "pages 10-20",
+      "notes": "Output must equal input for this rule",
+      "source": "O01",
+      "style_profile": "optional_typographic_minus",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "x-5",
+      "id": "T-103",
+      "input": "x-5",
+      "notes": "Output must equal input for this rule",
+      "source": "O01",
+      "style_profile": "optional_typographic_minus",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "a change of −5 points",
+      "id": "T-104",
+      "input": "a change of –5 points",
+      "notes": "Expected output applies Suggestion 1",
+      "source": "O02",
+      "style_profile": "optional_typographic_minus",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "pages 10–20",
+      "id": "T-105",
+      "input": "pages 10–20",
+      "notes": "Output must equal input for this rule",
+      "source": "O02",
+      "style_profile": "optional_typographic_minus",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "5–10",
+      "id": "T-106",
+      "input": "5–10",
+      "notes": "Output must equal input for this rule",
+      "source": "O02",
+      "style_profile": "optional_typographic_minus",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "The text mentions acid-base balance in a sentence.",
+      "id": "T-107",
+      "input": "The text mentions acid base balance in a sentence.",
+      "notes": "Missing hyphen",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions acid-base balances in a sentence.",
+      "id": "T-108",
+      "input": "The text mentions acid base balances in a sentence.",
+      "notes": "Missing hyphen",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions active-assistive in a sentence.",
+      "id": "T-109",
+      "input": "The text mentions active assistive in a sentence.",
+      "notes": "Missing hyphen",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions adult-gerontology in a sentence.",
+      "id": "T-110",
+      "input": "The text mentions adult gerontology in a sentence.",
+      "notes": "Missing hyphen",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions age-appropriate in a sentence.",
+      "id": "T-111",
+      "input": "The text mentions age appropriate in a sentence.",
+      "notes": "Missing hyphen",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions age-dependent in a sentence.",
+      "id": "T-112",
+      "input": "The text mentions age dependent in a sentence.",
+      "notes": "Missing hyphen",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions 99m in a sentence.",
+      "id": "T-113",
+      "input": "The text mentions 99-m in a sentence.",
+      "notes": "Hyphen not needed",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions AbleData project in a sentence.",
+      "id": "T-114",
+      "input": "The text mentions Able-Data project in a sentence.",
+      "notes": "Hyphen not needed",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions African American in a sentence.",
+      "id": "T-115",
+      "input": "The text mentions African-American in a sentence.",
+      "notes": "Hyphen not needed",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions African Americans in a sentence.",
+      "id": "T-116",
+      "input": "The text mentions African-Americans in a sentence.",
+      "notes": "Hyphen not needed",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions aftercare in a sentence.",
+      "id": "T-117",
+      "input": "The text mentions after-care in a sentence.",
+      "notes": "Hyphen not needed",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions ai chi in a sentence.",
+      "id": "T-118",
+      "input": "The text mentions ai-chi in a sentence.",
+      "notes": "Hyphen not needed",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions small-cell lung in a sentence.",
+      "id": "T-119",
+      "input": "The text mentions small-cell-lung in a sentence.",
+      "notes": "Hyphen in the wrong place",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Bland-Altman in a sentence.",
+      "id": "T-120",
+      "input": "The text mentions Bland–Altman in a sentence.",
+      "notes": "En dash used instead of hyphen",
+      "source": "Detect_List",
+      "style_profile": "mw_dictionary",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Cheyne-Stokes in a sentence.",
+      "id": "T-121",
+      "input": "The text mentions Cheyne–Stokes in a sentence.",
+      "notes": "En dash used instead of hyphen",
+      "source": "Detect_List",
+      "style_profile": "mw_dictionary",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Cochran-Mantel-Haenszel in a sentence.",
+      "id": "T-122",
+      "input": "The text mentions Cochran–Mantel–Haenszel in a sentence.",
+      "notes": "En dash used instead of hyphen",
+      "source": "Detect_List",
+      "style_profile": "mw_dictionary",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Epstein-Barr in a sentence.",
+      "id": "T-123",
+      "input": "The text mentions Epstein–Barr in a sentence.",
+      "notes": "En dash used instead of hyphen",
+      "source": "Detect_List",
+      "style_profile": "mw_dictionary",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Guillain-Barré in a sentence.",
+      "id": "T-124",
+      "input": "The text mentions Guillain–Barré in a sentence.",
+      "notes": "En dash used instead of hyphen",
+      "source": "Detect_List",
+      "style_profile": "mw_dictionary",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Hardy-Weinberg in a sentence.",
+      "id": "T-125",
+      "input": "The text mentions Hardy–Weinberg in a sentence.",
+      "notes": "En dash used instead of hyphen",
+      "source": "Detect_List",
+      "style_profile": "mw_dictionary",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Bland–Altman in a sentence.",
+      "id": "T-126",
+      "input": "The text mentions Bland-Altman in a sentence.",
+      "notes": "Hyphen where an en dash is needed",
+      "source": "Detect_List",
+      "style_profile": "chicago_ama_apa",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Boston–Washington in a sentence.",
+      "id": "T-127",
+      "input": "The text mentions Boston-Washington in a sentence.",
+      "notes": "Hyphen where an en dash is needed",
+      "source": "Detect_List",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions cause–effect in a sentence.",
+      "id": "T-128",
+      "input": "The text mentions cause-effect in a sentence.",
+      "notes": "Hyphen where an en dash is needed",
+      "source": "Detect_List",
+      "style_profile": "chicago_ama_apa",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Cheyne–Stokes in a sentence.",
+      "id": "T-129",
+      "input": "The text mentions Cheyne-Stokes in a sentence.",
+      "notes": "Hyphen where an en dash is needed",
+      "source": "Detect_List",
+      "style_profile": "chicago_ama_apa",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions Cochran–Mantel–Haenszel in a sentence.",
+      "id": "T-130",
+      "input": "The text mentions Cochran-Mantel-Haenszel in a sentence.",
+      "notes": "Hyphen where an en dash is needed",
+      "source": "Detect_List",
+      "style_profile": "chicago_ama_apa",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "The text mentions doctor–patient in a sentence.",
+      "id": "T-131",
+      "input": "The text mentions doctor-patient in a sentence.",
+      "notes": "Hyphen where an en dash is needed",
+      "source": "Detect_List",
+      "style_profile": "chicago_ama_apa",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "See COVID-19 in the results.",
+      "id": "T-132",
+      "input": "See COVID-19 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See SARS-CoV-2 in the results.",
+      "id": "T-133",
+      "input": "See SARS-CoV-2 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See HIV-1 in the results.",
+      "id": "T-134",
+      "input": "See HIV-1 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See HIV-2 in the results.",
+      "id": "T-135",
+      "input": "See HIV-2 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See CD4 in the results.",
+      "id": "T-136",
+      "input": "See CD4 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See IL-6 in the results.",
+      "id": "T-137",
+      "input": "See IL-6 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See TNF-α in the results.",
+      "id": "T-138",
+      "input": "See TNF-α in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See COX-2 in the results.",
+      "id": "T-139",
+      "input": "See COX-2 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See HLA-DR in the results.",
+      "id": "T-140",
+      "input": "See HLA-DR in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See ICD-10 in the results.",
+      "id": "T-141",
+      "input": "See ICD-10 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See ICD-10-CM in the results.",
+      "id": "T-142",
+      "input": "See ICD-10-CM in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See DSM-5 in the results.",
+      "id": "T-143",
+      "input": "See DSM-5 in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See DSM-IV-TR in the results.",
+      "id": "T-144",
+      "input": "See DSM-IV-TR in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See Wi-Fi in the results.",
+      "id": "T-145",
+      "input": "See Wi-Fi in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See Kübler-Ross in the results.",
+      "id": "T-146",
+      "input": "See Kübler-Ross in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "See Jean-Paul in the results.",
+      "id": "T-147",
+      "input": "See Jean-Paul in the results.",
+      "notes": "Protected term",
+      "source": "Protected_Terms",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "The patient is at high risk of falls.",
+      "id": "T-148",
+      "input": "The patient is at high risk of falls.",
+      "notes": "Previous word 'at' matches the skip rule",
+      "source": "Detect_List (position rule)",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "A high-risk patient needs review.",
+      "id": "T-149",
+      "input": "A high risk patient needs review.",
+      "notes": "Open form before a noun",
+      "source": "Detect_List (position rule)",
+      "style_profile": "all",
+      "test_type": "Should change"
+    },
+    {
+      "expected": "Please let me know how to proceed.",
+      "id": "T-150",
+      "input": "Please let me know how to proceed.",
+      "notes": "know how is not know-how: this form is deliberately not in the list",
+      "source": "Detect_List (position rule)",
+      "style_profile": "all",
+      "test_type": "Must not flag"
+    },
+    {
+      "expected": "From 10 to 20 patients aged 18–65 were enrolled between May–June 2019–2021 (pages 120–128).",
+      "id": "T-151",
+      "input": "From 10-20 patients aged 18-65 were enrolled between May-June 2019-2021 (pages 120-128).",
+      "notes": "Reference output from applying every active rule in priority order with Suggestion 1",
+      "source": "All regex rules",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Integrated paragraph"
+    },
+    {
+      "expected": "The 5-year-old child had a highly effective, more effective plan—however small—for twenty-one days.",
+      "id": "T-152",
+      "input": "The 5 year old child had a highly-effective, more-effective plan - however small - for twenty one days.",
+      "notes": "Reference output from applying every active rule in priority order with Suggestion 1",
+      "source": "All regex rules",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Integrated paragraph"
+    },
+    {
+      "expected": "Contact 555-1234 or see https://example.org/a-b for ISBN 978-1-23456-789-7 on 2024-05-12.",
+      "id": "T-153",
+      "input": "Contact 555-1234 or see https://example.org/a-b for ISBN 978-1-23456-789-7 on 2024-05-12.",
+      "notes": "Reference output from applying every active rule in priority order with Suggestion 1",
+      "source": "All regex rules",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Integrated paragraph"
+    },
+    {
+      "expected": "The president-elect met her mother-in-law in the mid-1990s and again in mid-October.",
+      "id": "T-154",
+      "input": "The president elect met her mother in law in the mid 1990s and again in mid October.",
+      "notes": "Reference output from applying every active rule in priority order with Suggestion 1",
+      "source": "All regex rules",
+      "style_profile": "us_mw_and_chicago",
+      "test_type": "Integrated paragraph"
+    }
+  ]
+}

@@ -33,7 +33,6 @@ import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import { ArtValidationModal } from '@/components/ArtValidationModal'
-import { LanguageEditReviewModal } from '@/features/language_edit/LanguageEditReviewModal'
 import { useStageActionsStore } from '@/store/useStageActionsStore'
 
 import {
@@ -283,14 +282,13 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId, clientName,
+  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenWordToIndesign, onOpenArtValidation, stageName, isAssigned, projectId, chapterId, clientName,
 }: {
   row: FileRow | null
   onOpenReferenceCheck: (file: FileRecord) => void
   onOpenXmlToIndesign: (fileId: number, fileName: string) => void
   onOpenWordToIndesign?: (fileId: number, fileName: string) => void
   onOpenArtValidation: (fileId: number, fileName: string) => void
-  onOpenLanguageEdit?: (fileId: number, fileName: string) => void
   stageName: string
   isAssigned: boolean
   projectId: number
@@ -765,7 +763,6 @@ export function ChapterFilePage({
   const queryClient = useQueryClient()
   const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string; processType?: 'xml_to_indesign' | 'word_to_indesign' } | null>(null)
   const [artValidationFile, setArtValidationFile] = useState<{ id: number; name: string } | null>(null)
-  const [langEditFile, setLangEditFile] = useState<{ id: number; name: string } | null>(null)
 
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     template: true,
@@ -1633,7 +1630,6 @@ export function ChapterFilePage({
                   onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'xml_to_indesign' })}
                   onOpenWordToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName, processType: 'word_to_indesign' })}
                   onOpenArtValidation={(fileId, fileName) => setArtValidationFile({ id: fileId, name: fileName })}
-                  onOpenLanguageEdit={(fileId, fileName) => setLangEditFile({ id: fileId, name: fileName })}
                   stageName={resolvedStageName}
                   isAssigned={resolvedIsAssigned}
                   projectId={pid}
@@ -1823,16 +1819,6 @@ export function ChapterFilePage({
         />
       )}
 
-      {/* ── Language Edit Human Validation Modal ──────────────────────────── */}
-      {langEditFile && (
-        <LanguageEditReviewModal
-          isOpen={langEditFile !== null}
-          onClose={() => setLangEditFile(null)}
-          fileId={langEditFile.id}
-          fileName={langEditFile.name}
-          projectId={pid}
-        />
-      )}
     </div>
   )
 }

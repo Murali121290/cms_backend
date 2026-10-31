@@ -31,14 +31,16 @@ import {
   CircleAlert,
   CircleHelp,
   CircleX,
+  Stethoscope,
 } from 'lucide-react'
-import { rulesApi, type LanguageRule, type RuleHistoryEntry } from '@/api/rulesApi'
+import { rulesApi, type LanguageRule, type RuleHistoryEntry, type RuleOverrides, type ToolBehaviour, type Audience, type MedicalStyleProfile } from '@/api/rulesApi'
+import { RuleDetails } from '@/features/language_edit/RuleDetails'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { formatDateTime } from '@/utils/dateUtils'
 import { useUsersStore } from '@/stores/usersStore'
 
-type CategoryKey = 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'inclusive' | 'other'
+type CategoryKey = 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'inclusive' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'custom' | 'other'
 
 interface CategoryMeta {
   label: string
@@ -99,6 +101,42 @@ const CATEGORY_META: Record<CategoryKey, CategoryMeta> = {
     softBg: 'bg-gradient-to-r from-rose-50/60 to-transparent',
     tileBg: 'from-rose-50 to-pink-50/40',
   },
+  hyphenation: {
+    label: 'Hyphenation', Icon: Link2,
+    grad: 'from-teal-500 to-cyan-500',
+    dot: 'bg-teal-500', accent: 'border-l-teal-500', ring: 'text-teal-500',
+    chipActive: 'bg-teal-500 text-white border-teal-500',
+    chipInactive: 'bg-teal-50 text-teal-800 border-teal-200 hover:bg-teal-100',
+    softBg: 'bg-gradient-to-r from-teal-50/60 to-transparent',
+    tileBg: 'from-teal-50 to-cyan-50/40',
+  },
+  abbreviations: {
+    label: 'Abbreviations', Icon: Hash,
+    grad: 'from-indigo-500 to-blue-500',
+    dot: 'bg-indigo-500', accent: 'border-l-indigo-500', ring: 'text-indigo-500',
+    chipActive: 'bg-indigo-500 text-white border-indigo-500',
+    chipInactive: 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100',
+    softBg: 'bg-gradient-to-r from-indigo-50/60 to-transparent',
+    tileBg: 'from-indigo-50 to-blue-50/40',
+  },
+  medical_terms: {
+    label: 'Medical Terms', Icon: Stethoscope,
+    grad: 'from-green-500 to-teal-500',
+    dot: 'bg-green-500', accent: 'border-l-green-500', ring: 'text-green-500',
+    chipActive: 'bg-green-500 text-white border-green-500',
+    chipInactive: 'bg-green-50 text-green-800 border-green-200 hover:bg-green-100',
+    softBg: 'bg-gradient-to-r from-green-50/60 to-transparent',
+    tileBg: 'from-green-50 to-teal-50/40',
+  },
+  custom: {
+    label: 'Custom', Icon: Code2,
+    grad: 'from-fuchsia-500 to-purple-500',
+    dot: 'bg-fuchsia-500', accent: 'border-l-fuchsia-500', ring: 'text-fuchsia-500',
+    chipActive: 'bg-fuchsia-500 text-white border-fuchsia-500',
+    chipInactive: 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200 hover:bg-fuchsia-100',
+    softBg: 'bg-gradient-to-r from-fuchsia-50/60 to-transparent',
+    tileBg: 'from-fuchsia-50 to-purple-50/40',
+  },
   other: {
     label: 'Other', Icon: Hash,
     grad: 'from-slate-500 to-slate-600',
@@ -141,6 +179,26 @@ export function ProjectRulesPage() {
   const [saving, setSaving] = useState(false)
   const [rules, setRules] = useState<LanguageRule[]>([])
   const [initialRules, setInitialRules] = useState<LanguageRule[]>([])  // for diff count
+  // Scope C: 875 Hyphenation workbook rules surfaced read-mostly. Enabled
+  // state + tool_behaviour overrides live in ruleOverrides, not in the
+  // rule object itself (keeps the save payload sparse — we never serialize
+  // 875 rules back to the server).
+  const [workbookRules, setWorkbookRules] = useState<LanguageRule[]>([])
+  const [ruleOverrides, setRuleOverrides] = useState<RuleOverrides>({})
+  const [initialOverrides, setInitialOverrides] = useState<RuleOverrides>({})
+  // Phase B+C Abbreviations settings — persisted in the project sidecar
+  // JSON. ``initial*`` snapshots support discard + dirty tracking.
+  const [audience, setAudience] = useState<Audience>('general')
+  const [minUses, setMinUses] = useState<number>(2)
+  const [scopeReset, setScopeReset] = useState<boolean>(false)
+  const [initialAudience, setInitialAudience] = useState<Audience>('general')
+  const [initialMinUses, setInitialMinUses] = useState<number>(2)
+  const [initialScopeReset, setInitialScopeReset] = useState<boolean>(false)
+  // Medical Terminology workbook (M-D): style profile for the subprofile
+  // rules (US spelling, Possessive, Nonpossessive). ``All``-tagged rules
+  // always fire; the subprofiles stay silent until the project opts in.
+  const [medicalStyleProfile, setMedicalStyleProfile] = useState<MedicalStyleProfile>('All')
+  const [initialMedicalStyleProfile, setInitialMedicalStyleProfile] = useState<MedicalStyleProfile>('All')
   const [profileKeys, setProfileKeys] = useState<string[]>(['uk'])
   const [profileChoices, setProfileChoices] = useState<string[]>([])
   const [availableProfiles, setAvailableProfiles] = useState<Record<string, any>>({})
@@ -176,6 +234,29 @@ export function ProjectRulesPage() {
         }))
         setRules(activeRules)
         setInitialRules(activeRules.map((r) => ({ ...r })))
+        // Scope C: workbook rules + overrides. Concat every workbook family
+        // the backend returns into a single flat state — the category chip
+        // on each rule carries the routing so the Rules Picker renders
+        // them under the right card without further plumbing.
+        const wbBuckets = data.workbook_rules ?? {}
+        const wb = ([] as LanguageRule[])
+          .concat((wbBuckets.hyphenation ?? []) as LanguageRule[])
+          .concat((wbBuckets.abbreviations ?? []) as LanguageRule[])
+          .concat((wbBuckets.medical_terms ?? []) as LanguageRule[])
+          .concat((wbBuckets.custom ?? []) as LanguageRule[])
+        setWorkbookRules(wb)
+        const overrides = (data.active_rules?.rule_overrides ?? {}) as RuleOverrides
+        setRuleOverrides(overrides)
+        setInitialOverrides(JSON.parse(JSON.stringify(overrides)))
+        // Phase B+C settings — defaults match the backend validators.
+        const aud: Audience = (data.active_rules?.audience as Audience) ?? 'general'
+        const mu = typeof data.active_rules?.min_uses === 'number' ? data.active_rules.min_uses : 2
+        const sr = Boolean(data.active_rules?.scope_reset)
+        setAudience(aud); setInitialAudience(aud)
+        setMinUses(mu); setInitialMinUses(mu)
+        setScopeReset(sr); setInitialScopeReset(sr)
+        const msp: MedicalStyleProfile = (data.active_rules?.medical_style_profile as MedicalStyleProfile) ?? 'All'
+        setMedicalStyleProfile(msp); setInitialMedicalStyleProfile(msp)
         const keys = (data.active_rules?.profile_keys && data.active_rules.profile_keys.length)
           ? data.active_rules.profile_keys
           : [data.active_rules?.profile_key ?? 'uk']
@@ -205,32 +286,53 @@ export function ProjectRulesPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [dirty, canEdit, saving]) // eslint-disable-line
 
+  /** Merged list of all rules (profile + workbook) with the current override
+   *  map applied. This is the source of truth for grouping, counts, and
+   *  rendering — the UI never shows the raw per-store state directly.
+   *
+   *  Overrides apply uniformly: for each rule, look up ``ruleOverrides[id]``
+   *  and swap in the overridden ``enabled`` / ``tool_behaviour``. A rule
+   *  without an override entry displays its file default. */
+  const allRules = useMemo<LanguageRule[]>(() => {
+    const apply = (r: LanguageRule): LanguageRule => {
+      const ov = ruleOverrides[r.id]
+      if (!ov) return r
+      const next: LanguageRule = { ...r, is_overridden: true, override: ov }
+      if ('enabled' in ov) next.enabled = !!ov.enabled
+      if (ov.tool_behaviour) next.tool_behaviour = ov.tool_behaviour
+      return next
+    }
+    return [...rules.map(apply), ...workbookRules.map(apply)]
+  }, [rules, workbookRules, ruleOverrides])
+
   const grouped = useMemo(() => {
     const q = search.trim().toLowerCase()
     const g: Record<CategoryKey, LanguageRule[]> = {
-      grammar: [], spelling: [], sentence: [], compounds: [], inclusive: [], other: [],
+      grammar: [], spelling: [], sentence: [], compounds: [], inclusive: [], hyphenation: [], abbreviations: [], medical_terms: [], custom: [], other: [],
     }
-    for (const r of rules) {
+    for (const r of allRules) {
       if (activeCategory !== 'all' && catOf(r) !== activeCategory) continue
       if (q) {
-        const hay = `${r.id} ${r.message ?? ''} ${r.pattern ?? ''}`.toLowerCase()
+        const hay = `${r.id} ${r.message ?? ''} ${r.pattern ?? ''} ${r.source ?? ''}`.toLowerCase()
         if (!hay.includes(q)) continue
       }
       g[catOf(r)].push(r)
     }
     return g
-  }, [rules, search, activeCategory])
+  }, [allRules, search, activeCategory])
 
   const counts = useMemo(() => {
-    const total = rules.length
-    const enabled = rules.filter((r) => r.enabled !== false).length
+    const total = allRules.length
+    const enabled = allRules.filter((r) => r.enabled !== false).length
     const byCat: Record<CategoryKey, { total: number; enabled: number }> = {
       grammar: { total: 0, enabled: 0 }, spelling: { total: 0, enabled: 0 },
       sentence: { total: 0, enabled: 0 }, compounds: { total: 0, enabled: 0 },
-      inclusive: { total: 0, enabled: 0 }, other: { total: 0, enabled: 0 },
+      inclusive: { total: 0, enabled: 0 }, hyphenation: { total: 0, enabled: 0 },
+      abbreviations: { total: 0, enabled: 0 }, medical_terms: { total: 0, enabled: 0 },
+      custom: { total: 0, enabled: 0 }, other: { total: 0, enabled: 0 },
     }
     const bySeverity = { error: 0, warning: 0, suggestion: 0 }
-    for (const r of rules) {
+    for (const r of allRules) {
       const c = catOf(r); byCat[c].total += 1
       if (r.enabled !== false) {
         byCat[c].enabled += 1
@@ -239,19 +341,55 @@ export function ProjectRulesPage() {
       }
     }
     return { total, enabled, byCat, bySeverity, pct: total ? Math.round((enabled / total) * 100) : 0 }
-  }, [rules])
+  }, [allRules])
+
+  /** Per-rule membership: does this rule live in the profile store or the
+   *  workbook store? Toggle / behaviour-change writes land in different
+   *  state buckets depending on the answer. */
+  const workbookIdSet = useMemo(() => new Set(workbookRules.map((r) => r.id)), [workbookRules])
 
   const diff = useMemo(() => {
-    const initMap = new Map(initialRules.map((r) => [r.id, r.enabled !== false]))
-    let added = 0, removed = 0
+    // Changes across both profile rules and the overrides map.
+    let added = 0, removed = 0, changedBehaviour = 0
+    const initRuleMap = new Map(initialRules.map((r) => [r.id, {
+      enabled: r.enabled !== false,
+      tb: r.tool_behaviour,
+    }]))
     for (const r of rules) {
-      const prev = initMap.get(r.id) ?? true
-      const now = r.enabled !== false
-      if (now && !prev) added++
-      if (!now && prev) removed++
+      const prev = initRuleMap.get(r.id); if (!prev) continue
+      const nowEnabled = r.enabled !== false
+      if (nowEnabled && !prev.enabled) added++
+      if (!nowEnabled && prev.enabled) removed++
+      if (prev.tb !== r.tool_behaviour) changedBehaviour++
     }
-    return { added, removed, total: added + removed }
-  }, [rules, initialRules])
+    const allIds = new Set([...Object.keys(initialOverrides), ...Object.keys(ruleOverrides)])
+    for (const id of allIds) {
+      const prev = initialOverrides[id] || {}
+      const now = ruleOverrides[id] || {}
+      // Only count enabled transitions when the override's ``enabled`` field
+      // actually diverged between prev and now.
+      const prevEn = 'enabled' in prev ? !!prev.enabled : null
+      const nowEn  = 'enabled' in now  ? !!now.enabled  : null
+      if (prevEn !== nowEn) {
+        if (nowEn === false) removed++
+        else if (nowEn === true) added++
+      }
+      if (prev.tool_behaviour !== now.tool_behaviour) changedBehaviour++
+    }
+    // Abbreviations settings also count as changes so the Save bar
+    // surfaces when the user tweaks only a setting.
+    let settingsChanged = 0
+    if (audience !== initialAudience) settingsChanged++
+    if (minUses !== initialMinUses) settingsChanged++
+    if (scopeReset !== initialScopeReset) settingsChanged++
+    if (medicalStyleProfile !== initialMedicalStyleProfile) settingsChanged++
+    return {
+      added, removed, changedBehaviour,
+      total: added + removed + changedBehaviour + settingsChanged,
+    }
+  }, [rules, initialRules, ruleOverrides, initialOverrides,
+      audience, initialAudience, minUses, initialMinUses, scopeReset, initialScopeReset,
+      medicalStyleProfile, initialMedicalStyleProfile])
 
   /** Rebuild the rule union when the selected styles change.
    *  - Preserves existing enabled/disabled flags for rule IDs that stay in the union.
@@ -287,12 +425,58 @@ export function ProjectRulesPage() {
 
   function toggleRule(ruleId: string) {
     if (!canEdit) return
-    setRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, enabled: !(r.enabled !== false) } : r)))
+    const current = allRules.find((r) => r.id === ruleId)
+    if (!current) return
+    const nextEnabled = !(current.enabled !== false)
+    if (workbookIdSet.has(ruleId)) {
+      // Workbook rule — update the sparse overrides map so the save
+      // payload stays small (no 875-rule round-trip to the server).
+      setRuleOverrides((prev) => ({
+        ...prev,
+        [ruleId]: { ...(prev[ruleId] || {}), enabled: nextEnabled },
+      }))
+    } else {
+      // Profile rule — edit the project's canonical rule list directly.
+      setRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, enabled: nextEnabled } : r)))
+    }
     setDirty(true)
   }
+
+  /** Scope-C per-rule FLAG | AUTO_REPLACE preference. Writes to the same
+   *  bucket as toggleRule (profile → rule.tool_behaviour; workbook →
+   *  overrides map). Never silently mutates manuscript text. */
+  function changeBehaviour(ruleId: string, next: ToolBehaviour) {
+    if (!canEdit) return
+    if (workbookIdSet.has(ruleId)) {
+      setRuleOverrides((prev) => ({
+        ...prev,
+        [ruleId]: { ...(prev[ruleId] || {}), tool_behaviour: next },
+      }))
+    } else {
+      setRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, tool_behaviour: next } : r)))
+    }
+    setDirty(true)
+  }
+
   function setAll(enabled: boolean, category?: CategoryKey) {
     if (!canEdit) return
-    setRules((prev) => prev.map((r) => (category ? (catOf(r) === category ? { ...r, enabled } : r) : { ...r, enabled })))
+    // Workbook rules get a batch override; profile rules get an in-place
+    // ``enabled`` update. ``category`` undefined means "all categories".
+    const touchesWorkbook = !category || category === 'hyphenation'
+    const touchesProfile = !category || category !== 'hyphenation'
+    if (touchesWorkbook && workbookRules.length) {
+      setRuleOverrides((prev) => {
+        const next = { ...prev }
+        for (const r of workbookRules) {
+          if (category && catOf(r) !== category) continue
+          next[r.id] = { ...(next[r.id] || {}), enabled }
+        }
+        return next
+      })
+    }
+    if (touchesProfile) {
+      setRules((prev) => prev.map((r) => (category ? (catOf(r) === category ? { ...r, enabled } : r) : { ...r, enabled })))
+    }
     setDirty(true)
   }
   function applyPreset(preset: 'strict' | 'standard' | 'minimal') {
@@ -308,9 +492,66 @@ export function ProjectRulesPage() {
     setDirty(true)
     pushToast('info', `Applied preset: ${preset[0].toUpperCase()}${preset.slice(1)}`)
   }
+  async function deleteCustomRule(ruleId: string) {
+    if (!projectId || !canEdit) return
+    const target = workbookRules.find((r) => r.id === ruleId)
+    const label = target?.message || ruleId
+    if (!window.confirm(`Delete custom rule "${label}"?\n\nThis is permanent — the rule will stop firing on future analyze passes.`)) {
+      return
+    }
+    try {
+      await rulesApi.deleteCustomRule(projectId, ruleId)
+      setWorkbookRules((prev) => prev.filter((r) => r.id !== ruleId))
+      // Also drop any override entry that referenced the deleted rule
+      // so the sparse map stays clean.
+      setRuleOverrides((prev) => {
+        if (!(ruleId in prev)) return prev
+        const next = { ...prev }
+        delete next[ruleId]
+        return next
+      })
+      setInitialOverrides((prev) => {
+        if (!(ruleId in prev)) return prev
+        const next = { ...prev }
+        delete next[ruleId]
+        return next
+      })
+      pushToast('success', `Deleted "${label}"`)
+    } catch (err: any) {
+      pushToast('error', err?.response?.data?.detail || err?.message || 'Delete failed')
+    }
+  }
+
   function discardChanges() {
     setRules(initialRules.map((r) => ({ ...r })))
+    setRuleOverrides(JSON.parse(JSON.stringify(initialOverrides)))
+    setAudience(initialAudience)
+    setMinUses(initialMinUses)
+    setScopeReset(initialScopeReset)
+    setMedicalStyleProfile(initialMedicalStyleProfile)
     setDirty(false)
+  }
+
+  function changeMedicalStyleProfile(next: MedicalStyleProfile) {
+    if (!canEdit) return
+    setMedicalStyleProfile(next); setDirty(true)
+  }
+
+  // Phase E settings handlers — all mark the page dirty so the floating
+  // Save bar surfaces and the Save button writes them with the next POST.
+  function changeAudience(next: Audience) {
+    if (!canEdit) return
+    setAudience(next); setDirty(true)
+  }
+  function changeMinUses(next: number) {
+    if (!canEdit) return
+    // Backend validator rejects < 1; clamp here for immediate feedback.
+    const clamped = Math.max(1, Math.min(10, Math.floor(next || 1)))
+    setMinUses(clamped); setDirty(true)
+  }
+  function toggleScopeReset() {
+    if (!canEdit) return
+    setScopeReset(prev => !prev); setDirty(true)
   }
   function toggleCollapse(cat: CategoryKey) {
     setCollapsed((prev) => {
@@ -323,8 +564,24 @@ export function ProjectRulesPage() {
     if (!projectId || !canEdit) return
     setSaving(true)
     try {
-      await rulesApi.save(projectId, { profile_keys: profileKeys, rules })
+      // Scope C: profile rules ride in ``rules``; workbook rules ride in
+      // the sparse ``rule_overrides`` map. Backend merges on the engine
+      // side at analyze time.
+      await rulesApi.save(projectId, {
+        profile_keys: profileKeys,
+        rules,
+        rule_overrides: ruleOverrides,
+        audience,
+        min_uses: minUses,
+        scope_reset: scopeReset,
+        medical_style_profile: medicalStyleProfile,
+      })
       setInitialRules(rules.map((r) => ({ ...r })))
+      setInitialOverrides(JSON.parse(JSON.stringify(ruleOverrides)))
+      setInitialAudience(audience)
+      setInitialMinUses(minUses)
+      setInitialScopeReset(scopeReset)
+      setInitialMedicalStyleProfile(medicalStyleProfile)
       setDirty(false)
       pushToast('success', `Saved · ${counts.enabled}/${counts.total} rules enabled`)
     } catch (err: any) {
@@ -383,7 +640,7 @@ export function ProjectRulesPage() {
   const visibleCats = (Object.keys(CATEGORY_META) as CategoryKey[]).filter((c) => counts.byCat[c].total > 0)
 
   return (
-    <div className="min-h-screen bg-slate-50 relative overflow-hidden">
+    <div className="h-screen bg-slate-50 relative overflow-hidden flex flex-col">
       {/* Decorative background blob */}
       <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-gradient-to-br from-violet-200/40 via-indigo-200/30 to-transparent rounded-full blur-3xl pointer-events-none" />
       <div className="absolute top-20 -left-40 w-[500px] h-[500px] bg-gradient-to-br from-sky-200/30 via-blue-200/20 to-transparent rounded-full blur-3xl pointer-events-none" />
@@ -502,7 +759,7 @@ export function ProjectRulesPage() {
       )}
 
       {/* ═══ Toolbar ═════════════════════════════════════════════════════ */}
-      <div className="sticky top-0 z-20 bg-white/80 backdrop-blur-xl border-b border-slate-200/80 shadow-sm">
+      <div className="shrink-0 z-20 bg-white/80 backdrop-blur-xl border-b border-slate-200/80 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[220px] max-w-md">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -521,24 +778,6 @@ export function ProjectRulesPage() {
             )}
           </div>
 
-          <div className="flex gap-1.5 flex-wrap">
-            <FilterPill active={activeCategory === 'all'} onClick={() => setActiveCategory('all')} label={`All ${counts.total}`} />
-            {visibleCats.map((cat) => {
-              const meta = CATEGORY_META[cat]; const c = counts.byCat[cat]
-              return (
-                <FilterPill
-                  key={cat}
-                  active={activeCategory === cat}
-                  onClick={() => setActiveCategory(cat)}
-                  activeCls={meta.chipActive}
-                  inactiveCls={meta.chipInactive}
-                  icon={<meta.Icon size={12} />}
-                  label={`${meta.label} ${c.enabled}/${c.total}`}
-                />
-              )
-            })}
-          </div>
-
           <div className="ml-auto flex items-center gap-2">
             {/* Preset menu */}
             <PresetMenu disabled={!canEdit} onPick={applyPreset} />
@@ -555,90 +794,321 @@ export function ProjectRulesPage() {
             />
           </div>
         </div>
+
       </div>
 
-      {/* ═══ Rule list ═══════════════════════════════════════════════════ */}
-      <main className="max-w-7xl mx-auto px-6 py-6 space-y-5 pb-40">
-        {visibleCats.map((cat) => {
-          const list = grouped[cat]
-          if (!list.length) return null
-          const meta = CATEGORY_META[cat]
-          const total = counts.byCat[cat].total
-          const enabled = counts.byCat[cat].enabled
-          const pct = total ? Math.round((enabled / total) * 100) : 0
-          const isCollapsed = collapsed.has(cat)
-          const fullyOn = enabled === total
-          const fullyOff = enabled === 0
-          return (
-            <section
-              key={cat}
-              className={`bg-white border border-slate-200 border-l-4 ${meta.accent} rounded-2xl shadow-sm overflow-hidden`}
-            >
-              <header className={`flex items-center justify-between px-5 py-3.5 ${meta.softBg} border-b border-slate-100`}>
-                <button
-                  onClick={() => toggleCollapse(cat)}
-                  className="flex items-center gap-3 text-left group"
-                >
-                  <ProgressRing percent={pct} size={34} stroke={3} track="#e2e8f0" bar={`currentColor`} className={meta.ring} />
-                  <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${meta.grad} text-white flex items-center justify-center shadow-sm`}>
-                    <meta.Icon size={16} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="font-semibold text-slate-900">{meta.label}</h2>
-                      {fullyOn && <StatusBadge text="ALL ON"  cls="bg-emerald-100 text-emerald-700" />}
-                      {fullyOff && <StatusBadge text="ALL OFF" cls="bg-slate-200 text-slate-500" />}
-                    </div>
-                    <div className="text-xs text-slate-500 font-medium">
-                      {enabled} / {total} enabled · {pct}%
-                    </div>
-                  </div>
-                  <span className="text-slate-400 group-hover:text-slate-600">
-                    {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-                  </span>
-                </button>
-                <div className="flex gap-1">
+      {/* ═══ Sidebar nav + focused content pane ════════════════════════
+         Both columns scroll independently so the hero + toolbar stay put
+         at the top and the long rules list doesn't push the Save bar off
+         the bottom of the viewport. ``min-h-0`` lets flex children shrink
+         below their content height so overflow-y-auto actually takes effect. */}
+      <main className="flex-1 min-h-0 w-full max-w-7xl mx-auto px-6 py-6 flex gap-6 items-stretch overflow-hidden">
+
+        {/* ─── LEFT: category nav + settings ───────────────────────── */}
+        <aside className="w-60 shrink-0 self-stretch overflow-y-auto space-y-6 pr-1 pb-6">
+          {/* Categories list */}
+          <div>
+            <h3 className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 mb-2">
+              Categories
+            </h3>
+            <nav className="space-y-0.5">
+              <button
+                onClick={() => setActiveCategory('all')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
+                  activeCategory === 'all'
+                    ? 'bg-violet-50 text-violet-700 font-semibold'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="w-2 h-2 rounded-full bg-slate-300" />
+                  All rules
+                </span>
+                <span className="text-xs text-slate-400 font-medium tabular-nums">
+                  {counts.enabled}/{counts.total}
+                </span>
+              </button>
+              {visibleCats.map((cat) => {
+                const meta = CATEGORY_META[cat]
+                const c = counts.byCat[cat]
+                const pct = c.total ? Math.round((c.enabled / c.total) * 100) : 0
+                const isActive = activeCategory === cat
+                return (
                   <button
-                    onClick={() => setAll(true, cat)}
-                    disabled={!canEdit || fullyOn}
-                    className="text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-400 disabled:hover:bg-transparent disabled:cursor-not-allowed px-2.5 py-1 rounded-md"
+                    key={cat}
+                    onClick={() => setActiveCategory(cat)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
+                      isActive
+                        ? 'bg-slate-100 text-slate-900 font-semibold'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
                   >
-                    Enable all
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${meta.dot}`} />
+                      <span className="truncate">{meta.label}</span>
+                    </span>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-xs text-slate-400 font-medium tabular-nums">
+                        {c.enabled}/{c.total}
+                      </span>
+                      {pct > 0 && pct < 100 && (
+                        <span className="text-[10px] text-slate-400 tabular-nums w-7 text-right">
+                          {pct}%
+                        </span>
+                      )}
+                    </span>
                   </button>
+                )
+              })}
+            </nav>
+          </div>
+
+          {/* Abbreviations settings — only when the workbook is loaded */}
+          {counts.byCat.abbreviations.total > 0 && (
+            <div>
+              <h3 className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 mb-2">
+                Abbreviations
+              </h3>
+              <div className="space-y-3 px-3">
+                {/* Audience */}
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1" title="General expands common terms (BP → blood pressure); Professional leaves them untouched.">
+                    Audience
+                  </label>
+                  <div className="inline-flex rounded-md border border-slate-200 overflow-hidden bg-white w-full">
+                    {(['general', 'professional'] as Audience[]).map(opt => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => changeAudience(opt)}
+                        disabled={!canEdit}
+                        className={`flex-1 px-2 py-1 text-[11px] font-medium transition-colors ${
+                          audience === opt
+                            ? 'bg-indigo-500 text-white'
+                            : 'text-slate-600 hover:bg-slate-50'
+                        } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {opt[0].toUpperCase() + opt.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Min uses */}
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs text-slate-500" title="Minimum occurrences before first-use rules fire.">
+                    Min uses
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={minUses}
+                    onChange={(e) => changeMinUses(Number(e.target.value))}
+                    disabled={!canEdit}
+                    className="w-14 border border-slate-200 rounded-md px-1.5 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 disabled:opacity-50 tabular-nums"
+                  />
+                </div>
+
+                {/* Scope reset */}
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs text-slate-500 cursor-pointer" title="Reset first-use tracking at each chapter boundary." onClick={toggleScopeReset}>
+                    Scope reset
+                  </label>
                   <button
-                    onClick={() => setAll(false, cat)}
-                    disabled={!canEdit || fullyOff}
-                    className="text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:text-slate-400 disabled:hover:bg-transparent disabled:cursor-not-allowed px-2.5 py-1 rounded-md"
+                    type="button"
+                    role="switch"
+                    aria-checked={scopeReset}
+                    onClick={toggleScopeReset}
+                    disabled={!canEdit}
+                    className={`relative inline-flex h-[18px] w-[32px] shrink-0 rounded-full border transition-colors ${
+                      scopeReset ? 'bg-indigo-500 border-indigo-500' : 'bg-slate-200 border-slate-300'
+                    } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    Disable all
+                    <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition-transform mt-[1px] ${
+                      scopeReset ? 'translate-x-[16px]' : 'translate-x-[2px]'
+                    }`} />
                   </button>
                 </div>
-              </header>
-              {!isCollapsed && (
-                <ul className="divide-y divide-slate-100">
-                  {list.map((rule) => (
-                    <RuleRow key={rule.id} rule={rule} canEdit={canEdit} onToggle={() => toggleRule(rule.id)} />
-                  ))}
-                </ul>
-              )}
-            </section>
-          )
-        })}
+              </div>
+            </div>
+          )}
 
-        {counts.total === 0 && (
-          <EmptyState
-            icon={<Hash size={28} />}
-            title="No rules in this profile"
-            hint="Pick another profile from the dropdown in the toolbar."
-          />
-        )}
-        {counts.total > 0 && Object.values(grouped).every((l) => l.length === 0) && (
-          <EmptyState
-            icon={<Search size={28} />}
-            title={`No rules match "${search}"${activeCategory !== 'all' ? ` in ${CATEGORY_META[activeCategory as CategoryKey].label}` : ''}`}
-            action={<button onClick={() => { setSearch(''); setActiveCategory('all') }} className="mt-3 text-sm text-violet-700 hover:underline">Clear filters</button>}
-          />
-        )}
+          {/* Medical Terms settings — only when the workbook is loaded */}
+          {counts.byCat.medical_terms.total > 0 && (
+            <div>
+              <h3 className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 mb-2 mt-4">
+                Medical Terms
+              </h3>
+              <div className="space-y-3 px-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1" title="Rules tagged 'All' always fire. The other profiles only fire when selected: US spelling patterns, Possessive / Nonpossessive eponyms.">
+                    Style profile
+                  </label>
+                  <select
+                    value={medicalStyleProfile}
+                    onChange={(e) => changeMedicalStyleProfile(e.target.value as MedicalStyleProfile)}
+                    disabled={!canEdit}
+                    className="w-full border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-green-200 focus:border-green-300 disabled:opacity-50"
+                  >
+                    <option value="All">All (default — subprofiles silent)</option>
+                    <option value="US spelling">US spelling (haem→hem, oedema→edema, …)</option>
+                    <option value="UK spelling">UK spelling</option>
+                    <option value="Possessive">Possessive eponyms (Alzheimer's)</option>
+                    <option value="Nonpossessive">Nonpossessive eponyms (Alzheimer)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+        </aside>
+
+        {/* ─── RIGHT: content pane ───────────────────────────────────
+           Fixed-height container with internal scroll — the rules list
+           grows up to 1047 rows (Medical Terms) and must not push the
+           page past viewport height. Bottom padding leaves breathing
+           room above the floating Save bar when it's visible. */}
+        <section className="flex-1 min-w-0 self-stretch overflow-y-auto pr-1 pb-28">
+          {activeCategory === 'all' ? (
+            /* ─── Overview grid — compact category tiles, click to drill ─── */
+            <>
+              <div className="mb-5">
+                <h2 className="text-xl font-semibold text-slate-900">All rules</h2>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {counts.enabled} of {counts.total} enabled across {visibleCats.length} categories.
+                  Pick a category on the left to configure its rules.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {visibleCats.map((cat) => {
+                  const meta = CATEGORY_META[cat]
+                  const c = counts.byCat[cat]
+                  const pct = c.total ? Math.round((c.enabled / c.total) * 100) : 0
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setActiveCategory(cat)}
+                      className="group text-left bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-300 hover:shadow-sm transition-all"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${meta.grad} text-white flex items-center justify-center shrink-0`}>
+                          <meta.Icon size={18} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <h3 className="font-semibold text-slate-900">{meta.label}</h3>
+                            <ChevronRight size={16} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            {c.enabled} of {c.total} enabled · {pct}%
+                          </div>
+                          <div className="mt-2 h-1 rounded-full bg-slate-100 overflow-hidden">
+                            <div
+                              className={`h-full ${meta.dot} rounded-full`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            /* ─── Focused category view — big header + dense rules list ─── */
+            (() => {
+              const cat = activeCategory as CategoryKey
+              const meta = CATEGORY_META[cat]
+              const list = grouped[cat]
+              const total = counts.byCat[cat].total
+              const enabled = counts.byCat[cat].enabled
+              const pct = total ? Math.round((enabled / total) * 100) : 0
+              const fullyOn = enabled === total
+              const fullyOff = enabled === 0
+              return (
+                <>
+                  {/* Category header */}
+                  <div className="flex items-center gap-4 mb-5">
+                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${meta.grad} text-white flex items-center justify-center shrink-0 shadow-sm`}>
+                      <meta.Icon size={22} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h2 className="text-xl font-semibold text-slate-900">{meta.label}</h2>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-sm text-slate-500">
+                          {enabled} of {total} enabled · {pct}%
+                        </span>
+                        <div className="w-32 h-1 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className={`h-full ${meta.dot} rounded-full transition-all`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => setAll(true, cat)}
+                        disabled={!canEdit || fullyOn}
+                        className="text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 disabled:text-slate-400 disabled:bg-slate-50 disabled:border-slate-200 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Enable all
+                      </button>
+                      <button
+                        onClick={() => setAll(false, cat)}
+                        disabled={!canEdit || fullyOff}
+                        className="text-xs font-medium text-slate-600 bg-white hover:bg-slate-100 border border-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Disable all
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rules list */}
+                  {list.length > 0 ? (
+                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                      <ul className="divide-y divide-slate-100">
+                        {list.map((rule) => (
+                          <RuleDetails
+                            key={rule.id}
+                            rule={rule}
+                            canEdit={canEdit}
+                            onToggle={() => toggleRule(rule.id)}
+                            onBehaviourChange={(next) => changeBehaviour(rule.id, next)}
+                            onDelete={catOf(rule) === 'custom' ? () => deleteCustomRule(rule.id) : undefined}
+                          />
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon={<Search size={28} />}
+                      title={search
+                        ? `No rules match "${search}" in ${meta.label}`
+                        : `No rules in ${meta.label}`}
+                      action={search ? (
+                        <button onClick={() => setSearch('')} className="mt-3 text-sm text-violet-700 hover:underline">
+                          Clear search
+                        </button>
+                      ) : undefined}
+                    />
+                  )}
+                </>
+              )
+            })()
+          )}
+
+          {counts.total === 0 && activeCategory === 'all' && (
+            <div className="mt-5">
+              <EmptyState
+                icon={<Hash size={28} />}
+                title="No rules in this profile"
+                hint="Pick another profile from the dropdown in the toolbar."
+              />
+            </div>
+          )}
+        </section>
       </main>
 
       {/* ═══ Floating save bar (sticky bottom when dirty) ═══════════════ */}
@@ -1064,69 +1534,6 @@ function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onCha
         }`}
       />
     </button>
-  )
-}
-
-function RuleRow({ rule, canEdit, onToggle }: { rule: LanguageRule; canEdit: boolean; onToggle: () => void }) {
-  const checked = rule.enabled !== false
-  const sev = (rule.severity || '').toLowerCase()
-  const sevStyle = SEVERITY_STYLE[sev]
-  return (
-    <li
-      onClick={onToggle}
-      className={`group flex items-start gap-3 px-5 py-3 border-l-2 ${sevStyle?.border || 'border-l-transparent'} ${
-        checked ? 'bg-white' : 'bg-slate-50/60'
-      } ${canEdit ? 'cursor-pointer hover:bg-violet-50/40' : 'cursor-default'} transition-colors`}
-    >
-      <div className="pt-0.5">
-        <ToggleSwitch checked={checked} onChange={onToggle} disabled={!canEdit} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded">
-            {rule.id}
-          </span>
-          {sevStyle && (
-            <span className={`text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${sevStyle.chip}`}>
-              <sevStyle.Icon size={10} className={sevStyle.iconCls} />
-              {sevStyle.label}
-            </span>
-          )}
-          {rule.type && (
-            <span className="text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-500">
-              {rule.type}
-            </span>
-          )}
-          {!checked && (
-            <span className="ml-auto text-[10px] uppercase tracking-wide font-semibold text-slate-400">
-              OFF
-            </span>
-          )}
-        </div>
-        {rule.message && (
-          <p className={`text-sm mt-1 ${checked ? 'text-slate-800' : 'text-slate-500'}`}>
-            {rule.message}
-          </p>
-        )}
-        {(rule.pattern || rule.replacement) && (
-          <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[11px] font-mono">
-            {rule.pattern && (
-              <code className="bg-slate-100 border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded max-w-full truncate" title={`/${rule.pattern}/`}>
-                /{rule.pattern}/
-              </code>
-            )}
-            {rule.replacement !== undefined && rule.replacement !== null && (
-              <>
-                <span className="text-slate-400">→</span>
-                <code className="bg-violet-50 border border-violet-200 text-violet-700 px-1.5 py-0.5 rounded">
-                  {String(rule.replacement) || '(remove)'}
-                </code>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </li>
   )
 }
 

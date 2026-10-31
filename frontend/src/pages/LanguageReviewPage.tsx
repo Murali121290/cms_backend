@@ -52,6 +52,7 @@ import {
   applyCasePreservingStructure,
 } from '@/features/language_edit/caseTransforms'
 import { replaceOptionsFor } from '@/features/language_edit/replaceOptions'
+import { SaveRegexAsRuleDialog, type RegexDraft } from '@/features/language_edit/SaveRegexAsRuleDialog'
 
 interface Finding {
   id: number
@@ -63,6 +64,10 @@ interface Finding {
   severity: string
   original_text: string
   suggestion: string
+  // Alternate replacements supplied by workbook rules (Dash_Rules
+  // Suggestion 2 / Detect_List Suggestion 2/3). Empty / undefined when
+  // the rule has only a single replacement — same shape as legacy rules.
+  alt_suggestions?: string[]
   message: string
   autofixable: boolean
   status: 'pending' | 'accepted' | 'edited' | 'rejected' | 'highlighted'
@@ -112,7 +117,7 @@ export function LanguageReviewPage() {
   // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
   const journal = useJournalReviewMode()
 
-  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'bias' | 'term' | 'typo' | 'comments' | 'rules'>('all')
+  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'term' | 'typo' | 'hyphenation' | 'comments' | 'rules'>('all')
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [job, setJob] = useState<JobData | null>(null)
@@ -139,6 +144,12 @@ export function LanguageReviewPage() {
   const [filterUnresolved, setFilterUnresolved] = useState(false)
   const [selectedEditorText, setSelectedEditorText] = useState<string>('')
   const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null)
+
+  // Scope D: Save-as-rule dialog state. ``savedRuleDraft`` captures the
+  // regex + replacement + match stats at the moment the user clicks
+  // "Save as rule" in the editor's Find bar, so the modal can preview
+  // the first match + its $1-expanded replacement.
+  const [savedRuleDraft, setSavedRuleDraft] = useState<RegexDraft | null>(null)
 
   // Editor and Save Hooks
   const editorRef = useRef<WysiwygEditorHandle>(null)
@@ -635,8 +646,14 @@ export function LanguageReviewPage() {
     const target = findings[idx]
     if (!target) return
     setSelectedFindingId(target.id)
-    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'compounds', 'bias', 'term', 'typo'].includes(target.category)) {
-      setActiveRightTab(target.category as any)
+    // Legacy 'compounds' / 'compound' category findings (from pre-merge
+    // analyze runs) share the Hyphenation tab now, so map them to the
+    // right tab on click rather than trying to switch to a tab that no
+    // longer exists.
+    const legacyCompoundCat = target.category === 'compounds' || target.category === 'compound'
+    const resolvedCat = legacyCompoundCat ? 'hyphenation' : target.category
+    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'bias', 'term', 'typo', 'hyphenation'].includes(resolvedCat)) {
+      setActiveRightTab(resolvedCat as any)
     }
 
     // Anchor the popover to the clicked span's rect. Two RAFs so ProseMirror
@@ -682,10 +699,17 @@ export function LanguageReviewPage() {
   const grammarFindings = useMemo(() => findings.filter(f => f.category === 'grammar'), [findings])
   const spellingFindings = useMemo(() => findings.filter(f => f.category === 'spelling'), [findings])
   const sentenceFindings = useMemo(() => findings.filter(f => f.category === 'sentence'), [findings])
-  const compoundsFindings = useMemo(() => findings.filter(f => f.category === 'compounds' || f.category === 'compound'), [findings])
   const biasFindings = useMemo(() => findings.filter(f => f.category === 'bias' || f.category === 'article'), [findings])
   const termFindings = useMemo(() => findings.filter(f => f.category === 'term' || f.source === 'term'), [findings])
   const typoFindings = useMemo(() => findings.filter(f => f.category === 'typo'), [findings])
+  // Hyphenation absorbs the old Compounds category (single tab per the
+  // Option B merge). Legacy jobs persisted with category='compounds' /
+  // 'compound' still show up here so previously-analysed documents keep
+  // rendering their MC_COMPOUNDS findings without re-analyze.
+  const hyphenationFindings = useMemo(
+    () => findings.filter(f => f.category === 'hyphenation' || f.category === 'compounds' || f.category === 'compound'),
+    [findings],
+  )
 
   const activeCategoryFindings = useMemo(() => {
     let list: Finding[] = []
@@ -693,10 +717,10 @@ export function LanguageReviewPage() {
     else if (activeRightTab === 'grammar') list = grammarFindings
     else if (activeRightTab === 'spelling') list = spellingFindings
     else if (activeRightTab === 'sentence') list = sentenceFindings
-    else if (activeRightTab === 'compounds') list = compoundsFindings
     else if (activeRightTab === 'bias') list = biasFindings
     else if (activeRightTab === 'term') list = termFindings
     else if (activeRightTab === 'typo') list = typoFindings
+    else if (activeRightTab === 'hyphenation') list = hyphenationFindings
 
     if (!searchQuery.trim()) return list
     const q = searchQuery.toLowerCase()
@@ -706,7 +730,7 @@ export function LanguageReviewPage() {
         f.message.toLowerCase().includes(q) ||
         f.rule_id.toLowerCase().includes(q),
     )
-  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, compoundsFindings, biasFindings, termFindings, typoFindings, searchQuery])
+  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, biasFindings, termFindings, typoFindings, hyphenationFindings, searchQuery])
 
   // Realtime progress statistics
   const totalFindingsCount = job?.total_findings || findings.length || 0
@@ -744,19 +768,38 @@ export function LanguageReviewPage() {
         .ProseMirror .occurrence-grammar    { background-color: #ffedd5 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
         .ProseMirror .occurrence-spelling   { background-color: #e0f2fe !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
         .ProseMirror .occurrence-sentence   { background-color: #fef9c3 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
-        .ProseMirror .occurrence-compounds  { background-color: #d1fae5 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
         .ProseMirror .occurrence-bias       { background-color: #ffe4e6 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
         .ProseMirror .occurrence-term       { background-color: #ede9fe !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
         /* Typo (pyspellchecker) — soft red/salmon so it's unmistakable but
            not alarming. Distinct from the Spelling (house-style) soft blue. */
         .ProseMirror .occurrence-typo       { background-color: #fecaca !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        /* Hyphenation (workbook: Dash_Rules + Detect_List + En_Dash_Terms +
+           the LWW curated compound list). Teal pastel.
+           '.occurrence-compounds' is aliased to the same teal so legacy jobs
+           persisted with the pre-merge 'compounds' category render
+           consistently alongside new 'hyphenation' findings. */
+        .ProseMirror .occurrence-hyphenation,
+        .ProseMirror .occurrence-compounds,
+        .ProseMirror .occurrence-compound   { background-color: #ccfbf1 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        /* Abbreviations (Do_Not_Use regex + Phase-B expansion rules).
+           Soft indigo — distinct from Hyphenation teal but shares the
+           cool-palette family. */
+        .ProseMirror .occurrence-abbreviations { background-color: #e0e7ff !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        /* Medical Terms workbook — pale green highlight so medical findings
+           are visually distinct from the teal (Hyphenation) and indigo
+           (Abbreviations) workbook categories. */
+        .ProseMirror .occurrence-medical_terms { background-color: #d1fae5 !important; box-shadow: none !important; border-bottom: 0 !important; text-decoration: none !important; }
+        .ProseMirror .occurrence-medical_terms:hover { background-color: #a7f3d0 !important; }
         .ProseMirror .occurrence-grammar:hover   { background-color: #fed7aa !important; }
         .ProseMirror .occurrence-spelling:hover  { background-color: #bae6fd !important; }
         .ProseMirror .occurrence-sentence:hover  { background-color: #fef08a !important; }
-        .ProseMirror .occurrence-compounds:hover { background-color: #a7f3d0 !important; }
         .ProseMirror .occurrence-bias:hover      { background-color: #fecdd3 !important; }
         .ProseMirror .occurrence-term:hover      { background-color: #ddd6fe !important; }
         .ProseMirror .occurrence-typo:hover      { background-color: #fca5a5 !important; }
+        .ProseMirror .occurrence-hyphenation:hover,
+        .ProseMirror .occurrence-compounds:hover,
+        .ProseMirror .occurrence-compound:hover  { background-color: #99f6e4 !important; }
+        .ProseMirror .occurrence-abbreviations:hover { background-color: #c7d2fe !important; }
         /* Selected (click-to-edit focus) — distinct green, no underline, no
            pulsing animation. The decoration only wraps the finding's exact
            range (never the paragraph node), so even for a long sentence
@@ -889,9 +932,6 @@ export function LanguageReviewPage() {
                     <span className="w-2.5 h-2.5 rounded-full bg-yellow-300"></span> Sentence
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-300"></span> Compounds
-                  </span>
-                  <span className="flex items-center gap-1">
                     <span className="w-2.5 h-2.5 rounded-full bg-rose-300"></span> Inclusive
                   </span>
                   <span className="flex items-center gap-1">
@@ -899,6 +939,9 @@ export function LanguageReviewPage() {
                   </span>
                   <span className="flex items-center gap-1">
                     <span className="w-2.5 h-2.5 rounded-full bg-red-300"></span> Spell Check
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-full bg-teal-300"></span> Hyphenation
                   </span>
                 </div>
               </div>
@@ -951,11 +994,29 @@ export function LanguageReviewPage() {
                     }}
                     currentUser={currentUser}
                     fileId={parsedFileId.toString()}
+                    onSaveAsRule={Number.isInteger(parsedProjectId) && parsedProjectId > 0
+                      ? (draft) => setSavedRuleDraft(draft)
+                      : undefined}
                   />
                 )}
               </div>
             </div>
           </main>
+
+          {/* Scope D: Save-as-rule modal (opens from the editor Find bar) */}
+          {Number.isInteger(parsedProjectId) && parsedProjectId > 0 && (
+            <SaveRegexAsRuleDialog
+              open={!!savedRuleDraft}
+              projectId={parsedProjectId}
+              draft={savedRuleDraft}
+              onClose={() => setSavedRuleDraft(null)}
+              onSaved={(rule) => {
+                toast.success(
+                  `Saved custom rule "${rule.message ?? rule.id}". It will fire on the next analyze.`,
+                )
+              }}
+            />
+          )}
 
           {/* ── RIGHT SIDE: SIDE PANEL (CLARITY DESIGN) ── */}
           <aside className="w-[420px] bg-white border-l border-slate-100 flex flex-col flex-shrink-0 overflow-hidden">
@@ -1028,17 +1089,6 @@ export function LanguageReviewPage() {
                 </button>
 
                 <button
-                  onClick={() => setActiveRightTab('compounds')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'compounds'
-                      ? 'bg-emerald-500 text-white shadow-sm'
-                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                  }`}
-                >
-                  Compounds {compoundsFindings.length}
-                </button>
-
-                <button
                   onClick={() => setActiveRightTab('bias')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
                     activeRightTab === 'bias'
@@ -1070,6 +1120,18 @@ export function LanguageReviewPage() {
                   title="Likely typos detected by the spell checker"
                 >
                   Spell Check {typoFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('hyphenation')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'hyphenation'
+                      ? 'bg-teal-500 text-white shadow-sm'
+                      : 'bg-teal-50 text-teal-700 hover:bg-teal-100'
+                  }`}
+                  title="Hyphen and en-dash workbook rules"
+                >
+                  Hyphenation {hyphenationFindings.length}
                 </button>
 
                 <button
@@ -1282,15 +1344,35 @@ export function LanguageReviewPage() {
                       grammar: { border: 'border-l-orange-400', text: 'text-orange-600', bg: 'bg-orange-50' },
                       spelling: { border: 'border-l-sky-400', text: 'text-sky-600', bg: 'bg-sky-50' },
                       sentence: { border: 'border-l-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
-                      compounds: { border: 'border-l-emerald-400', text: 'text-emerald-600', bg: 'bg-emerald-50' },
-                      compound: { border: 'border-l-emerald-400', text: 'text-emerald-600', bg: 'bg-emerald-50' },
+                      // Hyphenation absorbs the old Compounds category. Legacy
+                      // category values stay in the map (teal) so pre-merge
+                      // jobs render consistently alongside new findings.
+                      hyphenation: { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
+                      compounds:   { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
+                      compound:    { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
                       bias: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
                       article: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
                       term: { border: 'border-l-violet-400', text: 'text-violet-700', bg: 'bg-violet-50' },
                       typo: { border: 'border-l-red-400', text: 'text-red-600', bg: 'bg-red-50' },
+                      medical_terms: { border: 'border-l-green-500', text: 'text-green-700', bg: 'bg-green-50' },
+                      abbreviations: { border: 'border-l-indigo-400', text: 'text-indigo-600', bg: 'bg-indigo-50' },
                     }
 
                     const catStyle = catColorMap[f.category] || { border: 'border-l-violet-400', text: 'text-violet-600', bg: 'bg-violet-50' }
+                    // Rename legacy "compounds"/"compound" labels to "HYPHENATION"
+                    // in the card header so the unified category reads consistently
+                    // regardless of when the job was analysed.
+                    const displayCategory = (f.category === 'compounds' || f.category === 'compound')
+                      ? 'hyphenation'
+                      : f.category === 'medical_terms'
+                        ? 'medical'
+                        : f.category
+                    // Provenance badge: distinguishes workbook rules from the
+                    // smaller hand-curated LWW compound list without needing a
+                    // second filter tab.
+                    const hyphSource = displayCategory === 'hyphenation'
+                      ? (f.rule_id?.startsWith('compound_') ? 'LWW list' : 'Workbook')
+                      : null
 
                     if (isTerm) {
                       const { listName, alsoIn } = parseTermMeta(f.message)
@@ -1361,9 +1443,23 @@ export function LanguageReviewPage() {
                       >
                         {/* Card Header */}
                         <div className="flex items-center justify-between">
-                          <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
-                            {f.category}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
+                              {displayCategory}
+                            </span>
+                            {hyphSource && (
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
+                                title={
+                                  hyphSource === 'Workbook'
+                                    ? 'Rule from the hyphen & en-dash workbook'
+                                    : 'Rule from the LWW curated compound list'
+                                }
+                              >
+                                {hyphSource}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[11px] text-slate-400">
                             Para {f.para_index + 1}
                           </span>
@@ -1515,7 +1611,7 @@ export function LanguageReviewPage() {
               {inlinePopover.originalText}
             </div>
 
-            {(expansion || ruleSuggestion) && (
+            {(expansion || ruleSuggestion || (target?.alt_suggestions && target.alt_suggestions.length > 0)) && (
               <div className="mb-2 flex flex-wrap gap-1">
                 {expansion && (
                   <button
@@ -1537,6 +1633,21 @@ export function LanguageReviewPage() {
                     Suggestion: {ruleSuggestion}
                   </button>
                 )}
+                {/* Alternate replacements shipped by workbook rules (Dash_Rules
+                    Suggestion 2 / Detect_List Suggestion 2 & 3). Picking an
+                    alt writes it into the input; the existing Replace flow
+                    then applies the chosen value through Track Changes. */}
+                {target?.alt_suggestions?.map((alt, i) => (
+                  <button
+                    key={`alt-${i}`}
+                    type="button"
+                    onClick={() => setInlineInput(alt)}
+                    className="px-2 py-1 rounded-full text-[11px] font-medium bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100"
+                    title="Alternate suggestion"
+                  >
+                    Alt: {alt}
+                  </button>
+                ))}
               </div>
             )}
 
