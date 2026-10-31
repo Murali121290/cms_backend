@@ -136,6 +136,9 @@ class ProjectSummary(BaseModel):
     actual_pages: int | None = None
     isbn_no: str | None = None
     billing_location: str | None = None
+    billing_type: str | None = None
+    alt_text: str | None = None
+    accessibility: str | None = None
     due_date: str | None = None
     due_date_history: list | None = None
     file_details: dict | None = None
@@ -1108,6 +1111,7 @@ class ProjectUpdateRequest(BaseModel):
     color: str | None = None
     trim_size: str | None = None
     copyright_year: int | None = None
+    estimated_pages: int | None = None
     actual_pages: int | None = None
     due_date: str | None = None
     division_code: str | None = None
@@ -1115,7 +1119,12 @@ class ProjectUpdateRequest(BaseModel):
     sales_person: str | None = None
     isbn_no: str | None = None
     billing_location: str | None = None
+    billing_type: str | None = None
+    alt_text: str | None = None
+    accessibility: str | None = None
     reason: str | None = None
+    skipped_stages: dict[str, list[str]] | None = None
+    skipped_stages_history: list[dict[str, Any]] | None = None
 
 
 class UploadZipChapterEntry(BaseModel):

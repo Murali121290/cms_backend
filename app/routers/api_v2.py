@@ -299,6 +299,9 @@ def _serialize_project_summary(project: Project):
         actual_pages=getattr(project, "actual_pages", None),
         isbn_no=getattr(project, "isbn_no", None),
         billing_location=getattr(project, "billing_location", None),
+        billing_type=getattr(project, "billing_type", None),
+        alt_text=getattr(project, "alt_text", None),
+        accessibility=getattr(project, "accessibility", None),
         due_date=due,
         due_date_history=getattr(project, "due_date_history", None) or [],
         file_details=getattr(project, "file_details", None),
@@ -1843,6 +1846,9 @@ def api_v2_project_bootstrap(
     actual_pages: int | None = Form(None),
     isbn_no: str | None = Form(None),
     billing_location: str | None = Form(None),
+    billing_type: str | None = Form(None),
+    alt_text: str | None = Form(None),
+    accessibility: str | None = Form(None),
     due_date: str | None = Form(None),
     design_workflow_name: str | None = Form(None),
     design_due_date: str | None = Form(None),
@@ -1937,7 +1943,7 @@ def api_v2_project_bootstrap(
     for _f in ("division_code", "customer_contact", "category", "composition", "copyediting_level",
                "project_manager", "client_project_manager", "sales_person", "priority", "edition", "color",
                "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
-               "actual_pages", "isbn_no", "billing_location"):
+               "actual_pages", "isbn_no", "billing_location", "billing_type", "alt_text", "accessibility"):
         _v = locals().get(_f)
         if _v is not None:
             setattr(project, _f, _v)
@@ -2197,8 +2203,8 @@ def api_v2_update_project(
             raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
 
     for _f in ("project_manager", "client_project_manager", "priority", "composition", "copyediting_level", "category", "edition",
-               "color", "trim_size", "copyright_year", "actual_pages", "manuscript_pages",
-               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location"):
+               "color", "trim_size", "copyright_year", "estimated_pages", "actual_pages", "manuscript_pages",
+               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location", "billing_type", "alt_text", "accessibility"):
         _v = getattr(payload, _f, None)
         if _v is not None:
             setattr(project, _f, _v)
@@ -2240,6 +2246,34 @@ def api_v2_update_project(
             })
             project.due_date_history = history_list
             flag_modified(project, "due_date_history")
+
+    if payload.skipped_stages is not None:
+        from datetime import datetime as _datetime, timezone as _timezone
+        from sqlalchemy.orm.attributes import flag_modified
+        file_details = getattr(project, "file_details", None) or {}
+        if not isinstance(file_details, dict):
+            file_details = {}
+        file_details["skipped_stages"] = payload.skipped_stages
+        
+        # Track history
+        history_list = list(file_details.get("skipped_stages_history", []))
+        user_full_name = None
+        if hasattr(viewer, "first_name") or hasattr(viewer, "username"):
+            fn = (getattr(viewer, "first_name", "") or "").strip()
+            ln = (getattr(viewer, "last_name", "") or "").strip()
+            user_full_name = f"{fn} {ln}".strip() or getattr(viewer, "username", None) or getattr(viewer, "user_name", "Unknown")
+        else:
+            user_full_name = str(viewer)
+        
+        history_list.append({
+            "skipped_stages": payload.skipped_stages,
+            "changed_by": user_full_name,
+            "reason": payload.reason or None,
+            "timestamp": _datetime.now(_timezone.utc).isoformat(),
+        })
+        file_details["skipped_stages_history"] = history_list
+        project.file_details = file_details
+        flag_modified(project, "file_details")
 
     db.commit()
     db.refresh(project)
@@ -9436,12 +9470,30 @@ def api_v2_bulk_transition_config(
         next_stage_name = None
         is_last = False
 
+        # Check for skipped stages in project
+        skipped_set = set()
+        if project and getattr(project, "file_details", None) and isinstance(project.file_details, dict):
+            proj_skipped = project.file_details.get("skipped_stages", {})
+            if isinstance(proj_skipped, dict):
+                for st_list in proj_skipped.values():
+                    if isinstance(st_list, list):
+                        skipped_set.update(st_list)
+            elif isinstance(proj_skipped, list):
+                skipped_set.update(proj_skipped)
+
         if stages:
             curr_obj = next((s for s in stages if s.stage_name == current_stage), None)
-            if curr_obj and curr_obj.next_stage:
-                next_stage_name = curr_obj.next_stage
-            last_obj = next((s for s in stages if not s.next_stage), None)
-            if last_obj and last_obj.stage_name == (next_stage_name or current_stage):
+            while curr_obj and curr_obj.next_stage:
+                target_stage = curr_obj.next_stage
+                curr_obj = next((s for s in stages if s.stage_name == target_stage), None)
+                if target_stage not in skipped_set:
+                    next_stage_name = target_stage
+                    break
+            
+            last_obj = next((s for s in stages if not s.next_stage or s.stage_name not in skipped_set), None)
+            # Find the actual last active stage
+            active_stages = [s for s in stages if s.stage_name not in skipped_set]
+            if active_stages and active_stages[-1].stage_name == (next_stage_name or current_stage):
                 is_last = True
 
         previews.append(schemas_v2.BulkTransitionItemPreview(
@@ -9528,10 +9580,26 @@ def api_v2_bulk_transition_execute(
 
         current_stage = ch.stage_name or ""
         next_stage_name = None
+
+        # Check for skipped stages in project
+        skipped_set = set()
+        if project and getattr(project, "file_details", None) and isinstance(project.file_details, dict):
+            proj_skipped = project.file_details.get("skipped_stages", {})
+            if isinstance(proj_skipped, dict):
+                for st_list in proj_skipped.values():
+                    if isinstance(st_list, list):
+                        skipped_set.update(st_list)
+            elif isinstance(proj_skipped, list):
+                skipped_set.update(proj_skipped)
+
         if stages:
             curr_obj = next((s for s in stages if s.stage_name == current_stage), None)
-            if curr_obj and curr_obj.next_stage:
-                next_stage_name = curr_obj.next_stage
+            while curr_obj and curr_obj.next_stage:
+                target_stage = curr_obj.next_stage
+                curr_obj = next((s for s in stages if s.stage_name == target_stage), None)
+                if target_stage not in skipped_set:
+                    next_stage_name = target_stage
+                    break
 
         if not next_stage_name:
             continue
@@ -9548,8 +9616,8 @@ def api_v2_bulk_transition_execute(
         ch.stage_name = next_stage_name
         ch.current_assignee_name = None
 
-        last_stage_obj = next((s for s in stages if not s.next_stage), None) if stages else None
-        if last_stage_obj and last_stage_obj.stage_name == next_stage_name:
+        active_stages = [s for s in stages if s.stage_name not in skipped_set]
+        if active_stages and active_stages[-1].stage_name == next_stage_name:
             ch.status = "complete"
 
         transitioned_count += 1

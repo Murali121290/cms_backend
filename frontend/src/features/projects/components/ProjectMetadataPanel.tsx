@@ -48,6 +48,9 @@ export function ProjectMetadataPanel({ project }: ProjectMetadataPanelProps) {
         <MetaCard label="Actual Pages" value={project.actual_pages} />
         <MetaCard label="ISBN" value={project.isbn_no} />
         <MetaCard label="Billing Location" value={project.billing_location} />
+        <MetaCard label="Billing Type" value={project.billing_type ? project.billing_type.charAt(0).toUpperCase() + project.billing_type.slice(1) : project.billing_type} />
+        <MetaCard label="Alt Text" value={project.alt_text ? project.alt_text.charAt(0).toUpperCase() + project.alt_text.slice(1) : project.alt_text} />
+        <MetaCard label="Accessibility" value={project.accessibility ? project.accessibility.charAt(0).toUpperCase() + project.accessibility.slice(1) : project.accessibility} />
         <MetaCard label="Sales Person" value={project.sales_person} />
         <MetaCard label="Division Code" value={project.division_code} />
         <MetaCard label="Customer Contact" value={project.customer_contact} />
