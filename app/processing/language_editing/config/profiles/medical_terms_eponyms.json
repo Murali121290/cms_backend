@@ -1,0 +1,485 @@
+{
+  "_meta": {
+    "source_workbook": "Medical_Terminology_List_for_CE_Tool.xlsx",
+    "source_sha256": "58eac870c2e7e362644711525d78211359a73bc8fde5375e738ef6ee9b8ea69c",
+    "origin": "Medical Terminology List for CE Tool"
+  },
+  "entries": [
+    {
+      "possessive_form": "Alzheimer's disease",
+      "nonpossessive_form": "Alzheimer disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Parkinson's disease",
+      "nonpossessive_form": "Parkinson disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Crohn's disease",
+      "nonpossessive_form": "Crohn disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Hodgkin's disease",
+      "nonpossessive_form": "Hodgkin disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Addison's disease",
+      "nonpossessive_form": "Addison disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Graves' disease",
+      "nonpossessive_form": "Graves disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Cushing's syndrome",
+      "nonpossessive_form": "Cushing syndrome",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Cushing's disease",
+      "nonpossessive_form": "Cushing disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Raynaud's disease",
+      "nonpossessive_form": "Raynaud disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Raynaud's phenomenon",
+      "nonpossessive_form": "Raynaud phenomenon",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Bell's palsy",
+      "nonpossessive_form": "Bell palsy",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Huntington's disease",
+      "nonpossessive_form": "Huntington disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Lou Gehrig's disease",
+      "nonpossessive_form": "Lou Gehrig disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Ménière's disease",
+      "nonpossessive_form": "Ménière disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Paget's disease",
+      "nonpossessive_form": "Paget disease",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Wilms' tumor",
+      "nonpossessive_form": "Wilms tumor",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Kaposi's sarcoma",
+      "nonpossessive_form": "Kaposi sarcoma",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Burkitt's lymphoma",
+      "nonpossessive_form": "Burkitt lymphoma",
+      "mw_lists_possessive": "Yes",
+      "default_profile": "Nonpossessive",
+      "note": "Medium confidence: confirm in Merriam-Webster"
+    },
+    {
+      "possessive_form": "Hashimoto's thyroiditis",
+      "nonpossessive_form": "Hashimoto thyroiditis",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Down's syndrome",
+      "nonpossessive_form": "Down syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Turner's syndrome",
+      "nonpossessive_form": "Turner syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Klinefelter's syndrome",
+      "nonpossessive_form": "Klinefelter syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Marfan's syndrome",
+      "nonpossessive_form": "Marfan syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Tourette's syndrome",
+      "nonpossessive_form": "Tourette syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Reye's syndrome",
+      "nonpossessive_form": "Reye syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Asperger's syndrome",
+      "nonpossessive_form": "Asperger syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Sjögren's syndrome",
+      "nonpossessive_form": "Sjögren syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Wernicke's encephalopathy",
+      "nonpossessive_form": "Wernicke encephalopathy",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Korsakoff's syndrome",
+      "nonpossessive_form": "Korsakoff syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Gilbert's syndrome",
+      "nonpossessive_form": "Gilbert syndrome",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Chagas' disease",
+      "nonpossessive_form": "Chagas disease",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Hirschsprung's disease",
+      "nonpossessive_form": "Hirschsprung disease",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Peyronie's disease",
+      "nonpossessive_form": "Peyronie disease",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Dupuytren's contracture",
+      "nonpossessive_form": "Dupuytren contracture",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Colles' fracture",
+      "nonpossessive_form": "Colles fracture",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Pott's disease",
+      "nonpossessive_form": "Pott disease",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Hansen's disease",
+      "nonpossessive_form": "Hansen disease",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Barrett's esophagus",
+      "nonpossessive_form": "Barrett esophagus",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Murphy's sign",
+      "nonpossessive_form": "Murphy sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Babinski's sign",
+      "nonpossessive_form": "Babinski sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Chvostek's sign",
+      "nonpossessive_form": "Chvostek sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Trousseau's sign",
+      "nonpossessive_form": "Trousseau sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Homans' sign",
+      "nonpossessive_form": "Homans sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Kernig's sign",
+      "nonpossessive_form": "Kernig sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Brudzinski's sign",
+      "nonpossessive_form": "Brudzinski sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Cullen's sign",
+      "nonpossessive_form": "Cullen sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Battle's sign",
+      "nonpossessive_form": "Battle sign",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Romberg's test",
+      "nonpossessive_form": "Romberg test",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Rinne's test",
+      "nonpossessive_form": "Rinne test",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Weber's test",
+      "nonpossessive_form": "Weber test",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Allen's test",
+      "nonpossessive_form": "Allen test",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Valsalva's maneuver",
+      "nonpossessive_form": "Valsalva maneuver",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Fowler's position",
+      "nonpossessive_form": "Fowler position",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Sims' position",
+      "nonpossessive_form": "Sims position",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Trendelenburg's position",
+      "nonpossessive_form": "Trendelenburg position",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Cushing's triad",
+      "nonpossessive_form": "Cushing triad",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Beck's triad",
+      "nonpossessive_form": "Beck triad",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Virchow's triad",
+      "nonpossessive_form": "Virchow triad",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Charcot's triad",
+      "nonpossessive_form": "Charcot triad",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Bartholin's gland",
+      "nonpossessive_form": "Bartholin gland",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Cowper's gland",
+      "nonpossessive_form": "Cowper gland",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Broca's area",
+      "nonpossessive_form": "Broca area",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Wernicke's area",
+      "nonpossessive_form": "Wernicke area",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Kussmaul's respirations",
+      "nonpossessive_form": "Kussmaul respirations",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Biot's respirations",
+      "nonpossessive_form": "Biot respirations",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Bowman's capsule",
+      "nonpossessive_form": "Bowman capsule",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Auerbach's plexus",
+      "nonpossessive_form": "Auerbach plexus",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    },
+    {
+      "possessive_form": "Meissner's corpuscle",
+      "nonpossessive_form": "Meissner corpuscle",
+      "mw_lists_possessive": "No",
+      "default_profile": "Nonpossessive",
+      "note": null
+    }
+  ]
+}

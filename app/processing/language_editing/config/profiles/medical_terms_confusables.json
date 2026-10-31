@@ -1,0 +1,463 @@
+{
+  "_meta": {
+    "source_workbook": "Medical_Terminology_List_for_CE_Tool.xlsx",
+    "source_sha256": "58eac870c2e7e362644711525d78211359a73bc8fde5375e738ef6ee9b8ea69c",
+    "origin": "Medical Terminology List for CE Tool"
+  },
+  "entries": [
+    {
+      "id": "CF-001",
+      "word_a": "ileum",
+      "word_b": "ilium",
+      "cues_a": [
+        "small intestine",
+        "jejunum",
+        "bowel",
+        "Crohn",
+        "terminal",
+        "ileostomy",
+        "absorption",
+        "intestinal",
+        "resection"
+      ],
+      "cues_b": [
+        "hip",
+        "pelvis",
+        "bone",
+        "iliac",
+        "crest",
+        "fracture",
+        "graft",
+        "acetabulum",
+        "pelvic"
+      ],
+      "note": "Ileum is the small intestine. Ilium is the hip bone",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-002",
+      "word_a": "ureter",
+      "word_b": "urethra",
+      "cues_a": [
+        "kidney",
+        "renal",
+        "hydronephrosis",
+        "stent",
+        "stone",
+        "calculus",
+        "pelvis",
+        "obstruction"
+      ],
+      "cues_b": [
+        "catheter",
+        "meatus",
+        "stricture",
+        "voiding",
+        "Foley",
+        "urination",
+        "bladder outlet",
+        "female",
+        "male"
+      ],
+      "note": "Ureter carries urine from kidney to bladder. Urethra carries it out of the body",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-003",
+      "word_a": "palpation",
+      "word_b": "palpitation",
+      "cues_a": [
+        "abdomen",
+        "tenderness",
+        "exam",
+        "soft",
+        "palpable",
+        "deep",
+        "light",
+        "masses"
+      ],
+      "cues_b": [
+        "heart",
+        "racing",
+        "chest",
+        "fluttering",
+        "anxiety",
+        "skipped",
+        "pounding",
+        "rhythm"
+      ],
+      "note": "Palpation is touch examination. Palpitation is awareness of the heartbeat",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-004",
+      "word_a": "prostate",
+      "word_b": "prostrate",
+      "cues_a": [
+        "cancer",
+        "PSA",
+        "BPH",
+        "gland",
+        "enlarged",
+        "urinary",
+        "hyperplasia",
+        "biopsy"
+      ],
+      "cues_b": [
+        "exhaustion",
+        "heat",
+        "lying",
+        "face down",
+        "collapsed",
+        "overcome",
+        "flat"
+      ],
+      "note": "Prostate is a gland. Prostrate means lying flat or exhausted",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-005",
+      "word_a": "dysphagia",
+      "word_b": "dysphasia",
+      "cues_a": [
+        "swallowing",
+        "aspiration",
+        "esophagus",
+        "choking",
+        "food",
+        "bolus",
+        "thickened"
+      ],
+      "cues_b": [
+        "speech",
+        "language",
+        "stroke",
+        "aphasia",
+        "word-finding",
+        "expressive",
+        "receptive"
+      ],
+      "note": "Dysphagia is difficulty swallowing. Dysphasia is impaired language",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-006",
+      "word_a": "abduction",
+      "word_b": "adduction",
+      "cues_a": [
+        "away",
+        "lateral",
+        "lift",
+        "spread",
+        "raised",
+        "midline away"
+      ],
+      "cues_b": [
+        "toward",
+        "midline",
+        "together",
+        "cross",
+        "brought in",
+        "inward"
+      ],
+      "note": "Abduction moves away from the midline. Adduction moves toward it",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-007",
+      "word_a": "ipsilateral",
+      "word_b": "contralateral",
+      "cues_a": [
+        "same side",
+        "same",
+        "one side",
+        "matching"
+      ],
+      "cues_b": [
+        "opposite",
+        "other side",
+        "crossed",
+        "across"
+      ],
+      "note": "Ipsilateral means the same side. Contralateral means the opposite side",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-008",
+      "word_a": "afferent",
+      "word_b": "efferent",
+      "cues_a": [
+        "sensory",
+        "toward",
+        "receptor",
+        "input",
+        "ascending",
+        "dorsal"
+      ],
+      "cues_b": [
+        "motor",
+        "away",
+        "effector",
+        "output",
+        "descending",
+        "ventral"
+      ],
+      "note": "Afferent nerves carry signals toward the central nervous system. Efferent carry them away",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-009",
+      "word_a": "elicit",
+      "word_b": "illicit",
+      "cues_a": [
+        "reflex",
+        "response",
+        "history",
+        "symptom",
+        "sign",
+        "answer",
+        "tendon"
+      ],
+      "cues_b": [
+        "drug",
+        "substance",
+        "illegal",
+        "use",
+        "trafficking",
+        "narcotic"
+      ],
+      "note": "Elicit means to draw out. Illicit means illegal",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-010",
+      "word_a": "diagnosis",
+      "word_b": "prognosis",
+      "cues_a": [
+        "determined",
+        "confirmed",
+        "differential",
+        "criteria",
+        "made",
+        "established",
+        "clinical"
+      ],
+      "cues_b": [
+        "outlook",
+        "survival",
+        "poor",
+        "good",
+        "expected",
+        "likely course",
+        "five-year"
+      ],
+      "note": "Diagnosis names the condition. Prognosis is the expected outcome",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-011",
+      "word_a": "sign",
+      "word_b": "symptom",
+      "cues_a": [
+        "observed",
+        "measured",
+        "examiner",
+        "objective",
+        "noted on exam",
+        "visible"
+      ],
+      "cues_b": [
+        "reports",
+        "complains",
+        "patient states",
+        "subjective",
+        "feels",
+        "describes"
+      ],
+      "note": "A sign is observed. A symptom is reported by the patient",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-012",
+      "word_a": "incidence",
+      "word_b": "prevalence",
+      "cues_a": [
+        "new cases",
+        "per year",
+        "rate",
+        "per 100",
+        "000",
+        "developed",
+        "cumulative"
+      ],
+      "cues_b": [
+        "existing cases",
+        "at a time",
+        "proportion",
+        "point",
+        "current",
+        "percent of the population"
+      ],
+      "note": "Incidence is new cases over time. Prevalence is existing cases at a point or period",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-013",
+      "word_a": "sensitivity",
+      "word_b": "specificity",
+      "cues_a": [
+        "true positive",
+        "detect",
+        "disease present",
+        "rule out",
+        "missed",
+        "screening"
+      ],
+      "cues_b": [
+        "true negative",
+        "healthy",
+        "rule in",
+        "false positive",
+        "without disease"
+      ],
+      "note": "Sensitivity finds those with the condition. Specificity excludes those without it",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-014",
+      "word_a": "hypotension",
+      "word_b": "hypertension",
+      "cues_a": [
+        "low",
+        "shock",
+        "dizziness",
+        "orthostatic",
+        "syncope",
+        "hypovolemia",
+        "bleeding",
+        "vasopressor"
+      ],
+      "cues_b": [
+        "high",
+        "headache",
+        "retinopathy",
+        "diuretic",
+        "stroke risk",
+        "elevated",
+        "antihypertensive"
+      ],
+      "note": "Hypotension is low blood pressure. Hypertension is high",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-015",
+      "word_a": "hypoglycemia",
+      "word_b": "hyperglycemia",
+      "cues_a": [
+        "shaky",
+        "sweaty",
+        "glucose tablets",
+        "insulin excess",
+        "low glucose",
+        "confusion",
+        "juice"
+      ],
+      "cues_b": [
+        "thirst",
+        "polyuria",
+        "ketones",
+        "high glucose",
+        "DKA",
+        "dehydration",
+        "fruity breath"
+      ],
+      "note": "Hypoglycemia is low blood glucose. Hyperglycemia is high",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-016",
+      "word_a": "hypokalemia",
+      "word_b": "hyperkalemia",
+      "cues_a": [
+        "weakness",
+        "ileus",
+        "U wave",
+        "low potassium",
+        "diuretic loss",
+        "cramps"
+      ],
+      "cues_b": [
+        "peaked T waves",
+        "high potassium",
+        "renal failure",
+        "dialysis",
+        "arrhythmia",
+        "ACE"
+      ],
+      "note": "Hypokalemia is low potassium. Hyperkalemia is high",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-017",
+      "word_a": "hyponatremia",
+      "word_b": "hypernatremia",
+      "cues_a": [
+        "low sodium",
+        "water intoxication",
+        "SIADH",
+        "seizures",
+        "edema"
+      ],
+      "cues_b": [
+        "high sodium",
+        "thirst",
+        "dehydration",
+        "diabetes insipidus",
+        "concentrated"
+      ],
+      "note": "Hyponatremia is low sodium. Hypernatremia is high",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    },
+    {
+      "id": "CF-018",
+      "word_a": "hypothermia",
+      "word_b": "hyperthermia",
+      "cues_a": [
+        "cold",
+        "rewarming",
+        "exposure",
+        "below 35",
+        "shivering",
+        "cooling"
+      ],
+      "cues_b": [
+        "heat",
+        "heat stroke",
+        "fever",
+        "above",
+        "malignant",
+        "cooling blanket"
+      ],
+      "note": "Hypothermia is low body temperature. Hyperthermia is high",
+      "tool_behaviour": "flag",
+      "tool_behaviour_raw": "Flag and suggest"
+    }
+  ]
+}
