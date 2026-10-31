@@ -1080,8 +1080,13 @@ export function ProjectWorkflow() {
   }, [activeTab, designChapters, artChapters, manuscriptChapters, project])
 
   const orderedStages = useMemo(() => {
-    return wfStagesMap[activeWorkflowName] ?? []
-  }, [activeWorkflowName, wfStagesMap])
+    const rawStages = wfStagesMap[activeWorkflowName] ?? []
+    const skippedMap = ((project?.file_details as Record<string, unknown> | null)?.skipped_stages as Record<string, string[]> | undefined) || {}
+    const skippedList = skippedMap[activeTab] || skippedMap['manuscript'] || []
+    if (!skippedList || skippedList.length === 0) return rawStages
+    const skippedSet = new Set(skippedList)
+    return rawStages.filter(s => !skippedSet.has(s.stage_name))
+  }, [activeWorkflowName, wfStagesMap, project, activeTab])
 
   const summary = useMemo(() => {
     const actual = activeChapters.filter(c => c.chapters !== 'CE support')

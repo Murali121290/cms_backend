@@ -672,6 +672,9 @@ export function CreateProjectPage() {
       if (form.actual_pages != null) formData.append('actual_pages', String(form.actual_pages))
       if (form.isbn_no) formData.append('isbn_no', form.isbn_no)
       if (form.billing_location) formData.append('billing_location', form.billing_location)
+      if (form.billing_type) formData.append('billing_type', form.billing_type)
+      if (form.alt_text) formData.append('alt_text', form.alt_text)
+      if (form.accessibility) formData.append('accessibility', form.accessibility)
       if (form.due_date) formData.append('due_date', form.due_date)
       if (poResult || authorName.trim()) {
         const fileDetails = { ...(poResult?.extras ?? {}), author_name: authorName.trim() || undefined }
@@ -997,6 +1000,36 @@ export function CreateProjectPage() {
                 { value: 'S4Carlisle Publishing Services Pte Ltd-Singapore 2', label: 'S4Carlisle Publishing Services Pte Ltd-Singapore 2' },
               ]}
               placeholder="Select billing location"
+            />
+            <Select
+              label="Billing Type"
+              value={form.billing_type ?? ''}
+              onChange={e => set('billing_type', e.target.value || null)}
+              options={[
+                { value: 'partial', label: 'Partial' },
+                { value: 'full', label: 'Full' },
+              ]}
+              placeholder="Select billing type"
+            />
+            <Select
+              label="Alt Text"
+              value={form.alt_text ?? ''}
+              onChange={e => set('alt_text', e.target.value || null)}
+              options={[
+                { value: 'yes', label: 'Yes' },
+                { value: 'no', label: 'No' },
+              ]}
+              placeholder="Select alt text"
+            />
+            <Select
+              label="Accessibility"
+              value={form.accessibility ?? ''}
+              onChange={e => set('accessibility', e.target.value || null)}
+              options={[
+                { value: 'yes', label: 'Yes' },
+                { value: 'no', label: 'No' },
+              ]}
+              placeholder="Select accessibility"
             />
             <Input
               label="Due Date"

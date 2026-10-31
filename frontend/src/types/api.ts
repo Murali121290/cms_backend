@@ -108,6 +108,9 @@ export interface ProjectSummary {
   isbn_no?: string | null;
   copyediting_level?: string | null;
   billing_location?: string | null;
+  billing_type?: string | null;
+  alt_text?: string | null;
+  accessibility?: string | null;
   due_date?: string | null;
   file_details?: Record<string, unknown> | null;
   created_at?: string | null;

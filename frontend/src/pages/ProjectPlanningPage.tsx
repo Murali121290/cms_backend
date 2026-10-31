@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, Layers, Calendar, Flag, AlertTriangle, Edit3, X, History } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Layers, Calendar, Flag, AlertTriangle, Edit3, X, History, Sliders } from 'lucide-react'
 import { projectsApi } from '@/api/projects'
 import type { Project } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
@@ -361,6 +361,9 @@ export function ProjectPlanningPage() {
   const [adjustmentReason, setAdjustmentReason] = useState('')
   const [viewingHistory, setViewingHistory] = useState<{ chapter: string; stageName: string; history: StageHistoryEntry[] } | null>(null)
   const [activeTab, setActiveTab] = useState<'manuscript' | 'art' | 'design'>('manuscript')
+  const [isCustomizeStagesOpen, setIsCustomizeStagesOpen] = useState(false)
+  const [localSkippedStages, setLocalSkippedStages] = useState<Record<string, string[]>>({})
+  const [skipReason, setSkipReason] = useState('')
 
   const loadPlanningData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -370,6 +373,8 @@ export function ProjectPlanningPage() {
       const proj = response.project as unknown as Project
       setProject(proj)
       setPreviewComposition(proj.composition ?? 'Medium')
+      const initialSkipped = ((proj.file_details as Record<string, unknown> | null)?.skipped_stages as Record<string, string[]> | undefined) || {}
+      setLocalSkippedStages(initialSkipped)
       const projectCode = proj.code || proj.project_code || ''
 
       // Ensure WMS chapter_details are in sync with CMS chapters
@@ -533,8 +538,12 @@ export function ProjectPlanningPage() {
   }, [activeTab, designChapters, artChapters, manuscriptChapters, project])
 
   const currentOrderedStages = useMemo(() => {
-    return wfStagesMap[activeWorkflowName] ?? []
-  }, [activeWorkflowName, wfStagesMap])
+    const raw = wfStagesMap[activeWorkflowName] ?? []
+    const skippedList = localSkippedStages[activeTab] || []
+    if (skippedList.length === 0) return raw
+    const skippedSet = new Set(skippedList)
+    return raw.filter(s => !skippedSet.has(s.stage_name))
+  }, [activeWorkflowName, wfStagesMap, localSkippedStages, activeTab])
 
   const baseSchedule = useMemo((): StageSchedule[] => {
     if (!project || currentOrderedStages.length === 0) return []
@@ -579,7 +588,9 @@ export function ProjectPlanningPage() {
     const anchor = project.created_at || new Date().toISOString()
 
     // Manuscript track
-    const msStages = wfStagesMap[manuscriptChapters[0]?.workflow || project.workflow_name || ''] ?? []
+    const rawMsStages = wfStagesMap[manuscriptChapters[0]?.workflow || project.workflow_name || ''] ?? []
+    const msSkipped = new Set(localSkippedStages['manuscript'] || [])
+    const msStages = rawMsStages.filter(s => !msSkipped.has(s.stage_name))
     const msBase = buildBaseSchedule(msStages, masterMap, previewComposition, anchor)
     const msBaseSla = new Map<string, number | null>()
     const msPageNorm = new Map<string, number | null>()
@@ -605,7 +616,9 @@ export function ProjectPlanningPage() {
 
     // Art track
     if (artChapters.length > 0) {
-      const artStages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
+      const rawArtStages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
+      const artSkipped = new Set(localSkippedStages['art'] || [])
+      const artStages = rawArtStages.filter(s => !artSkipped.has(s.stage_name))
       const artBase = buildBaseSchedule(artStages, masterMap, previewComposition, anchor)
       const artBaseSla = new Map<string, number | null>()
       const artPageNorm = new Map<string, number | null>()
@@ -632,7 +645,9 @@ export function ProjectPlanningPage() {
 
     // Design track
     if (designChapters.length > 0) {
-      const designStages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
+      const rawDesignStages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
+      const designSkipped = new Set(localSkippedStages['design'] || [])
+      const designStages = rawDesignStages.filter(s => !designSkipped.has(s.stage_name))
       const designBase = buildBaseSchedule(designStages, masterMap, previewComposition, anchor)
       const designBaseSla = new Map<string, number | null>()
       const designPageNorm = new Map<string, number | null>()
@@ -792,6 +807,8 @@ export function ProjectPlanningPage() {
         status: 'Active',
         due_date: project.due_date || toLocalDateStr(finalDue),
         composition: previewComposition ?? undefined,
+        skipped_stages: localSkippedStages,
+        reason: reason || undefined,
       })
     } catch {
       toast.error('Failed to approve planning')
@@ -1281,6 +1298,26 @@ export function ProjectPlanningPage() {
         <div className="px-6 py-2 bg-surface border-b border-border text-xs text-muted flex items-center justify-between flex-shrink-0 gap-4 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
             <span>Active Workflow: <strong>{activeWorkflowName || 'None'}</strong></span>
+            {isEditable && (
+              <button
+                type="button"
+                onClick={() => setIsCustomizeStagesOpen(true)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border transition-all shadow-sm ${
+                  (localSkippedStages[activeTab]?.length || 0) > 0
+                    ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                    : 'bg-card text-text border-border hover:bg-surface'
+                }`}
+                title="Customize which stages are active or skipped for this book"
+              >
+                <Sliders size={12} className="text-primary" />
+                Customize Stages
+                {(localSkippedStages[activeTab]?.length || 0) > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900">
+                    {localSkippedStages[activeTab].length} skipped
+                  </span>
+                )}
+              </button>
+            )}
             {activeTab === 'manuscript' && activeChapters.reduce((sum, ch) => sum + (ch.manuscript_pages || 0), 0) > 0 && (
               <>
                 <span className="text-border">|</span>
@@ -1377,6 +1414,115 @@ export function ProjectPlanningPage() {
           </>
         )}
       </div>
+
+      {/* Customize Stages Modal */}
+      {isCustomizeStagesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <Sliders size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-text">Customize Stages</h3>
+                  <p className="text-xs text-muted">
+                    {activeTab === 'manuscript' ? 'Manuscript Track' : activeTab === 'art' ? 'Art Track' : 'Design Track'} — {activeWorkflowName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsCustomizeStagesOpen(false)}
+                className="text-muted hover:text-text p-1 rounded-lg hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-muted">
+                Uncheck any stages that are not needed for this book. The schedule and workflow rail will automatically omit skipped stages.
+              </p>
+
+              <div className="max-h-60 overflow-y-auto space-y-1.5 border border-border rounded-lg p-2.5 bg-surface/50">
+                {(wfStagesMap[activeWorkflowName] ?? []).map((stage, idx) => {
+                  const currentSkipped = localSkippedStages[activeTab] || []
+                  const isChecked = !currentSkipped.includes(stage.stage_name)
+                  return (
+                    <label
+                      key={stage.stage_name}
+                      className="flex items-center gap-2.5 p-2 rounded-md hover:bg-card border border-transparent hover:border-border transition-colors cursor-pointer select-none text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          const nextSkipped = isChecked
+                            ? [...currentSkipped, stage.stage_name]
+                            : currentSkipped.filter(s => s !== stage.stage_name)
+                          setLocalSkippedStages(prev => ({
+                            ...prev,
+                            [activeTab]: nextSkipped
+                          }))
+                        }}
+                        className="rounded border-border text-primary focus:ring-primary/40 h-4 w-4"
+                      />
+                      <span className="w-5 text-[11px] font-bold text-muted">{idx + 1}.</span>
+                      <span className={`font-medium ${isChecked ? 'text-text' : 'text-muted line-through'}`}>
+                        {stage.stage_name}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+
+              {alreadyApproved && (
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-semibold text-text block">
+                    Reason for Skipping / Changing Stages <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={skipReason}
+                    onChange={e => setSkipReason(e.target.value)}
+                    placeholder="e.g. Non-XML and Indexing not required by client"
+                    className="w-full text-xs bg-surface border border-border rounded-lg px-3 py-2 text-text placeholder:text-muted/60 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  <p className="text-[10px] text-muted">Who, when, and this reason will be preserved in the audit log.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsCustomizeStagesOpen(false)}
+                className="text-xs h-8 px-3"
+              >
+                Close
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (alreadyApproved && !skipReason.trim()) {
+                    toast.error('Please enter a reason for changing the stages')
+                    return
+                  }
+                  if (alreadyApproved) {
+                    setAdjustmentReason(skipReason.trim())
+                  }
+                  setIsCustomizeStagesOpen(false)
+                  toast.success('Stages updated. Review recalculated schedule and approve when ready.')
+                }}
+                className="text-xs h-8 px-3 font-medium"
+              >
+                Apply & Replan
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Adjustment Reason Modal */}
       {isReasonModalOpen && (

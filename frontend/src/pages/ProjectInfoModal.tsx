@@ -41,9 +41,15 @@ interface EditForm {
   color: string
   trim_size: string
   copyright_year: string
+  estimated_pages: string
   actual_pages: string
   due_date: string
   reason: string
+  billing_location: string
+  billing_type: string
+  alt_text: string
+  accessibility: string
+  isbn_no: string
 }
 
 interface ProjectInfoModalProps {
@@ -55,7 +61,22 @@ interface ProjectInfoModalProps {
 }
 
 export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: ProjectInfoModalProps) {
-  const [form, setForm] = useState<EditForm>({ composition: '', edition: '', color: '', trim_size: '', copyright_year: '', actual_pages: '', due_date: '', reason: '' })
+  const [form, setForm] = useState<EditForm>({
+    composition: '',
+    edition: '',
+    color: '',
+    trim_size: '',
+    copyright_year: '',
+    estimated_pages: '',
+    actual_pages: '',
+    due_date: '',
+    reason: '',
+    billing_location: '',
+    billing_type: '',
+    alt_text: '',
+    accessibility: '',
+    isbn_no: '',
+  })
   const [saving, setSaving] = useState(false)
   const [chapterManuscriptPages, setChapterManuscriptPages] = useState<number | null>(null)
   const [chapterWordCount, setChapterWordCount] = useState<number | null>(null)
@@ -85,9 +106,15 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         color: project.color ?? '',
         trim_size: project.trim_size ?? '',
         copyright_year: project.copyright_year != null ? String(project.copyright_year) : '',
+        estimated_pages: project.estimated_pages != null ? String(project.estimated_pages) : '',
         actual_pages: String(project.actual_pages ?? 0),
         due_date: project.due_date ? String(project.due_date).split('T')[0] : '',
         reason: '',
+        billing_location: project.billing_location ?? '',
+        billing_type: project.billing_type ?? '',
+        alt_text: project.alt_text ?? '',
+        accessibility: project.accessibility ?? '',
+        isbn_no: project.isbn_no ?? '',
       })
     }
   }, [project])
@@ -147,8 +174,14 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         color: form.color || null,
         trim_size: form.trim_size || null,
         copyright_year: form.copyright_year ? Number(form.copyright_year) : null,
+        estimated_pages: form.estimated_pages ? Number(form.estimated_pages) : null,
         actual_pages: form.actual_pages ? Number(form.actual_pages) : 0,
         due_date: form.due_date ? form.due_date : null,
+        billing_location: form.billing_location || null,
+        billing_type: form.billing_type || null,
+        alt_text: form.alt_text || null,
+        accessibility: form.accessibility || null,
+        isbn_no: form.isbn_no || null,
         reason: isDueDateChanged && form.reason.trim() ? form.reason.trim() : null,
       }
       const updated = await projectsApi.update(project.id, data)
@@ -215,8 +248,66 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         <InfoField label="Workflow" value={project.workflow_name} />
         <InfoField label="Project Manager" value={project.project_manager ? useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager) : '—'} />
         <InfoField label="Sales Person" value={project.sales_person ? useUsersStore.getState().getUserDisplayNameByUsername(project.sales_person) : '—'} />
-        <InfoField label="Billing Location" value={project.billing_location} />
-        <InfoField label="ISBN No" value={project.isbn_no} />
+        {mode === 'view' ? (
+          <>
+            <InfoField label="Billing Location" value={project.billing_location} />
+            <InfoField label="Billing Type" value={project.billing_type ? project.billing_type.charAt(0).toUpperCase() + project.billing_type.slice(1) : '—'} />
+            <InfoField label="Alt Text" value={project.alt_text ? project.alt_text.charAt(0).toUpperCase() + project.alt_text.slice(1) : '—'} />
+            <InfoField label="Accessibility" value={project.accessibility ? project.accessibility.charAt(0).toUpperCase() + project.accessibility.slice(1) : '—'} />
+            <InfoField label="ISBN No" value={project.isbn_no} />
+          </>
+        ) : (
+          <>
+            <Select
+              label="Billing Location"
+              value={form.billing_location}
+              onChange={e => set('billing_location', e.target.value)}
+              options={[
+                { value: 'S4Carlisle Publishing Services-Chennai', label: 'S4Carlisle Publishing Services-Chennai' },
+                { value: 'S4Carlisle Publishing Services-Singapore', label: 'S4Carlisle Publishing Services-Singapore' },
+                { value: 'S4Carlisle Transmedia Services Inc', label: 'S4Carlisle Transmedia Services Inc' },
+                { value: 'S4Carlisle Publishing Services Pte Ltd-Singapore 2', label: 'S4Carlisle Publishing Services Pte Ltd-Singapore 2' },
+              ]}
+              placeholder="Select billing location"
+            />
+            <Select
+              label="Billing Type"
+              value={form.billing_type}
+              onChange={e => set('billing_type', e.target.value)}
+              options={[
+                { value: 'partial', label: 'Partial' },
+                { value: 'full', label: 'Full' },
+              ]}
+              placeholder="Select billing type"
+            />
+            <Select
+              label="Alt Text"
+              value={form.alt_text}
+              onChange={e => set('alt_text', e.target.value)}
+              options={[
+                { value: 'yes', label: 'Yes' },
+                { value: 'no', label: 'No' },
+              ]}
+              placeholder="Select alt text"
+            />
+            <Select
+              label="Accessibility"
+              value={form.accessibility}
+              onChange={e => set('accessibility', e.target.value)}
+              options={[
+                { value: 'yes', label: 'Yes' },
+                { value: 'no', label: 'No' },
+              ]}
+              placeholder="Select accessibility"
+            />
+            <Input
+              label="ISBN No"
+              value={form.isbn_no}
+              onChange={e => set('isbn_no', e.target.value)}
+              placeholder="e.g. 978-3-16-148410-0"
+            />
+          </>
+        )}
 
         {/* ── Publication Details ── */}
         <Section title="Publication Details" icon={Layers} />
@@ -256,6 +347,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
             <Input label="Color" value={form.color} onChange={e => set('color', e.target.value)} placeholder="e.g. 4-color, B&W" />
             <Input label="Trim Size" value={form.trim_size} onChange={e => set('trim_size', e.target.value)} placeholder="e.g. 8.5 x 11" />
             <Input label="Copyright Year" value={form.copyright_year} onChange={e => set('copyright_year', e.target.value)} type="number" placeholder={String(new Date().getFullYear())} />
+            <Input label="Estimated Pages" value={form.estimated_pages} onChange={e => set('estimated_pages', e.target.value)} type="number" placeholder="0" />
             <Input label="Actual Pages" value={form.actual_pages} onChange={e => set('actual_pages', e.target.value)} type="number" placeholder="0" />
             <Input label="Due Date" value={form.due_date} onChange={e => set('due_date', e.target.value)} type="date" />
             {project.due_date && String(project.due_date).split('T')[0] !== form.due_date && form.due_date && (
