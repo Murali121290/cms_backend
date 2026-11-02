@@ -1,4 +1,4 @@
-﻿import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardBody } from '@/components/ui/Card'
 import { FolderSearch, FileText, CalendarDays, ArrowRight } from 'lucide-react'
 
@@ -27,7 +27,6 @@ export function ReportsPage() {
       icon: CalendarDays,
       path: '/reports/today-schedule',
       color: 'text-violet-500 bg-violet-50 dark:bg-violet-950/30',
-      comingSoon: true,
     },
   ]
 
