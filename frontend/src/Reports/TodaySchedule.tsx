@@ -25,6 +25,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useRBAC } from "@/hooks/useRBAC";
 import { Spinner } from "@/components/ui/Spinner";
+import { Dropdown } from "@/components/ui/Dropdown";
 import * as XLSX from "xlsx";
 
 type ActiveTab = "all" | "today" | "delayed" | "inProgress" | "yts" | "completed";
@@ -636,22 +637,25 @@ const TodaySchedule = () => {
           {userInfo.isAdmin && (
             <div className="flex items-center gap-1.5 bg-surface border border-border rounded-xl px-3 py-1.5 shadow-xs">
               <span className="text-[11px] font-semibold text-muted">Team Scope:</span>
-              <select
-                value={selectedTeam}
-                onChange={(e) => setSelectedTeam(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-text outline-none cursor-pointer"
-              >
-                <option value="auto">All Teams (Admin Overview)</option>
-                <option value="--ALL--">Show All Company Stages</option>
-                <option value="initiat">Job Initiation</option>
-                <option value="pre-edit">Pre-editing Team</option>
-                <option value="editorial">Editorial / Copyediting</option>
-                <option value="typesetting">Typesetting / Composition</option>
-                <option value="xml">XML Conversion / Digital</option>
-                <option value="art">Art &amp; Graphics</option>
-                <option value="proof">Proofreading &amp; QC</option>
-                <option value="project manager">Project Management</option>
-              </select>
+              <div className="relative">
+                <select
+                  value={selectedTeam}
+                  onChange={(e) => setSelectedTeam(e.target.value)}
+                  className="appearance-none bg-transparent pr-5 text-xs font-semibold text-text outline-none cursor-pointer"
+                >
+                  <option value="auto">All Teams (Admin Overview)</option>
+                  <option value="--ALL--">Show All Company Stages</option>
+                  <option value="initiat">Job Initiation</option>
+                  <option value="pre-edit">Pre-editing Team</option>
+                  <option value="editorial">Editorial / Copyediting</option>
+                  <option value="typesetting">Typesetting / Composition</option>
+                  <option value="xml">XML Conversion / Digital</option>
+                  <option value="art">Art &amp; Graphics</option>
+                  <option value="proof">Proofreading &amp; QC</option>
+                  <option value="project manager">Project Management</option>
+                </select>
+                <ChevronDown size={12} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-muted" />
+              </div>
             </div>
           )}
 
@@ -879,51 +883,50 @@ const TodaySchedule = () => {
           {/* Client Filter */}
           <div>
             <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Client</label>
-            <select
+            <Dropdown
               value={selectedClient}
-              onChange={(e) => setSelectedClient(e.target.value)}
-              className="w-full rounded-lg border border-border/80 bg-surface px-2.5 py-1.5 text-xs text-text outline-none focus:border-primary shadow-xs"
-            >
-              <option value="--ALL--">All Clients</option>
-              {allUniqueClients.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setSelectedClient(val)}
+              searchable
+              searchPlaceholder="Search clients..."
+              className="w-full bg-surface border-border/80 rounded-xl py-2 px-3 text-xs font-medium shadow-xs"
+              options={[
+                { value: "--ALL--", label: "All Clients" },
+                ...allUniqueClients.map((c) => ({ value: c, label: c })),
+              ]}
+            />
           </div>
 
           {/* Stage Filter */}
           <div>
             <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Stage</label>
-            <select
+            <Dropdown
               value={selectedStage}
-              onChange={(e) => setSelectedStage(e.target.value)}
-              className="w-full rounded-lg border border-border/80 bg-surface px-2.5 py-1.5 text-xs text-text outline-none focus:border-primary shadow-xs"
-            >
-              <option value="--ALL--">All Stages</option>
-              {allUniqueStages.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setSelectedStage(val)}
+              searchable={allUniqueStages.length > 5}
+              searchPlaceholder="Search stages..."
+              className="w-full bg-surface border-border/80 rounded-xl py-2 px-3 text-xs font-medium shadow-xs"
+              options={[
+                { value: "--ALL--", label: "All Stages" },
+                ...allUniqueStages.map((s) => ({ value: s, label: s })),
+              ]}
+            />
           </div>
 
           {/* Status Filter */}
           <div>
             <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Status</label>
-            <select
+            <Dropdown
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full rounded-lg border border-border/80 bg-surface px-2.5 py-1.5 text-xs text-text outline-none focus:border-primary shadow-xs"
-            >
-              <option value="--ALL--">All Statuses</option>
-              <option value="Delayed">Delayed / Overdue</option>
-              <option value="In-progress">In-Progress</option>
-              <option value="YTS">YTS (Yet to Start)</option>
-              <option value="Completed">Completed</option>
-            </select>
+              onChange={(val) => setStatusFilter(val)}
+              className="w-full bg-surface border-border/80 rounded-xl py-2 px-3 text-xs font-medium shadow-xs"
+              options={[
+                { value: "--ALL--", label: "All Statuses" },
+                { value: "Delayed", label: "Delayed / Overdue" },
+                { value: "In-progress", label: "In-Progress" },
+                { value: "YTS", label: "YTS (Yet to Start)" },
+                { value: "Completed", label: "Completed" },
+              ]}
+            />
           </div>
 
           {/* Planned Start From */}
@@ -933,7 +936,7 @@ const TodaySchedule = () => {
               type="date"
               value={startDateFrom}
               onChange={(e) => setStartDateFrom(e.target.value)}
-              className="w-full rounded-lg border border-border/80 bg-surface px-2.5 py-1.5 text-xs text-text outline-none focus:border-primary shadow-xs"
+              className="w-full rounded-xl border border-border/80 bg-surface px-3 py-2 text-xs font-medium text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-xs transition-all"
             />
           </div>
 
@@ -944,7 +947,7 @@ const TodaySchedule = () => {
               type="date"
               value={startDateTo}
               onChange={(e) => setStartDateTo(e.target.value)}
-              className="w-full rounded-lg border border-border/80 bg-surface px-2.5 py-1.5 text-xs text-text outline-none focus:border-primary shadow-xs"
+              className="w-full rounded-xl border border-border/80 bg-surface px-3 py-2 text-xs font-medium text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-xs transition-all"
             />
           </div>
         </div>
