@@ -686,14 +686,12 @@ const TodaySchedule = () => {
         {/* Today's Planned */}
         <div
           onClick={() => setActiveTab(activeTab === "today" ? "all" : "today")}
-          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${
-            activeTab === "today" ? "border-violet-500 ring-2 ring-violet-500/20 bg-violet-500/5" : "border-border/80"
-          }`}
+          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "today" ? "border-violet-500 ring-2 ring-violet-500/20 bg-violet-500/5" : "border-border/80"
+            }`}
         >
           <div>
             <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">Today&apos;s Planned</p>
             <p className="text-2xl font-bold text-violet-600 dark:text-violet-400 mt-1">{kpis.todayPlanned}</p>
-            <span className="text-[10px] text-muted font-medium">planned_start = today</span>
           </div>
           <div className="p-2.5 rounded-xl bg-violet-500/10 text-violet-600 border border-violet-500/20">
             <CalendarDays size={20} />
@@ -703,14 +701,12 @@ const TodaySchedule = () => {
         {/* Delayed / Overdue */}
         <div
           onClick={() => setActiveTab(activeTab === "delayed" ? "all" : "delayed")}
-          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${
-            activeTab === "delayed" ? "border-rose-500 ring-2 ring-rose-500/20 bg-rose-500/5" : "border-border/80"
-          }`}
+          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "delayed" ? "border-rose-500 ring-2 ring-rose-500/20 bg-rose-500/5" : "border-border/80"
+            }`}
         >
           <div>
             <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">Delayed</p>
             <p className="text-2xl font-bold text-rose-600 dark:text-rose-400 mt-1">{kpis.delayed}</p>
-            <span className="text-[10px] text-rose-500/90 font-medium">planned_end &lt; today</span>
           </div>
           <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-600 border border-rose-500/20">
             <AlertTriangle size={20} />
@@ -720,14 +716,12 @@ const TodaySchedule = () => {
         {/* In-Progress */}
         <div
           onClick={() => setActiveTab(activeTab === "inProgress" ? "all" : "inProgress")}
-          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${
-            activeTab === "inProgress" ? "border-sky-500 ring-2 ring-sky-500/20 bg-sky-500/5" : "border-border/80"
-          }`}
+          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "inProgress" ? "border-sky-500 ring-2 ring-sky-500/20 bg-sky-500/5" : "border-border/80"
+            }`}
         >
           <div>
             <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">In-Progress</p>
             <p className="text-2xl font-bold text-sky-600 dark:text-sky-400 mt-1">{kpis.inProgress}</p>
-            <span className="text-[10px] text-muted font-medium">actual_start is set</span>
           </div>
           <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-600 border border-sky-500/20">
             <Clock size={20} />
@@ -737,14 +731,12 @@ const TodaySchedule = () => {
         {/* YTS (Yet to Start) */}
         <div
           onClick={() => setActiveTab(activeTab === "yts" ? "all" : "yts")}
-          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${
-            activeTab === "yts" ? "border-amber-500 ring-2 ring-amber-500/20 bg-amber-500/5" : "border-border/80"
-          }`}
+          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "yts" ? "border-amber-500 ring-2 ring-amber-500/20 bg-amber-500/5" : "border-border/80"
+            }`}
         >
           <div>
             <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">YTS</p>
             <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{kpis.yts}</p>
-            <span className="text-[10px] text-muted font-medium">no start &amp; end &gt;= today</span>
           </div>
           <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20">
             <Clock size={20} />
@@ -754,14 +746,12 @@ const TodaySchedule = () => {
         {/* Completed */}
         <div
           onClick={() => setActiveTab(activeTab === "completed" ? "all" : "completed")}
-          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${
-            activeTab === "completed" ? "border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/5" : "border-border/80"
-          }`}
+          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "completed" ? "border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/5" : "border-border/80"
+            }`}
         >
           <div>
             <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">Completed</p>
             <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{kpis.completed}</p>
-            <span className="text-[10px] text-muted font-medium">actual_end = today</span>
           </div>
           <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
             <CheckCircle2 size={20} />
@@ -775,65 +765,59 @@ const TodaySchedule = () => {
         <div className="flex flex-wrap items-center gap-1.5 p-1 bg-surface rounded-xl border border-border/80">
           <button
             onClick={() => setActiveTab("all")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === "all"
-                ? "bg-card text-text shadow-xs border border-border font-bold"
-                : "text-muted hover:text-text"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeTab === "all"
+              ? "bg-card text-text shadow-xs border border-border font-bold"
+              : "text-muted hover:text-text"
+              }`}
           >
             All Workload ({kpis.total})
           </button>
           <button
             onClick={() => setActiveTab("today")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              activeTab === "today"
-                ? "bg-violet-600 text-white shadow-xs font-bold"
-                : "text-muted hover:text-violet-600"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${activeTab === "today"
+              ? "bg-violet-600 text-white shadow-xs font-bold"
+              : "text-muted hover:text-violet-600"
+              }`}
           >
             <CalendarDays size={12} />
             Today&apos;s Planned ({kpis.todayPlanned})
           </button>
           <button
             onClick={() => setActiveTab("delayed")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              activeTab === "delayed"
-                ? "bg-rose-600 text-white shadow-xs font-bold"
-                : "text-muted hover:text-rose-600"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${activeTab === "delayed"
+              ? "bg-rose-600 text-white shadow-xs font-bold"
+              : "text-muted hover:text-rose-600"
+              }`}
           >
             <AlertTriangle size={12} />
             Delayed ({kpis.delayed})
           </button>
           <button
             onClick={() => setActiveTab("inProgress")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              activeTab === "inProgress"
-                ? "bg-sky-600 text-white shadow-xs font-bold"
-                : "text-muted hover:text-sky-600"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${activeTab === "inProgress"
+              ? "bg-sky-600 text-white shadow-xs font-bold"
+              : "text-muted hover:text-sky-600"
+              }`}
           >
             <Clock size={12} />
             In-Progress ({kpis.inProgress})
           </button>
           <button
             onClick={() => setActiveTab("yts")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              activeTab === "yts"
-                ? "bg-amber-600 text-white shadow-xs font-bold"
-                : "text-muted hover:text-amber-600"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${activeTab === "yts"
+              ? "bg-amber-600 text-white shadow-xs font-bold"
+              : "text-muted hover:text-amber-600"
+              }`}
           >
             <Clock size={12} />
             YTS ({kpis.yts})
           </button>
           <button
             onClick={() => setActiveTab("completed")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              activeTab === "completed"
-                ? "bg-emerald-600 text-white shadow-xs font-bold"
-                : "text-muted hover:text-emerald-600"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${activeTab === "completed"
+              ? "bg-emerald-600 text-white shadow-xs font-bold"
+              : "text-muted hover:text-emerald-600"
+              }`}
           >
             <CheckCircle2 size={12} />
             Completed ({kpis.completed})
