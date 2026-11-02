@@ -108,6 +108,57 @@ def test_protected_regex_doi_not_touched():
         assert "10.1234" not in f.original, f
 
 
+def test_protected_pp_page_range_not_touched_by_d01():
+    """PR-028 (code-level additional protected pattern) shields ``pp.``/
+    ``p.`` + numeric-range citations from the D01 cue-word en-dash rule.
+    """
+    for text in ("pp. 2118-2128", "pp. 129-131"):
+        out = hd.analyze_hyphen_dash(text, dash_profile="all")
+        assert not any(f.rule_id == "D01" for f in out), (text, out)
+
+    # Case + spacing variants are also shielded.
+    for text in ("PP. 2118-2128", "p. 42-45", "pp.  2118-2128"):
+        out = hd.analyze_hyphen_dash(text, dash_profile="all")
+        assert not any(f.rule_id == "D01" for f in out), (text, out)
+
+
+def test_protected_capital_pages_citation_not_touched_by_d01():
+    """PR-029 shields written-out citation page ranges that use capital
+    ``Pages`` or ``Page`` (reference-list long form), without affecting
+    lowercase body-text use.
+
+    Key discriminator: capital ``P``. Body-text usage is lowercase
+    ("see pages 10-20") and MUST continue to fire D01.
+    """
+    # Bug-report strings.
+    for text in ("Pages 10980-10986", "Pages 723-744"):
+        out = hd.analyze_hyphen_dash(text, dash_profile="all")
+        assert not any(f.rule_id == "D01" for f in out), (text, out)
+
+    # Common variants in reference / metadata blocks.
+    for text in ("Pages: 10980-10986", "Page 42-45"):
+        out = hd.analyze_hyphen_dash(text, dash_profile="all")
+        assert not any(f.rule_id == "D01" for f in out), (text, out)
+
+
+def test_d01_still_fires_on_non_citation_ranges():
+    """Regression guard: PR-028 and PR-029 must only shield citation
+    page ranges, NOT any other legitimate D01 fire site. Body-text ``pages``
+    (lowercase), age / year / figure / table / stage ranges continue to
+    produce a D01 finding.
+    """
+    body_text_cases = (
+        "See pages 10-20 for details.",
+        "The ages 25-30 showed higher rates.",
+        "Rates rose in years 2010-2020.",
+        "See tables 1-5 and figures 2-7.",
+        "Dosing stages 1-3 completed.",
+    )
+    for text in body_text_cases:
+        out = hd.analyze_hyphen_dash(text, dash_profile="all")
+        assert any(f.rule_id == "D01" for f in out), (text, out)
+
+
 def test_build_protected_spans_merges_overlaps():
     """Two patterns matching the same text region should return a merged span."""
     spans = hd.build_protected_spans(
