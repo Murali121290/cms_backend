@@ -6085,6 +6085,56 @@ def api_v2_bulk_export_analysis(
         )
 
 
+@router.post(
+    "/projects/{project_id}/stylesheets/parse-docx",
+    response_model=schemas_v2.DocxStylesheetParseResponse,
+)
+async def api_v2_parse_docx_stylesheet(
+    project_id: int,
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Parses an editorial stylesheet (.docx) file and returns structured rule recommendations."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    filename = file.filename or ""
+    if not filename.lower().endswith(".docx"):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_FILE_TYPE",
+            message="Please upload a Microsoft Word document (.docx).",
+        )
+
+    try:
+        content_bytes = await file.read()
+        from app.processing.manuscript_core.parsers.docx_stylesheet_parser import DocxStylesheetParser
+        parser = DocxStylesheetParser()
+        result = parser.parse(content_bytes)
+        return schemas_v2.DocxStylesheetParseResponse(**result)
+    except Exception as e:
+        logger.error(f"Failed to parse docx stylesheet: {e}", exc_info=True)
+        return _error_response(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            code="PARSE_FAILED",
+            message=f"Failed to parse editorial style sheet: {str(e)}",
+        )
+
+
 @router.get("/projects/{project_id}/stylesheets/{stylesheet_id}/export")
 def api_v2_export_stylesheet_report(
     project_id: int,
