@@ -632,28 +632,28 @@ const TodaySchedule = () => {
             </div>
           </div>
 
-          {/* Team Scope Switcher */}
-          <div className="flex items-center gap-1.5 bg-surface border border-border rounded-xl px-3 py-1.5 shadow-xs">
-            <span className="text-[11px] font-semibold text-muted">Team Scope:</span>
-            <select
-              value={selectedTeam}
-              onChange={(e) => setSelectedTeam(e.target.value)}
-              className="bg-transparent text-xs font-semibold text-text outline-none cursor-pointer"
-            >
-              <option value="auto">
-                {userInfo.isAdmin ? "All Teams (Admin Overview)" : `My Team (${userInfo.team || "Default"})`}
-              </option>
-              <option value="--ALL--">Show All Company Stages</option>
-              <option value="initiat">Job Initiation</option>
-              <option value="pre-edit">Pre-editing Team</option>
-              <option value="editorial">Editorial / Copyediting</option>
-              <option value="typesetting">Typesetting / Composition</option>
-              <option value="xml">XML Conversion / Digital</option>
-              <option value="art">Art &amp; Graphics</option>
-              <option value="proof">Proofreading &amp; QC</option>
-              <option value="project manager">Project Management</option>
-            </select>
-          </div>
+          {/* Team Scope Switcher - Only visible to Admins/Managers to view other team workloads */}
+          {userInfo.isAdmin && (
+            <div className="flex items-center gap-1.5 bg-surface border border-border rounded-xl px-3 py-1.5 shadow-xs">
+              <span className="text-[11px] font-semibold text-muted">Team Scope:</span>
+              <select
+                value={selectedTeam}
+                onChange={(e) => setSelectedTeam(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-text outline-none cursor-pointer"
+              >
+                <option value="auto">All Teams (Admin Overview)</option>
+                <option value="--ALL--">Show All Company Stages</option>
+                <option value="initiat">Job Initiation</option>
+                <option value="pre-edit">Pre-editing Team</option>
+                <option value="editorial">Editorial / Copyediting</option>
+                <option value="typesetting">Typesetting / Composition</option>
+                <option value="xml">XML Conversion / Digital</option>
+                <option value="art">Art &amp; Graphics</option>
+                <option value="proof">Proofreading &amp; QC</option>
+                <option value="project manager">Project Management</option>
+              </select>
+            </div>
+          )}
 
           <button
             onClick={handleExportExcel}
@@ -966,6 +966,12 @@ const TodaySchedule = () => {
               <thead className="sticky top-0 z-20 shadow-xs bg-card">
                 <tr className="border-b border-border bg-card text-left text-[11px] font-bold uppercase tracking-wider text-muted select-none">
                   <th
+                    onClick={() => handleSort("client")}
+                    className="px-3.5 py-3 whitespace-nowrap cursor-pointer hover:bg-muted/20 transition-colors bg-card"
+                  >
+                    Client
+                  </th>
+                  <th
                     onClick={() => handleSort("projectCode")}
                     className="px-3.5 py-3 whitespace-nowrap cursor-pointer hover:bg-muted/20 transition-colors bg-card"
                   >
@@ -977,6 +983,12 @@ const TodaySchedule = () => {
                     className="px-3.5 py-3 whitespace-nowrap cursor-pointer hover:bg-muted/20 transition-colors bg-card"
                   >
                     Chapter
+                  </th>
+                  <th
+                    onClick={() => handleSort("workflow")}
+                    className="px-3.5 py-3 whitespace-nowrap cursor-pointer hover:bg-muted/20 transition-colors bg-card"
+                  >
+                    Workflow
                   </th>
                   <th
                     onClick={() => handleSort("stageName")}
@@ -1016,8 +1028,6 @@ const TodaySchedule = () => {
                     Actual End
                   </th>
                   <th className="px-3.5 py-3 whitespace-nowrap bg-card">Operational Status</th>
-                  <th className="px-3.5 py-3 whitespace-nowrap bg-card">Client</th>
-                  <th className="px-3.5 py-3 whitespace-nowrap bg-card">Workflow</th>
                 </tr>
               </thead>
 
@@ -1033,6 +1043,11 @@ const TodaySchedule = () => {
                           : ""
                         }`}
                     >
+                      {/* Client */}
+                      <td className="px-3.5 py-3 font-semibold text-text whitespace-nowrap">
+                        {row.client}
+                      </td>
+
                       {/* Project Code */}
                       <td className="px-3.5 py-3 font-bold text-text whitespace-nowrap">
                         <span className="font-mono text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20">
@@ -1052,6 +1067,11 @@ const TodaySchedule = () => {
                           row.chapterNumber.toLowerCase().includes("ce support")
                           ? row.chapterNumber
                           : `Chapter ${row.chapterNumber}`}
+                      </td>
+
+                      {/* Workflow */}
+                      <td className="px-3.5 py-3 text-muted whitespace-nowrap text-[11px]">
+                        {row.workflow}
                       </td>
 
                       {/* Planned Stage Name */}
@@ -1154,16 +1174,6 @@ const TodaySchedule = () => {
                             </span>
                           )}
                         </div>
-                      </td>
-
-                      {/* Client */}
-                      <td className="px-3.5 py-3 text-muted whitespace-nowrap">
-                        {row.client}
-                      </td>
-
-                      {/* Workflow */}
-                      <td className="px-3.5 py-3 text-muted whitespace-nowrap text-[11px]">
-                        {row.workflow}
                       </td>
                     </tr>
                   ))
