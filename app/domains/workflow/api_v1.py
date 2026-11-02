@@ -881,3 +881,31 @@ def update_chapter_info(chapter_id: int, data: ChapterInfoUpdate, db: Session = 
 def delete_chapter_info(chapter_id: int, db: Session = Depends(get_db)):
     if not crud.delete_chapter_info(db, chapter_id):
         raise HTTPException(status_code=404, detail="Chapter info not found")
+
+
+@router.get("/users-lookup")
+def list_users_lookup(db: Session = Depends(get_db)):
+    from app.domains.auth.models import User
+    users = db.query(User).all()
+    results = []
+    for u in users:
+        fn = (u.first_name or "").strip()
+        ln = (u.last_name or "").strip()
+        full_name = fn
+        if fn and ln:
+            if fn.lower().endswith(ln.lower()):
+                full_name = fn
+            else:
+                full_name = f"{fn} {ln}"
+        elif not full_name:
+            full_name = ln or u.username
+        results.append({
+            "id": u.id,
+            "username": u.username,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "full_name": full_name,
+            "role": u.role,
+        })
+    return results
+
