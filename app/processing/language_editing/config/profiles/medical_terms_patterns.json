@@ -1,0 +1,423 @@
+{
+  "_meta": {
+    "source_workbook": "Medical_Terminology_List_for_CE_Tool.xlsx",
+    "source_sha256": "58eac870c2e7e362644711525d78211359a73bc8fde5375e738ef6ee9b8ea69c",
+    "origin": "Medical Terminology List for CE Tool"
+  },
+  "entries": [
+    {
+      "id": "MED-SP01",
+      "name": "haem- to hem-",
+      "pattern": "\\b([a-z]*)haem(?!ophilus)(o|a)",
+      "replacement": "\\1hem\\2",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "haemoglobin and haemorrhage",
+      "example_right": "hemoglobin and hemorrhage",
+      "must_not_change": "Haemophilus influenzae | hemoglobin",
+      "note": "The genus Haemophilus keeps its ae. The lookahead protects it."
+    },
+    {
+      "id": "MED-SP02",
+      "name": "-aemia and -aemic to -emia and -emic",
+      "pattern": "\\b([a-z]*?)aemi(a|c)\\b",
+      "replacement": "\\1emi\\2",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "anaemia and leukaemia",
+      "example_right": "anemia and leukemia",
+      "must_not_change": "anemia | leukemia",
+      "note": "Covers ischaemia, hyperglycaemia and septicaemic."
+    },
+    {
+      "id": "MED-SP03",
+      "name": "oedema to edema",
+      "pattern": "\\b([a-z]*?)oedema(s|tous)?\\b",
+      "replacement": "\\1edema\\2",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "oedema and lymphoedema",
+      "example_right": "edema and lymphedema",
+      "must_not_change": "edema | edematous",
+      "note": null
+    },
+    {
+      "id": "MED-SP04",
+      "name": "oesophag- to esophag-",
+      "pattern": "\\b([a-z]*?)oesophag",
+      "replacement": "\\1esophag",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "oesophagus and oesophageal",
+      "example_right": "esophagus and esophageal",
+      "must_not_change": "esophagus",
+      "note": null
+    },
+    {
+      "id": "MED-SP05",
+      "name": "foetus and foetal to fetus and fetal",
+      "pattern": "\\bfoet(us|uses|al)\\b",
+      "replacement": "fet\\1",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "foetus and foetal",
+      "example_right": "fetus and fetal",
+      "must_not_change": "fetus | fetal",
+      "note": null
+    },
+    {
+      "id": "MED-SP06a",
+      "name": "paediatric to pediatric",
+      "pattern": "\\bpaediatr",
+      "replacement": "pediatr",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "paediatric ward",
+      "example_right": "pediatric ward",
+      "must_not_change": "pediatric",
+      "note": null
+    },
+    {
+      "id": "MED-SP06b",
+      "name": "orthopaedic to orthopedic",
+      "pattern": "\\borthopaed",
+      "replacement": "orthoped",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "orthopaedic surgery",
+      "example_right": "orthopedic surgery",
+      "must_not_change": "orthopedic",
+      "note": null
+    },
+    {
+      "id": "MED-SP07",
+      "name": "gynaec- to gynec-",
+      "pattern": "\\bgynaec",
+      "replacement": "gynec",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "gynaecology",
+      "example_right": "gynecology",
+      "must_not_change": "gynecology",
+      "note": null
+    },
+    {
+      "id": "MED-SP08",
+      "name": "anaesth- to anesth-",
+      "pattern": "\\banaesth",
+      "replacement": "anesth",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "anaesthesia and anaesthetist",
+      "example_right": "anesthesia and anesthetist",
+      "must_not_change": "anesthesia",
+      "note": null
+    },
+    {
+      "id": "MED-SP09a",
+      "name": "-rrhoea to -rrhea",
+      "pattern": "\\b([a-z]*?)rrhoea\\b",
+      "replacement": "\\1rrhea",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "diarrhoea and amenorrhoea",
+      "example_right": "diarrhea and amenorrhea",
+      "must_not_change": "diarrhea",
+      "note": null
+    },
+    {
+      "id": "MED-SP09b",
+      "name": "-pnoea to -pnea",
+      "pattern": "\\b([a-z]*?)pnoea\\b",
+      "replacement": "\\1pnea",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "dyspnoea and apnoea",
+      "example_right": "dyspnea and apnea",
+      "must_not_change": "dyspnea",
+      "note": null
+    },
+    {
+      "id": "MED-SP10a",
+      "name": "caecum to cecum",
+      "pattern": "\\bcaec(um|al)\\b",
+      "replacement": "cec\\1",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "caecum",
+      "example_right": "cecum",
+      "must_not_change": "cecum",
+      "note": null
+    },
+    {
+      "id": "MED-SP10b",
+      "name": "coeliac to celiac",
+      "pattern": "\\bcoeliac\\b",
+      "replacement": "celiac",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "coeliac disease",
+      "example_right": "celiac disease",
+      "must_not_change": "celiac disease",
+      "note": null
+    },
+    {
+      "id": "MED-SP10c",
+      "name": "oestr- to estr-",
+      "pattern": "\\boestr(o|a|u)",
+      "replacement": "estr\\1",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "oestrogen and oestradiol",
+      "example_right": "estrogen and estradiol",
+      "must_not_change": "estrogen",
+      "note": null
+    },
+    {
+      "id": "MED-SP11",
+      "name": "aetiology to etiology",
+      "pattern": "\\baetiolog",
+      "replacement": "etiolog",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "aetiology",
+      "example_right": "etiology",
+      "must_not_change": "etiology",
+      "note": null
+    },
+    {
+      "id": "MED-SP12",
+      "name": "-ise and -isation to -ize and -ization",
+      "pattern": "\\b(catheter|hospital|immun|steril|stabil|sensit|random|standard|minim|maxim|organ|recogn|util|emphas|categor|summar|general|individual|visual|mobil|normal|neutral|crystall|metabol|cauter|vaccin|ioniz|fertil)is(e|es|ed|ing|ation|ations)\\b",
+      "replacement": "\\1iz\\2",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "flag",
+      "action_raw": "Flag and suggest",
+      "style_profile": "US spelling",
+      "example_wrong": "catheterised and randomisation",
+      "example_right": "catheterized and randomization",
+      "must_not_change": "exercise | organisms | promise",
+      "note": "Style choice, so flag rather than fix."
+    },
+    {
+      "id": "MED-SP13",
+      "name": "-yse to -yze",
+      "pattern": "\\b(ana|para|cata)lys(e|ed|ing)\\b",
+      "replacement": "\\1lyz\\2",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "analysed and paralysing",
+      "example_right": "analyzed and paralyzing",
+      "must_not_change": "analyses | dialysis",
+      "note": "The plural analyses is correct and is not changed."
+    },
+    {
+      "id": "MED-SP14",
+      "name": "tumour to tumor",
+      "pattern": "\\btumour(s|al)?\\b",
+      "replacement": "tumor\\1",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "tumours",
+      "example_right": "tumors",
+      "must_not_change": "tumor",
+      "note": null
+    },
+    {
+      "id": "MED-SP15a",
+      "name": "litre to liter",
+      "pattern": "\\b(milli|micro|deci|centi)?litre(s)?\\b",
+      "replacement": "\\1liter\\2",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "millilitres",
+      "example_right": "milliliters",
+      "must_not_change": "milliliters",
+      "note": null
+    },
+    {
+      "id": "MED-SP15b",
+      "name": "metre to meter",
+      "pattern": "\\b(milli|micro|deci|centi|nano|kilo)?metre(s)?\\b",
+      "replacement": "\\1meter\\2",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "millimetres",
+      "example_right": "millimeters",
+      "must_not_change": "millimeters",
+      "note": null
+    },
+    {
+      "id": "MED-SP16",
+      "name": "sulph- to sulf-",
+      "pattern": "\\bsulph",
+      "replacement": "sulf",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "sulphate and sulphonamide",
+      "example_right": "sulfate and sulfonamide",
+      "must_not_change": "sulfate",
+      "note": "Also applies to drug names."
+    },
+    {
+      "id": "MED-SP17",
+      "name": "leuco- to leuko-",
+      "pattern": "\\bleuco",
+      "replacement": "leuko",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "leucocyte and leucopenia",
+      "example_right": "leukocyte and leukopenia",
+      "must_not_change": "leukocyte",
+      "note": null
+    },
+    {
+      "id": "MED-SP18",
+      "name": "haem to heme",
+      "pattern": "\\bhaem\\b",
+      "replacement": "heme",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "haem iron",
+      "example_right": "heme iron",
+      "must_not_change": "heme iron",
+      "note": null
+    },
+    {
+      "id": "MED-SP19",
+      "name": "faeces to feces",
+      "pattern": "\\bfae(ces|cal)\\b",
+      "replacement": "fe\\1",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "faeces and faecal",
+      "example_right": "feces and fecal",
+      "must_not_change": "feces",
+      "note": null
+    },
+    {
+      "id": "MED-SP20",
+      "name": "caesarean to cesarean",
+      "pattern": "\\bcaesarean\\b",
+      "replacement": "cesarean",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "tool_behaviour": "auto_replace",
+      "action_raw": "Auto-fix",
+      "style_profile": "US spelling",
+      "example_wrong": "caesarean section",
+      "example_right": "cesarean section",
+      "must_not_change": "cesarean section",
+      "note": null
+    },
+    {
+      "id": "MED-SP21",
+      "name": "Lowercase genus name",
+      "pattern": "\\b(escherichia|staphylococcus|streptococcus|pseudomonas|klebsiella|helicobacter|mycobacterium|neisseria|haemophilus|salmonella|shigella|legionella|candida|plasmodium|treponema|chlamydia|enterococcus|bacillus|listeria|vibrio|borrelia|clostridioides|clostridium|pneumocystis|aspergillus)(?= [a-z]{4,}\\b)",
+      "replacement": "{cap:1}",
+      "flags": [],
+      "tool_behaviour": "flag",
+      "action_raw": "Flag and suggest",
+      "style_profile": "All",
+      "example_wrong": "escherichia coli and staphylococcus aureus",
+      "example_right": "Escherichia coli and Staphylococcus aureus",
+      "must_not_change": "Escherichia coli | the coliform",
+      "note": "Capitalize the first letter of the genus. Then italicize genus and species."
+    }
+  ]
+}

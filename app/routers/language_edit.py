@@ -26,6 +26,8 @@ from app.services.language_rule_service import (
     get_project_language_rules,
     get_project_language_rules_history,
     save_project_language_rules,
+    add_project_custom_rule,
+    delete_project_custom_rule,
 )
 
 # Roles permitted to edit (not just view) the per-project rule selection.
@@ -77,6 +79,45 @@ class SaveRulesRequest(BaseModel):
     variant_to_canonical: Optional[dict[str, str]] = None
     profile_name: Optional[str] = None
     note: Optional[str] = None
+    # Workbook-driven dash/hyphen style axis — "all" | "mw_dictionary" |
+    # "chicago_ama_apa". Omit to inherit the project's existing value
+    # (or the backward-compatible default of "all").
+    dash_profile: Optional[str] = None
+    # Scope C per-rule overrides. Sparse: ``{rule_id: {enabled?: bool,
+    # tool_behaviour?: 'flag' | 'auto_replace'}}``. Applies to BOTH profile
+    # rules and workbook rules — the engine merges on top of each rule's
+    # file default at analyze time. Omit to inherit the project's existing
+    # overrides map.
+    rule_overrides: Optional[dict[str, dict[str, Any]]] = None
+    # Phase B abbreviations settings. Omit to inherit the project's
+    # existing values. ``audience`` is 'general' | 'professional';
+    # ``min_uses`` is a positive integer (workbook default 2).
+    audience: Optional[str] = None
+    min_uses: Optional[int] = None
+    # Phase C AB16: scope_reset. When True, first-use rules re-fire at
+    # every detectable scope boundary. Phase C ships per-paragraph as a
+    # crude approximation; Phase D will add real boundary detection.
+    scope_reset: Optional[bool] = None
+    # Medical Terminology workbook (M-D): per-project style profile.
+    # 'All' | 'US spelling' | 'UK spelling' | 'Possessive' | 'Nonpossessive'.
+    # Omit to inherit the project's existing value (default 'All').
+    medical_style_profile: Optional[str] = None
+
+
+class CustomRuleRequest(BaseModel):
+    """Scope D: a user-authored regex rule promoted from the editor's
+    regex playground into persistent project rules. The service layer
+    validates ``pattern``, ``flags``, ``replacement``, ``category``,
+    ``severity`` and ``tool_behaviour`` — see
+    ``language_rule_service._validate_custom_rule``."""
+    pattern: str
+    replacement: Optional[str] = None
+    flags: Optional[list[str]] = None
+    message: Optional[str] = None
+    category: Optional[str] = None
+    severity: Optional[str] = None
+    tool_behaviour: Optional[str] = None
+    id: Optional[str] = None
 
 
 class DecisionRequest(BaseModel):
@@ -93,13 +134,83 @@ def get_project_rules(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_from_cookie),
 ):
-    """Fetch current project language rules from CE support along with available base profiles."""
+    """Fetch current project language rules from CE support along with available base profiles.
+
+    Scope C: the response also carries the 875 Hyphenation workbook rules
+    normalised into the unified LanguageRule wire shape with the project's
+    per-rule overrides merged on top, plus a cheap summary tuple for the
+    Rules Picker header stats.
+    """
     _require_language_user(current_user)
     active_rules = get_project_language_rules(db, project_id=project_id)
     available_profiles = get_available_style_profiles()
+
+    from app.processing.language_editing import workbook_rules_surface as _ws
+    overrides = active_rules.get("rule_overrides") or {}
+    try:
+        hyphen_rules = _ws.list_hyphenation_rules(overrides)
+        hyphen_summary = _ws.hyphenation_rule_summary(overrides)
+    except Exception as exc:
+        logger.warning("Failed to surface hyphenation workbook rules: %s", exc)
+        hyphen_rules = []
+        hyphen_summary = {"total": 0, "enabled": 0, "flag": 0, "auto_replace": 0}
+    try:
+        abbr_rules = _ws.list_abbreviation_rules(overrides)
+        abbr_summary = _ws.abbreviation_rule_summary(overrides)
+    except Exception as exc:
+        logger.warning("Failed to surface abbreviations workbook rules: %s", exc)
+        abbr_rules = []
+        abbr_summary = {"total": 0, "enabled": 0, "flag": 0, "auto_replace": 0}
+    try:
+        medical_rules = _ws.list_medical_terms_rules(overrides)
+        medical_summary = _ws.medical_terms_rule_summary(overrides)
+    except Exception as exc:
+        logger.warning("Failed to surface medical terms workbook rules: %s", exc)
+        medical_rules = []
+        medical_summary = {"total": 0, "enabled": 0, "flag": 0, "auto_replace": 0}
+
+    # Scope D: user-authored custom regex rules. Each entry is normalised
+    # by the service at save time; here we only apply the per-rule
+    # override map on top so the Rules Picker renders the same wire shape
+    # as workbook rules (enabled flag + tool_behaviour + override badge).
+    custom_rules: list[dict[str, Any]] = []
+    for raw in (active_rules.get("custom_rules") or []):
+        if not isinstance(raw, dict):
+            continue
+        rule = dict(raw)
+        rule.setdefault("source_of", "custom")
+        rule.setdefault("origin", "custom")
+        o = overrides.get(rule.get("id") or "")
+        if isinstance(o, dict):
+            if "enabled" in o:
+                rule["enabled"] = bool(o["enabled"])
+            if o.get("tool_behaviour") in ("flag", "auto_replace"):
+                rule["tool_behaviour"] = o["tool_behaviour"]
+            rule["is_overridden"] = True
+            rule["override"] = {k: v for k, v in o.items() if k in ("enabled", "tool_behaviour")}
+        custom_rules.append(rule)
+    custom_summary = {
+        "total": len(custom_rules),
+        "enabled": sum(1 for r in custom_rules if r.get("enabled", True)),
+        "flag": sum(1 for r in custom_rules if (r.get("tool_behaviour") or "flag") == "flag"),
+        "auto_replace": sum(1 for r in custom_rules if r.get("tool_behaviour") == "auto_replace"),
+    }
+
     return {
         "active_rules": active_rules,
         "available_profiles": available_profiles,
+        "workbook_rules": {
+            "hyphenation": hyphen_rules,
+            "abbreviations": abbr_rules,
+            "medical_terms": medical_rules,
+            "custom": custom_rules,
+        },
+        "workbook_summary": {
+            "hyphenation": hyphen_summary,
+            "abbreviations": abbr_summary,
+            "medical_terms": medical_summary,
+            "custom": custom_summary,
+        },
     }
 
 
@@ -123,6 +234,40 @@ def update_project_rules(
     if not pkeys:
         pkeys = [body.profile_key] if body.profile_key else ["uk"]
     try:
+        # If the client omits dash_profile / rule_overrides, honour whatever
+        # the project already had on disk — "no change" semantics for a
+        # partial save.
+        existing = None
+        dash_profile = body.dash_profile
+        if dash_profile is None:
+            existing = existing or get_project_language_rules(db, project_id=project_id)
+            dash_profile = existing.get("dash_profile")
+        rule_overrides = body.rule_overrides
+        if rule_overrides is None:
+            existing = existing or get_project_language_rules(db, project_id=project_id)
+            rule_overrides = existing.get("rule_overrides") or {}
+        audience = body.audience
+        if audience is None:
+            existing = existing or get_project_language_rules(db, project_id=project_id)
+            audience = existing.get("audience")
+        min_uses = body.min_uses
+        if min_uses is None:
+            existing = existing or get_project_language_rules(db, project_id=project_id)
+            min_uses = existing.get("min_uses")
+        scope_reset = body.scope_reset
+        if scope_reset is None:
+            existing = existing or get_project_language_rules(db, project_id=project_id)
+            scope_reset = existing.get("scope_reset")
+        medical_style_profile = body.medical_style_profile
+        if medical_style_profile is None:
+            existing = existing or get_project_language_rules(db, project_id=project_id)
+            medical_style_profile = existing.get("medical_style_profile")
+        # Scope D: the main save endpoint never clobbers custom_rules — a
+        # style-profile switch or override toggle should preserve the
+        # project's authored rules. Dedicated POST/DELETE endpoints handle
+        # mutations to that list.
+        existing = existing or get_project_language_rules(db, project_id=project_id)
+        preserved_custom = existing.get("custom_rules") or []
         updated = save_project_language_rules(
             db,
             project_id=project_id,
@@ -132,6 +277,13 @@ def update_project_rules(
             profile_name=body.profile_name,
             changed_by_id=current_user.id,
             note=body.note,
+            dash_profile=dash_profile,
+            rule_overrides=rule_overrides,
+            audience=audience,
+            min_uses=min_uses,
+            scope_reset=scope_reset,
+            custom_rules=preserved_custom,
+            medical_style_profile=medical_style_profile,
         )
         db.commit()
         return {"ok": True, "rules": updated}
@@ -141,6 +293,69 @@ def update_project_rules(
     except Exception as exc:
         db.rollback()
         logger.error("Failed to update language rules: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/projects/{project_id}/language-rules/custom")
+def add_custom_rule(
+    project_id: int,
+    body: CustomRuleRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_from_cookie),
+):
+    """Scope D: persist a user-authored regex rule.
+
+    Admin / Project Manager only (same gate as rule-selection edits).
+    Returns the stored rule dict including the generated id. On a
+    validation failure (bad regex, duplicate id, unknown category),
+    responds 400 with the service's user-facing error message.
+    """
+    _require_rules_editor(current_user)
+    try:
+        new_rule = add_project_custom_rule(
+            db,
+            project_id=project_id,
+            draft=body.model_dump(exclude_none=True),
+            created_by_id=current_user.id,
+        )
+        db.commit()
+        return {"ok": True, "rule": new_rule}
+    except ValueError as err:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(err))
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to add custom language rule: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete("/projects/{project_id}/language-rules/custom/{rule_id}")
+def remove_custom_rule(
+    project_id: int,
+    rule_id: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_from_cookie),
+):
+    """Scope D: delete a user-authored regex rule by id."""
+    _require_rules_editor(current_user)
+    try:
+        removed = delete_project_custom_rule(
+            db, project_id=project_id, rule_id=rule_id,
+            changed_by_id=current_user.id,
+        )
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"Custom rule {rule_id!r} not found")
+        db.commit()
+        return {"ok": True, "removed": rule_id}
+    except HTTPException:
+        db.rollback()
+        raise
+    except ValueError as err:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(err))
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to delete custom language rule: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -354,7 +569,15 @@ def start_language_edit_analysis(
 
     # Load project language rules from CE support
     project_rules_cfg = get_project_language_rules(db, project_id=file_record.project_id)
-    rules = load_rules_from_dict(project_rules_cfg.get("rules", []))
+    # Scope D: user-authored regex rules sit alongside profile rules.
+    # They were validated at save-time so re-compilation here is a cheap
+    # repeat check. If one of them was corrupted on disk, drop that single
+    # entry rather than failing the whole analyze pass.
+    all_rule_dicts = list(project_rules_cfg.get("rules", []))
+    for cr in (project_rules_cfg.get("custom_rules") or []):
+        if isinstance(cr, dict):
+            all_rule_dicts.append(cr)
+    rules = load_rules_from_dict(all_rule_dicts)
     dictionary = load_house_style_from_dict(project_rules_cfg.get("variant_to_canonical", {}))
 
     # Compile the project's assigned term lists once (separate concern from rules).
@@ -378,11 +601,20 @@ def start_language_edit_analysis(
     # loaded from app/processing/language_editing/config/dictionaries/ plus
     # anything listed in $CMS_LANGEDIT_CUSTOM_DICTS. Cached per-process.
     custom_dict_words = custom_dict.load_all_custom_dicts()
+    # Medical Terminology workbook preferred spellings (1055 entries) feed
+    # the spell-check whitelist so correct medical terms never surface as
+    # typos. Applied globally — the workbook is enabled for every project.
+    from app.processing.language_editing import medical_terms as _medical_terms
+    try:
+        medical_whitelist = _medical_terms.preferred_terms()
+    except Exception as exc:
+        logger.warning("Failed to load medical terms whitelist: %s", exc)
+        medical_whitelist = frozenset()
     spell_whitelist = spell_check.build_whitelist(
         variant_to_canonical=project_rules_cfg.get("variant_to_canonical", {}),
         uk_us_pairs=UK_US_PAIRS,
         term_vocabulary=term_vocab,
-        extras=custom_dict_words,
+        extras=list(custom_dict_words) + list(medical_whitelist),
     )
     # Also feed custom dict words into pyspellchecker's known-word frequency
     # table so morphological variants (plurals, -ed forms) of a dic entry
@@ -394,10 +626,21 @@ def start_language_edit_analysis(
 
     # Read paragraphs from DOCX
     try:
-        _, paragraphs = docx_io.read_paragraphs(file_record.path)
+        doc_obj, paragraphs = docx_io.read_paragraphs(file_record.path)
     except Exception as exc:
         logger.error("Failed to read DOCX at %s: %s", file_record.path, exc)
         raise HTTPException(status_code=500, detail="Failed to read target DOCX file.")
+
+    # Phase D: paragraph-role metadata for the abbreviations module.
+    # ``classify_paragraphs`` walks every paragraph in the raw doc
+    # (headings + body + tables + figures + abstract) so AB11 / AB12 /
+    # AB15 / AB16 can branch on role. Legacy rule families ignore the
+    # map; AB01-AB10 still fire using the filtered body ``paragraphs``.
+    try:
+        para_roles = docx_io.classify_paragraphs(doc_obj)
+    except Exception as exc:
+        logger.warning("Failed to classify paragraphs for Phase D: %s", exc)
+        para_roles = {}
 
     job_uuid = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S_") + str(uuid.uuid4())[:8]
     job = LanguageEditJob(
@@ -417,12 +660,132 @@ def start_language_edit_analysis(
 
     # Only word-level rule categories can dedupe a typo. A sentence-level
     # finding spans many words and legitimately coexists with a typo inside
-    # it (different issues: sentence rewrite vs word spelling).
-    _TYPO_DEDUP_CATEGORIES = {"spelling", "grammar", "compounds", "bias"}
+    # it (different issues: sentence rewrite vs word spelling). Hyphenation
+    # (workbook rules) is word-level and belongs in this set so a hyphen
+    # fix on "age related" doesn't also surface as a typo on "related".
+    _TYPO_DEDUP_CATEGORIES = {"spelling", "grammar", "compounds", "bias", "hyphenation", "medical_terms"}
+
+    # Resolved dash profile. Workbook default is "all"; the service layer
+    # has already backfilled this on load so legacy projects behave sanely.
+    from app.processing.language_editing import hyphen_dash as _hyphen_dash
+    dash_profile = project_rules_cfg.get("dash_profile") or "all"
+    # Scope C: per-rule overrides apply to both profile rules (enable flag)
+    # and workbook rules (enable + tool_behaviour). None → engine sees {}.
+    rule_overrides = project_rules_cfg.get("rule_overrides") or {}
+    # Phase B abbreviations settings — defaults applied here so project
+    # configs without the fields keep working. Phase E adds the Rules
+    # Picker UI; the fields are already round-trippable via the sidecar.
+    audience = project_rules_cfg.get("audience") or "general"
+    min_uses_raw = project_rules_cfg.get("min_uses")
+    try:
+        min_uses = int(min_uses_raw) if min_uses_raw is not None else 2
+    except (TypeError, ValueError):
+        min_uses = 2
+    scope_reset = bool(project_rules_cfg.get("scope_reset") or False)
+    # Medical Terminology workbook: style profile gates the ~313 subprofile
+    # rules (US spelling, Possessive, Nonpossessive). ``All``-tagged rules
+    # always fire. Default ``All`` keeps subprofile rules silent until the
+    # project opts in via the Rules Picker.
+    medical_style_profile = project_rules_cfg.get("medical_style_profile") or "All"
+
+    # Pre-compute the document-scope abbreviation state ONCE per analyze
+    # request (or ONCE per paragraph when scope_reset is True — crude
+    # Phase-C fallback until Phase D ships real boundary detection).
+    # The per-paragraph loop below threads it into every engine.analyze
+    # call so the abbreviations module can emit AB01 / AB02 / AB03 /
+    # AB04 / AB05 / AB06 / AB07 / AB10 findings with full cross-paragraph
+    # awareness.
+    from app.processing.language_editing import abbreviations as _ab
+
+    # Phase D: include heading / caption / table / figure paragraphs in
+    # the state build so AB11 / AB12 / AB15 can see occurrences there.
+    # ``paragraphs`` from read_paragraphs filters them out for the
+    # existing rule families; we add them back via para_roles.text for
+    # the abbreviation state only. The engine's per-paragraph analyze
+    # loop still iterates only ``paragraphs`` — rules anchored to
+    # heading/table paragraphs fire via Phase D's role-aware emitters
+    # when the router passes those paragraphs separately below.
+    body_para_set = {pi for pi, _ in paragraphs}
+    enriched_paragraphs = list(paragraphs)
+    for pi, roles in (para_roles or {}).items():
+        if pi in body_para_set:
+            continue
+        if roles.get("role") in ("heading", "title", "caption") or roles.get("in_table") or roles.get("in_figure") or roles.get("in_abstract"):
+            txt = (roles.get("text") or "").strip()
+            if txt:
+                enriched_paragraphs.append((pi, roles.get("text") or ""))
+    enriched_paragraphs.sort(key=lambda t: t[0])
+
+    def _build_state_for(paras):
+        try:
+            return _ab.build_document_state(
+                paras, audience=audience, min_uses=min_uses,
+                rule_overrides=rule_overrides, para_roles=para_roles,
+            )
+        except Exception as exc:
+            logger.warning("Failed to build abbreviations document state: %s", exc)
+            return {}
+
+    if scope_reset:
+        # Phase D: when chapter_boundary metadata is available, split by
+        # chapter boundaries rather than per paragraph. Each chapter
+        # gets its own document state; first-use rules re-fire at each
+        # chapter's first mention. Falls back to per-paragraph when no
+        # boundaries are detected (short documents).
+        chapter_bounds = sorted(
+            pi for pi, r in (para_roles or {}).items() if r.get("chapter_boundary")
+        )
+        abbr_state_by_para: dict[int, dict] = {}
+        if chapter_bounds:
+            # Build a chapter → [(para_idx, text), …] grouping.
+            scopes: list[list[tuple[int, str]]] = [[]]
+            cur_boundary_iter = iter(chapter_bounds)
+            next_bound = next(cur_boundary_iter, None)
+            for pi, pt in enriched_paragraphs:
+                while next_bound is not None and pi >= next_bound:
+                    scopes.append([])
+                    next_bound = next(cur_boundary_iter, None)
+                scopes[-1].append((pi, pt))
+            for scope in scopes:
+                if not scope:
+                    continue
+                scope_state = _build_state_for(scope)
+                for pi, _ in scope:
+                    abbr_state_by_para[pi] = scope_state
+        else:
+            # No chapter boundaries detected → fall back to per-paragraph.
+            for pi, pt in enriched_paragraphs:
+                abbr_state_by_para[pi] = _build_state_for([(pi, pt)])
+        abbr_state = None
+    else:
+        abbr_state_by_para = None
+        abbr_state = _build_state_for(enriched_paragraphs)
 
     for para_idx, text in paragraphs:
         sents = segmenter.sentences(text)
-        found = engine.analyze(text, rules, dictionary, sents)
+        # Compute protected spans ONCE per paragraph and feed to both
+        # analyze() and spell_check so a protected shape (COVID-19, DOI,
+        # ISBN, gene symbol, …) is excluded from every detector in lock-step.
+        try:
+            protected_spans = _hyphen_dash.build_protected_spans(
+                text, dash_profile=dash_profile,
+            )
+        except Exception:
+            protected_spans = []
+        found = engine.analyze(
+            text, rules, dictionary, sents,
+            dash_profile=dash_profile,
+            protected_spans=protected_spans,
+            rule_overrides=rule_overrides,
+            para_idx=para_idx,
+            abbr_state=(
+                abbr_state_by_para.get(para_idx, {}) if abbr_state_by_para is not None else abbr_state
+            ),
+            audience=audience,
+            min_uses=min_uses,
+            para_roles=para_roles,
+            medical_style_profile=medical_style_profile,
+        )
         # Build exact-span dedup set: only (start, end) pairs from word-level
         # rules — so a Sentence finding covering a whole clause doesn't
         # suppress real typos inside it.
@@ -446,6 +809,7 @@ def start_language_edit_analysis(
                 autofixable=fd.autofixable,
                 status="pending",
                 source="rule",
+                alt_suggestions=list(getattr(fd, "alt_suggestions", []) or []) or None,
             )
             findings_to_insert.append(finding_row)
 
@@ -453,7 +817,10 @@ def start_language_edit_analysis(
         # importable. Category = "typo" so it's a distinct chip in the UI,
         # never conflated with the existing "spelling" (house-style) findings.
         for ty in spell_check.spell_check_paragraph(
-            text, spell_checker, whitelist=spell_whitelist, exclude_spans=rule_spans,
+            text, spell_checker,
+            whitelist=spell_whitelist,
+            exclude_spans=rule_spans,
+            protected_spans=protected_spans,
         ):
             total_findings_count += 1
             typo_count += 1
@@ -563,6 +930,10 @@ def get_job_findings(
                 "severity": f.severity,
                 "original_text": f.original_text,
                 "suggestion": f.suggestion,
+                # Workbook rules can offer 2–3 replacements; the Phase-3 UI
+                # dropdown reads this list. Empty / null for rows that have
+                # no alternates — identical shape to the pre-workbook behaviour.
+                "alt_suggestions": f.alt_suggestions or [],
                 "message": f.message,
                 "autofixable": f.autofixable,
                 "status": f.status,

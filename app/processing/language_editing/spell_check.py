@@ -83,6 +83,33 @@ _EXTRA_KNOWN_WORDS: frozenset[str] = frozenset({
     "wellbeing",   # also valid as `well-being`
     "biomarker", "biomarkers",
     "comorbid", "comorbidity",
+    # Productive learned/scientific prefix stems. pyspell's small base dict
+    # carries some of these (`pseudo`, `photo`, `micro`, `mono`, `poly`,
+    # `hyper`, `hypo`, `radio`, `geo`, `auto`, `para`, `meta`, `hetero`,
+    # `homo`, `mega`, `mini`, `macro`, `ultra`, `quasi`, `hydro`, `electro`)
+    # but misses these equally-productive ones. All are standalone
+    # combining-form entries in modern Merriam-Webster / Oxford — the gap
+    # is in the shipped lexicon, not the language. Adding them lets the
+    # compound-of-known rule accept legitimate scientific compounds
+    # (`biomolecular`, `nanoscale`, `neurotoxic`, `cytogenesis`,
+    # `thermolabile`, `cryogenic`) via `<prefix>+<known-root>` splits
+    # without seeding every compound by hand.
+    "bio", "nano", "neuro", "thermo", "cyto", "pyro", "cryo",
+    "piezo", "iso", "tele",
+    # `-morph-` combining-form family. The base dict carries the full
+    # compounds (`polymorphic`, `isomorphic`, `monomorphic`,
+    # `anthropomorphism`) but not the standalone stem or its bare
+    # derivations — so a compound like `pseudomorphic` splits into
+    # `pseudo` (known) + `morphic` (unknown) and the compound-of-known
+    # rule rejects it even though both halves are valid English. Adding
+    # the stem family closes that gap generically: `pseudomorphic`,
+    # `pseudomorph`, `pseudomorphism`, `pseudomorphous`, `anamorph`, etc.
+    # all resolve.
+    "morph", "morphic", "morphism", "morphous",
+    # Sibling adjectival combining forms the base dict carries
+    # inconsistently (`phobic`/`trophic`/`genic`/`graphic` are present,
+    # these aren't — same lemma gap).
+    "philic", "scopic",
 })
 
 # Common English prefixes used both as bound morphemes and as standalone
@@ -236,6 +263,7 @@ def spell_check_paragraph(
     whitelist: Optional[set[str]] = None,
     exclude_spans: Optional[list[tuple[int, int]]] = None,
     max_suggestions: int = _DEFAULT_MAX_SUGGESTIONS,
+    protected_spans: Optional[list[tuple[int, int]]] = None,
 ) -> list[Finding]:
     """Return 'typo' findings for `text` using the provided SpellChecker.
 
@@ -246,6 +274,11 @@ def spell_check_paragraph(
     NOT suppress a typo on `[200, 206]`, because they represent different
     issues (sentence rewrite vs. word spelling) per the dedup spec.
 
+    `protected_spans` are workbook-protected ranges (COVID-19, DOIs, ISBNs,
+    gene symbols, etc.). Any token overlapping one is skipped — overlap
+    semantics match URL/email handling because the protected shape may be
+    longer than a single tokeniser hit.
+
     URL/email spans are detected internally and skipped using overlap
     semantics (we don't want to flag words inside https://… links).
 
@@ -255,8 +288,11 @@ def spell_check_paragraph(
     whitelist = whitelist or set()
     # Exact-span dedup set from upstream rule findings.
     dedupe = set(exclude_spans or [])
-    # Overlap-based skip for URL/email/DOI runs.
+    # Overlap-based skip for URL/email/DOI runs. Protected spans joined on
+    # the same overlap list so the token loop checks them in one pass.
     url_spans = _spans(_URL_RE, text)
+    if protected_spans:
+        url_spans = list(url_spans) + list(protected_spans)
     starts = _sentence_start_positions(text)
     # Paragraph-local prefix whitelist from hyphenated companions.
     # "pre and post-intervention" → `post` extracted → allows BOTH `pre` and
@@ -316,7 +352,13 @@ def spell_check_paragraph(
     # legitimate morphological variants. If any derived form IS in the dict,
     # accept the token as correct.
     PREFIXES = ("non", "co", "re", "un", "dis", "mis", "pre", "over", "under",
-                "anti", "sub", "super", "inter", "intra", "post", "semi", "multi")
+                "anti", "sub", "super", "inter", "intra", "post", "semi", "multi",
+                # English negation / reversal / direction prefixes that pyspell's
+                # small base dict doesn't carry pre-attached to every root:
+                #   destigmatize/destigmatizing — base dict has `stigmatize`/
+                #   `stigmatizing`, not the `de-` form.
+                #   transnational, proactive, forewarn, etc.
+                "de", "trans", "pro", "fore", "cross", "mid")
     SUFFIX_RULES = [
         (re.compile(r"(.+)ies$"), r"\1y"),      # ethnicities -> ethnicity
         (re.compile(r"(.+)ied$"), r"\1y"),      # qualified -> qualify
@@ -366,6 +408,11 @@ def spell_check_paragraph(
         (re.compile(r"(.+)ics$"), r"\1ic"),     # psychodynamics -> psychodynamic
         (re.compile(r"(.+)ic$"), r"\1ical"),    # historic -> historical
         (re.compile(r"(.+)ical$"), r"\1ic"),    # historical -> historic
+        # `-ic` adjective built on an `-ist` / `-ism` / `-ion` noun root.
+        # Dropping `-ic` recovers the noun form pyspell's base dict knows
+        # (`reductionistic` -> `reductionist`, `conformistic` -> `conformist`).
+        # Safe because the stripped root still has to be in the base dict.
+        (re.compile(r"(.+)ic$"), r"\1"),        # reductionistic -> reductionist
     ]
 
     def _morph_variants(w: str) -> list[str]:

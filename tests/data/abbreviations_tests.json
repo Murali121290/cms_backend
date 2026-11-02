@@ -1,0 +1,765 @@
+{
+  "_meta": {
+    "generated_by": "scripts/import_abbreviations_workbook.py",
+    "source_file": "abbrev_wb.xlsx",
+    "source_sha256": "811b824e2d9e0ea0ca6db3e4af23904d541f3979744ceee47eb36e07df90a7f1"
+  },
+  "test_cases": [
+    {
+      "area": "First-use rule",
+      "expected": "The patient was admitted to the intensive care unit (ICU) after surgery. The ICU staff monitored blood pressure. Later the patient left the ICU.",
+      "id": "T-001",
+      "input": "The patient was admitted to the intensive care unit after surgery. The intensive care unit staff monitored blood pressure. Later the patient left the intensive care unit.",
+      "notes": "AB01 and AB02 together. Blood pressure is used once, so it is not abbreviated",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "An intensive care unit (ICU) nurse checked the magnetic resonance imaging (MRI) results. The ICU team reviewed the MRI.",
+      "id": "T-002",
+      "input": "An ICU nurse checked the MRI results. The ICU team reviewed the MRI.",
+      "notes": "AB01 for two abbreviations; an becomes an expansion",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "She had a magnetic resonance imaging (MRI) scan. An MRI was repeated. The MRI showed no change.",
+      "id": "T-003",
+      "input": "She had a magnetic resonance imaging scan. A magnetic resonance imaging was repeated. The MRI showed no change.",
+      "notes": "AB10 article agreement: A becomes An before MRI",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "Intensive care unit (ICU) beds were full. The ICU opened more beds.",
+      "id": "T-004",
+      "input": "Intensive care unit (ICU) beds were full. The intensive care unit (ICU) opened more beds.",
+      "notes": "AB04 repeated definition",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "The intensive care unit (ICU) was full. Patients in the ICU were stable.",
+      "id": "T-005",
+      "input": "The ICU was full. Patients in the intensive care unit (ICU) were stable.",
+      "notes": "AB03 definition after first use",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "The patient was transferred to the postanesthesia care unit.",
+      "id": "T-006",
+      "input": "The patient was transferred to the PACU.",
+      "notes": "AB05 single use is spelled out",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "The chart noted shortness of breath.",
+      "id": "T-007",
+      "input": "The chart noted shortness of breath.",
+      "notes": "Single use of an expansion: no change",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Must not change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "Two intensive care units (ICUs) were closed. The ICUs reopened.",
+      "id": "T-008",
+      "input": "Two intensive care units were closed. The intensive care units reopened.",
+      "notes": "Plurals: ICUs",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "The neonatal intensive care unit (NICU) admitted two infants. The NICU and the intensive care unit (ICU) share staff. The NICU was busy. The ICU was quiet.",
+      "id": "T-009",
+      "input": "The neonatal intensive care unit admitted two infants. The neonatal intensive care unit and the intensive care unit share staff. The NICU was busy. The ICU was quiet.",
+      "notes": "Overlap: ICU is not matched inside neonatal intensive care unit",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "The patient has HIV. HIV testing continued.",
+      "id": "T-010",
+      "input": "The patient has HIV. HIV testing continued.",
+      "notes": "Rule N: no change",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Must not change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "Heart failure is common.",
+      "id": "T-011",
+      "input": "Heart failure (HF) is common.",
+      "notes": "AB05: a lone definition loses its parentheses",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "Intensive care unit (ICU) staffing is low. The ICU team agrees.",
+      "id": "T-012",
+      "input": "ICU staffing is low. The ICU team agrees.",
+      "notes": "Sentence start capitalization",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "Blood pressure (BP) was measured twice. BP was normal.",
+      "id": "T-013",
+      "input": "Blood pressure was measured twice. Blood pressure was normal.",
+      "notes": "Rule G entries are expanded for a general audience",
+      "settings": "audience=general; minUses=2",
+      "test_type": "Should change"
+    },
+    {
+      "area": "First-use rule",
+      "expected": "Blood pressure was measured twice. Blood pressure was normal.",
+      "id": "T-014",
+      "input": "Blood pressure was measured twice. Blood pressure was normal.",
+      "notes": "Rule G entries are left alone for a professional audience",
+      "settings": "audience=professional; minUses=2",
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Plural apostrophe",
+      "expected": "The ICUs were closed overnight.",
+      "id": "T-015",
+      "input": "The ICU's were closed overnight.",
+      "notes": "AB09",
+      "settings": null,
+      "test_type": "Should change"
+    },
+    {
+      "area": "Plural apostrophe",
+      "expected": "The ICU's staff were tired.",
+      "id": "T-016",
+      "input": "The ICU's staff were tired.",
+      "notes": "Possessive: a noun follows",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN01",
+      "expected": "Give 10 units of insulin.",
+      "id": "T-017",
+      "input": "Give 10 U of insulin.",
+      "notes": "U, u",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN01",
+      "expected": "Give 10 mg daily.",
+      "id": "T-018",
+      "input": "Give 10 mg daily.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN02",
+      "expected": "Give 5000 international units daily.",
+      "id": "T-019",
+      "input": "Give 5000 IU daily.",
+      "notes": "IU",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN02",
+      "expected": "IUD placement",
+      "id": "T-020",
+      "input": "IUD placement",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN03",
+      "expected": "Take 1 tablet daily.",
+      "id": "T-021",
+      "input": "Take 1 tablet QD.",
+      "notes": "Q.D., QD, q.d., qd",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN03",
+      "expected": "QID",
+      "id": "T-022",
+      "input": "QID",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN04",
+      "expected": "Give 1 tablet every other day.",
+      "id": "T-023",
+      "input": "Give 1 tablet QOD.",
+      "notes": "Q.O.D., QOD, q.o.d., qod",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN04",
+      "expected": "QD",
+      "id": "T-024",
+      "input": "QD",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN05",
+      "expected": "Give 5 mg.",
+      "id": "T-025",
+      "input": "Give 5.0 mg.",
+      "notes": "Trailing zero (X.0 mg)",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN05",
+      "expected": "Give 5.5 mg.",
+      "id": "T-026",
+      "input": "Give 5.5 mg.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN06",
+      "expected": "Give 0.5 mg.",
+      "id": "T-027",
+      "input": "Give .5 mg.",
+      "notes": "Lack of leading zero (.X mg)",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN06",
+      "expected": "Give 0.5 mg.",
+      "id": "T-028",
+      "input": "Give 0.5 mg.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN07",
+      "expected": "Give morphine sulfate 4 mg IV.",
+      "id": "T-029",
+      "input": "Give MS 4 mg IV.",
+      "notes": "MS",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN07",
+      "expected": "MS is a chronic disease.",
+      "id": "T-030",
+      "input": "MS is a chronic disease.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN08",
+      "expected": "Give morphine sulfate 2 mg.",
+      "id": "T-031",
+      "input": "Give MSO4 2 mg.",
+      "notes": "MSO4",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN08",
+      "expected": "MgSO4",
+      "id": "T-032",
+      "input": "MgSO4",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN09",
+      "expected": "Start magnesium sulfate infusion.",
+      "id": "T-033",
+      "input": "Start MgSO4 infusion.",
+      "notes": "MgSO4",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN09",
+      "expected": "MSO4",
+      "id": "T-034",
+      "input": "MSO4",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN10",
+      "expected": "Give 50 mcg.",
+      "id": "T-035",
+      "input": "Give 50 μg.",
+      "notes": "µg, μg",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN10",
+      "expected": "Give 50 mcg.",
+      "id": "T-036",
+      "input": "Give 50 mcg.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN11",
+      "expected": "Give 5 mL.",
+      "id": "T-037",
+      "input": "Give 5 cc.",
+      "notes": "cc",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN11",
+      "expected": "Give 5 mL.",
+      "id": "T-038",
+      "input": "Give 5 mL.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN12",
+      "expected": "BP at 0800 was 120/80.",
+      "id": "T-039",
+      "input": "BP @ 0800 was 120/80.",
+      "notes": "@",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN12",
+      "expected": "write to nurse@hospital.org",
+      "id": "T-040",
+      "input": "write to nurse@hospital.org",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN13",
+      "expected": "discharge the Foley.",
+      "id": "T-041",
+      "input": "D/C the Foley.",
+      "notes": "D/C",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN13",
+      "expected": "D&C",
+      "id": "T-042",
+      "input": "D&C",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN14",
+      "expected": "Take 5 mg at bedtime.",
+      "id": "T-043",
+      "input": "Take 5 mg HS.",
+      "notes": "HS, hs",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN14",
+      "expected": "HS graduate",
+      "id": "T-044",
+      "input": "HS graduate",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN15",
+      "expected": "Give heparin subcut.",
+      "id": "T-045",
+      "input": "Give heparin SQ.",
+      "notes": "SQ, sq, sub-q, subQ",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN15",
+      "expected": "square",
+      "id": "T-046",
+      "input": "square",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN16",
+      "expected": "Give drug 3 times weekly.",
+      "id": "T-047",
+      "input": "Give drug TIW.",
+      "notes": "TIW",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN16",
+      "expected": "TIDW",
+      "id": "T-048",
+      "input": "TIDW",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN17",
+      "expected": "Give drug 2 times weekly.",
+      "id": "T-049",
+      "input": "Give drug BIW.",
+      "notes": "BIW",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN17",
+      "expected": "BID",
+      "id": "T-050",
+      "input": "BID",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN18",
+      "expected": "Give by mouth.",
+      "id": "T-051",
+      "input": "Give per os.",
+      "notes": "per os",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN18",
+      "expected": "person",
+      "id": "T-052",
+      "input": "person",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN19",
+      "expected": "Give 5 mg nightly at bedtime.",
+      "id": "T-053",
+      "input": "Give 5 mg qhs.",
+      "notes": "qhs, QHS",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN19",
+      "expected": "qh",
+      "id": "T-054",
+      "input": "qh",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN20",
+      "expected": "Give 5 mg nightly at bedtime.",
+      "id": "T-055",
+      "input": "Give 5 mg qn.",
+      "notes": "qn, QN",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN20",
+      "expected": "qnet",
+      "id": "T-056",
+      "input": "qnet",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN21",
+      "expected": "Give 2 mg intranasally.",
+      "id": "T-057",
+      "input": "Give 2 mg IN.",
+      "notes": "IN",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN21",
+      "expected": "Give 2 mg IM.",
+      "id": "T-058",
+      "input": "Give 2 mg IM.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN22",
+      "expected": "Continue hydrochlorothiazide.",
+      "id": "T-059",
+      "input": "Continue HCTZ.",
+      "notes": "HCTZ",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN22",
+      "expected": "HCT",
+      "id": "T-060",
+      "input": "HCT",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN23",
+      "expected": "Give methotrexate weekly.",
+      "id": "T-061",
+      "input": "Give MTX weekly.",
+      "notes": "MTX",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN23",
+      "expected": "MTX2",
+      "id": "T-062",
+      "input": "MTX2",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN24",
+      "expected": "Give nitroglycerin SL.",
+      "id": "T-063",
+      "input": "Give NTG SL.",
+      "notes": "NTG",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN24",
+      "expected": "NTGX",
+      "id": "T-064",
+      "input": "NTGX",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN25",
+      "expected": "Start zidovudine.",
+      "id": "T-065",
+      "input": "Start AZT.",
+      "notes": "AZT",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN25",
+      "expected": "AZTEC",
+      "id": "T-066",
+      "input": "AZTEC",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN26",
+      "expected": "Give acetaminophen 650 mg.",
+      "id": "T-067",
+      "input": "Give APAP 650 mg.",
+      "notes": "APAP",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN26",
+      "expected": "APAPX",
+      "id": "T-068",
+      "input": "APAPX",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN27",
+      "expected": "Give milk of magnesia 30 mL.",
+      "id": "T-069",
+      "input": "Give MOM 30 mL.",
+      "notes": "MOM",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN27",
+      "expected": "Mom called.",
+      "id": "T-070",
+      "input": "Mom called.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN28",
+      "expected": "Give 5 grains.",
+      "id": "T-071",
+      "input": "Give 5 gr.",
+      "notes": "gr (grain)",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN28",
+      "expected": "Give 5 g.",
+      "id": "T-072",
+      "input": "Give 5 g.",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Do not use DN29",
+      "expected": "Give for 3 days.",
+      "id": "T-073",
+      "input": "Give x3d.",
+      "notes": "x3d",
+      "settings": "inside medication orders",
+      "test_type": "Should change"
+    },
+    {
+      "area": "Do not use DN29",
+      "expected": "x-ray",
+      "id": "T-074",
+      "input": "x-ray",
+      "notes": "Must not be flagged",
+      "settings": null,
+      "test_type": "Must not change"
+    },
+    {
+      "area": "Context choice",
+      "expected": "room air",
+      "id": "T-075",
+      "input": "The patient was on RA with SpO2 of 98% and no oxygen needed.",
+      "notes": "RA",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "rheumatoid arthritis",
+      "id": "T-076",
+      "input": "RA with morning stiffness and joint swelling, on methotrexate.",
+      "notes": "RA",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "right atrium",
+      "id": "T-077",
+      "input": "Pressure in the RA was elevated during cardiac catheterization.",
+      "notes": "RA",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "heart rate",
+      "id": "T-078",
+      "input": "Vital signs: HR 110 bpm, BP 90/60 with tachycardia.",
+      "notes": "HR",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "hazard ratio",
+      "id": "T-079",
+      "input": "The HR was 0.62 (95% CI 0.45 to 0.85) in the survival analysis.",
+      "notes": "HR",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "physical examination",
+      "id": "T-080",
+      "input": "PE: lungs clear, abdomen soft on inspection.",
+      "notes": "PE",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "pulmonary embolism",
+      "id": "T-081",
+      "input": "Heparin was started for PE after a DVT with hypoxia.",
+      "notes": "PE",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "(no cue: ask the author)",
+      "id": "T-082",
+      "input": "The PA was reviewed.",
+      "notes": "PA",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "multiple sclerosis",
+      "id": "T-083",
+      "input": "MS with relapsing episodes and demyelinating lesions on MRI.",
+      "notes": "MS",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    },
+    {
+      "area": "Context choice",
+      "expected": "costovertebral angle",
+      "id": "T-084",
+      "input": "Left CVA tenderness with flank pain and pyelonephritis.",
+      "notes": "CVA",
+      "settings": "Context_Rules",
+      "test_type": "Should choose"
+    }
+  ]
+}

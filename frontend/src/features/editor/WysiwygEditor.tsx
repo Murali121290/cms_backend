@@ -482,6 +482,18 @@ export interface WysiwygEditorProps {
   hideSaveButton?: boolean;
   onSelectionChange?: (selectedText: string) => void;
   onCommentClick?: (commentId: string) => void;
+  // Scope D: opens the parent's "Save as rule" modal with the current
+  // regex draft. When undefined, the Save-as-rule button is hidden so
+  // editors embedded outside the Language workflow stay unaffected.
+  onSaveAsRule?: (draft: {
+    pattern: string;
+    replacement: string;
+    caseSensitive: boolean;
+    wholeWord: boolean;
+    matchCount: number;
+    firstMatch: string | null;
+    firstReplacement: string | null;
+  }) => void;
 }
 
 const ToolbarButton = ({
@@ -559,6 +571,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       hideSaveButton = false,
       onSelectionChange,
       onCommentClick,
+      onSaveAsRule,
     }: WysiwygEditorProps,
     ref
   ) {
@@ -1045,6 +1058,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     const searchMatchCount = searchResults.length;
     const currentSearchMatch = searchMatchCount > 0 ? activeSearchIndex + 1 : 0;
     const wholeWord = (editor?.storage as any)?.searchReplace?.wholeWord ?? false;
+    const regexMode = (editor?.storage as any)?.searchReplace?.regexMode ?? false;
+    const caseSensitive = (editor?.storage as any)?.searchReplace?.caseSensitive ?? false;
+    const searchError: string | null = (editor?.storage as any)?.searchReplace?.error ?? null;
 
     // Open the comment-creation dialog from whatever is selected in the
     // editor. Used by both the in-toolbar button and the page-level
@@ -1981,7 +1997,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         {/* â”€â”€ Find & Replace Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {showFindReplace && (
-          <div className="bg-slate-900 border-b border-slate-700 px-4 py-2 flex items-center gap-3 text-sm flex-wrap">
+          <div className="bg-slate-900 border-b border-slate-700 px-4 py-2 flex flex-col gap-1.5 text-sm">
+            <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <span className="text-slate-400 text-xs font-semibold uppercase tracking-wide shrink-0">Find</span>
               <input
@@ -1993,14 +2010,46 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                   setFindTerm(val);
                   editor?.commands.setSearchTerm(val);
                 }}
-                placeholder="Search in document..."
-                className="flex-1 min-w-0 px-2.5 py-1 bg-slate-800 border border-slate-600 rounded-md text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                placeholder={regexMode ? "e.g. \\b(ICU|ER)\\b" : "Search in document..."}
+                className={`flex-1 min-w-0 px-2.5 py-1 bg-slate-800 border rounded-md text-xs text-slate-200 focus:outline-none ${
+                  searchError
+                    ? "border-rose-500 focus:border-rose-400"
+                    : regexMode
+                      ? "border-emerald-700 focus:border-emerald-500 font-mono"
+                      : "border-slate-600 focus:border-amber-500"
+                }`}
               />
-              {findTerm && (
+              {findTerm && !searchError && (
                 <span className="text-[10px] text-slate-400 shrink-0 font-mono">
                   {searchMatchCount > 0 ? `${currentSearchMatch} of ${searchMatchCount}` : "No matches"}
                 </span>
               )}
+              <button
+                type="button"
+                onClick={() => editor?.commands.setRegexMode(!regexMode)}
+                title="Regex mode"
+                aria-pressed={regexMode}
+                className={`shrink-0 px-2 py-1 text-[10px] font-bold rounded-md border transition-colors cursor-pointer font-mono ${
+                  regexMode
+                    ? "bg-emerald-500 text-slate-900 border-emerald-400"
+                    : "bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700"
+                }`}
+              >
+                .*
+              </button>
+              <button
+                type="button"
+                onClick={() => editor?.commands.setCaseSensitive(!caseSensitive)}
+                title="Match case"
+                aria-pressed={caseSensitive}
+                className={`shrink-0 px-2 py-1 text-[10px] font-bold rounded-md border transition-colors cursor-pointer ${
+                  caseSensitive
+                    ? "bg-amber-500 text-slate-900 border-amber-400"
+                    : "bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700"
+                }`}
+              >
+                Aa
+              </button>
               <button
                 type="button"
                 onClick={() => editor?.commands.setWholeWord(!wholeWord)}
@@ -2021,8 +2070,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                 type="text"
                 value={replaceTerm}
                 onChange={(e) => setReplaceTerm(e.target.value)}
-                placeholder="Replacement text..."
-                className="flex-1 min-w-0 px-2.5 py-1 bg-slate-800 border border-slate-600 rounded-md text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                placeholder={regexMode ? "e.g. $1 (backrefs supported)" : "Replacement text..."}
+                className={`flex-1 min-w-0 px-2.5 py-1 bg-slate-800 border border-slate-600 rounded-md text-xs text-slate-200 focus:outline-none focus:border-amber-500 ${regexMode ? "font-mono" : ""}`}
               />
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -2062,10 +2111,52 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               >
                 Replace All
               </button>
+              {onSaveAsRule && regexMode && (
+                <button
+                  onClick={() => {
+                    if (!findTerm || searchError || searchMatchCount === 0) return;
+                    const first = searchResults[0] as { from: number; to: number; groups?: string[] } | undefined;
+                    let firstMatch: string | null = null;
+                    let firstReplacement: string | null = null;
+                    if (first && editor) {
+                      try {
+                        firstMatch = editor.state.doc.textBetween(first.from, first.to, "");
+                        if (replaceTerm) {
+                          const groups = first.groups ?? [];
+                          firstReplacement = replaceTerm.replace(/\$(\d{1,2})/g, (_m: string, k: string) => {
+                            const idx = parseInt(k, 10);
+                            return Number.isNaN(idx) || idx < 1 ? "" : (groups[idx - 1] ?? "");
+                          });
+                        }
+                      } catch { /* ignore */ }
+                    }
+                    onSaveAsRule({
+                      pattern: findTerm,
+                      replacement: replaceTerm,
+                      caseSensitive,
+                      wholeWord,
+                      matchCount: searchMatchCount,
+                      firstMatch,
+                      firstReplacement,
+                    });
+                  }}
+                  disabled={!findTerm || !!searchError || searchMatchCount === 0}
+                  title="Save this regex as a reusable rule for the project"
+                  className="px-2.5 py-1 bg-emerald-600 text-white text-[10px] font-bold rounded-md hover:bg-emerald-700 transition-colors cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Save as rule
+                </button>
+              )}
               <button onClick={() => { setShowFindReplace(false); setFindTerm(""); editor?.commands.setSearchTerm(""); }} className="p-1 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer border-none bg-transparent">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
+            </div>
+            {searchError && (
+              <div className="text-[10px] text-rose-300 font-mono px-1">
+                {searchError}
+              </div>
+            )}
           </div>
         )}
 
