@@ -1,11 +1,61 @@
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardBody } from '@/components/ui/Card'
-import { FolderSearch, FileText, CalendarDays, ArrowRight } from 'lucide-react'
+import { FolderSearch, FileText, CalendarDays, ArrowRight, Briefcase } from 'lucide-react'
+import { useAuthStore } from '@/store/useAuthStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useRBAC } from '@/hooks/useRBAC'
 
 export function ReportsPage() {
   const navigate = useNavigate()
+  const sessionViewer = useSessionStore((s) => s.viewer)
+  const authUser = useAuthStore((s) => s.user)
+  const rbac = useRBAC()
+
+  const { isAdmin, isProjectManagement } = useMemo(() => {
+    const sessionRoles = sessionViewer?.roles || []
+    const authStoreRoles = (authUser?.roles || []).map((r) =>
+      typeof r === 'string' ? r : (r as any).name || ''
+    )
+    const userRoleStr = (authUser as any)?.role || (sessionViewer as any)?.role || ''
+    const allRoles = Array.from(new Set([...sessionRoles, ...authStoreRoles, userRoleStr])).filter(Boolean)
+
+    const admin =
+      rbac.isAdmin ||
+      allRoles.some((r) => r.toLowerCase().includes('admin'))
+
+    const userTeam = sessionViewer?.team || (authUser as any)?.team || ''
+    const userDesignation = (sessionViewer as any)?.designation || (authUser as any)?.designation || ''
+
+    const pm =
+      userTeam.toLowerCase().includes('project management') ||
+      userTeam.toLowerCase().includes('management') ||
+      allRoles.some((r) => {
+        const low = r.toLowerCase()
+        return low.includes('project manager') || low.includes('project management') || low.includes('pm')
+      }) ||
+      userDesignation.toLowerCase().includes('project manager') ||
+      userDesignation.toLowerCase().includes('management')
+
+    return { isAdmin: admin, isProjectManagement: pm }
+  }, [sessionViewer, authUser, rbac])
+
+  const canAccessMyWork = isAdmin || isProjectManagement
 
   const reportCards = [
+    ...(canAccessMyWork
+      ? [
+          {
+            title: 'My Work',
+            description: isAdmin
+              ? 'PM Workspace: View assigned book portfolios, planning matrices, and current status across all Project Managers.'
+              : 'Your assigned project portfolio: Track your managed books, planned schedules, and current operational stage status.',
+            icon: Briefcase,
+            path: '/reports/my-work',
+            color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30',
+          },
+        ]
+      : []),
     {
       title: 'Project Info & Timeline Tracker',
       description: 'Search, filter, and track detailed project progress with timeline details and status indicators.',
@@ -39,7 +89,7 @@ export function ReportsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className={`grid grid-cols-1 ${canAccessMyWork ? 'sm:grid-cols-2 lg:grid-cols-4' : 'md:grid-cols-3'} gap-6`}>
         {reportCards.map((card) => {
           const Icon = card.icon
           return (
