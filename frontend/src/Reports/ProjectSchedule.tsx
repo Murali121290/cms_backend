@@ -157,6 +157,91 @@ const ProjectSchedule = () => {
   });
   const [selectedProject, setSelectedProject] = useState<ProjectRow | null>(null);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
+  const [usersLookup, setUsersLookup] = useState<{ id?: number; username: string; full_name: string }[]>([]);
+
+  // User display name helper
+  const getUserDisplayName = useCallback(
+    (identifier: string | null | undefined): string => {
+      if (!identifier || identifier === "—" || identifier.toLowerCase() === "unassigned") {
+        return "—";
+      }
+      const raw = identifier.trim();
+      const match = usersLookup.find(
+        (u) =>
+          u.username?.toLowerCase() === raw.toLowerCase() ||
+          String(u.id) === raw ||
+          (u.full_name && u.full_name.toLowerCase() === raw.toLowerCase())
+      );
+      if (match && match.full_name) {
+        return match.full_name;
+      }
+      return raw;
+    },
+    [usersLookup]
+  );
+
+  // Unified Status Badge renderer
+  const renderUnifiedStatusBadge = (status?: string | null) => {
+    const raw = (status || "").trim();
+    const low = raw.toLowerCase();
+    if (!raw || raw === "—") return <span className="text-muted text-xs">—</span>;
+
+    if (low.includes("delay")) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30">
+          <AlertCircle size={10} />
+          {raw}
+        </span>
+      );
+    }
+    if (low.includes("today")) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/15 text-violet-600 dark:text-violet-400 border border-violet-500/30">
+          <Clock size={10} />
+          {raw}
+        </span>
+      );
+    }
+    if (low.includes("progress")) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+          <Clock size={10} />
+          {raw}
+        </span>
+      );
+    }
+    if (low.includes("yts") || low.includes("yet to start")) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+          <Clock size={10} />
+          {raw}
+        </span>
+      );
+    }
+    if (low.includes("complet") || low.includes("done")) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+          <CheckCircle2 size={10} />
+          {raw}
+        </span>
+      );
+    }
+    if (low.includes("upcoming")) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">
+          <Calendar size={10} />
+          {raw}
+        </span>
+      );
+    }
+
+    const badgeVar = statusToBadge(raw);
+    return (
+      <Badge variant={badgeVar} size="sm">
+        {raw}
+      </Badge>
+    );
+  };
 
   // Custom Date Range Filters (From & To)
   const [startDateFrom, setStartDateFrom] = useState("");
@@ -220,7 +305,7 @@ const ProjectSchedule = () => {
             const entry = {
               chapterNumber: chNum,
               stages: idx >= 0 ? updatedChs[idx].stages : {},
-              assigneeName: ch.current_assignee_name || (idx >= 0 ? updatedChs[idx].assigneeName : ""),
+              assigneeName: ch.current_assignee_name ? getUserDisplayName(ch.current_assignee_name) : (idx >= 0 ? updatedChs[idx].assigneeName : ""),
               currentStage: ch.stage_name || (idx >= 0 ? updatedChs[idx].currentStage : ""),
               status: ch.status || (idx >= 0 ? updatedChs[idx].status : "In-progress"),
               startDate: ch.created_at ? ch.created_at.split("T")[0] : (idx >= 0 ? updatedChs[idx].startDate : ""),
@@ -252,11 +337,32 @@ const ProjectSchedule = () => {
     const fetchProjectData = async () => {
       try {
         setLoading(true);
-        const [projectsRes, stageDetails, chaptersList] = await Promise.all([
+        const [projectsRes, stageDetails, chaptersList, usersRes] = await Promise.all([
           projectsApi.list(0, 1000),
           api.get<any[]>("/api/v1/stage-details").then((r) => r.data),
           api.get<any[]>("/chapters/").then((r) => r.data),
+          api.get<any[]>("/api/v1/users-lookup").then((r) => r.data).catch(() => []),
         ]);
+
+        const users = Array.isArray(usersRes) ? usersRes : [];
+        setUsersLookup(users);
+
+        const formatUser = (identifier: string | null | undefined): string => {
+          if (!identifier || identifier === "—" || identifier.toLowerCase() === "unassigned") {
+            return "—";
+          }
+          const raw = identifier.trim();
+          const match = users.find(
+            (u) =>
+              u.username?.toLowerCase() === raw.toLowerCase() ||
+              String(u.id) === raw ||
+              (u.full_name && u.full_name.toLowerCase() === raw.toLowerCase())
+          );
+          if (match && match.full_name) {
+            return match.full_name;
+          }
+          return raw;
+        };
 
         const projects = projectsRes.projects || [];
         const mapped: ProjectRow[] = projects.map((p: any) => {
@@ -295,7 +401,7 @@ const ProjectSchedule = () => {
               ? String(sortedStageRows[sortedStageRows.length - 1].planned_end_date).split("T")[0]
               : "";
 
-            const assignedName =
+            const rawAssignedName =
               chRecord?.current_assignee_name ||
               chapterStageRows.find((d) => d.assignee_name)?.assignee_name ||
               "";
@@ -303,7 +409,7 @@ const ProjectSchedule = () => {
             return {
               chapterNumber,
               stages,
-              assigneeName: assignedName,
+              assigneeName: formatUser(rawAssignedName),
               currentStage: chRecord?.stage_name || activeStageRow?.stage_name || "",
               status: chRecord?.status || (chapterStageRows.every((d) => d.stage_status === "Completed") ? "Completed" : "In-progress"),
               startDate: chRecord?.created_at ? chRecord.created_at.split("T")[0] : firstPlannedStart,
@@ -318,7 +424,7 @@ const ProjectSchedule = () => {
             projectCode,
             projectTitle: p.title || p.project_title || "",
             chapterCount: p.chapter_count ?? 0,
-            projectManager: p.project_manager || "",
+            projectManager: formatUser(p.project_manager),
             salesPerson: p.sales_person || "",
             category: p.category || "",
             manuscriptPages: p.manuscript_pages ?? 0,
@@ -675,12 +781,7 @@ const ProjectSchedule = () => {
       }
 
       if (col.id === "status") {
-        const badgeVar = statusToBadge(String(val));
-        return (
-          <Badge variant={badgeVar} size="sm">
-            {String(val)}
-          </Badge>
-        );
+        return renderUnifiedStatusBadge(String(val));
       }
 
       if (col.id === "alt_text" || col.id === "accessibility") {
@@ -1031,7 +1132,7 @@ const ProjectSchedule = () => {
           {hasActiveFilters && (
             <button
               onClick={handleClearFilters}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 text-white font-semibold shadow-sm hover:bg-rose-700 active:scale-95 px-3 py-2 text-xs transition-all ring-2 ring-rose-500/20"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 text-white font-semibold shadow-sm hover:bg-red-700 active:scale-95 px-3 py-2 text-xs transition-all ring-2 ring-red-500/20"
               title="Reset all active filters and sortings"
             >
               <RotateCcw size={13} className="text-white" />
@@ -1072,14 +1173,16 @@ const ProjectSchedule = () => {
           <div>
             <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">Active In-Progress</p>
             <div className="flex items-center gap-2 mt-1">
-              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
                 {stats.inProgressProjects}
               </p>
-              <span className="text-[10px] text-muted font-medium">({stats.completedProjects} done)</span>
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                {stats.completedProjects} done
+              </span>
             </div>
           </div>
-          <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-            <CheckCircle2 size={20} />
+          <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+            <Clock size={20} />
           </div>
         </div>
       </div>
@@ -1256,7 +1359,7 @@ const ProjectSchedule = () => {
               {hasActiveFilters && (
                 <button
                   onClick={handleClearFilters}
-                  className="inline-flex items-center gap-1 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 px-2 py-0.5 text-[11px] font-semibold border border-rose-500/20 transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1 rounded-md bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 px-2 py-0.5 text-[11px] font-semibold border border-red-500/20 transition-all cursor-pointer"
                   title="Clear all active filters"
                 >
                   <RotateCcw size={11} />
@@ -1337,9 +1440,7 @@ const ProjectSchedule = () => {
                           )}
                         </td>
                         <td className="px-3.5 py-2.5">
-                          <Badge variant={badgeVar} size="sm">
-                            {ch.status || "Pending"}
-                          </Badge>
+                          {renderUnifiedStatusBadge(ch.status || "Pending")}
                         </td>
                       </tr>
                     );

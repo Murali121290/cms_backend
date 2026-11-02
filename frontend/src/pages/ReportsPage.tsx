@@ -19,7 +19,7 @@ export function ReportsPage() {
       icon: FileText,
       path: '/reports/schedule',
       color: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-950/30',
-      comingSoon: true,
+      // comingSoon: true,
     },
     {
       title: 'Daily Operations Dashboard',

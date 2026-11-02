@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Search,
@@ -102,6 +102,7 @@ const TodaySchedule = () => {
   const [stageDetails, setStageDetails] = useState<StageDetailRecord[]>([]);
   const [stagesMaster, setStagesMaster] = useState<StageMasterRecord[]>([]);
   const [projectsList, setProjectsList] = useState<any[]>([]);
+  const [usersLookup, setUsersLookup] = useState<{ id?: number; username: string; full_name: string; role?: string }[]>([]);
 
   // Filtering states
   const [activeTab, setActiveTab] = useState<ActiveTab>("all");
@@ -124,16 +125,18 @@ const TodaySchedule = () => {
     const fetchOperationsData = async () => {
       try {
         setLoading(true);
-        const [detailsRes, stagesRes, projectsRes] = await Promise.all([
+        const [detailsRes, stagesRes, projectsRes, usersRes] = await Promise.all([
           api.get<StageDetailRecord[]>("/api/v1/stage-details?limit=1000000").then((r) => r.data).catch(() => []),
           api.get<StageMasterRecord[]>("/api/v1/stages?limit=100000").then((r) => r.data).catch(() => []),
           api.get<any>("/projects/?limit=100000").then((r) => r.data?.projects || r.data || []).catch(() => []),
+          api.get<any[]>("/api/v1/users-lookup").then((r) => r.data).catch(() => []),
         ]);
 
         if (isMounted) {
           setStageDetails(detailsRes);
           setStagesMaster(stagesRes);
           setProjectsList(Array.isArray(projectsRes) ? projectsRes : []);
+          setUsersLookup(Array.isArray(usersRes) ? usersRes : []);
         }
       } catch (err) {
         console.error("Failed to load Daily Operations data:", err);
@@ -193,6 +196,27 @@ const TodaySchedule = () => {
       isAdmin,
     };
   }, [authUser, sessionViewer, rbac]);
+
+  // User display name helper (First + Last Name)
+  const getUserDisplayName = useCallback(
+    (identifier: string | null | undefined): string => {
+      if (!identifier || identifier === "—" || identifier.toLowerCase() === "unassigned") {
+        return "—";
+      }
+      const raw = identifier.trim();
+      const match = usersLookup.find(
+        (u) =>
+          u.username?.toLowerCase() === raw.toLowerCase() ||
+          String((u as any).id) === raw ||
+          (u.full_name && u.full_name.toLowerCase() === raw.toLowerCase())
+      );
+      if (match && match.full_name) {
+        return match.full_name;
+      }
+      return raw;
+    },
+    [usersLookup]
+  );
 
   // Stage name to roles map
   const stageRolesMap = useMemo(() => {
@@ -318,6 +342,14 @@ const TodaySchedule = () => {
         const chapterKey = `${item.project}:::${item.chapters}`;
         const currentStage = currentChapterStageMap.get(chapterKey) || item.stage_name;
 
+        // User display name lookup (First + Last Name)
+        const assigneeDisplay =
+          item.assignee_name && item.assignee_name.toLowerCase() !== "unassigned"
+            ? getUserDisplayName(item.assignee_name)
+            : "Unassigned";
+
+        const pmDisplay = getUserDisplayName(item.project_manager_name);
+
         return {
           id: item.id,
           client: item.client || "—",
@@ -327,8 +359,8 @@ const TodaySchedule = () => {
           stageName: item.stage_name || "—",
           currentStage,
           workflow: item.workflow || "—",
-          assignee: item.assignee_name || "Unassigned",
-          projectManager: item.project_manager_name || "—",
+          assignee: assigneeDisplay,
+          projectManager: pmDisplay,
           plannedStart: sStart || "—",
           plannedEnd: sEnd || "—",
           actualStart: aStart || "—",
@@ -343,7 +375,7 @@ const TodaySchedule = () => {
           roles: matchedRoles,
         };
       });
-  }, [stageDetails, stageRolesMap, projectTitleMap, currentChapterStageMap]);
+  }, [stageDetails, stageRolesMap, projectTitleMap, currentChapterStageMap, usersLookup, getUserDisplayName]);
 
   // Match row against user team/role
   const matchesUserTeamRole = (row: OperationalRow): boolean => {
@@ -671,7 +703,7 @@ const TodaySchedule = () => {
           {hasActiveFilters && (
             <button
               onClick={handleResetFilters}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 text-white font-semibold shadow-sm hover:bg-rose-700 active:scale-95 px-3 py-2 text-xs transition-all ring-2 ring-rose-500/20"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 text-white font-semibold shadow-sm hover:bg-red-700 active:scale-95 px-3 py-2 text-xs transition-all ring-2 ring-red-500/20"
               title="Reset all filters"
             >
               <RotateCcw size={13} />
@@ -701,14 +733,14 @@ const TodaySchedule = () => {
         {/* Delayed / Overdue */}
         <div
           onClick={() => setActiveTab(activeTab === "delayed" ? "all" : "delayed")}
-          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "delayed" ? "border-rose-500 ring-2 ring-rose-500/20 bg-rose-500/5" : "border-border/80"
+          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "delayed" ? "border-red-500 ring-2 ring-red-500/20 bg-red-500/5" : "border-border/80"
             }`}
         >
           <div>
             <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">Delayed</p>
-            <p className="text-2xl font-bold text-rose-600 dark:text-rose-400 mt-1">{kpis.delayed}</p>
+            <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1">{kpis.delayed}</p>
           </div>
-          <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-600 border border-rose-500/20">
+          <div className="p-2.5 rounded-xl bg-red-500/10 text-red-600 border border-red-500/20">
             <AlertTriangle size={20} />
           </div>
         </div>
@@ -716,14 +748,14 @@ const TodaySchedule = () => {
         {/* In-Progress */}
         <div
           onClick={() => setActiveTab(activeTab === "inProgress" ? "all" : "inProgress")}
-          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "inProgress" ? "border-sky-500 ring-2 ring-sky-500/20 bg-sky-500/5" : "border-border/80"
+          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${activeTab === "inProgress" ? "border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-500/5" : "border-border/80"
             }`}
         >
           <div>
             <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">In-Progress</p>
-            <p className="text-2xl font-bold text-sky-600 dark:text-sky-400 mt-1">{kpis.inProgress}</p>
+            <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">{kpis.inProgress}</p>
           </div>
-          <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-600 border border-sky-500/20">
+          <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 border border-indigo-500/20">
             <Clock size={20} />
           </div>
         </div>
@@ -785,8 +817,8 @@ const TodaySchedule = () => {
           <button
             onClick={() => setActiveTab("delayed")}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${activeTab === "delayed"
-              ? "bg-rose-600 text-white shadow-xs font-bold"
-              : "text-muted hover:text-rose-600"
+              ? "bg-red-600 text-white shadow-xs font-bold"
+              : "text-muted hover:text-red-600"
               }`}
           >
             <AlertTriangle size={12} />
@@ -795,8 +827,8 @@ const TodaySchedule = () => {
           <button
             onClick={() => setActiveTab("inProgress")}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${activeTab === "inProgress"
-              ? "bg-sky-600 text-white shadow-xs font-bold"
-              : "text-muted hover:text-sky-600"
+              ? "bg-indigo-600 text-white shadow-xs font-bold"
+              : "text-muted hover:text-indigo-600"
               }`}
           >
             <Clock size={12} />
@@ -1024,7 +1056,7 @@ const TodaySchedule = () => {
                     <tr
                       key={row.id}
                       className={`hover:bg-surface/60 transition-colors ${row.isDelayed
-                        ? "bg-rose-500/5 hover:bg-rose-500/10"
+                        ? "bg-red-500/5 hover:bg-red-500/10"
                         : row.isTodayPlanned
                           ? "bg-violet-500/5 hover:bg-violet-500/10"
                           : ""
@@ -1094,7 +1126,7 @@ const TodaySchedule = () => {
                         <span
                           className={
                             row.isDelayed
-                              ? "text-rose-600 font-bold"
+                              ? "text-red-600 font-bold"
                               : row.isTodayPlanned
                                 ? "text-violet-600 font-bold"
                                 : "text-muted"
@@ -1128,7 +1160,7 @@ const TodaySchedule = () => {
                       <td className="px-3.5 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
                           {row.isDelayed && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30">
                               <AlertTriangle size={11} />
                               Delayed ({row.delayDays}d)
                             </span>
@@ -1155,7 +1187,14 @@ const TodaySchedule = () => {
                             </span>
                           )}
 
-                          {!row.isDelayed && !row.isTodayPlanned && !row.isCompleted && !row.isYTS && (
+                          {row.isInProgress && !row.isDelayed && !row.isTodayPlanned && !row.isCompleted && !row.isYTS && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                              <Clock size={11} />
+                              In-Progress
+                            </span>
+                          )}
+
+                          {!row.isDelayed && !row.isTodayPlanned && !row.isCompleted && !row.isYTS && !row.isInProgress && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-surface text-muted border border-border">
                               {row.stageStatus}
                             </span>
@@ -1203,7 +1242,7 @@ const TodaySchedule = () => {
               {hasActiveFilters && (
                 <button
                   onClick={handleResetFilters}
-                  className="inline-flex items-center gap-1 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 px-2 py-0.5 text-[11px] font-semibold border border-rose-500/20 transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1 rounded-md bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 px-2 py-0.5 text-[11px] font-semibold border border-red-500/20 transition-all cursor-pointer"
                 >
                   <RotateCcw size={11} />
                   Clear filters
