@@ -33,7 +33,21 @@ function InfoField({ label, value }: { label: string; value: string | number | n
   )
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+const PROJECT_TYPE_LABEL_MAP: Record<string, string> = {
+  'TX': 'Text-TX',
+  'WB': 'Whole Book-WB',
+  'ANC': 'Ancillary content - ANC',
+  'PPT': 'PPT',
+  'ART': 'ART',
+  'Text-TX': 'Text-TX',
+  'Whole Book-WB': 'Whole Book-WB',
+  'Ancillary content - ANC': 'Ancillary content - ANC',
+}
+
+function formatProjectType(val: string | null | undefined): string {
+  if (!val) return '—'
+  return PROJECT_TYPE_LABEL_MAP[val] || val
+}
 
 interface EditForm {
   composition: string
@@ -47,6 +61,7 @@ interface EditForm {
   reason: string
   billing_location: string
   billing_type: string
+  project_type: string
   alt_text: string
   accessibility: string
   isbn_no: string
@@ -73,6 +88,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
     reason: '',
     billing_location: '',
     billing_type: '',
+    project_type: '',
     alt_text: '',
     accessibility: '',
     isbn_no: '',
@@ -112,6 +128,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         reason: '',
         billing_location: project.billing_location ?? '',
         billing_type: project.billing_type ?? '',
+        project_type: (project as any).project_type ?? '',
         alt_text: project.alt_text ?? '',
         accessibility: project.accessibility ?? '',
         isbn_no: project.isbn_no ?? '',
@@ -179,6 +196,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         due_date: form.due_date ? form.due_date : null,
         billing_location: form.billing_location || null,
         billing_type: form.billing_type || null,
+        project_type: form.project_type || null,
         alt_text: form.alt_text || null,
         accessibility: form.accessibility || null,
         isbn_no: form.isbn_no || null,
@@ -244,6 +262,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         <InfoField label="Division Code" value={project.division_code} />
         <InfoField label="Customer Contact" value={project.customer_contact} />
         <InfoField label="Category" value={project.category} />
+        <InfoField label="Project Type" value={formatProjectType(project.project_type ?? form.project_type)} />
         <InfoField label="Composition" value={project.composition} />
         <InfoField label="Workflow" value={project.workflow_name} />
         <InfoField label="Project Manager" value={project.project_manager ? useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager) : '—'} />
@@ -305,6 +324,19 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
               value={form.isbn_no}
               onChange={e => set('isbn_no', e.target.value)}
               placeholder="e.g. 978-3-16-148410-0"
+            />
+            <Select
+              label="Project Type"
+              value={form.project_type}
+              onChange={e => set('project_type', e.target.value)}
+              options={[
+                { value: 'TX', label: 'Text-TX' },
+                { value: 'WB', label: 'Whole Book-WB' },
+                { value: 'ANC', label: 'Ancillary content - ANC' },
+                { value: 'PPT', label: 'PPT' },
+                { value: 'ART', label: 'ART' },
+              ]}
+              placeholder="Select project type"
             />
           </>
         )}
@@ -422,10 +454,10 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isPdf ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
-                          isExcel ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
-                            isWord ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
-                              isZip ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
-                                'bg-gray-500/10 text-gray-600 dark:text-gray-400'
+                        isExcel ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                          isWord ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
+                            isZip ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                              'bg-gray-500/10 text-gray-600 dark:text-gray-400'
                         }`}>
                         {isPdf && <FileText size={16} />}
                         {isExcel && <FileSpreadsheet size={16} />}
@@ -441,10 +473,10 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
                             {doc.filename}
                           </p>
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${doc.category === 'PO Document'
-                              ? 'bg-primary/10 text-primary border-primary/20'
-                              : doc.category === 'Extracted PO Data'
-                                ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
-                                : 'bg-muted/10 text-muted border-border'
+                            ? 'bg-primary/10 text-primary border-primary/20'
+                            : doc.category === 'Extracted PO Data'
+                              ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
+                              : 'bg-muted/10 text-muted border-border'
                             }`}>
                             {doc.category}
                           </span>

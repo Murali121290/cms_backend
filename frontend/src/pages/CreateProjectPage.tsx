@@ -43,6 +43,14 @@ const PO_VENDOR_HINTS: Record<string, string> = {
   springer: 'Springer Publishing',
 }
 
+const PROJECT_TYPE_OPTIONS = [
+  { value: 'TX', label: 'Text-TX' },
+  { value: 'WB', label: 'Whole Book-WB' },
+  { value: 'ANC', label: 'Ancillary content - ANC' },
+  { value: 'PPT', label: 'PPT' },
+  { value: 'ART', label: 'ART' },
+]
+
 function humanizeKey(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
@@ -673,6 +681,7 @@ export function CreateProjectPage() {
       if (form.isbn_no) formData.append('isbn_no', form.isbn_no)
       if (form.billing_location) formData.append('billing_location', form.billing_location)
       if (form.billing_type) formData.append('billing_type', form.billing_type)
+      if (form.project_type) formData.append('project_type', form.project_type)
       if (form.alt_text) formData.append('alt_text', form.alt_text)
       if (form.accessibility) formData.append('accessibility', form.accessibility)
       if (form.due_date) formData.append('due_date', form.due_date)
@@ -860,6 +869,13 @@ export function CreateProjectPage() {
               value={form.category ?? ''}
               onChange={e => set('category', e.target.value)}
               placeholder="e.g. Book, Journal, Report"
+            />
+            <Select
+              label="Project Type"
+              value={form.project_type ?? ''}
+              onChange={e => set('project_type', e.target.value || null)}
+              options={PROJECT_TYPE_OPTIONS}
+              placeholder="Select project type"
             />
             <Select
               label="Composition"
