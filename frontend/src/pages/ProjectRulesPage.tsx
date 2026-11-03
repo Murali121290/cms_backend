@@ -33,7 +33,7 @@ import {
   CircleX,
   Stethoscope,
 } from 'lucide-react'
-import { rulesApi, type LanguageRule, type RuleHistoryEntry, type RuleOverrides, type ToolBehaviour, type Audience, type MedicalStyleProfile } from '@/api/rulesApi'
+import { rulesApi, type LanguageRule, type RuleHistoryEntry, type RuleOverrides, type ToolBehaviour, type Audience, type MedicalStyleProfile, type DocumentVariant } from '@/api/rulesApi'
 import { RuleDetails } from '@/features/language_edit/RuleDetails'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
@@ -199,6 +199,11 @@ export function ProjectRulesPage() {
   // always fire; the subprofiles stay silent until the project opts in.
   const [medicalStyleProfile, setMedicalStyleProfile] = useState<MedicalStyleProfile>('All')
   const [initialMedicalStyleProfile, setInitialMedicalStyleProfile] = useState<MedicalStyleProfile>('All')
+  // UK/US Spelling workbook (S-D): per-project document variant.
+  // Default inferred by the backend from profile_keys[0]; user can
+  // explicitly pick en-GB-oxendict for Oxford-spelled UK projects.
+  const [documentVariant, setDocumentVariant] = useState<DocumentVariant>('en-GB')
+  const [initialDocumentVariant, setInitialDocumentVariant] = useState<DocumentVariant>('en-GB')
   const [profileKeys, setProfileKeys] = useState<string[]>(['uk'])
   const [profileChoices, setProfileChoices] = useState<string[]>([])
   const [availableProfiles, setAvailableProfiles] = useState<Record<string, any>>({})
@@ -243,6 +248,7 @@ export function ProjectRulesPage() {
           .concat((wbBuckets.hyphenation ?? []) as LanguageRule[])
           .concat((wbBuckets.abbreviations ?? []) as LanguageRule[])
           .concat((wbBuckets.medical_terms ?? []) as LanguageRule[])
+          .concat((wbBuckets.uk_us_spelling ?? []) as LanguageRule[])
           .concat((wbBuckets.custom ?? []) as LanguageRule[])
         setWorkbookRules(wb)
         const overrides = (data.active_rules?.rule_overrides ?? {}) as RuleOverrides
@@ -257,6 +263,8 @@ export function ProjectRulesPage() {
         setScopeReset(sr); setInitialScopeReset(sr)
         const msp: MedicalStyleProfile = (data.active_rules?.medical_style_profile as MedicalStyleProfile) ?? 'All'
         setMedicalStyleProfile(msp); setInitialMedicalStyleProfile(msp)
+        const dv: DocumentVariant = (data.active_rules?.document_variant as DocumentVariant) ?? 'en-GB'
+        setDocumentVariant(dv); setInitialDocumentVariant(dv)
         const keys = (data.active_rules?.profile_keys && data.active_rules.profile_keys.length)
           ? data.active_rules.profile_keys
           : [data.active_rules?.profile_key ?? 'uk']
@@ -383,13 +391,15 @@ export function ProjectRulesPage() {
     if (minUses !== initialMinUses) settingsChanged++
     if (scopeReset !== initialScopeReset) settingsChanged++
     if (medicalStyleProfile !== initialMedicalStyleProfile) settingsChanged++
+    if (documentVariant !== initialDocumentVariant) settingsChanged++
     return {
       added, removed, changedBehaviour,
       total: added + removed + changedBehaviour + settingsChanged,
     }
   }, [rules, initialRules, ruleOverrides, initialOverrides,
       audience, initialAudience, minUses, initialMinUses, scopeReset, initialScopeReset,
-      medicalStyleProfile, initialMedicalStyleProfile])
+      medicalStyleProfile, initialMedicalStyleProfile,
+      documentVariant, initialDocumentVariant])
 
   /** Rebuild the rule union when the selected styles change.
    *  - Preserves existing enabled/disabled flags for rule IDs that stay in the union.
@@ -529,12 +539,18 @@ export function ProjectRulesPage() {
     setMinUses(initialMinUses)
     setScopeReset(initialScopeReset)
     setMedicalStyleProfile(initialMedicalStyleProfile)
+    setDocumentVariant(initialDocumentVariant)
     setDirty(false)
   }
 
   function changeMedicalStyleProfile(next: MedicalStyleProfile) {
     if (!canEdit) return
     setMedicalStyleProfile(next); setDirty(true)
+  }
+
+  function changeDocumentVariant(next: DocumentVariant) {
+    if (!canEdit) return
+    setDocumentVariant(next); setDirty(true)
   }
 
   // Phase E settings handlers — all mark the page dirty so the floating
@@ -575,6 +591,7 @@ export function ProjectRulesPage() {
         min_uses: minUses,
         scope_reset: scopeReset,
         medical_style_profile: medicalStyleProfile,
+        document_variant: documentVariant,
       })
       setInitialRules(rules.map((r) => ({ ...r })))
       setInitialOverrides(JSON.parse(JSON.stringify(ruleOverrides)))
@@ -582,6 +599,7 @@ export function ProjectRulesPage() {
       setInitialMinUses(minUses)
       setInitialScopeReset(scopeReset)
       setInitialMedicalStyleProfile(medicalStyleProfile)
+      setInitialDocumentVariant(documentVariant)
       setDirty(false)
       pushToast('success', `Saved · ${counts.enabled}/${counts.total} rules enabled`)
     } catch (err: any) {
@@ -956,6 +974,32 @@ export function ProjectRulesPage() {
                     <option value="UK spelling">UK spelling</option>
                     <option value="Possessive">Possessive eponyms (Alzheimer's)</option>
                     <option value="Nonpossessive">Nonpossessive eponyms (Alzheimer)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Spelling settings — direction for the UK/US workbook */}
+          {counts.byCat.spelling.total > 0 && (
+            <div>
+              <h3 className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 mb-2 mt-4">
+                Spelling
+              </h3>
+              <div className="space-y-3 px-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1" title="Drives direction-aware US/UK findings. en-GB: standard UK (-ise). en-US: standard US (-ize). en-GB-oxendict: UK with Oxford spelling (-ize accepted). Default is derived from the project's style profile.">
+                    Document variant
+                  </label>
+                  <select
+                    value={documentVariant}
+                    onChange={(e) => changeDocumentVariant(e.target.value as DocumentVariant)}
+                    disabled={!canEdit}
+                    className="w-full border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-sky-200 focus:border-sky-300 disabled:opacity-50"
+                  >
+                    <option value="en-US">en-US (US spelling)</option>
+                    <option value="en-GB">en-GB (UK standard, -ise)</option>
+                    <option value="en-GB-oxendict">en-GB-oxendict (UK Oxford, -ize)</option>
                   </select>
                 </div>
               </div>

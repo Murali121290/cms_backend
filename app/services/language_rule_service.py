@@ -158,6 +158,37 @@ def _validate_medical_style_profile(raw: Any) -> str:
     return s
 
 
+# UK/US Spelling workbook (S-C): per-project document variant that
+# drives direction-aware regional spelling. Default derives from
+# ``profile_keys[0]`` — uk → en-GB, us/ama → en-US — unless the user
+# explicitly selects a different variant (e.g. en-GB-oxendict for UK
+# docs that follow Oxford spelling).
+DEFAULT_DOCUMENT_VARIANT = "en-GB"
+VALID_DOCUMENT_VARIANTS = ("en-US", "en-GB", "en-GB-oxendict")
+
+
+def _default_document_variant_for(profile_keys: list[str] | None) -> str:
+    """Infer the sensible default for a project based on its style profile."""
+    if not profile_keys:
+        return DEFAULT_DOCUMENT_VARIANT
+    first = (profile_keys[0] or "").lower()
+    if first in ("us", "ama", "apa", "chicago"):
+        return "en-US"
+    return "en-GB"
+
+
+def _validate_document_variant(raw: Any) -> str:
+    if raw is None:
+        return DEFAULT_DOCUMENT_VARIANT
+    s = str(raw).strip()
+    if s not in VALID_DOCUMENT_VARIANTS:
+        raise ValueError(
+            f"Invalid document_variant {raw!r}; "
+            f"expected one of {VALID_DOCUMENT_VARIANTS}"
+        )
+    return s
+
+
 def _validate_scope_reset(raw: Any) -> bool:
     if raw is None:
         return DEFAULT_SCOPE_RESET
@@ -467,6 +498,7 @@ def save_project_language_rules(
     scope_reset: Optional[bool] = None,
     custom_rules: Optional[list[dict[str, Any]]] = None,
     medical_style_profile: Optional[str] = None,
+    document_variant: Optional[str] = None,
 ) -> dict[str, Any]:
     """Write the per-project rules selection to the project's CE Support folder.
 
@@ -543,6 +575,12 @@ def save_project_language_rules(
         # Defaults to 'All'; subprofile rules fire only when a project
         # opts in via the Rules Picker.
         "medical_style_profile": _validate_medical_style_profile(medical_style_profile),
+        # UK/US Spelling workbook (S-C): per-project document variant.
+        # When caller omits it we infer from profile_keys[0].
+        "document_variant": _validate_document_variant(
+            document_variant if document_variant is not None
+            else _default_document_variant_for(pkeys)
+        ),
     }
 
     file_path = get_project_language_rules_path(project.project_code)
@@ -717,6 +755,17 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
                     )
                 except ValueError:
                     data["medical_style_profile"] = DEFAULT_MEDICAL_STYLE_PROFILE
+                # UK/US Spelling workbook (S-C): default + validate.
+                try:
+                    data["document_variant"] = _validate_document_variant(
+                        data.get("document_variant")
+                        if data.get("document_variant") is not None
+                        else _default_document_variant_for(data.get("profile_keys"))
+                    )
+                except ValueError:
+                    data["document_variant"] = _default_document_variant_for(
+                        data.get("profile_keys")
+                    )
                 return data
             except Exception as exc:
                 logger.warning("Error reading language rules JSON at %s: %s", file_path, exc)
@@ -735,6 +784,7 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
     default_data["scope_reset"] = DEFAULT_SCOPE_RESET
     default_data["custom_rules"] = []
     default_data["medical_style_profile"] = DEFAULT_MEDICAL_STYLE_PROFILE
+    default_data["document_variant"] = _default_document_variant_for(default_data.get("profile_keys"))
     return default_data
 
 

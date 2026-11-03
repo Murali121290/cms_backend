@@ -1,0 +1,126 @@
+{
+  "_meta": {
+    "source_workbook": "Ninja_Inkflow_CE_US_UK_Spelling_Database.xlsx",
+    "source_sha256": "04a2505baefbc32ca0fcc305774430552869730ffac9df9ce7d1401078efb111",
+    "origin": "Ninja Inkflow CE US and UK Spelling Database"
+  },
+  "entries": [
+    {
+      "rule_id": "R-DEF",
+      "rule_name": "Definite regional mismatch",
+      "applies_when": "The found form is not accepted by the document’s dictionary and the other form is.",
+      "severity": "error",
+      "action": "flag_autocorrect",
+      "autocorrect_safe": "Y",
+      "requires_context": "N",
+      "replacement_strategy": "whole_word_preserve_case",
+      "config_dependency": "document_variant",
+      "message_template": "{found} is the {found_region} spelling; {doc_region} English uses {suggestion} ({pattern}).",
+      "notes": "Safe to apply automatically outside masked text."
+    },
+    {
+      "rule_id": "R-CTX",
+      "rule_name": "Context-dependent",
+      "applies_when": "The two forms differ by meaning or part of speech.",
+      "severity": "info or warning",
+      "action": "flag_with_context",
+      "autocorrect_safe": "N",
+      "requires_context": "Y",
+      "replacement_strategy": "context_layer",
+      "config_dependency": "context_layer_enabled",
+      "message_template": "{found} may be correct, depending on meaning or part of speech. Check against {suggestion}.",
+      "notes": "Severity is info when the found form is itself valid in the document’s dictionary, otherwise warning."
+    },
+    {
+      "rule_id": "R-STY",
+      "rule_name": "Style preference",
+      "applies_when": "The document’s dictionary also accepts the found form.",
+      "severity": "info",
+      "action": "flag_suggest",
+      "autocorrect_safe": "N",
+      "requires_context": "N",
+      "replacement_strategy": "suggest_only",
+      "config_dependency": "min_severity",
+      "message_template": "{found} is accepted in {doc_region} English. {suggestion} is the {doc_region} alternative.",
+      "notes": "Hidden unless min_severity is info. Apply only if house style requires it."
+    },
+    {
+      "rule_id": "R-ALT",
+      "rule_name": "Accepted alternative",
+      "applies_when": "Both forms are accepted in the document’s variety.",
+      "severity": "info",
+      "action": "flag_suggest",
+      "autocorrect_safe": "N",
+      "requires_context": "N",
+      "replacement_strategy": "suggest_only",
+      "config_dependency": "min_severity",
+      "message_template": "{found} and {suggestion} are both accepted.",
+      "notes": "Use for consistency checks within a document."
+    },
+    {
+      "rule_id": "R-UNV",
+      "rule_name": "Unverified entry",
+      "applies_when": "The pair follows the documented pattern but is not in the dictionary word lists.",
+      "severity": "warning",
+      "action": "flag_suggest",
+      "autocorrect_safe": "N",
+      "requires_context": "N",
+      "replacement_strategy": "suggest_only",
+      "config_dependency": "none",
+      "message_template": "{found} follows the {doc_region} pattern for {suggestion}, but the pair is not dictionary-checked.",
+      "notes": "Never autocorrect. Review before promoting to dictionary_checked or verified."
+    },
+    {
+      "rule_id": "R-DSP",
+      "rule_name": "Disputed record",
+      "applies_when": "The record is marked disputed, so the form cannot be corrected automatically in either direction.",
+      "severity": "warning",
+      "action": "flag_suggest",
+      "autocorrect_safe": "N",
+      "requires_context": "N",
+      "replacement_strategy": "suggest_only",
+      "config_dependency": "none",
+      "message_template": "{found} is not the usual {doc_region} spelling, but the record is disputed. Suggested form: {suggestion}.",
+      "notes": "Never autocorrect. Review the record and the house style."
+    },
+    {
+      "rule_id": "R-OXF",
+      "rule_name": "Oxford -ize policy",
+      "applies_when": "Document variant is en-GB-oxendict and an -ise form is found.",
+      "severity": "warning",
+      "action": "flag_suggest",
+      "autocorrect_safe": "N",
+      "requires_context": "N",
+      "replacement_strategy": "suggest_only",
+      "config_dependency": "document_variant=en-GB-oxendict",
+      "message_template": "{found} is the -ise form. Oxford spelling uses {suggestion}.",
+      "notes": "Applies only to the IZE_ISE pattern. The -yse verbs are unchanged."
+    },
+    {
+      "rule_id": "R-MIX",
+      "rule_name": "Mixed US and UK forms",
+      "applies_when": "A document contains definite US forms and definite UK forms.",
+      "severity": "warning",
+      "action": "report_only",
+      "autocorrect_safe": "N",
+      "requires_context": "N",
+      "replacement_strategy": "none",
+      "config_dependency": "document_variant",
+      "message_template": "This document mixes US and UK spellings ({us_forms} US, {uk_forms} UK). Examples: {examples}.",
+      "notes": "Document-level message. Use it to confirm the intended variant."
+    },
+    {
+      "rule_id": "R-PROT",
+      "rule_name": "Protected term",
+      "applies_when": "The span matches an entry in Protected_Terms or the document’s own protected names.",
+      "severity": "none",
+      "action": "ignore",
+      "autocorrect_safe": "N",
+      "requires_context": "N",
+      "replacement_strategy": "none",
+      "config_dependency": "extra_protected",
+      "message_template": null,
+      "notes": "Masks the span before lookup. Matching is exact and case-sensitive."
+    }
+  ]
+}

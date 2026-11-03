@@ -1,0 +1,252 @@
+{
+  "_meta": {
+    "source_workbook": "Ninja_Inkflow_CE_US_UK_Spelling_Database.xlsx",
+    "source_sha256": "04a2505baefbc32ca0fcc305774430552869730ffac9df9ce7d1401078efb111",
+    "origin": "Ninja Inkflow CE US and UK Spelling Database"
+  },
+  "entries": [
+    {
+      "term_id": "PT-001",
+      "term": "World Health Organization",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Organization",
+      "reason": "Official English name of the United Nations agency. It keeps the -ize spelling even in UK text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-002",
+      "term": "International Organization for Standardization",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Organization",
+      "reason": "Official English name; keeps the -ize spelling in UK text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-003",
+      "term": "Centers for Disease Control and Prevention",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Centers",
+      "reason": "Name of a US federal agency; uses the US -er spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-004",
+      "term": "Department of Defense",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Defense",
+      "reason": "Name of the US federal department; uses the US -se spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-005",
+      "term": "Department of Labor",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Labor",
+      "reason": "Name of the US federal department; uses the US -or spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-006",
+      "term": "Ministry of Defence",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Defence",
+      "reason": "Name of the UK government department; uses the UK -ce spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-007",
+      "term": "Defence Science and Technology Laboratory",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Defence",
+      "reason": "Name of a UK government laboratory; uses the UK -ce spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-008",
+      "term": "Labour Party",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Labour",
+      "reason": "Name of a UK political party; uses the UK -our spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-009",
+      "term": "Australian Labor Party",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Labor",
+      "reason": "Name of an Australian political party; uses the -or spelling in an English document of any variant.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-010",
+      "term": "Lincoln Center",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Center",
+      "reason": "Name of a US arts venue; uses the US -er spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-011",
+      "term": "Kennedy Center",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Center",
+      "reason": "Name of a US arts venue; uses the US -er spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-012",
+      "term": "Center Parcs",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Center",
+      "reason": "Brand name of a holiday company; uses the -er spelling in UK text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-013",
+      "term": "National Theatre",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Theatre",
+      "reason": "Name of a UK theatre company; uses the UK -re spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-014",
+      "term": "Theatre Royal",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Theatre",
+      "reason": "Name used by several UK theatres; uses the UK -re spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-015",
+      "term": "Gray’s Anatomy",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Gray",
+      "reason": "Title of a medical textbook; keeps the gray spelling in UK text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-016",
+      "term": "Grey’s Anatomy",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Grey",
+      "reason": "Title of a television series; keeps the grey spelling in US text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-017",
+      "term": "The Aluminum Association",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Aluminum",
+      "reason": "Name of a US trade body; uses the US spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-018",
+      "term": "Society of Dyers and Colourists",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Colourists",
+      "reason": "Name of a UK professional body; uses the UK -our spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-019",
+      "term": "Colour Index International",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Colour",
+      "reason": "Name of a publication of that society; uses the UK -our spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-020",
+      "term": "Fibre Channel",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Fibre",
+      "reason": "Name of a networking standard; uses the -re spelling in US text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-021",
+      "term": "Analog Devices",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Analog",
+      "reason": "Company name; uses the US spelling in UK text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-022",
+      "term": "Harbor Freight Tools",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Harbor",
+      "reason": "Company name (trademark); uses the US spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-023",
+      "term": "Neighborhood Watch",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Neighborhood",
+      "reason": "Programme name; uses the US spelling in US usage.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-024",
+      "term": "rigor mortis",
+      "match_type": "exact_phrase",
+      "case_sensitive": false,
+      "spelling_involved": "rigor",
+      "reason": "Latin medical phrase; spelled the same in UK and US text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-025",
+      "term": "Labor Day",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Labor",
+      "reason": "Name of a US holiday; keeps the US spelling.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-026",
+      "term": "Sydney Harbour Bridge",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Harbour",
+      "reason": "Name of a landmark; keeps the -our spelling in US text.",
+      "validation_status": "needs_review"
+    },
+    {
+      "term_id": "PT-027",
+      "term": "Prolog",
+      "match_type": "exact_phrase",
+      "case_sensitive": true,
+      "spelling_involved": "Prolog",
+      "reason": "Name of a programming language; not the same word as prologue.",
+      "validation_status": "needs_review"
+    }
+  ]
+}
