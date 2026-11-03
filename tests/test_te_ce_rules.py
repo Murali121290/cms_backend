@@ -148,3 +148,143 @@ def test_ranges_multi_options():
     assert opts["2"] == "10 to 15"
     assert opts["4"] == "10 – 15"
     assert opts["5"] is None  # matches surface "10-15"
+
+
+def test_ampm_multi_options_and_selection_against_remaining():
+    """Verify that when any AM/PM option is selected, all remaining unselected variants
+    are suggested for replacement to the selected option, while matching variants have None."""
+    # Detection of various AM/PM forms in text
+    sample_text = (
+        "Starts at 10:00 a.m. and 9:00 a.m and 8:30 am, then 5:00 A.M. and 6:00 A.M, "
+        "ending at 4:00 PM and 3:30 pm and 2:00 p.m. and 1:00 p.m and 12:00 p.m."
+    )
+    findings_map = _findings(sample_text)
+    
+    # 1. Option 4 selected: 12-hour uppercase (AM / PM)
+    for surface, target_clean in [
+        ("10:00 a.m.", "10:00 AM"),
+        ("9:00 a.m", "9:00 AM"),
+        ("8:30 am", "8:30 AM"),
+        ("5:00 A.M.", "5:00 AM"),
+        ("6:00 A.M", "6:00 AM"),
+        ("3:30 pm", "3:30 PM"),
+        ("2:00 p.m.", "2:00 PM"),
+        ("1:00 p.m", "1:00 PM"),
+    ]:
+        f = findings_map[surface]
+        assert f["option_replacements"]["4"] == target_clean, f"Failed for {surface}"
+    # Compliant variant has None under Option 4
+    assert findings_map["4:00 PM"]["option_replacements"]["4"] is None
+
+    # 2. Option 3 selected: 12-hour undotted lowercase (am / pm)
+    for surface, target_clean in [
+        ("10:00 a.m.", "10:00 am"),
+        ("5:00 A.M.", "5:00 am"),
+        ("4:00 PM", "4:00 pm"),
+        ("2:00 p.m.", "2:00 pm"),
+    ]:
+        f = findings_map[surface]
+        assert f["option_replacements"]["3"] == target_clean, f"Failed for {surface}"
+    assert findings_map["8:30 am"]["option_replacements"]["3"] is None
+    assert findings_map["3:30 pm"]["option_replacements"]["3"] is None
+
+    # 3. Option 1 selected: 12-hour dotted lowercase (a.m. / p.m.)
+    for surface, target_clean in [
+        ("8:30 am", "8:30 a.m."),
+        ("4:00 PM", "4:00 p.m."),
+        ("5:00 A.M.", "5:00 a.m."),
+    ]:
+        f = findings_map[surface]
+        assert f["option_replacements"]["1"] == target_clean, f"Failed for {surface}"
+    assert findings_map["10:00 a.m."]["option_replacements"]["1"] is None
+    assert findings_map["2:00 p.m."]["option_replacements"]["1"] is None
+
+    # 4. Option 2 selected: 24-hour military/scientific
+    assert findings_map["10:00 a.m."]["option_replacements"]["2"] == "10:00"
+    assert findings_map["4:00 PM"]["option_replacements"]["2"] == "16:00"
+
+
+def test_figure_table_multi_options():
+    """Verify that Figure and Table citations support spelled out, dotted, and undotted abbreviations."""
+    sample = "See Fig. 4.1 and Figure 4.2 and Figs 4.1 to 4.4. Also Tab. 1.1 and Table 1.2."
+    f_map = _findings(sample)
+    
+    # Figure 4.1
+    f_fig = f_map["Fig. 4.1"]
+    assert f_fig["option_replacements"]["1"] == "Figure 4.1"
+    assert f_fig["option_replacements"]["2"] is None  # matches surface Fig. 4.1
+    assert f_fig["option_replacements"]["3"] == "Fig 4.1"
+    
+    # Plural figures
+    f_figs = f_map["Figs 4.1 to 4.4"]
+    assert f_figs["option_replacements"]["1"] == "Figures 4.1 to 4.4"
+    assert f_figs["option_replacements"]["2"] == "Figs. 4.1 to 4.4"
+    assert f_figs["option_replacements"]["3"] is None  # matches surface Figs 4.1 to 4.4
+    
+    # Table 1.1
+    f_tab = f_map["Tab. 1.1"]
+    assert f_tab["option_replacements"]["1"] == "Table 1.1"
+    assert f_tab["option_replacements"]["2"] is None
+    assert f_tab["option_replacements"]["3"] == "Tab 1.1"
+
+
+def test_medical_al_endings_options():
+    """Verify that -al endings support Option 1 (-ic) and Option 2 (-al)."""
+    sample = "Both pathological and physiologic findings were documented."
+    f_map = _findings(sample)
+    
+    f_path = f_map["pathological"]
+    assert f_path["option_replacements"]["1"] == "pathologic"
+    assert f_path["option_replacements"]["2"] is None  # matches surface
+    assert f_path["option_replacements"]["3"] == "QUERY"
+
+    f_phys = f_map["physiologic"]
+    assert f_phys["option_replacements"]["1"] is None  # matches surface
+    assert f_phys["option_replacements"]["2"] == "physiological"
+    assert f_phys["option_replacements"]["3"] == "QUERY"
+
+
+def test_leading_zero_and_fractions_options():
+    """Verify leading zero and fraction options."""
+    sample = "A dose of .5 mg or ½ tablet was administered."
+    f_map = _findings(sample)
+    
+    f_zero = f_map[".5"]
+    assert f_zero["option_replacements"]["1"] == "0.5"
+    assert f_zero["option_replacements"]["2"] is None
+
+    f_fract = f_map["½"]
+    assert f_fract["option_replacements"]["1"] == "1/2"
+    assert f_fract["option_replacements"]["2"] == "one-half"
+
+
+def test_te_point_replacement_options_fixes():
+    from manuscript_core.rules.te_point_replacements import get_te_replacement, get_te_replacement_options
+    import re
+
+    # 1. Comparison operators must not match "cm" unit
+    m_more = re.search(r"more than", "infants support more than 70% of weight")
+    opts_more = get_te_replacement_options("cmp_more_words", m_more)
+    assert "cm" not in opts_more
+    assert opts_more == [">", "greater than", "more than"]
+
+    m_less = re.search(r"less than", "less than 5 mg")
+    opts_less = get_te_replacement_options("cmp_less_words", m_less)
+    assert "cm" not in opts_less
+    assert opts_less == ["<", "less than"]
+
+    # 2. Percentage formatting with decimals
+    m_pct = re.search(r"0\.88%", "achieve goals (0.88%)")
+    opts_pct = get_te_replacement_options("percent_symbol", m_pct)
+    assert opts_pct == ["0.88%", "0.88 %", "0.88 percent", "0.88 per cent", "0.88 percentage points"]
+
+    # 3. Leading zero replacement retains decimal digits
+    m_lz = re.search(r"\.55", "values (.55)")
+    assert get_te_replacement("leading_zero_missing", m_lz) == "0.55"
+
+    m_lz_p = re.search(r"0\.55", "values (0.55)")
+    assert get_te_replacement("leading_zero_present", m_lz_p) == ".55"
+
+    # 4. SI unit matches only unit_* rules
+    m_cm = re.search(r"\bcm\b", "5 cm")
+    assert get_te_replacement_options("unit_cm_abbr", m_cm) == ["cm", "centimetre"]

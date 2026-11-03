@@ -1,10 +1,3 @@
-"""Match technical-review findings to a selection of IA template rows (a project or journal style sheet).
-
-Used by the book Technical Review API (to mark findings `in_stylesheet`), by the fix job, and by
-the journal Pre-Editing IA rules step (to keep only the selected rules). Also applies the
-stylesheet's CE checklist settings (option, on/off, severity) to every checklist finding, and the
-selection's preferred forms to range and thousand-separator replacements.
-"""
 import re
 from typing import Dict, Iterable, List, Optional
 
@@ -20,7 +13,7 @@ def _rule_id_to_ia(rule_id_to_ia: Optional[Dict]) -> Dict:
         return RULE_ID_TO_IA
     except ImportError:
         try:
-            from manuscript_core.ia_mapping import RULE_ID_TO_IA  # type: ignore
+            from manuscript_core.ia_mapping import RULE_ID_TO_IA
             return RULE_ID_TO_IA
         except ImportError:
             return {}
@@ -30,17 +23,11 @@ def _ce_rules_module():
     try:
         from app.processing.manuscript_core.rules import ce_rules
     except ImportError:
-        from manuscript_core.rules import ce_rules  # type: ignore
+        from manuscript_core.rules import ce_rules
     return ce_rules
 
 
 def apply_ce_settings(findings: List[dict], selected_rows: Iterable[dict] = (), ce_rules: Optional[dict] = None) -> List[dict]:
-    """Re-pick the replacement of every checklist finding from the stylesheet's CE settings.
-
-    Findings are the cached scan dicts; only those with a `ce_rule_no` change. A rule switched
-    off gets `ce_enabled=False` and no replacement; a review-only or query option gets no
-    replacement (the finding is highlighted) and `ce_query` when the option is an author query.
-    """
     ce = _ce_rules_module()
     resolved = ce.resolve_ce_config(list(selected_rows or []), ce_rules or {})
     for f in findings:
@@ -65,30 +52,14 @@ def annotate_with_stylesheet(
     rule_id_to_ia: Optional[Dict] = None,
     ce_rules: Optional[dict] = None,
 ) -> List[dict]:
-    """Set finding["in_stylesheet"] for each finding and apply the stylesheet's preferred forms.
-
-    A finding matches when its rule maps to a selected (element, subtype, pattern) row, or, as a
-    fallback, when its category equals a selected row's subtype. Checklist findings take their
-    replacement from the stylesheet's CE settings, and a checklist rule switched off is never
-    in the stylesheet. Mutates and returns `findings`.
-    """
     rows = list(selected_rows or [])
     exact = {(r.get("element"), r.get("subtype"), r.get("pattern")) for r in rows}
     subtypes = {(r.get("subtype") or "").lower() for r in rows if r.get("subtype")}
+    elements = {r.get("element") for r in rows if r.get("element")}
     mapping = _rule_id_to_ia(rule_id_to_ia)
 
-    for f in findings:
-        ia_row = mapping.get(f.get("rule_id"))
-        matched = isinstance(ia_row, (tuple, list)) and len(ia_row) >= 3 and (ia_row[0], ia_row[1], ia_row[2]) in exact
-        if not matched:
-            cat = (f.get("category") or "").lower()
-            matched = bool(cat and cat in subtypes)
-        f["in_stylesheet"] = matched
-
+    # First, apply CE settings to resolve option, replacement, and enabled flag
     apply_ce_settings(findings, rows, ce_rules)
-    for f in findings:
-        if f.get("ce_rule_no") and not f.get("ce_enabled", True):
-            f["in_stylesheet"] = False
 
     preferred: Dict[str, set] = {}
     for r in rows:
@@ -96,8 +67,41 @@ def annotate_with_stylesheet(
             preferred.setdefault(r["element"], set()).add(r["pattern"])
 
     for f in findings:
+        ia_row = mapping.get(f.get("rule_id"))
+        has_ia = isinstance(ia_row, (tuple, list)) and len(ia_row) >= 3
+        elem = ia_row[0] if has_ia else None
+        patt = ia_row[2] if has_ia else None
+
+        # Determine in_stylesheet
         if f.get("ce_rule_no"):
-            continue  # ranges (R14) and thousands (R11) follow the CE option instead
+            if not f.get("ce_enabled", True):
+                f["in_stylesheet"] = False
+            else:
+                # Rule is enabled. It is in stylesheet if it matches an exact row,
+                # or if it has an active replacement / query under the stylesheet option,
+                # or if its element is in the stylesheet.
+                if (has_ia and (ia_row[0], ia_row[1], ia_row[2]) in exact) or f.get("replacement") is not None or f.get("ce_query"):
+                    f["in_stylesheet"] = True
+                elif elem and elem in elements:
+                    f["in_stylesheet"] = True
+                else:
+                    cat = (f.get("category") or "").lower()
+                    f["in_stylesheet"] = bool(cat and cat in subtypes)
+        else:
+            # Non-checklist finding
+            if has_ia and (ia_row[0], ia_row[1], ia_row[2]) in exact:
+                f["in_stylesheet"] = True
+            elif elem and elem in elements:
+                # Element is configured in stylesheet, this is a finding in that element
+                f["in_stylesheet"] = True
+            else:
+                cat = (f.get("category") or "").lower()
+                f["in_stylesheet"] = bool(cat and cat in subtypes)
+
+    # Non-checklist rule replacements based on IA preferred rows
+    for f in findings:
+        if f.get("ce_rule_no"):
+            continue
         rule_id, surface = f.get("rule_id", ""), f.get("surface", "")
         if rule_id in RANGE_RULES and preferred.get("Ranges"):
             pref = next(iter(preferred["Ranges"])).lower()

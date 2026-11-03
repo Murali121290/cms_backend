@@ -69,10 +69,57 @@ IA_ROW_TO_CE: dict[tuple[str, str], tuple[int, int]] = {
     ("(-al) endings", "(-al) endings"): (40, 2),
     ("UK date", "D Mon YYYY (long form)"): (17, 1),
     ("US date", "Month D, YYYY (long form)"): (17, 2),
-    ("Table", "Table ^#.^#"): (75, 1),
-    ("Table", "Table ^#-^#"): (75, 1),
-    ("Figure", "Figure ^#.^#"): (76, 1),
-    ("Figure", "Figure ^#-^#"): (76, 1),
+    ("Periods", "am"): (19, 3),
+    ("Periods", "pm"): (19, 3),
+    ("Periods", "AM"): (19, 4),
+    ("Periods", "PM"): (19, 4),
+    ("Periods", "a.m."): (19, 1),
+    ("Periods", "p.m."): (19, 1),
+    ("Periods", "a.m"): (19, 1),
+    ("Periods", "p.m"): (19, 1),
+    ("Periods", "A.M."): (19, 4),
+    ("Periods", "P.M."): (19, 4),
+    ("Periods", "A.M"): (19, 4),
+    ("Periods", "P.M"): (19, 4),
+    ("Table", "Table ^#"): (71, 1),
+    ("Table", "Table ^#.^#"): (71, 1),
+    ("Table", "Table ^#-^#"): (71, 1),
+    ("Table", "Tables ^#.^# to ^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^# and ^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^# & ^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^#-^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^#–^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^# through ^#.^#"): (71, 1),
+    ("Table", "Tab ^#"): (71, 2),
+    ("Table", "Tab ^#.^#"): (71, 2),
+    ("Table", "Tab ^#-^#"): (71, 2),
+    ("Table", "Tabs ^#.^# to ^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^# and ^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^# & ^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^#-^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^#–^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^# through ^#.^#"): (71, 2),
+    ("Table", "table ^# (lowercase)"): (71, 4),
+    ("Figure", "Figure ^#"): (72, 1),
+    ("Figure", "Figure ^#.^#"): (72, 1),
+    ("Figure", "Figure ^#-^#"): (72, 1),
+    ("Figure", "Figures ^#.^# to ^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^# and ^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^# & ^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^#-^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^#–^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^# through ^#.^#"): (72, 1),
+    ("Figure", "Fig ^#"): (72, 2),
+    ("Figure", "Fig ^#.^#"): (72, 2),
+    ("Figure", "Fig ^#-^#"): (72, 2),
+    ("Figure", "Figs ^#.^# to ^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^# and ^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^# & ^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^#-^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^#–^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^# through ^#.^#"): (72, 2),
+    ("Figure", "figure ^# (lowercase)"): (72, 4),
+    ("Figure", "figures ^# (lowercase)"): (72, 4),
     ("Abbreviations", "Abbreviations in heading"): (34, 1),
     ("Abbreviations", "Abbreviations in FC/TC"): (81, 1),
 }
@@ -145,15 +192,24 @@ def derive_from_ia_rows(selected_rows: Iterable[dict]) -> tuple[dict[int, dict],
     derived: dict[int, dict] = {}
     conflicts: list[int] = []
     for row in selected_rows or []:
-        hit = IA_ROW_TO_CE.get((row.get("element"), row.get("pattern")))
+        elem = row.get("element")
+        subtype = (row.get("subtype") or "").lower()
+        patt = row.get("pattern")
+        hit = IA_ROW_TO_CE.get((elem, patt))
         if not hit:
             continue
         sno, option = hit
+        # Route Caption vs Citation to correct CE rules
+        if subtype == "caption" and sno in (71, 72):
+            sno = 75 if sno == 71 else 76
+        elif subtype == "citation" and sno in (75, 76):
+            sno = 71 if sno == 75 else 72
+
         if sno in derived:
             if derived[sno]["option"] != option and sno not in conflicts:
                 conflicts.append(sno)
             continue
-        derived[sno] = {"option": option, "from": f"{row.get('element')}: {row.get('pattern')}"}
+        derived[sno] = {"option": option, "from": f"{elem} ({row.get('subtype') or 'General'}): {patt}"}
     return derived, conflicts
 
 

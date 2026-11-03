@@ -23,8 +23,9 @@ def get_te_replacement(rule_id: str, m: re.Match) -> str | None:
         return "p.m."
     # 4. Leading zero
     if rule_id == "leading_zero_missing":
-        # "(?<!\d)\.(?=\d)" matches "."
-        return "0."
+        return f"0{surface.lstrip('0')}" if surface.startswith('.') else f"0{surface}"
+    if rule_id == "leading_zero_present":
+        return surface.lstrip('0')
     # 5. Spaced locators
     if rule_id == "spaced_hyphens":
         return "—"
@@ -202,10 +203,12 @@ def get_te_replacement(rule_id: str, m: re.Match) -> str | None:
 _NUM_WORDS = {1:"one",2:"two",3:"three",4:"four",5:"five",6:"six",7:"seven",8:"eight",9:"nine",10:"ten",11:"eleven",12:"twelve"}
 _ORD_WORDS = {1:"first",2:"second",3:"third",4:"fourth",5:"fifth",6:"sixth",7:"seventh",8:"eighth",9:"ninth",10:"tenth",
               11:"eleventh",12:"twelfth",13:"thirteenth",14:"fourteenth",15:"fifteenth",20:"twentieth",21:"twenty-first"}
+_NUM_DEC_RE = re.compile(r"\d+(?:\.\d+)?|\.\d+")
+
 def get_te_replacement_options(rule_id: str, m: re.Match) -> list[str]:
     """Return ordered list of valid replacement choices for editor review dropdown."""
     surface = m.group(0)
-    nums = re.findall(r'\d+', surface)
+    nums = _NUM_DEC_RE.findall(surface)
     # Percent style
     if rule_id in ("percent_symbol", "percent_word", "per_cent_word", "percent_percentage"):
         if nums:
@@ -357,14 +360,29 @@ def get_te_replacement_options(rule_id: str, m: re.Match) -> list[str]:
         return [f"{n}°F", f"{n} degrees Fahrenheit"]
     if rule_id == "degree_symbol_alone":
         return ["°C", "°F"]
+    # Figure and table references / captions
+    if rule_id.startswith(("ref_fig", "cap_fig")):
+        is_plural = any(k in rule_id for k in ("_figs_", "_figures_"))
+        label = "Figures" if is_plural else "Figure"
+        abbr = "Figs" if is_plural else "Fig"
+        num_part = re.sub(r'^[A-Za-z]+(?:\.|\b)\s*', '', surface).strip()
+        num_part = f" {num_part}" if num_part else ""
+        return [f"{label}{num_part}", f"{abbr}.{num_part}", f"{abbr}{num_part}", f"{label.lower()}{num_part}"]
+    if rule_id.startswith(("ref_tab", "cap_tab")):
+        is_plural = any(k in rule_id for k in ("_tabs_", "_tables_"))
+        label = "Tables" if is_plural else "Table"
+        abbr = "Tabs" if is_plural else "Tab"
+        num_part = re.sub(r'^[A-Za-z]+(?:\.|\b)\s*', '', surface).strip()
+        num_part = f" {num_part}" if num_part else ""
+        return [f"{label}{num_part}", f"{abbr}.{num_part}", f"{abbr}{num_part}", f"{label.lower()}{num_part}"]
     # Comparison symbols
     if rule_id in ("cmp_gte_sym", "cmp_gte_words"):
-        return ["≥", "greater than or equal to"]
+        return ["≥", ">=", "greater than or equal to"]
     if rule_id in ("cmp_lte_sym", "cmp_lte_words"):
-        return ["≤", "less than or equal to"]
-    if rule_id in ("cmp_gt_sym", "cmp_gt_words"):
-        return [">", "greater than"]
-    if rule_id in ("cmp_lt_sym", "cmp_lt_words"):
+        return ["≤", "<=", "less than or equal to"]
+    if rule_id in ("cmp_gt_sym", "cmp_gt_words", "cmp_more_words"):
+        return [">", "greater than", "more than"]
+    if rule_id in ("cmp_lt_sym", "cmp_lt_words", "cmp_less_words"):
         return ["<", "less than"]
     if rule_id in ("cmp_approx_words", "cmp_tilde"):
         return ["≈", "~", "approximately"]
@@ -382,7 +400,7 @@ def get_te_replacement_options(rule_id: str, m: re.Match) -> list[str]:
         if slash_m:
             return [surface, f"{slash_m.group(1)} per {slash_m.group(2)}"]
     # Inline list marker
-    if "list" in rule_id:
+    if rule_id.startswith("list_"):
         return ["(a)", "(1)", "(i)", "a)", "1)", "i)", "A)", "I)"]
     # SI units
     _SI = {"mg":("mg","milligram"), "kg":("kg","kilogram"),
@@ -390,7 +408,7 @@ def get_te_replacement_options(rule_id: str, m: re.Match) -> list[str]:
            "mm":("mm","millimetre"), "cm":("cm","centimetre"),
            "km":("km","kilometre")}
     for abbr, opts in _SI.items():
-        if abbr in rule_id:
+        if rule_id.startswith("unit_") and (f"unit_{abbr}_" in rule_id or rule_id == f"unit_{abbr}"):
             return list(opts)
     # Time units
     if "unit_hour" in rule_id:
@@ -410,6 +428,6 @@ def get_te_replacement_options(rule_id: str, m: re.Match) -> list[str]:
             "pao2":("PaO₂","PaO2"), "fio2":("FiO₂","FIO2"),
             "sao2":("SaO₂","SaO2"), "spo2":("SpO₂","SpO2")}
     for gas, opts in _GAS.items():
-        if gas in rule_id:
+        if rule_id.startswith("gas_") and gas in rule_id:
             return list(opts)
     return []

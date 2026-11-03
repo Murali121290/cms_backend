@@ -43,6 +43,8 @@ def build_finding(
             option_replacements = get_te_replacements_by_option(rule_id, m)
         choice = choose_replacement(surface, meta["sno"], option_replacements, ce_steps=ce_steps)
         replacement = choice["replacement"]
+        if not rep_opts and option_replacements:
+            rep_opts = [v for v in option_replacements.values() if v and v != "QUERY" and v != surface]
         nos = [meta["sno"]] + [n for n in (extra_rule_nos or []) if n != meta["sno"]]
         ce = {
             "ce_rule_no": meta["sno"],

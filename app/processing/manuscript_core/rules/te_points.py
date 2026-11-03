@@ -47,16 +47,16 @@ def detect_ellipsis(seg: Segment) -> Iterable[Finding]:
 # Rule 3: AM/PM style — split by AM vs PM and dot variant
 # ---------------------------------------------------------------------------
 AMPM_PATTERNS = [
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*A\.M\."), "ampm_am_upper_dots"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*P\.M\."), "ampm_pm_upper_dots"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*a\.m\."), "ampm_am_lower_dots"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*p\.m\."), "ampm_pm_lower_dots"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*A\.M(?!\.)\b"), "ampm_am_upper_nodot"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*P\.M(?!\.)\b"), "ampm_pm_upper_nodot"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*a\.m(?!\.)\b"), "ampm_am_lower_nodot"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*p\.m(?!\.)\b"), "ampm_pm_lower_nodot"),
     (re.compile(r"\b\d{1,2}(?::\d{2})?\s*AM\b"), "ampm_am_upper"),
     (re.compile(r"\b\d{1,2}(?::\d{2})?\s*PM\b"), "ampm_pm_upper"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*A\.M\b"), "ampm_am_upper_nodot"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*A\.M\."), "ampm_am_upper_dots"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*P\.M\b"), "ampm_pm_upper_nodot"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*P\.M\."), "ampm_pm_upper_dots"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*a\.m\b"), "ampm_am_lower_nodot"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*a\.m\."), "ampm_am_lower_dots"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*p\.m\b"), "ampm_pm_lower_nodot"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*p\.m\."), "ampm_pm_lower_dots"),
     (re.compile(r"\b\d{1,2}(?::\d{2})?\s*am\b"), "ampm_am_lower"),
     (re.compile(r"\b\d{1,2}(?::\d{2})?\s*pm\b"), "ampm_pm_lower"),
 ]
@@ -806,15 +806,16 @@ def detect_currency(seg):
 # ---------------------------------------------------------------------------
 # Rule 32: (-al) endings - Medical/Scientific terms only
 # ---------------------------------------------------------------------------
-AL_ENDING_WORDS = {
-    "biological", "chronological", "cytological", "dermatological",
-    "ecological", "embryological", "epidemiological", "etiological",
-    "gynecological", "hematological", "histological", "immunological",
-    "morphological", "oncological", "ophthalmological", "pathological",
-    "pharmacological", "radiological", "rheumatological", "sociological",
-    "symptomatological", "toxicological", "traumatological", "urological",
-    "anatomical", "physiological", "neurological"
-}
+_AL_STEMS = [
+    "biolog", "chronolog", "cytolog", "dermatolog",
+    "ecolog", "embryolog", "epidemiolog", "etiolog",
+    "gynecolog", "hematolog", "histolog", "immunolog",
+    "morpholog", "oncolog", "ophthalmolog", "patholog",
+    "pharmacolog", "radiolog", "rheumatolog", "sociolog",
+    "symptomatolog", "toxicolog", "traumatolog", "urolog",
+    "anatom", "physiolog", "neurolog"
+]
+AL_ENDING_WORDS = {s + "ic" for s in _AL_STEMS} | {s + "ical" for s in _AL_STEMS}
 AL_ENDING_PATTERNS = [
     (re.compile(r"\b(" + "|".join(AL_ENDING_WORDS) + r")\b", re.IGNORECASE), "al_endings"),
 ]
