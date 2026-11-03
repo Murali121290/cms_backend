@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, Layers, Calendar, Flag, AlertTriangle, Edit3, X, History, Sliders } from 'lucide-react'
 import { projectsApi } from '@/api/projects'
 import type { Project } from '@/api/projects'
@@ -337,6 +337,7 @@ function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: Sta
 export function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const viewer = useSessionStore(s => s.viewer)
   const { user } = useAuthStore()
   const currentUserFullName = getUserFullName(viewer) || getUserFullName(user) || null
@@ -1112,7 +1113,15 @@ export function ProjectPlanningPage() {
   }
 
   async function handleBack() {
-    navigate(-1)
+    if (location.state?.from) {
+      navigate(location.state.from)
+    } else if (window.history.length > 1) {
+      navigate(-1)
+    } else if (project?.client_id) {
+      navigate(`/clients/${project.client_id}/projects`)
+    } else {
+      navigate('/clients')
+    }
   }
 
   if (loading) return <FullPageSpinner />

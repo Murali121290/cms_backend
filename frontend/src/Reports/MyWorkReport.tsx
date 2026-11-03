@@ -360,9 +360,10 @@ export default function MyWorkReport() {
       });
 
       const pStatus = (p.status || "").toLowerCase();
-      const isCompleted = pStatus === "completed" || pStatus === "complete" || (totalChapters > 0 && completedChapters === totalChapters);
-      const isDelayed = hasDelayedStage && !isCompleted;
-      const isInProgress = !isCompleted && !isDelayed;
+      const isPlanning = pStatus === "planning" || (!hasDelayedStage && details.length === 0);
+      const isCompleted = !isPlanning && (pStatus === "completed" || pStatus === "complete" || (totalChapters > 0 && completedChapters === totalChapters));
+      const isDelayed = !isPlanning && hasDelayedStage && !isCompleted;
+      const isInProgress = !isPlanning && !isCompleted && !isDelayed;
 
       return {
         ...p,
@@ -376,6 +377,7 @@ export default function MyWorkReport() {
         designCount,
         supportCount,
         completedManuscripts,
+        isPlanning,
         isCompleted,
         isDelayed,
         isInProgress,
@@ -395,11 +397,12 @@ export default function MyWorkReport() {
   // Overall KPIs
   const kpis = useMemo(() => {
     const total = enrichedProjects.length;
+    const planning = enrichedProjects.filter((p) => p.isPlanning).length;
     const delayed = enrichedProjects.filter((p) => p.isDelayed).length;
     const inProgress = enrichedProjects.filter((p) => p.isInProgress).length;
     const completed = enrichedProjects.filter((p) => p.isCompleted).length;
 
-    return { total, delayed, inProgress, completed };
+    return { total, planning, delayed, inProgress, completed };
   }, [enrichedProjects]);
 
   // Filtered list based on search and status
@@ -412,6 +415,8 @@ export default function MyWorkReport() {
       result = result.filter((p) => p.isDelayed);
     } else if (statusFilter === "completed") {
       result = result.filter((p) => p.isCompleted);
+    } else if (statusFilter === "planning") {
+      result = result.filter((p) => p.isPlanning);
     }
 
     if (searchTerm.trim()) {
@@ -757,7 +762,7 @@ export default function MyWorkReport() {
       </div>
 
       {/* ── KPI Metric Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
         {/* Total Managed Books */}
         <div
           onClick={() => setStatusFilter("all")}
@@ -771,6 +776,24 @@ export default function MyWorkReport() {
           </div>
           <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
             <BookOpen size={20} />
+          </div>
+        </div>
+
+        {/* Planning (Cyan/Sky) */}
+        <div
+          onClick={() => setStatusFilter(statusFilter === "planning" ? "all" : "planning")}
+          className={`cursor-pointer bg-card border rounded-2xl p-4 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between ${
+            statusFilter === "planning"
+              ? "border-cyan-500 ring-2 ring-cyan-500/20 bg-cyan-500/5"
+              : "border-border/80"
+          }`}
+        >
+          <div>
+            <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">Planning</p>
+            <p className="text-2xl font-bold text-cyan-600 dark:text-cyan-400 mt-1">{kpis.planning}</p>
+          </div>
+          <div className="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
+            <Calendar size={20} />
           </div>
         </div>
 
@@ -910,7 +933,11 @@ export default function MyWorkReport() {
 
                         {/* Status Badge */}
                         <div>
-                          {p.isCompleted ? (
+                          {p.isPlanning ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">
+                              <Calendar size={10} /> Planning
+                            </span>
+                          ) : p.isCompleted ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
                               <CheckCircle2 size={10} /> Completed
                             </span>
@@ -982,6 +1009,23 @@ export default function MyWorkReport() {
                     <span className="text-xs font-semibold text-muted">
                       {selectedProject.client_name || "Client"}
                     </span>
+                    {selectedProject.isPlanning ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">
+                        <Calendar size={11} /> Planning
+                      </span>
+                    ) : selectedProject.isCompleted ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                        <CheckCircle2 size={11} /> Completed
+                      </span>
+                    ) : selectedProject.isDelayed ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30">
+                        <AlertTriangle size={11} /> Delayed
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                        <Clock size={11} /> In-Progress
+                      </span>
+                    )}
                   </div>
                   <h2 className="text-base font-bold text-text mt-1">{selectedProject.title}</h2>
                   <p className="text-xs text-muted mt-0.5">
@@ -993,7 +1037,7 @@ export default function MyWorkReport() {
                 {/* Quick Link Navigation Buttons */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
-                    onClick={() => navigate(`/projects/${selectedProject.id}/planning`)}
+                    onClick={() => navigate(`/projects/${selectedProject.id}/planning`, { state: { from: "/reports/my-work" } })}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white font-semibold text-xs hover:bg-indigo-700 active:scale-95 transition-all shadow-xs"
                     title="Open Full Schedule Planning Grid"
                   >
@@ -1001,7 +1045,7 @@ export default function MyWorkReport() {
                     Full Planning Board
                   </button>
                   <button
-                    onClick={() => navigate(`/projects/${selectedProject.id}`)}
+                    onClick={() => navigate(`/projects/${selectedProject.id}`, { state: { from: "/reports/my-work" } })}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-surface hover:bg-card text-text font-semibold text-xs transition-all shadow-xs"
                     title="Open Project Workflow View"
                   >
@@ -1122,7 +1166,26 @@ export default function MyWorkReport() {
                   </div>
                 </div>
 
-                {displayedChapterRows.length === 0 ? (
+                {selectedProject.isPlanning ? (
+                  <div className="text-center py-12 px-4 bg-cyan-500/5 rounded-2xl border border-cyan-500/20 space-y-3.5 my-2">
+                    <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mx-auto text-cyan-600 dark:text-cyan-400 shadow-xs">
+                      <Calendar size={26} />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-bold text-text">Project is Currently in Planning Phase</h4>
+                      <p className="text-xs text-muted max-w-md mx-auto">
+                        Track schedules and stage progression have not been finalized or approved yet. You can configure and approve the schedule on the planning board.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => navigate(`/projects/${selectedProject.id}/planning`, { state: { from: "/reports/my-work" } })}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold text-xs hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
+                    >
+                      <Calendar size={13} />
+                      Open Full Planning Board
+                    </button>
+                  </div>
+                ) : displayedChapterRows.length === 0 ? (
                   <div className="text-center py-10 bg-surface rounded-xl border border-border/60">
                     <Clock size={24} className="mx-auto text-muted/60 mb-2" />
                     <p className="text-xs font-semibold text-text">No tracks match filter</p>

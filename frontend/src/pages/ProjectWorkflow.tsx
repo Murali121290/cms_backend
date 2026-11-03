@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
@@ -818,6 +818,7 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
 export function ProjectWorkflow() {
   const { projectId, clientId } = useParams<{ projectId: string; clientId?: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const id = Number(projectId)
 
   const { roles, viewer, canAccess } = useRBAC()
@@ -1587,7 +1588,11 @@ export function ProjectWorkflow() {
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
             onClick={() => {
-              if (clientId) {
+              if (location.state?.from) {
+                navigate(location.state.from)
+              } else if (window.history.length > 1) {
+                navigate(-1)
+              } else if (clientId) {
                 navigate(`/clients/${clientId}/projects`)
               } else {
                 navigate('/clients')
