@@ -46,7 +46,7 @@ export function ReportsPage() {
     ...(canAccessMyWork
       ? [
           {
-            title: 'My Work',
+            title: 'My Projects',
             description: isAdmin
               ? 'PM Workspace: View assigned book portfolios, planning matrices, and current status across all Project Managers.'
               : 'Your assigned project portfolio: Track your managed books, planned schedules, and current operational stage status.',

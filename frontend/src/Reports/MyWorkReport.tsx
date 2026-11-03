@@ -214,7 +214,7 @@ export default function MyWorkReport() {
           }
         }
       } catch (err) {
-        console.error("Failed to load My Work data:", err);
+        console.error("Failed to load My Projects data:", err);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -682,7 +682,7 @@ export default function MyWorkReport() {
         </div>
         <h2 className="text-xl font-bold text-text mb-2">Restricted Access</h2>
         <p className="text-sm text-muted max-w-md mx-auto mb-6">
-          The <strong>My Work</strong> workspace is exclusively available to members of the{" "}
+          The <strong>My Projects</strong> workspace is exclusively available to members of the{" "}
           <strong>Project Management</strong> team and <strong>Administrators</strong>.
         </p>
         <button
@@ -709,7 +709,7 @@ export default function MyWorkReport() {
           </button>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight text-text">My Work</h1>
+              <h1 className="text-xl font-bold tracking-tight text-text">My Projects</h1>
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex items-center gap-1">
                 <Briefcase size={12} />
                 PM Portfolio
