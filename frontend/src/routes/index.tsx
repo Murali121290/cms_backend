@@ -48,6 +48,7 @@ import { ReportsPage } from '@/pages/ReportsPage'
 import ScheduleReport from '@/Reports/ScheduleReport'
 import TodaySchedule from '@/Reports/TodaySchedule'
 import ProjectSchedule from '@/Reports/ProjectSchedule'
+import MyWorkReport from '@/Reports/MyWorkReport'
 import { PostProduction } from '@/pages/PostProduction'
 import { PostProdWordConversion } from '@/pages/PostProdWordConversion'
 import { PostProdChaptersPage } from '@/pages/PostProdChaptersPage'
@@ -219,6 +220,7 @@ const router = createBrowserRouter([
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },
       { path: 'reports/project-schedule', element: <ProjectSchedule /> },
+      { path: 'reports/my-work', element: <MyWorkReport /> },
 
       // ── Review pages without fileId (legacy patterns) ───────────────────────
       { path: 'projects/:projectId/chapters/:chapterId/technical-review', element: <TechnicalReviewPage /> },
