@@ -34,6 +34,7 @@ class Project(Base):
     isbn_no          = Column(String(20),  nullable=True)
     billing_location = Column(String(255), nullable=True)
     billing_type     = Column(String(50),  nullable=True)
+    project_type     = Column(String(100), nullable=True)
     alt_text         = Column(String(10),  nullable=True)
     accessibility    = Column(String(10),  nullable=True)
     due_date         = Column(Date,        nullable=True)

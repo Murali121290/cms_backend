@@ -63,6 +63,7 @@ export interface Project extends ProjectSummary {
   isbn_no?: string | null
   billing_location?: string | null
   billing_type?: string | null
+  project_type?: string | null
   alt_text?: string | null
   accessibility?: string | null
   due_date?: string | null
@@ -107,6 +108,7 @@ export interface ProjectCreate {
   isbn_no?: string | null
   billing_location?: string | null
   billing_type?: string | null
+  project_type?: string | null
   alt_text?: string | null
   accessibility?: string | null
   due_date?: string | null
@@ -138,6 +140,7 @@ export interface ProjectUpdate {
   isbn_no?: string | null
   billing_location?: string | null
   billing_type?: string | null
+  project_type?: string | null
   alt_text?: string | null
   accessibility?: string | null
   due_date?: string | null

@@ -288,6 +288,7 @@ def _serialize_project_summary(project: Project):
         composition=getattr(project, "composition", None),
         copyediting_level=getattr(project, "copyediting_level", None),
         project_manager=getattr(project, "project_manager", None),
+        client_project_manager=getattr(project, "client_project_manager", None),
         sales_person=getattr(project, "sales_person", None),
         priority=getattr(project, "priority", None),
         edition=getattr(project, "edition", None),
@@ -300,6 +301,7 @@ def _serialize_project_summary(project: Project):
         isbn_no=getattr(project, "isbn_no", None),
         billing_location=getattr(project, "billing_location", None),
         billing_type=getattr(project, "billing_type", None),
+        project_type=getattr(project, "project_type", None),
         alt_text=getattr(project, "alt_text", None),
         accessibility=getattr(project, "accessibility", None),
         due_date=due,
@@ -1847,6 +1849,7 @@ def api_v2_project_bootstrap(
     isbn_no: str | None = Form(None),
     billing_location: str | None = Form(None),
     billing_type: str | None = Form(None),
+    project_type: str | None = Form(None),
     alt_text: str | None = Form(None),
     accessibility: str | None = Form(None),
     due_date: str | None = Form(None),
@@ -1943,7 +1946,7 @@ def api_v2_project_bootstrap(
     for _f in ("division_code", "customer_contact", "category", "composition", "copyediting_level",
                "project_manager", "client_project_manager", "sales_person", "priority", "edition", "color",
                "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
-               "actual_pages", "isbn_no", "billing_location", "billing_type", "alt_text", "accessibility"):
+               "actual_pages", "isbn_no", "billing_location", "billing_type", "project_type", "alt_text", "accessibility"):
         _v = locals().get(_f)
         if _v is not None:
             setattr(project, _f, _v)
@@ -2204,7 +2207,7 @@ def api_v2_update_project(
 
     for _f in ("project_manager", "client_project_manager", "priority", "composition", "copyediting_level", "category", "edition",
                "color", "trim_size", "copyright_year", "estimated_pages", "actual_pages", "manuscript_pages",
-               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location", "billing_type", "alt_text", "accessibility"):
+               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location", "billing_type", "project_type", "alt_text", "accessibility"):
         _v = getattr(payload, _f, None)
         if _v is not None:
             setattr(project, _f, _v)

@@ -137,6 +137,7 @@ class ProjectSummary(BaseModel):
     isbn_no: str | None = None
     billing_location: str | None = None
     billing_type: str | None = None
+    project_type: str | None = None
     alt_text: str | None = None
     accessibility: str | None = None
     due_date: str | None = None
@@ -1082,6 +1083,7 @@ class ProjectUpdateRequest(BaseModel):
     isbn_no: str | None = None
     billing_location: str | None = None
     billing_type: str | None = None
+    project_type: str | None = None
     alt_text: str | None = None
     accessibility: str | None = None
     reason: str | None = None
