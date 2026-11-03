@@ -104,6 +104,47 @@ _DISABLED_PROTECTED_IDS: frozenset[str] = frozenset({
 })
 
 
+# Additional protected patterns applied on top of the workbook-sourced
+# ``patterns`` list in ``hyphen_dash_protected.json``. Lives in code (not
+# JSON) so the import script, which fully regenerates the JSON from the
+# xlsx source, doesn't wipe these on the next re-import.
+#
+# Each entry: (id, uncompiled_regex, style_profile, note).
+#
+# Add here when the workbook's dash rules fire on a shape that is
+# editorially governed by a different style authority (citation style,
+# publisher convention, external standard), and the fix belongs with the
+# dash runtime rather than inside the workbook's style profiles.
+_ADDITIONAL_PROTECTED_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
+    # Citation page ranges (``pp. 2118-2128`` / ``p. 129-131``). The dash
+    # rules' D01 ("Numeric range after a cue word, hyphen used")
+    # correctly converts hyphens to en dashes for body-text page ranges
+    # like "see pages 10-20", but reference-list entries follow the
+    # citation style (APA, Vancouver, AMA, etc.) and the publisher's
+    # format, NOT body-text editorial rules. Shielding the ``pp.`` shape
+    # keeps references untouched across every project.
+    (
+        "PR-028",
+        r"(?i)\bpp?\.\s*\d+(?:\.\d+)?-\d+(?:\.\d+)?\b",
+        "all",
+        "Page-range citation (p./pp. followed by numeric range)",
+    ),
+    # Citation page ranges written out as ``Pages NNN-NNN`` (capital P).
+    # This is the common long-form in reference-list entries ("Volume: 15,
+    # Issue: 3, Pages: 10980-10986"). Case-sensitive on the capital P is
+    # the key discriminator — body-text usage is lowercase ("see pages
+    # 10-20 for details") and MUST still fire D01. An optional colon
+    # after ``Pages`` covers "Pages: NNN-NNN" variants seen in some
+    # journal metadata blocks.
+    (
+        "PR-029",
+        r"\bPages?\s*:?\s+\d+(?:\.\d+)?-\d+(?:\.\d+)?\b",
+        "all",
+        "Page-range citation written out (capital-P Pages followed by numeric range)",
+    ),
+)
+
+
 def _rule_in_profile(rule_profile: str, active: str) -> bool:
     """Does a rule tagged with ``rule_profile`` fire under ``active``?
 
@@ -383,6 +424,16 @@ def _compile_protected_patterns() -> list[tuple[str, re.Pattern]]:
             logger.error("protected pattern %s invalid: %s", rid, exc)
             continue
         out.append((row.get("style_profile") or "all", rx))
+
+    # Appended patterns defined in code (see _ADDITIONAL_PROTECTED_PATTERNS).
+    # These survive xlsx re-imports because they don't live in the JSON.
+    for rid, pat, profile, _note in _ADDITIONAL_PROTECTED_PATTERNS:
+        try:
+            rx = re.compile(pat)
+        except re.error as exc:
+            logger.error("additional protected pattern %s invalid: %s", rid, exc)
+            continue
+        out.append((profile, rx))
     return out
 
 
