@@ -128,7 +128,7 @@ const TodaySchedule = () => {
         const [detailsRes, stagesRes, projectsRes, usersRes] = await Promise.all([
           api.get<StageDetailRecord[]>("/api/v1/stage-details?limit=1000000").then((r) => r.data).catch(() => []),
           api.get<StageMasterRecord[]>("/api/v1/stages?limit=100000").then((r) => r.data).catch(() => []),
-          api.get<any>("/projects/?limit=100000").then((r) => r.data?.projects || r.data || []).catch(() => []),
+          api.get<any>("/projects?limit=100000").then((r) => r.data?.projects || r.data || []).catch(() => []),
           api.get<any[]>("/api/v1/users-lookup").then((r) => r.data).catch(() => []),
         ]);
 

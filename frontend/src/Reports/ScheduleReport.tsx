@@ -169,7 +169,7 @@ const ScheduleReport = () => {
         api.get<StageDetailRecord[]>("/api/v1/stage-details?limit=1000000").then((r) => r.data).catch(() => []),
         api.get<StageMasterRecord[]>("/api/v1/stages?limit=100000").then((r) => r.data).catch(() => []),
         api.get<ChapterInfoRecord[]>("/api/v1/chapter-infos?skip=0&limit=10000").then((r) => r.data).catch(() => []),
-        api.get<any>("/projects/?limit=100000").then((r) => r.data?.projects || r.data || []).catch(() => []),
+        api.get<any>("/projects?limit=100000").then((r) => r.data?.projects || r.data || []).catch(() => []),
         api.get<UserLookupItem[]>("/api/v1/users-lookup").then((r) => r.data).catch(() => []),
       ]);
 
