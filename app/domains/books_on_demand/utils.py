@@ -15,6 +15,7 @@ def calculate_bod_due_date(
         from_date = datetime.now(timezone.utc)
 
     is_image = bool(pdf_type and "image" in str(pdf_type).lower())
-    days = 6 if is_image else 3
+    # days = 6 if is_image else 3
+    days = 7 if is_image else 4
 
     return from_date + timedelta(days=days)

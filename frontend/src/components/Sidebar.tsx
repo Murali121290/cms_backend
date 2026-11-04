@@ -87,7 +87,7 @@ export function Sidebar() {
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist Hub' }]
       : []),
     ...(hasPermission('access_bod')
-      ? [{ to: '/bod/report', icon: BookOpen, label: 'BOD Report' }]
+      ? [{ to: '/bod/report', icon: BookOpen, label: 'BOD Production' }]
       : []),
     ...(hasPermission('access_settings')
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]

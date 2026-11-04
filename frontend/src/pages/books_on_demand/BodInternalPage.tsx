@@ -207,9 +207,9 @@ export function BodInternalPage() {
     if (!fastrackModalJob || !fastrackExpectedDate) return
 
     if (fastrackModalJob.due_date) {
-      const maxDate = new Date(fastrackModalJob.due_date.endsWith('Z') ? fastrackModalJob.due_date : fastrackModalJob.due_date + 'Z')
+      const maxDate = parseUtcDate(fastrackModalJob.due_date)
       const chosenDate = new Date(`${fastrackExpectedDate}T23:59:59`)
-      if (chosenDate.getTime() > maxDate.getTime() + 60000) {
+      if (maxDate && chosenDate.getTime() > maxDate.getTime() + 60000) {
         toast.error(`Expected date must be on or before the due date (${formatDate(fastrackModalJob.due_date)})`)
         return
       }
@@ -2061,15 +2061,14 @@ export function BodInternalPage() {
                                   handleFastrackClick(e, job)
                                 }}
                                 disabled={completed || togglingFastrackId === job.id}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all select-none ${
-                                  completed
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all select-none ${completed
                                     ? job.is_fastrack
                                       ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
                                       : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
                                     : job.is_fastrack
                                       ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
                                       : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
-                                }`}
+                                  }`}
                                 title={
                                   completed
                                     ? "Job completed — Fastrack status is locked"
@@ -2085,23 +2084,6 @@ export function BodInternalPage() {
                                 )}
                                 <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
                               </button>
-                              {job.is_fastrack && job.fastrack_requested_date && (
-                                <span
-                                  className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-0.5 whitespace-nowrap"
-                                  title={`Expected by customer: ${formatDateTime(job.fastrack_requested_date)}`}
-                                >
-                                  <Clock size={8} className="shrink-0" />
-                                  {(() => {
-                                    const raw = String(job.fastrack_requested_date).split('T')[0]
-                                    const parts = raw.split('-')
-                                    if (parts.length === 3) {
-                                      const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
-                                      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-                                    }
-                                    return raw
-                                  })()}
-                                </span>
-                              )}
                             </div>
                           </td>
                           <td className="px-1 py-2 text-center text-xs text-muted font-mono overflow-hidden">
@@ -2125,7 +2107,7 @@ export function BodInternalPage() {
                               if (isManager) {
                                 e.stopPropagation()
                                 setShowEditDueDateModal(job)
-                                setNewDueDate(job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toISOString().slice(0, 10) : '')
+                                setNewDueDate(job.due_date ? (parseUtcDate(job.due_date)?.toISOString().slice(0, 10) || '') : '')
                                 setDueDateReason('')
                               }
                             }}
@@ -2137,12 +2119,29 @@ export function BodInternalPage() {
                                   {getJobStatusInfo(job).isTomorrow && <Clock size={10} className="shrink-0" />}
                                   <span className="truncate">{formatDate(job.due_date)}</span>
                                 </p>
-                                <p className="text-[9px] text-muted m-0 truncate">
-                                  {parseUtcDate(job.due_date)?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true })}
-                                </p>
+                                {job.is_fastrack && job.fastrack_requested_date && (
+                                  <p
+                                    className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 m-0 truncate flex items-center gap-0.5 mt-0.5"
+                                    title={`Fastrack target: ${formatDate(job.fastrack_requested_date)}`}
+                                  >
+                                    <Clock size={8} className="shrink-0 text-amber-500" />
+                                    <span>Fastrack: {formatDate(job.fastrack_requested_date)}</span>
+                                  </p>
+                                )}
                               </div>
                             ) : (
-                              isManager ? <span className="text-primary text-[11px]">Set Date</span> : '-'
+                              <div>
+                                {isManager ? <span className="text-primary text-[11px]">Set Date</span> : '-'}
+                                {job.is_fastrack && job.fastrack_requested_date && (
+                                  <p
+                                    className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 m-0 truncate flex items-center gap-0.5 mt-0.5"
+                                    title={`Fastrack target: ${formatDate(job.fastrack_requested_date)}`}
+                                  >
+                                    <Clock size={8} className="shrink-0 text-amber-500" />
+                                    <span>Fastrack: {formatDate(job.fastrack_requested_date)}</span>
+                                  </p>
+                                )}
+                              </div>
                             )}
                           </td>
                           <td className="px-1.5 py-2 text-[11px] text-muted font-medium overflow-hidden">
@@ -2351,15 +2350,14 @@ export function BodInternalPage() {
                               handleFastrackClick(e, job)
                             }}
                             disabled={isJobCompleted(job) || togglingFastrackId === job.id}
-                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all select-none ${
-                              isJobCompleted(job)
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all select-none ${isJobCompleted(job)
                                 ? job.is_fastrack
                                   ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
                                   : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
                                 : job.is_fastrack
                                   ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
                                   : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
-                            }`}
+                              }`}
                             title={
                               isJobCompleted(job)
                                 ? "Job completed — Fastrack status is locked"
@@ -2425,17 +2423,23 @@ export function BodInternalPage() {
                           if (isManager) {
                             e.stopPropagation()
                             setShowEditDueDateModal(job)
-                            setNewDueDate(job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toISOString().slice(0, 10) : '')
+                            setNewDueDate(job.due_date ? (parseUtcDate(job.due_date)?.toISOString().slice(0, 10) || '') : '')
                             setDueDateReason('')
                           }
                         }}
                       >
                         Due: {job.due_date ? (
                           <span className={getJobStatusInfo(job).isOverdue ? 'text-red-500 font-semibold' : getJobStatusInfo(job).isTomorrow ? 'text-orange-500 font-semibold' : ''}>
-                            {formatDateTime(job.due_date)}
+                            {formatDate(job.due_date)}
                           </span>
                         ) : (isManager ? 'Set Date' : '-')}
                       </span>
+                      {job.is_fastrack && job.fastrack_requested_date && (
+                        <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-0.5">
+                          <Clock size={8} className="shrink-0 text-amber-500" />
+                          <span>Fastrack: {formatDate(job.fastrack_requested_date)}</span>
+                        </span>
+                      )}
                     </div>
                     <span className="flex items-center gap-1 text-primary">View Details <ArrowRight size={10} /></span>
                   </div>
@@ -2606,7 +2610,6 @@ export function BodInternalPage() {
                         className="text-[11px] text-primary hover:underline font-semibold"
                         title="Calculate based on: Text (3 days) | Image (6 days)"
                       >
-                        Auto-calc ({((showEditDueDateModal.pdf_type || '').toLowerCase().includes('image') ? '6d' : '3d')})
                       </button>
                     )}
                   </div>
@@ -2703,7 +2706,10 @@ export function BodInternalPage() {
                     type="date"
                     required
                     value={fastrackExpectedDate}
-                    max={fastrackModalJob.due_date ? new Date(fastrackModalJob.due_date.endsWith('Z') ? fastrackModalJob.due_date : fastrackModalJob.due_date + 'Z').toISOString().slice(0, 10) : undefined}
+                    max={(() => {
+                      const parsed = parseUtcDate(fastrackModalJob.due_date)
+                      return parsed ? parsed.toISOString().slice(0, 10) : undefined
+                    })()}
                     onChange={(e) => setFastrackExpectedDate(e.target.value)}
                     className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-text focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all shadow-xs"
                     style={{ colorScheme: 'light dark' }}
