@@ -5861,12 +5861,13 @@ def api_v2_technical_scan(
             )
     elif findings and file_record and file_record.project_id and active_stylesheet:
         # No stylesheet chosen on the page: the project's active stylesheet decides the
-        # CE checklist options, so switching stylesheets needs no re-scan.
-        from app.processing.manuscript_core.ia_selection import apply_ce_settings
-        apply_ce_settings(
+        # CE checklist options and annotates findings with in_stylesheet matching.
+        from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
+        annotate_with_stylesheet(
             findings,
             [row.model_dump() for row in active_stylesheet.selected_ia_rows],
-            {k: v.model_dump(exclude_none=True) for k, v in active_stylesheet.ce_rules.items()},
+            raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
+            ce_rules={k: v.model_dump(exclude_none=True) for k, v in active_stylesheet.ce_rules.items()},
         )
 
     # Ensure inconsistencies is a dict (convert list to dict if needed)

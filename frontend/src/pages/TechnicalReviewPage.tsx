@@ -103,6 +103,7 @@ export function TechnicalReviewPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [stylesheetFilter, setStylesheetFilter] = useState<"all" | "in_stylesheet" | "other">("all");
+  const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
   // Occurrence reviewer states
   const [checkedIds, setCheckedIds] = useState<Record<string, boolean>>({});
@@ -255,6 +256,7 @@ export function TechnicalReviewPage() {
   useEffect(() => {
     if (!hasAutoSelectedStylesheet.current && technicalReviewQuery.data?.active_stylesheet?.id) {
       setSelectedStylesheetId(technicalReviewQuery.data.active_stylesheet.id);
+      setStylesheetFilter("in_stylesheet");
       hasAutoSelectedStylesheet.current = true;
     }
   }, [technicalReviewQuery.data?.active_stylesheet?.id]);
@@ -353,9 +355,15 @@ export function TechnicalReviewPage() {
         (stylesheetFilter === "in_stylesheet" && f.in_stylesheet === true) ||
         (stylesheetFilter === "other" && f.in_stylesheet !== true);
 
-      return matchesSearch && matchesCategory && matchesStylesheet;
+      const matchesRule =
+        !selectedRuleFilter ||
+        f.rule_label === selectedRuleFilter ||
+        f.rule_id === selectedRuleFilter ||
+        (f.ce_rule_no !== undefined && f.ce_rule_no !== null && `R${f.ce_rule_no}` === selectedRuleFilter);
+
+      return matchesSearch && matchesCategory && matchesStylesheet && matchesRule;
     });
-  }, [findings, searchTerm, categoryFilter, stylesheetFilter, appliedKeys]);
+  }, [findings, searchTerm, categoryFilter, stylesheetFilter, selectedRuleFilter, appliedKeys]);
 
   // Keep selectedOccurrenceIndex within bounds as items are resolved
   useEffect(() => {
@@ -1005,6 +1013,18 @@ export function TechnicalReviewPage() {
               onSearchChange={setSearchTerm}
               categoryFilter={categoryFilter}
               onCategoryFilterChange={setCategoryFilter}
+              stylesheetFilter={stylesheetFilter}
+              onStylesheetFilterChange={(filter) => {
+                setStylesheetFilter(filter);
+                setSelectedOccurrenceIndex(0);
+              }}
+              hasActiveStylesheet={Boolean(activeStylesheet || selectedStylesheetId)}
+              activeStylesheetName={activeStylesheetName}
+              selectedRuleFilter={selectedRuleFilter}
+              onSelectedRuleFilterChange={(rule) => {
+                setSelectedRuleFilter(rule);
+                setSelectedOccurrenceIndex(0);
+              }}
               actionType={actionTypes[activeKey] || "fix"}
               onActionTypeChange={(act) =>
                 setActionTypes((prev) => ({ ...prev, [activeKey]: act }))

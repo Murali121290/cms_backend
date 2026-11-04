@@ -84,16 +84,22 @@ def annotate_with_stylesheet(
                     f["in_stylesheet"] = True
                 elif elem and elem in elements:
                     f["in_stylesheet"] = True
+                elif has_ia:
+                    f["in_stylesheet"] = False
                 else:
                     cat = (f.get("category") or "").lower()
                     f["in_stylesheet"] = bool(cat and cat in subtypes)
         else:
             # Non-checklist finding
-            if has_ia and (ia_row[0], ia_row[1], ia_row[2]) in exact:
-                f["in_stylesheet"] = True
-            elif elem and elem in elements:
-                # Element is configured in stylesheet, this is a finding in that element
-                f["in_stylesheet"] = True
+            if has_ia:
+                # When a rule maps to a known IA element, it is only in the stylesheet
+                # if the user explicitly selected that element / pattern row.
+                if (ia_row[0], ia_row[1], ia_row[2]) in exact:
+                    f["in_stylesheet"] = True
+                elif elem and elem in elements:
+                    f["in_stylesheet"] = True
+                else:
+                    f["in_stylesheet"] = False
             else:
                 cat = (f.get("category") or "").lower()
                 f["in_stylesheet"] = bool(cat and cat in subtypes)

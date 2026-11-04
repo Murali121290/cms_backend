@@ -57,6 +57,7 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [stylesheetFilter, setStylesheetFilter] = useState<"all" | "in_stylesheet" | "other">("all");
+  const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
   const [checkedIds, setCheckedIds] = useState<Record<string, boolean>>({});
   const [actionTypes, setActionTypes] = useState<Record<string, "fix" | "highlight">>({});
@@ -195,6 +196,7 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
   useEffect(() => {
     if (!hasAutoSelectedStylesheet.current && technicalReviewQuery.data?.active_stylesheet?.id) {
       setSelectedStylesheetId(technicalReviewQuery.data.active_stylesheet.id);
+      setStylesheetFilter("in_stylesheet");
       hasAutoSelectedStylesheet.current = true;
     }
   }, [technicalReviewQuery.data?.active_stylesheet?.id]);
@@ -280,15 +282,27 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
         (stylesheetFilter === "in_stylesheet" && f.in_stylesheet === true) ||
         (stylesheetFilter === "other" && f.in_stylesheet !== true);
 
-      return matchesSearch && matchesCategory && matchesStylesheet;
+      const matchesRule =
+        !selectedRuleFilter ||
+        f.rule_label === selectedRuleFilter ||
+        f.rule_id === selectedRuleFilter ||
+        (f.ce_rule_no !== undefined && f.ce_rule_no !== null && `R${f.ce_rule_no}` === selectedRuleFilter);
+
+      return matchesSearch && matchesCategory && matchesStylesheet && matchesRule;
     });
-  }, [findings, searchTerm, categoryFilter, stylesheetFilter, appliedKeys]);
+  }, [findings, searchTerm, categoryFilter, stylesheetFilter, selectedRuleFilter, appliedKeys]);
 
   useEffect(() => {
     if (filteredFindings.length > 0 && selectedOccurrenceIndex >= filteredFindings.length) {
       setSelectedOccurrenceIndex(Math.max(0, filteredFindings.length - 1));
     }
   }, [filteredFindings.length, selectedOccurrenceIndex]);
+
+  const activeStylesheet = technicalReviewQuery.data?.active_stylesheet ?? null;
+  const activeStylesheetName =
+    stylesheetsQuery.data?.stylesheets?.find((s) => s.id === selectedStylesheetId)?.name ||
+    activeStylesheet?.name ||
+    null;
 
   const activeOccurrence = filteredFindings[selectedOccurrenceIndex] || null;
 
@@ -639,6 +653,18 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
           onSearchChange={setSearchTerm}
           categoryFilter={categoryFilter}
           onCategoryFilterChange={setCategoryFilter}
+          stylesheetFilter={stylesheetFilter}
+          onStylesheetFilterChange={(filter) => {
+            setStylesheetFilter(filter);
+            setSelectedOccurrenceIndex(0);
+          }}
+          hasActiveStylesheet={Boolean(activeStylesheet || selectedStylesheetId)}
+          activeStylesheetName={activeStylesheetName}
+          selectedRuleFilter={selectedRuleFilter}
+          onSelectedRuleFilterChange={(rule) => {
+            setSelectedRuleFilter(rule);
+            setSelectedOccurrenceIndex(0);
+          }}
           actionType={actionTypes[activeKey] || "fix"}
           onActionTypeChange={(act) => setActionTypes((prev) => ({ ...prev, [activeKey]: act }))}
           customReplacement={

@@ -288,3 +288,69 @@ def test_te_point_replacement_options_fixes():
     # 4. SI unit matches only unit_* rules
     m_cm = re.search(r"\bcm\b", "5 cm")
     assert get_te_replacement_options("unit_cm_abbr", m_cm) == ["cm", "centimetre"]
+
+
+def test_detect_para_ending_filters():
+    from app.processing.manuscript_core.extractor import Segment
+    from app.processing.manuscript_core.rules.te_points import detect_para_ending
+
+    def make_seg(text: str, style: str = "", source: str = "body", region: str = "body"):
+        return Segment(
+            chapter_index=1,
+            chapter_name="test",
+            source=source,
+            para_index=1,
+            text=text,
+            style=style,
+            page=1,
+            excluded=False,
+        )
+
+    # 1. Genuine narrative paragraph missing full stop -> should be detected
+    seg_narrative = make_seg("This is an extensive study examining motor development in children throughout early life")
+    findings = list(detect_para_ending(seg_narrative))
+    assert len(findings) == 1
+    assert findings[0].rule_id == "para_no_full_stop"
+    assert findings[0].surface == "e"
+
+    # 2. Short fragments / key terms (< 8 words) -> should NOT be detected
+    assert list(detect_para_ending(make_seg("primitive reflexes"))) == []
+    assert list(detect_para_ending(make_seg("crawling"))) == []
+    assert list(detect_para_ending(make_seg("Infant Reflexes"))) == []
+
+    # 3. Headings / Outlines / Titles by style or prefix -> should NOT be detected
+    assert list(detect_para_ending(make_seg("Chapter 9: Motor Behavior During Early Childhood", style="POUT-1"))) == []
+    assert list(detect_para_ending(make_seg("Upon completion of this chapter, you should be able to", style="OBJ-TXT"))) == []
+    assert list(detect_para_ending(make_seg("primitive reflexes", style="KT-UL-MID"))) == []
+
+    # 4. URLs -> should NOT be detected
+    assert list(detect_para_ending(make_seg("https://t.ly/j4ga"))) == []
+    assert list(detect_para_ending(make_seg("For more information, please visit https://my.clevelandclinic.org"))) == []
+
+    # 5. Intentional clause endings (:, ;, —, –, ,, .) -> should NOT be detected
+    assert list(detect_para_ending(make_seg("The study demonstrates clear development across several key dimensions:"))) == []
+    assert list(detect_para_ending(make_seg("Development of motor skills requires affordance and opportunity;"))) == []
+    assert list(detect_para_ending(make_seg("Motor development progresses rapidly during early life, in summary,"))) == []
+    assert list(detect_para_ending(make_seg("This paragraph ends correctly with a standard full stop."))) == []
+
+
+def test_annotate_with_stylesheet_non_selected_ia():
+    from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
+
+    findings = [
+        {"rule_id": "para_no_full_stop", "surface": "e", "category": "te_point"},
+        {"rule_id": "percent_symbol", "surface": "25%", "category": "te_point", "ce_rule_no": 6},
+    ]
+    # Stylesheet selects percent symbol, but does NOT select "Paras ending without full point"
+    selected_rows = [
+        {"element": "Percent", "subtype": "General", "pattern": "%"}
+    ]
+
+    annotated = annotate_with_stylesheet(findings, selected_rows)
+    f_para = next(f for f in annotated if f["rule_id"] == "para_no_full_stop")
+    f_pct = next(f for f in annotated if f["rule_id"] == "percent_symbol")
+
+    # Unselected IA rule must have in_stylesheet == False
+    assert f_para["in_stylesheet"] is False
+    # Selected IA rule must have in_stylesheet == True
+    assert f_pct["in_stylesheet"] is True
