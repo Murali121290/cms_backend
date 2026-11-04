@@ -47,7 +47,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v2", tags=["Term Lists"])
 
 # Admin + Project Manager may create / import / edit lists; language roles read.
-TERM_LIST_EDIT_ROLES = {"admin", "projectmanager", "project manager"}
+TERM_LIST_EDIT_ROLES = {
+    "admin",
+    "projectmanager",
+    "project manager",
+    "editorial manager",
+    "editorialmanager",
+    "team lead - language editing",
+    "team lead language editing",
+    "team leader - language editing",
+    "team leader language editing",
+    "team lead - editorial",
+    "technical editor",
+    "technicaleditor",
+}
 
 
 def _require_language_user(user: Optional[User]) -> User:

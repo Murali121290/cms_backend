@@ -79,8 +79,8 @@ def _run_via_pph(file_path: str, endpoint: str, extra_data: dict = None, file_fi
 PRE_EDITOR_ROLES = ["Pre Editor", "Pre-Editor", "Team Lead - Prediting", "Team Lead - Pre-Editing", "Team Leader - Pre-Editing", "Admin", "Non-XML Manager", "Non-XML Operator"]
 
 PROCESS_PERMISSIONS = {
-    "language": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing"],
-    "technical": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing"],
+    "language": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing", "Editorial Manager"],
+    "technical": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing", "Editorial Manager"],
     "macro_processing": PRE_EDITOR_ROLES,
     "ppd": ["Manuscript Analysis Operator", "ProjectManager", "Admin"],
     "permissions": ["PermissionsManager", "ProjectManager", "Admin"],
@@ -91,7 +91,7 @@ PROCESS_PERMISSIONS = {
     "reference_structuring": PRE_EDITOR_ROLES,
     "structuring": ["ProjectManager", "XML Manager", "XML Operator", "Senior XML Operator"] + PRE_EDITOR_ROLES,
     "structuring_qa": ["ProjectManager", "XML Manager", "XML Operator", "Senior XML Operator"] + PRE_EDITOR_ROLES,
-    "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing"],
+    "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing", "Editorial Manager"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "word_to_indesign": ["Admin", "Compositor", "Senior Compositor", "Production Manager", "Non-XML Manager", "Non-XML Operator", "XML Manager", "XML Operator", "Senior XML Operator"],

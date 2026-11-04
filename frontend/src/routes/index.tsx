@@ -1,254 +1,268 @@
-import { createBrowserRouter, RouterProvider, Navigate, useLocation, useParams } from 'react-router-dom'
-import { AppLayout } from '@/layouts/AppLayout'
-import { ProtectedRoute } from '@/components/ProtectedRoute'
-import { RoleGuard } from '@/components/RoleGuard'
-import { LoginPage } from '@/pages/LoginPage'
-import { WorkflowPortalPage } from '@/pages/WorkflowPortalPage'
-import { RegisterPage } from '@/pages/RegisterPage'
-import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
-import { DashboardPage } from '@/pages/DashboardPage'
-import { WorkspacePage } from '@/pages/WorkspacePage'
-import { Settings } from '@/pages/Settings'
-import { UserManagement } from '@/pages/settings/UserManagement'
-import { CustomerManagement } from '@/pages/settings/CustomerManagement'
-import { StageManagement } from '@/pages/settings/StageManagement'
-import { RolesManagement } from '@/pages/settings/RolesManagement'
-import { WorkflowManagement } from '@/pages/settings/WorkflowManagement'
-import { QueueManagement } from '@/pages/settings/QueueManagement'
-import { StageTransitionNotifications } from '@/pages/settings/StageTransitionNotifications'
-import { Clients } from '@/pages/Clients'
-import { ClientProjects } from '@/pages/ClientProjects'
-import { CreateProjectPage } from '@/pages/CreateProjectPage'
-import { ProjectWorkflow } from '@/pages/ProjectWorkflow'
-import { ProjectPlanningPage } from '@/pages/ProjectPlanningPage'
-import { FileMappingPage } from '@/pages/FileMappingPage'
-import { ChapterEditorPage } from '@/pages/ChapterEditorPage'
-import { Placeholder } from '@/pages/Placeholder'
-import { ProjectsPage } from '@/pages/ProjectsPage'
-import { ChapterFilePage } from '@/pages/ChapterFilePage'
-import { ChapterDetailPage } from '@/pages/ChapterDetailPage'
-
-import { TechnicalReviewPage } from '@/pages/TechnicalReviewPage'
-import { TechnicalEditorPage } from '@/pages/TechnicalEditorPage'
-import { StructuringReviewPage } from '@/pages/StructuringReviewPage'
-import { LanguageReviewPage } from '@/pages/LanguageReviewPage'
-import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReviewPage'
-
-
-
-import { UnifiedReviewEditorPage } from '@/pages/UnifiedReviewEditorPage'
-import { FileEditorPage } from '@/pages/FileEditorPage'
-import { DocxEditorPage } from '@/pages/DocxEditorPage'
-import { StylesheetsPage } from '@/pages/StylesheetsPage'
-import { ProjectRulesPage } from '@/pages/ProjectRulesPage'
-import { TermLibraryPage } from '@/pages/TermLibraryPage'
-import { ProjectTermListsPage } from '@/pages/ProjectTermListsPage'
-import { ImageReviewPage } from '@/features/imageReview/ImageReviewPage'
-import { ReportsPage } from '@/pages/ReportsPage'
-import ScheduleReport from '@/Reports/ScheduleReport'
-import TodaySchedule from '@/Reports/TodaySchedule'
-import ProjectSchedule from '@/Reports/ProjectSchedule'
-import MyWorkReport from '@/Reports/MyWorkReport'
-import { PostProduction } from '@/pages/PostProduction'
-import { PostProdWordConversion } from '@/pages/PostProdWordConversion'
-import { PostProdChaptersPage } from '@/pages/PostProdChaptersPage'
-import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
-import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
-import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
-import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
-import { PostProdXmlConversion } from '@/pages/PostProdXmlConversion'
-import { PostProdXmlConversionEditor } from '@/pages/PostProdXmlConversionEditor'
-import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
-import { JournalClientsPage } from '@/pages/journals/JournalClientsPage'
-import { JournalClientPage } from '@/pages/journals/JournalClientPage'
-import { CreateJournalPage } from '@/pages/journals/CreateJournalPage'
-import { JournalArticlesPage } from '@/pages/journals/JournalArticlesPage'
-import { JournalArticleFilesPage } from '@/pages/journals/JournalArticleFilesPage'
-import { JournalSettingsPage } from '@/pages/journals/JournalSettingsPage'
-import { BodInternalPage } from '@/pages/books_on_demand/BodInternalPage'
-import { BodInternalJobPage } from '@/pages/books_on_demand/BodInternalJobPage'
-import { BodCustomerReportPage } from '@/pages/books_on_demand/BodCustomerReportPage'
-import { PostProdWebPdfProcessor } from '@/pages/PostProdWebPdfProcessor'
-import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
-import { useRBAC } from '@/hooks/useRBAC'
-
-function PostProdGuard({ children }: { children: React.ReactNode }) {
-  const { canAccess, viewer } = useRBAC()
-  const isAccessUser =
-    viewer?.team === 'Accessibility Team' ||
-    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('accessibility')) ||
-    Boolean((viewer as any)?.roles && (viewer as any).roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
-
-  const hasAccess = canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessUser
-  if (!hasAccess) {
-    return <Navigate to="/" replace />
-  }
-  return <>{children}</>
-}
-
-// The Structuring Review page hosts the Reference Review as an inner tab
-// (see StructuringReviewPage's ?tab=reference). Legacy .../reference-review
-// URLs redirect into it. Any pre-existing query params are preserved.
-function ReferenceTabRedirect() {
-  const { clientId, projectId, chapterId, fileId } = useParams()
-  const location = useLocation()
-  const base = clientId
-    ? `/clients/${clientId}/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
-    : `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
-  const params = new URLSearchParams(location.search)
-  params.set('tab', 'reference')
-  return <Navigate to={`${base}?${params.toString()}${location.hash}`} replace />
-}
-
-// Back-compat for the intermediate .../review?view= URLs that briefly existed.
-function LegacyFileReviewRedirect() {
-  const { clientId, projectId, chapterId, fileId } = useParams()
-  const location = useLocation()
-  const params = new URLSearchParams(location.search)
-  const view = params.get('view') === 'reference' ? 'reference' : 'editor'
-  params.delete('view')
-  params.set('tab', view)
-  const base = clientId
-    ? `/clients/${clientId}/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
-    : `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
-  return <Navigate to={`${base}?${params.toString()}${location.hash}`} replace />
-}
-
-const router = createBrowserRouter([
-  // ── Public routes ──────────────────────────────────────────────────────────
-  { path: '/portal', element: <WorkflowPortalPage /> },
-  { path: '/login', element: <LoginPage /> },
-  { path: '/register', element: <RegisterPage /> },
-  { path: '/forgot-password', element: <ForgotPasswordPage /> },
-
-  // ── Protected routes ───────────────────────────────────────────────────────
-  {
-    path: '/',
-    element: (
-      <ProtectedRoute>
-        <AppLayout />
-      </ProtectedRoute>
-    ),
-    children: [
-      { index: true, element: <DashboardPage /> },
-      { path: 'dashboard', element: <DashboardPage /> },
-      { path: 'workspace', element: <WorkspacePage /> },
-
-      { path: 'clients', element: <Clients /> },
-      { path: 'journal-production', element: <JournalClientsPage /> },
-      { path: 'journal-production/clients/:clientId', element: <JournalClientPage /> },
-      { path: 'journal-production/clients/:clientId/journals/new', element: <CreateJournalPage /> },
-      { path: 'journal-production/journals/:journalId', element: <JournalArticlesPage /> },
-      { path: 'journal-production/journals/:journalId/settings', element: <JournalSettingsPage /> },
-      { path: 'journal-production/articles/:articleId', element: <JournalArticleFilesPage /> },
-      // Book review pages on a journal article's shadow file (?journalArticle=<id>, see useJournalReviewMode)
-      { path: 'journal-production/review/structuring/:projectId/:fileId', element: <StructuringReviewPage /> },
-      { path: 'journal-production/review/technical/:projectId/:fileId', element: <TechnicalReviewPage /> },
-      { path: 'journal-production/review/language/:projectId/:fileId', element: <LanguageReviewPage /> },
-      { path: 'clients/:clientId/projects', element: <ClientProjects /> },
-      { path: 'clients/:clientId/projects/new', element: <CreateProjectPage /> },
-
+import { createBrowserRouter, RouterProvider, Navigate, useLocation, useParams } from 'react-router-dom'
+import { AppLayout } from '@/layouts/AppLayout'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { RoleGuard } from '@/components/RoleGuard'
+import { LoginPage } from '@/pages/LoginPage'
+import { WorkflowPortalPage } from '@/pages/WorkflowPortalPage'
+import { RegisterPage } from '@/pages/RegisterPage'
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
+import { DashboardPage } from '@/pages/DashboardPage'
+import { WorkspacePage } from '@/pages/WorkspacePage'
+import { Settings } from '@/pages/Settings'
+import { UserManagement } from '@/pages/settings/UserManagement'
+import { CustomerManagement } from '@/pages/settings/CustomerManagement'
+import { StageManagement } from '@/pages/settings/StageManagement'
+import { RolesManagement } from '@/pages/settings/RolesManagement'
+import { WorkflowManagement } from '@/pages/settings/WorkflowManagement'
+import { QueueManagement } from '@/pages/settings/QueueManagement'
+import { StageTransitionNotifications } from '@/pages/settings/StageTransitionNotifications'
+import { Clients } from '@/pages/Clients'
+import { ClientProjects } from '@/pages/ClientProjects'
+import { CreateProjectPage } from '@/pages/CreateProjectPage'
+import { ProjectWorkflow } from '@/pages/ProjectWorkflow'
+import { ProjectPlanningPage } from '@/pages/ProjectPlanningPage'
+import { FileMappingPage } from '@/pages/FileMappingPage'
+import { ChapterEditorPage } from '@/pages/ChapterEditorPage'
+import { Placeholder } from '@/pages/Placeholder'
+import { ProjectsPage } from '@/pages/ProjectsPage'
+import { ChapterFilePage } from '@/pages/ChapterFilePage'
+import { ChapterDetailPage } from '@/pages/ChapterDetailPage'
+
+import { TechnicalReviewPage } from '@/pages/TechnicalReviewPage'
+import { TechnicalEditorPage } from '@/pages/TechnicalEditorPage'
+import { StructuringReviewPage } from '@/pages/StructuringReviewPage'
+import { LanguageReviewPage } from '@/pages/LanguageReviewPage'
+import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReviewPage'
+
+
+
+import { UnifiedReviewEditorPage } from '@/pages/UnifiedReviewEditorPage'
+import { FileEditorPage } from '@/pages/FileEditorPage'
+import { DocxEditorPage } from '@/pages/DocxEditorPage'
+import { StylesheetsPage } from '@/pages/StylesheetsPage'
+import { ProjectRulesPage } from '@/pages/ProjectRulesPage'
+import { TermLibraryPage } from '@/pages/TermLibraryPage'
+import { ProjectTermListsPage } from '@/pages/ProjectTermListsPage'
+import { EditorialStandardsPage } from '@/pages/EditorialStandardsPage'
+
+function EditorialRedirect({ tab }: { tab: string }) {
+  const { projectId } = useParams()
+  return <Navigate to={`/projects/${projectId}/editorial?tab=${tab}`} replace />
+}
+import { ImageReviewPage } from '@/features/imageReview/ImageReviewPage'
+import { ReportsPage } from '@/pages/ReportsPage'
+import ScheduleReport from '@/Reports/ScheduleReport'
+import TodaySchedule from '@/Reports/TodaySchedule'
+import ProjectSchedule from '@/Reports/ProjectSchedule'
+import MyWorkReport from '@/Reports/MyWorkReport'
+import { PostProduction } from '@/pages/PostProduction'
+import { PostProdWordConversion } from '@/pages/PostProdWordConversion'
+import { PostProdChaptersPage } from '@/pages/PostProdChaptersPage'
+import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
+import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
+import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
+import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
+import { PostProdXmlConversion } from '@/pages/PostProdXmlConversion'
+import { PostProdXmlConversionEditor } from '@/pages/PostProdXmlConversionEditor'
+import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
+import { JournalClientsPage } from '@/pages/journals/JournalClientsPage'
+import { JournalClientPage } from '@/pages/journals/JournalClientPage'
+import { CreateJournalPage } from '@/pages/journals/CreateJournalPage'
+import { JournalArticlesPage } from '@/pages/journals/JournalArticlesPage'
+import { JournalArticleFilesPage } from '@/pages/journals/JournalArticleFilesPage'
+import { JournalSettingsPage } from '@/pages/journals/JournalSettingsPage'
+import { BodInternalPage } from '@/pages/books_on_demand/BodInternalPage'
+import { BodInternalJobPage } from '@/pages/books_on_demand/BodInternalJobPage'
+import { BodCustomerReportPage } from '@/pages/books_on_demand/BodCustomerReportPage'
+import { PostProdWebPdfProcessor } from '@/pages/PostProdWebPdfProcessor'
+import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
+import { useRBAC } from '@/hooks/useRBAC'
+
+function PostProdGuard({ children }: { children: React.ReactNode }) {
+  const { canAccess, viewer } = useRBAC()
+  const isAccessUser =
+    viewer?.team === 'Accessibility Team' ||
+    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('accessibility')) ||
+    Boolean((viewer as any)?.roles && (viewer as any).roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
+
+  const hasAccess = canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessUser
+  if (!hasAccess) {
+    return <Navigate to="/" replace />
+  }
+  return <>{children}</>
+}
+
+// The Structuring Review page hosts the Reference Review as an inner tab
+// (see StructuringReviewPage's ?tab=reference). Legacy .../reference-review
+// URLs redirect into it. Any pre-existing query params are preserved.
+function ReferenceTabRedirect() {
+  const { clientId, projectId, chapterId, fileId } = useParams()
+  const location = useLocation()
+  const base = clientId
+    ? `/clients/${clientId}/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+    : `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+  const params = new URLSearchParams(location.search)
+  params.set('tab', 'reference')
+  return <Navigate to={`${base}?${params.toString()}${location.hash}`} replace />
+}
+
+// Back-compat for the intermediate .../review?view= URLs that briefly existed.
+function LegacyFileReviewRedirect() {
+  const { clientId, projectId, chapterId, fileId } = useParams()
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
+  const view = params.get('view') === 'reference' ? 'reference' : 'editor'
+  params.delete('view')
+  params.set('tab', view)
+  const base = clientId
+    ? `/clients/${clientId}/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+    : `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+  return <Navigate to={`${base}?${params.toString()}${location.hash}`} replace />
+}
+
+const router = createBrowserRouter([
+  // ── Public routes ──────────────────────────────────────────────────────────
+  { path: '/portal', element: <WorkflowPortalPage /> },
+  { path: '/login', element: <LoginPage /> },
+  { path: '/register', element: <RegisterPage /> },
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
+
+  // ── Protected routes ───────────────────────────────────────────────────────
+  {
+    path: '/',
+    element: (
+      <ProtectedRoute>
+        <AppLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <DashboardPage /> },
+      { path: 'dashboard', element: <DashboardPage /> },
+      { path: 'workspace', element: <WorkspacePage /> },
+
+      { path: 'clients', element: <Clients /> },
+      { path: 'journal-production', element: <JournalClientsPage /> },
+      { path: 'journal-production/clients/:clientId', element: <JournalClientPage /> },
+      { path: 'journal-production/clients/:clientId/journals/new', element: <CreateJournalPage /> },
+      { path: 'journal-production/journals/:journalId', element: <JournalArticlesPage /> },
+      { path: 'journal-production/journals/:journalId/settings', element: <JournalSettingsPage /> },
+      { path: 'journal-production/articles/:articleId', element: <JournalArticleFilesPage /> },
+      // Book review pages on a journal article's shadow file (?journalArticle=<id>, see useJournalReviewMode)
+      { path: 'journal-production/review/structuring/:projectId/:fileId', element: <StructuringReviewPage /> },
+      { path: 'journal-production/review/technical/:projectId/:fileId', element: <TechnicalReviewPage /> },
+      { path: 'journal-production/review/language/:projectId/:fileId', element: <LanguageReviewPage /> },
+      { path: 'clients/:clientId/projects', element: <ClientProjects /> },
+      { path: 'clients/:clientId/projects/new', element: <CreateProjectPage /> },
+
+      {
+        path: 'clients/:clientId/projects/:projectId',
+        element: <ProjectWorkflow />,
+      },
+      {
+        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId',
+        element: <ChapterDetailPage />,
+      },
+      {
+        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files',
+        element: <ChapterDetailPage />,
+      },
+      {
+        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/view/:subfolder/:filename',
+        element: <ChapterEditorPage />,
+      },
+
+      { path: 'projects/:projectId', element: <ProjectWorkflow /> },
+      { path: 'projects/:id/mapping', element: <FileMappingPage /> },
+      { path: 'projects/:projectId/planning', element: <ProjectPlanningPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId', element: <ChapterDetailPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files', element: <ChapterDetailPage /> },
+      {
+        path: 'projects/:projectId/chapters/:chapterId/view/:subfolder/:filename',
+        element: <ChapterEditorPage />,
+      },
+
+      // ── File-level pages (projects prefix) ──────────────────────────────────
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/language-review', element: <LanguageReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },
+
+      // ── File-level pages (clients prefix) ───────────────────────────────────
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/language-review', element: <LanguageReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
+
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },
+
+      { path: 'projects', element: <ProjectsPage /> },
+      { path: 'chapters', element: <Placeholder title="Chapters" /> },
+      { path: 'post-production', element: <PostProdGuard><PostProduction /></PostProdGuard> },
+      { path: 'post-production/word-conversion', element: <PostProdGuard><PostProdWordConversion /></PostProdGuard> },
+      { path: 'post-production/word-conversion/:projectId', element: <PostProdGuard><PostProdChaptersPage /></PostProdGuard> },
+      { path: 'post-production/epub-css-matcher', element: <PostProdGuard><PostProdCssMatcher /></PostProdGuard> },
+      { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
+      { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
+      { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
+      { path: 'post-production/xml-conversion', element: <PostProdGuard><PostProdXmlConversion /></PostProdGuard> },
+      { path: 'post-production/xml-conversion/:projectId', element: <PostProdGuard><PostProdXmlConversionEditor /></PostProdGuard> },
+      { path: 'journal-article-editor', element: <JournalArticleEditorPage /> },
+      { path: 'journal-article-editor/:articleId', element: <JournalArticleEditorPage /> },
+      { path: 'bod/internal', element: <BodInternalPage /> },
+      { path: 'bod/internal/:jobId', element: <BodInternalJobPage /> },
+      { path: 'bod/report', element: <BodCustomerReportPage /> },
+      { path: 'post-production/web-pdf-processor', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
+      { path: 'post-production/web-pdf-processor/:projectId', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
+      { path: 'reports', element: <ReportsPage /> },
+      { path: 'reports/schedule', element: <ScheduleReport /> },
+      { path: 'reports/today-schedule', element: <TodaySchedule /> },
+      { path: 'reports/project-schedule', element: <ProjectSchedule /> },
+      { path: 'reports/my-work', element: <MyWorkReport /> },
+
+      // ── Review pages without fileId (legacy patterns) ───────────────────────
+      { path: 'projects/:projectId/chapters/:chapterId/technical-review', element: <TechnicalReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/reference-review', element: <ReferenceValidationReviewPage /> },
       {
-        path: 'clients/:clientId/projects/:projectId',
-        element: <ProjectWorkflow />,
-      },
-      {
-        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId',
-        element: <ChapterDetailPage />,
-      },
-      {
-        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files',
-        element: <ChapterDetailPage />,
-      },
-      {
-        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/view/:subfolder/:filename',
-        element: <ChapterEditorPage />,
-      },
-
-      { path: 'projects/:projectId', element: <ProjectWorkflow /> },
-      { path: 'projects/:id/mapping', element: <FileMappingPage /> },
-      { path: 'projects/:projectId/planning', element: <ProjectPlanningPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId', element: <ChapterDetailPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files', element: <ChapterDetailPage /> },
-      {
-        path: 'projects/:projectId/chapters/:chapterId/view/:subfolder/:filename',
-        element: <ChapterEditorPage />,
-      },
-
-      // ── File-level pages (projects prefix) ──────────────────────────────────
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/language-review', element: <LanguageReviewPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },
-
-      // ── File-level pages (clients prefix) ───────────────────────────────────
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/language-review', element: <LanguageReviewPage /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
-
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },
-
-      { path: 'projects', element: <ProjectsPage /> },
-      { path: 'chapters', element: <Placeholder title="Chapters" /> },
-      { path: 'post-production', element: <PostProdGuard><PostProduction /></PostProdGuard> },
-      { path: 'post-production/word-conversion', element: <PostProdGuard><PostProdWordConversion /></PostProdGuard> },
-      { path: 'post-production/word-conversion/:projectId', element: <PostProdGuard><PostProdChaptersPage /></PostProdGuard> },
-      { path: 'post-production/epub-css-matcher', element: <PostProdGuard><PostProdCssMatcher /></PostProdGuard> },
-      { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
-      { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
-      { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
-      { path: 'post-production/xml-conversion', element: <PostProdGuard><PostProdXmlConversion /></PostProdGuard> },
-      { path: 'post-production/xml-conversion/:projectId', element: <PostProdGuard><PostProdXmlConversionEditor /></PostProdGuard> },
-      { path: 'journal-article-editor', element: <JournalArticleEditorPage /> },
-      { path: 'journal-article-editor/:articleId', element: <JournalArticleEditorPage /> },
-      { path: 'bod/internal', element: <BodInternalPage /> },
-      { path: 'bod/internal/:jobId', element: <BodInternalJobPage /> },
-      { path: 'bod/report', element: <BodCustomerReportPage /> },
-      { path: 'post-production/web-pdf-processor', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
-      { path: 'post-production/web-pdf-processor/:projectId', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
-      { path: 'reports', element: <ReportsPage /> },
-      { path: 'reports/schedule', element: <ScheduleReport /> },
-      { path: 'reports/today-schedule', element: <TodaySchedule /> },
-      { path: 'reports/project-schedule', element: <ProjectSchedule /> },
-      { path: 'reports/my-work', element: <MyWorkReport /> },
-
-      // ── Review pages without fileId (legacy patterns) ───────────────────────
-      { path: 'projects/:projectId/chapters/:chapterId/technical-review', element: <TechnicalReviewPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/structuring-review', element: <StructuringReviewPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/reference-review', element: <ReferenceValidationReviewPage /> },
-      { path: 'projects/:projectId/stylesheets', element: <StylesheetsPage /> },
-      { path: 'projects/:projectId/rules', element: <ProjectRulesPage /> },
-      { path: 'clients/:clientId/projects/:projectId/rules', element: <ProjectRulesPage /> },
-      { path: 'term-lists', element: <Navigate to="/settings/term-lists" replace /> },
-      { path: 'projects/:projectId/term-lists', element: <ProjectTermListsPage /> },
-      { path: 'clients/:clientId/projects/:projectId/term-lists', element: <ProjectTermListsPage /> },
-      { path: 'projects/:projectId/image-review', element: <ImageReviewPage /> },
-
-      // ── Settings: admin + manager only ───────────────────────────────────
-      { path: 'settings', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Settings /></RoleGuard> },
-      { path: 'settings/users', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><UserManagement /></RoleGuard> },
-      { path: 'settings/customers', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><CustomerManagement /></RoleGuard> },
-      { path: 'settings/stages', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><StageManagement /></RoleGuard> },
-      { path: 'settings/transition-notifications', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><StageTransitionNotifications /></RoleGuard> },
-      { path: 'settings/roles', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><RolesManagement /></RoleGuard> },
-      { path: 'settings/workflow', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><WorkflowManagement /></RoleGuard> },
-      { path: 'settings/system', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Placeholder title="System Settings" /></RoleGuard> },
-      { path: 'settings/queues', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><QueueManagement /></RoleGuard> },
-      { path: 'settings/term-lists', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><TermLibraryPage /></RoleGuard> },
-    ],
-  },
-])
-
-export function AppRouter() {
-  return <RouterProvider router={router} />
-}
+        path: 'projects/:projectId/editorial',
+        element: (
+          <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_editorial_standards}>
+            <EditorialStandardsPage />
+          </RoleGuard>
+        ),
+      },
+      { path: 'projects/:projectId/stylesheets', element: <EditorialRedirect tab="stylesheets" /> },
+      { path: 'projects/:projectId/rules', element: <EditorialRedirect tab="rules" /> },
+      { path: 'clients/:clientId/projects/:projectId/rules', element: <EditorialRedirect tab="rules" /> },
+      { path: 'term-lists', element: <Navigate to="/settings/term-lists" replace /> },
+      { path: 'projects/:projectId/term-lists', element: <EditorialRedirect tab="terms" /> },
+      { path: 'clients/:clientId/projects/:projectId/term-lists', element: <EditorialRedirect tab="terms" /> },
+      { path: 'projects/:projectId/image-review', element: <ImageReviewPage /> },
+
+      // ── Settings: admin + manager only ───────────────────────────────────
+      { path: 'settings', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Settings /></RoleGuard> },
+      { path: 'settings/users', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><UserManagement /></RoleGuard> },
+      { path: 'settings/customers', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><CustomerManagement /></RoleGuard> },
+      { path: 'settings/stages', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><StageManagement /></RoleGuard> },
+      { path: 'settings/transition-notifications', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><StageTransitionNotifications /></RoleGuard> },
+      { path: 'settings/roles', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><RolesManagement /></RoleGuard> },
+      { path: 'settings/workflow', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><WorkflowManagement /></RoleGuard> },
+      { path: 'settings/system', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Placeholder title="System Settings" /></RoleGuard> },
+      { path: 'settings/queues', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><QueueManagement /></RoleGuard> },
+      { path: 'settings/term-lists', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><TermLibraryPage /></RoleGuard> },
+    ],
+  },
+])
+
+export function AppRouter() {
+  return <RouterProvider router={router} />
+}

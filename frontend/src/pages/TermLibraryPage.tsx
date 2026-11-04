@@ -14,10 +14,18 @@ export function TermLibraryPage() {
   const navigate = useNavigate()
   const { roles } = useRBAC()
   useDocumentTitle('Term Library — S4 Carlisle CMS')
-  const canEdit = useMemo(
-    () => roles.some((r) => ['admin', 'projectmanager', 'project manager'].includes(r.toLowerCase().replace(/\s+/g, ' ').trim().replace(' ', ''))),
-    [roles],
-  )
+  const canEdit = useMemo(() => {
+    const normalised = roles.map((r) => r.toLowerCase().replace(/[\s-]/g, ''))
+    return (
+      normalised.includes('admin') ||
+      normalised.includes('projectmanager') ||
+      normalised.includes('editorialmanager') ||
+      normalised.includes('teamleadlanguageediting') ||
+      normalised.includes('teamleaderlanguageediting') ||
+      normalised.includes('technicaleditor') ||
+      normalised.includes('teamleadeditorial')
+    )
+  }, [roles])
 
   const [lists, setLists] = useState<TermList[]>([])
   const [loading, setLoading] = useState(true)

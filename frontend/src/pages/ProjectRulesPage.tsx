@@ -163,7 +163,11 @@ function catOf(rule: LanguageRule): CategoryKey {
 
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string }
 
-export function ProjectRulesPage() {
+interface ProjectRulesPageProps {
+  embedded?: boolean;
+}
+
+export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {}) {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const { roles } = useRBAC()
@@ -173,7 +177,14 @@ export function ProjectRulesPage() {
     () => new Set(roles.map((r) => r.toLowerCase().replace(/\s+/g, ''))),
     [roles],
   )
-  const canEdit = normalizedRoles.has('admin') || normalizedRoles.has('projectmanager')
+  const canEdit =
+    normalizedRoles.has('admin') ||
+    normalizedRoles.has('projectmanager') ||
+    normalizedRoles.has('editorialmanager') ||
+    normalizedRoles.has('teamleadlanguageediting') ||
+    normalizedRoles.has('teamleaderlanguageediting') ||
+    normalizedRoles.has('technicaleditor') ||
+    normalizedRoles.has('teamleadeditorial')
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -658,7 +669,7 @@ export function ProjectRulesPage() {
   const visibleCats = (Object.keys(CATEGORY_META) as CategoryKey[]).filter((c) => counts.byCat[c].total > 0)
 
   return (
-    <div className="h-screen bg-slate-50 relative overflow-hidden flex flex-col">
+    <div className={`${embedded ? "flex-1 min-h-0" : "h-screen"} bg-slate-50 relative overflow-hidden flex flex-col`}>
       {/* Decorative background blob */}
       <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-gradient-to-br from-violet-200/40 via-indigo-200/30 to-transparent rounded-full blur-3xl pointer-events-none" />
       <div className="absolute top-20 -left-40 w-[500px] h-[500px] bg-gradient-to-br from-sky-200/30 via-blue-200/20 to-transparent rounded-full blur-3xl pointer-events-none" />
@@ -669,23 +680,27 @@ export function ProjectRulesPage() {
              style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, white 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
         <div className="relative max-w-7xl mx-auto px-6 pt-6 pb-10">
           <div className="flex items-start gap-4">
-            <button
-              onClick={() => navigate(-1)}
-              className="mt-1 w-10 h-10 rounded-xl bg-white/10 backdrop-blur hover:bg-white/20 flex items-center justify-center text-white transition-colors"
-              title="Back"
-            >
-              <ArrowLeft size={16} />
-            </button>
+            {!embedded && (
+              <button
+                onClick={() => navigate(-1)}
+                className="mt-1 w-10 h-10 rounded-xl bg-white/10 backdrop-blur hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+                title="Back"
+              >
+                <ArrowLeft size={16} />
+              </button>
+            )}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-indigo-200/70 mb-2">
-                <button onClick={() => navigate('/projects')} className="hover:text-white">Projects</button>
-                <ChevronRight size={11} />
-                <button onClick={() => navigate(`/projects/${projectId}`)} className="hover:text-white font-medium">
-                  {projectCode || `Project #${projectId}`}
-                </button>
-                <ChevronRight size={11} />
-                <span className="text-white font-medium">Rules</span>
-              </div>
+              {!embedded && (
+                <div className="flex items-center gap-1.5 text-xs text-indigo-200/70 mb-2">
+                  <button onClick={() => navigate('/projects')} className="hover:text-white">Projects</button>
+                  <ChevronRight size={11} />
+                  <button onClick={() => navigate(`/projects/${projectId}`)} className="hover:text-white font-medium">
+                    {projectCode || `Project #${projectId}`}
+                  </button>
+                  <ChevronRight size={11} />
+                  <span className="text-white font-medium">Rules</span>
+                </div>
+              )}
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-500/30">
                   <Sparkles size={22} />

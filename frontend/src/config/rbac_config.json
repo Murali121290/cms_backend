@@ -54,5 +54,16 @@
   "access_post_production": [
     "Admin",
     "Accessibility Team"
+  ],
+  "access_editorial_standards": [
+    "Admin",
+    "Team Lead - Language Editing",
+    "Team Leader - Language Editing",
+    "Team Lead Language Editing",
+    "Team Leader Language Editing",
+    "Team Lead - Editorial",
+    "Team Leader - Editorial",
+    "Editorial Manager",
+    "Technical Editor"
   ]
 }
