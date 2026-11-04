@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap, History, FileText } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -49,6 +49,10 @@ export function BodInternalPage() {
   const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'tomorrow' | 'day_3' | 'day_4' | 'day_5' | 'week' | 'month' | 'custom'>('today')
   const [customFromDate, setCustomFromDate] = useState('')
   const [customToDate, setCustomToDate] = useState('')
+
+  // History Drawer state
+  const [historyJob, setHistoryJob] = useState<any | null>(null)
+  const [historyActiveTab, setHistoryActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'files'>('stage')
 
   // Table heading filters & sorting
   const [colFilters, setColFilters] = useState({
@@ -2209,6 +2213,17 @@ export function BodInternalPage() {
                                   )}
                                 </button>
                               )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setHistoryJob(job)
+                                  setHistoryActiveTab('stage')
+                                }}
+                                className="p-1 text-muted hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                                title="View History (Stages, Assignments, Updates, Files)"
+                              >
+                                <History size={15} />
+                              </button>
                               {isAdmin && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
@@ -2739,6 +2754,251 @@ export function BodInternalPage() {
           </div>
         )
       }
+
+      {/* History Slide-over Drawer */}
+      {historyJob && (
+        <div className="fixed inset-0 z-50 flex justify-end animate-in fade-in duration-200">
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs"
+            onClick={() => setHistoryJob(null)}
+          />
+          <div className="relative w-full max-w-lg bg-card border-l border-border shadow-2xl h-full flex flex-col z-10 animate-in slide-in-from-right duration-200">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted/20">
+              <div className="min-w-0 pr-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                    <History size={16} />
+                  </div>
+                  <h3 className="text-sm font-bold text-text truncate m-0">
+                    {historyJob.pdf_filename || historyJob.project_name || `Job #${historyJob.id}`}
+                  </h3>
+                </div>
+                <p className="text-[11px] text-muted mt-0.5 truncate m-0">
+                  Stage: <span className="font-semibold text-text">{historyJob.current_stage_name}</span> • Assignee: <span className="font-medium text-text">{getUserDisplayName(historyJob.current_assignee) || 'Unassigned'}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setHistoryJob(null)}
+                className="p-1.5 text-muted hover:text-text rounded-lg hover:bg-muted transition-colors shrink-0"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex items-center gap-4 px-5 pt-3 border-b border-border bg-card overflow-x-auto hide-scrollbar shrink-0">
+              <button
+                onClick={() => setHistoryActiveTab('stage')}
+                className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'stage' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                  }`}
+              >
+                Stage History
+              </button>
+              {historyJob.assigned_users && Array.isArray(historyJob.assigned_users) && historyJob.assigned_users.length > 0 && (
+                <button
+                  onClick={() => setHistoryActiveTab('assignment')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'assignment' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Assignment History
+                </button>
+              )}
+              {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.length > 0 && (
+                <button
+                  onClick={() => setHistoryActiveTab('duedate')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Update History
+                </button>
+              )}
+              {historyJob.file_history && Array.isArray(historyJob.file_history) && historyJob.file_history.length > 0 && (
+                <button
+                  onClick={() => setHistoryActiveTab('files')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'files' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  File History
+                </button>
+              )}
+            </div>
+
+            {/* Tab Contents */}
+            <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-3">
+              {historyActiveTab === 'stage' && (
+                <div className="space-y-3">
+                  {Object.keys(historyJob.stage_history || {})
+                    .filter(stageName => {
+                      const data = historyJob.stage_history[stageName]
+                      return stageName === historyJob.current_stage_name || Boolean(data?.start_time || data?.end_time)
+                    })
+                    .map((stageName, idx) => {
+                      const data = historyJob.stage_history[stageName]
+                      const isCurrent = stageName === historyJob.current_stage_name && !isJobCompleted(historyJob)
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3.5 rounded-xl border transition-all ${isCurrent
+                            ? 'bg-primary/5 border-primary/30 shadow-xs ring-1 ring-primary/10'
+                            : 'bg-background/80 border-border'
+                            }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`w-2 h-2 rounded-full ${isCurrent ? 'bg-primary animate-pulse' : 'bg-emerald-500'
+                                  }`}
+                              />
+                              <span className="text-xs font-bold text-text">{stageName}</span>
+                            </div>
+                            {isCurrent && (
+                              <span className="text-[10px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded-full">
+                                In Progress
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11px] text-muted border-t border-border/50 pt-2">
+                            <div>
+                              <span className="block text-[9px] uppercase tracking-wider text-muted-foreground">Started</span>
+                              <span className="font-medium text-text">{data?.start_time ? formatDateTime(data.start_time) : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="block text-[9px] uppercase tracking-wider text-muted-foreground">Completed</span>
+                              <span className="font-medium text-text">{data?.end_time ? formatDateTime(data.end_time) : (isCurrent ? 'Ongoing' : '-')}</span>
+                            </div>
+                          </div>
+                          {data?.assignee && (
+                            <div className="mt-2 text-[11px] text-muted">
+                              Assignee: <span className="font-medium text-text">{getUserDisplayName(data.assignee)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                </div>
+              )}
+
+              {historyActiveTab === 'assignment' && historyJob.assigned_users && (
+                <div className="space-y-3">
+                  {[...historyJob.assigned_users].reverse().map((assignment: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between bg-background border border-border rounded-xl p-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0">
+                          {assignment.action && assignment.action.toLowerCase().includes('dispatch') ? (
+                            <Send size={14} className="text-emerald-600 dark:text-emerald-400" />
+                          ) : (
+                            <User size={14} />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-text m-0 truncate">
+                            {getUserDisplayName(assignment.username || assignment.user_id) || 'Unassigned'}
+                          </p>
+                          <p className="text-[10px] text-muted m-0 mt-0.5 truncate">
+                            Stage: <span className="font-semibold text-text">{assignment.stage}</span>
+                            {assignment.assigned_by && (
+                              <span> • By {getUserDisplayName(assignment.assigned_by)}</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-muted font-medium shrink-0 text-right whitespace-nowrap pl-2">
+                        {formatDateTime(assignment.time)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {historyActiveTab === 'duedate' && historyJob.due_date_history && (
+                <div className="space-y-3">
+                  {[...historyJob.due_date_history].reverse().map((historyItem: any, idx: number) => {
+                    const hasChanges = Array.isArray(historyItem.changes) && historyItem.changes.length > 0;
+                    return (
+                      <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md">
+                              <Calendar size={13} />
+                            </div>
+                            <span className="text-xs font-bold text-text">
+                              {historyItem.date ? formatDate(historyItem.date) : 'Update Entry'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-muted font-medium">
+                            {formatDateTime(historyItem.timestamp)}
+                          </span>
+                        </div>
+
+                        {hasChanges && (
+                          <div className="space-y-1 pt-1 border-t border-border/50">
+                            {historyItem.changes.map((change: any, cIdx: number) => (
+                              <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded text-[10px]">
+                                  {change.field}
+                                </span>
+                                {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                  <>
+                                    <span className="text-muted line-through text-[11px]">{String(change.old)}</span>
+                                    <span className="text-muted text-[10px]">→</span>
+                                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">{String(change.new)}</span>
+                                  </>
+                                ) : (
+                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">set to {String(change.new)}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {historyItem.reason && (
+                          <p className="text-xs text-text/80 m-0 break-words bg-muted/20 p-2 rounded-lg">
+                            <span className="text-muted font-medium">Reason:</span> {historyItem.reason}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted m-0">
+                          Changed By: <span className="font-medium text-text">{historyItem.changed_by || 'Unknown'}</span>
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {historyActiveTab === 'files' && historyJob.file_history && (
+                <div className="space-y-3">
+                  {[...historyJob.file_history].reverse().map((fItem: any, idx: number) => (
+                    <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="p-1.5 bg-primary/10 text-primary rounded-md shrink-0">
+                            <FileText size={13} />
+                          </div>
+                          <span className="text-xs font-bold text-text truncate">
+                            {fItem.new_filename || fItem.original_filename}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted font-medium shrink-0">
+                          {formatDateTime(fItem.timestamp)}
+                        </span>
+                      </div>
+                      {fItem.backup_filename && (
+                        <p className="text-[10px] text-muted font-mono break-all m-0 bg-muted/20 p-1.5 rounded">
+                          Backed up: <span className="text-amber-600 dark:text-amber-400">{fItem.backup_filename}</span>
+                        </p>
+                      )}
+                      <p className="text-[10px] text-muted m-0 pt-1">
+                        Stage: <span className="font-semibold text-text">{fItem.stage || 'QC'}</span> • Uploaded By: <span className="font-medium text-text">{fItem.user || 'Unknown'}</span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div >
   )
 }

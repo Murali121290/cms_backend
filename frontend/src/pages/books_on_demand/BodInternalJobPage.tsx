@@ -42,7 +42,7 @@ export function BodInternalJobPage() {
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [isOpeningValidator, setIsOpeningValidator] = useState(false)
-  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate'>('stage')
+  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'files'>('stage')
   const [aceFile, setAceFile] = useState<File | null>(null)
   const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
   const [isUploadingReports, setIsUploadingReports] = useState(false)
@@ -258,8 +258,13 @@ export function BodInternalJobPage() {
       await api.post(`/bod/jobs/${jobId}/upload-epub`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      toast.success("EPUB uploaded and moved to QC")
-      navigate('/bod/internal')
+      if (job?.current_stage_name === 'QC') {
+        toast.success("EPUB re-uploaded and validator workspace refreshed")
+        fetchJob()
+      } else {
+        toast.success("EPUB uploaded and moved to QC")
+        navigate('/bod/internal')
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to upload EPUB")
     } finally {
@@ -834,6 +839,15 @@ export function BodInternalJobPage() {
                 Update History
               </button>
             )}
+            {job.file_history && Array.isArray(job.file_history) && job.file_history.length > 0 && (
+              <button
+                onClick={() => setActiveTab('files')}
+                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'files' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                  }`}
+              >
+                File History
+              </button>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
@@ -982,6 +996,36 @@ export function BodInternalJobPage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {activeTab === 'files' && job.file_history && Array.isArray(job.file_history) && job.file_history.length > 0 && (
+              <div className="space-y-3">
+                {[...job.file_history].reverse().map((fItem: any, idx: number) => (
+                  <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-3">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
+                        <FileText size={14} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-text m-0 truncate">
+                          {fItem.new_filename || fItem.original_filename}
+                        </p>
+                        {fItem.backup_filename && (
+                          <p className="text-[10px] text-muted font-mono mt-1 mb-0 break-all">
+                            Backed up as: <span className="text-amber-600 dark:text-amber-400 font-medium">{fItem.backup_filename}</span>
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted m-0 mt-1">
+                          Stage: <span className="font-semibold text-text/90">{fItem.stage || 'QC'}</span> • Uploaded By: <span className="font-medium text-text/90">{fItem.user || 'Unknown'}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-muted font-medium shrink-0 pt-0.5 text-right whitespace-nowrap">
+                      {formatDateTime(fItem.timestamp)}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
