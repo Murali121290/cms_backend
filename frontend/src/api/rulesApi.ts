@@ -65,6 +65,17 @@ export interface LanguageRule {
   // override provenance (set by backend when a project override is applied)
   is_overridden?: boolean
   override?: { enabled?: boolean; tool_behaviour?: ToolBehaviour }
+  // LWW-NE workbook per-row applicability metadata. Surfaced by
+  // workbook_rules_surface.list_lww_ne_rules() for the Rules Picker so
+  // the ProfileApplicability chip grid can be computed purely client-
+  // side without re-asking the backend. ``rule_runs_raw`` is the parsed
+  // list of base tag strings ({APA, AMA, NE, Generic, Eponym}) stripped
+  // of parenthetical annotations. ``rule_runs_display`` is the comma-
+  // joined form for tooltips. ``is_generic`` short-circuits the
+  // applicability filter — Generic rows fire in every project.
+  rule_runs_raw?: string[]
+  rule_runs_display?: string
+  is_generic?: boolean
   // Pass-through for any extra engine fields we don't care about in the UI.
   [k: string]: unknown
 }

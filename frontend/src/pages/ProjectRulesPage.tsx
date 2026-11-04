@@ -137,14 +137,24 @@ const CATEGORY_META: Record<CategoryKey, CategoryMeta> = {
     softBg: 'bg-gradient-to-r from-fuchsia-50/60 to-transparent',
     tileBg: 'from-fuchsia-50 to-purple-50/40',
   },
+  // Internal key stays 'other' — this is the fallback bucket that catOf()
+  // routes rules into when their ``category`` value is not present in
+  // CATEGORY_META. Today the only rules landing here are 14 LWW-NE
+  // Person-first language rules (workbook category='Person-first language',
+  // engine category='bias'). Relabelled to "Inclusive Language" + rose
+  // visuals to match the existing 'inclusive' category's visual language;
+  // the Users icon signals people-first content at a glance. If other
+  // rule families later emit categories that fall through here, the
+  // label will need to be revisited — until then this is an accurate name
+  // for the 14-rule bucket.
   other: {
-    label: 'Other', Icon: Hash,
-    grad: 'from-slate-500 to-slate-600',
-    dot: 'bg-slate-400', accent: 'border-l-slate-400', ring: 'text-slate-400',
-    chipActive: 'bg-slate-700 text-white border-slate-700',
-    chipInactive: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200',
-    softBg: 'bg-slate-50',
-    tileBg: 'from-slate-50 to-slate-100/40',
+    label: 'Inclusive Language', Icon: Users,
+    grad: 'from-rose-500 to-pink-500',
+    dot: 'bg-rose-500', accent: 'border-l-rose-500', ring: 'text-rose-500',
+    chipActive: 'bg-rose-500 text-white border-rose-500',
+    chipInactive: 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100',
+    softBg: 'bg-gradient-to-r from-rose-50/60 to-transparent',
+    tileBg: 'from-rose-50 to-pink-50/40',
   },
 }
 

@@ -239,6 +239,109 @@ const TYPE_RENDERERS: Record<string, (p: { rule: LanguageRule }) => any> = {
   builtin: DetailBuiltin,
 }
 
+
+/* ─── Profile Applicability (LWW-NE only) ───────────────────────────── */
+
+// Workbook-tagged profiles shown in the applicability grid. UK, US,
+// Canadian, and Chicago are intentionally omitted — the LWW-NE workbook
+// does not tag any row for those project types, so the display would
+// have been all-✕ for every non-Generic rule. Showing only the three
+// tags that actually appear in the workbook data gives reviewers a
+// cleaner signal. Runtime execution is unchanged (projects of other
+// types continue to receive Generic rows via the engine's short-circuit).
+const PROFILE_APPLICABILITY_ORDER = ['APA', 'AMA', 'NE'] as const
+type ApplicabilityProfile = typeof PROFILE_APPLICABILITY_ORDER[number]
+
+/**
+ * Mirrors ``lww_ne._row_applies_to_project`` + ``lww_ne.compute_active_tags``.
+ * Single source of truth: the runtime module. This function must stay in
+ * lockstep with the backend filter logic.
+ *   - Generic rows fire in every project (short-circuit) — all three
+ *     shown chips are ✓ for Generic.
+ *   - Non-Generic rows fire only when the project's active tag set
+ *     intersects the row's non-empty Rule Runs.
+ *   - Eponym is a classification tag; it is NOT in the active tag set,
+ *     so it never counts as an applicability match. Rows tagged
+ *     ``[AMA, NE, Eponym]`` fire in AMA / NE only, not via Eponym.
+ */
+function lwwNeProfileApplies(
+  rule: LanguageRule, profile: ApplicabilityProfile,
+): boolean {
+  if (rule.is_generic) return true
+  const tags = Array.isArray(rule.rule_runs_raw) ? rule.rule_runs_raw : []
+  return tags.includes(profile)
+}
+
+function ProfileApplicability({ rule }: { rule: LanguageRule }) {
+  // Only render for LWW-NE workbook rules. Other workbook categories
+  // (hyphenation / abbreviations / medical_terms / uk_us_spelling /
+  // custom) use different applicability models and are out of scope
+  // for this block.
+  if (rule.source_badge !== 'LWW-NE') return null
+  // Defensive: if the surface payload is missing both fields we can't
+  // compute applicability, so skip rendering rather than showing a
+  // misleading all-✕ row.
+  if (!Array.isArray(rule.rule_runs_raw) && rule.is_generic === undefined) {
+    return null
+  }
+
+  const hasEponymTag = Array.isArray(rule.rule_runs_raw) && rule.rule_runs_raw.includes('Eponym')
+  const isGeneric = Boolean(rule.is_generic)
+
+  return (
+    <div className="mt-1.5 flex items-center gap-1 flex-wrap text-[10px]" role="group" aria-label="Profile applicability">
+      <span className="text-slate-400 font-semibold uppercase tracking-wide mr-0.5">
+        Runs in:
+      </span>
+      {PROFILE_APPLICABILITY_ORDER.map((profile) => {
+        const applies = lwwNeProfileApplies(rule, profile)
+        // Tooltip precedence:
+        // 1. Generic → explain why every profile is ✓
+        // 2. Applicable → brief affirmative (special wording for NE
+        //    since it's a term-list signal, not a profile_key)
+        // 3. Non-applicable → brief negative
+        let title: string
+        if (isGeneric) {
+          title = `Generic rule — runs in ${profile} (and every other project)`
+        } else if (applies) {
+          title = profile === 'NE'
+            ? 'Runs when the LWW_NE term list is assigned to the project'
+            : `Runs in ${profile} projects`
+        } else {
+          title = `Does not run in ${profile} projects — rule is not tagged for ${profile}`
+        }
+        return (
+          <span
+            key={profile}
+            title={title}
+            className={cls(
+              'inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded border font-medium',
+              applies
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-slate-50 text-slate-400 border-slate-200',
+            )}
+          >
+            <span>{profile}</span>
+            <span aria-hidden="true" className="font-bold">
+              {applies ? '✓' : '✕'}
+            </span>
+          </span>
+        )
+      })}
+      {hasEponymTag && (
+        <span
+          title="Eponym is a classification tag only. It does not act as an independent profile at runtime — Eponym-tagged rules fire via their other tags (APA / AMA / NE) or via the Generic short-circuit."
+          className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded border font-medium bg-amber-50 text-amber-700 border-amber-200 ml-1"
+          aria-label="Eponym classification note"
+        >
+          <span>Eponym</span>
+          <span aria-hidden="true">ⓘ</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
 /* ─── Main component ─────────────────────────────────────────────────── */
 
 export function RuleDetails({ rule, canEdit, onToggle, onBehaviourChange, compact, onDelete }: RuleDetailsProps) {
@@ -331,6 +434,13 @@ export function RuleDetails({ rule, canEdit, onToggle, onBehaviourChange, compac
 
         {/* Type-dispatched detail */}
         {!compact && <Detail rule={rule} />}
+
+        {/* Profile Applicability — LWW-NE workbook rows only. Informational
+            chip grid showing which project types will trigger this rule at
+            runtime. Does NOT affect enable/disable state or runtime execution
+            — those remain controlled by the toggle switch + Scope-C overrides
+            above. See lwwNeProfileApplies() for the mirroring logic. */}
+        {!compact && <ProfileApplicability rule={rule} />}
       </div>
     </li>
   )
