@@ -1221,34 +1221,45 @@ def sync_job_to_validator(
     extract_folder = os.path.join(project_dir, EXTRACT_DIR)
     os.makedirs(extract_folder, exist_ok=True)
 
-    # Copy EPUB file to extract folder
+    # Check if project already exists in ev_projects and is already extracted
+    existing_proj = db.query(EvProject).filter(
+        EvProject.folder_name == folder_name,
+        EvProject.is_deleted == False
+    ).first()
+
     dest_epub_path = os.path.join(extract_folder, job.epub_filename or os.path.basename(job.epub_filepath))
-    try:
-        shutil.copy2(job.epub_filepath, dest_epub_path)
-    except Exception as e:
-        logger.error(f"Error copying EPUB to validator folder: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to copy EPUB: {str(e)}")
-
-    # Copy PDF file if available
-    if job.pdf_filepath and os.path.exists(job.pdf_filepath):
-        dest_pdf_path = os.path.join(extract_folder, job.pdf_filename or os.path.basename(job.pdf_filepath))
-        try:
-            shutil.copy2(job.pdf_filepath, dest_pdf_path)
-        except Exception as e:
-            logger.warning(f"Could not copy PDF to validator folder: {e}")
-
-    # Extract EPUB contents into extract/epub/
     epub_extract_path = os.path.join(extract_folder, "epub")
-    if os.path.exists(epub_extract_path):
-        shutil.rmtree(epub_extract_path, ignore_errors=True)
-    os.makedirs(epub_extract_path, exist_ok=True)
 
-    try:
-        with zipfile.ZipFile(dest_epub_path, "r") as epub_ref:
-            epub_ref.extractall(epub_extract_path)
-    except Exception as e:
-        logger.error(f"Failed to unzip EPUB {dest_epub_path}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to unpack EPUB: {str(e)}")
+    # Only copy and extract if not already extracted or if epub folder is missing
+    already_extracted = os.path.exists(epub_extract_path) and any(os.scandir(epub_extract_path))
+
+    if not already_extracted:
+        # Copy EPUB file to extract folder
+        try:
+            shutil.copy2(job.epub_filepath, dest_epub_path)
+        except Exception as e:
+            logger.error(f"Error copying EPUB to validator folder: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to copy EPUB: {str(e)}")
+
+        # Copy PDF file if available
+        if job.pdf_filepath and os.path.exists(job.pdf_filepath):
+            dest_pdf_path = os.path.join(extract_folder, job.pdf_filename or os.path.basename(job.pdf_filepath))
+            try:
+                shutil.copy2(job.pdf_filepath, dest_pdf_path)
+            except Exception as e:
+                logger.warning(f"Could not copy PDF to validator folder: {e}")
+
+        # Extract EPUB contents into extract/epub/
+        if os.path.exists(epub_extract_path):
+            shutil.rmtree(epub_extract_path, ignore_errors=True)
+        os.makedirs(epub_extract_path, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(dest_epub_path, "r") as epub_ref:
+                epub_ref.extractall(epub_extract_path)
+        except Exception as e:
+            logger.error(f"Failed to unzip EPUB {dest_epub_path}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to unpack EPUB: {str(e)}")
 
     total_files = sum(len(files) for _, _, files in os.walk(epub_extract_path))
 
@@ -1261,12 +1272,6 @@ def sync_job_to_validator(
     user_id = current_user.get("id") if isinstance(current_user, dict) else getattr(current_user, "id", None)
     username = current_user.get("username") if isinstance(current_user, dict) else getattr(current_user, "username", None)
     assignee_to_set = username or job.current_assignee or None
-
-    # Check if project already exists in ev_projects
-    existing_proj = db.query(EvProject).filter(
-        EvProject.folder_name == folder_name,
-        EvProject.is_deleted == False
-    ).first()
 
     if existing_proj:
         existing_proj.epub_path = dest_epub_path

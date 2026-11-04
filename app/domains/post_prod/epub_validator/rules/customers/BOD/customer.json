@@ -333,8 +333,88 @@
       ],
       "enabled": true,
       "rule_config": {
-        "expected_summary": "Dieses E-Book wurde gemäß der W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit geprüft. Es genügt den Anforderungen an Barrierefreiheit zu Inhaltsstruktur, semantischer Auszeichnung und Alternativtexten.",
-        "is_required": true
+        "is_required": true,
+        "default_level": "AA",
+        "expected_summary_by_language": {
+          "de": {
+            "language_name": "German",
+            "AA": "Dieses E-Book wurde nach den W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit geprüft. Es genügt den Anforderungen an Barrierefreiheit zu Inhaltsstruktur, semantischer Auszeichnung und Alternativtexten.",
+            "A": "Dieses E-Book wurde nach den W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit geprüft. Es genügt den grundsätzlichen Anforderungen an Barrierefreiheit zu Inhaltsstruktur, semantischer Auszeichnung und Alternativtexten.",
+            "Inaccessible": "Dieses E-Book wurde nicht nach den W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit optimiert. Es enthält ggfs. nicht-barrierefreie Elemente."
+          },
+          "da": {
+            "language_name": "Danish",
+            "AA": "Denne e-bog er blevet testet for tilgængelighed i overensstemmelse med W3C EPUB Accessibility Guidelines eller PDF UA-standarderne. Den opfylder tilgængelighedskravene til indholdsstruktur, semantisk opmærkning og alternative tekster",
+            "A": "Denne e-bog er blevet testet for tilgængelighed i overensstemmelse med W3C EPUB Accessibility Guidelines eller PDF UA-standarderne. Den opfylder de grundlæggende tilgængelighedskrav til indholdsstruktur, semantisk opmærkning og alternative tekster.",
+            "Inaccessible": "Denne e-bog er ikke blevet optimeret til tilgængelighed i overensstemmelse med W3C EPUB Accessibility Guidelines eller PDF UA-standarderne. Den kan indeholde ikke-tilgængelige elementer."
+          },
+          "fi": {
+            "language_name": "Finnish",
+            "AA": "Tämän e-kirjan esteettömyys on testattu W3C:n EPUB verkkosisällön saavutettavuusohjeiden tai PDF UA - standardien mukaisesti. Se täyttää sisällön rakennetta, semanttista merkintää ja vaihtoehtoisia tekstejä koskevat saavutettavuusvaatimukset",
+            "A": "Tämä e-kirja on testattu W3C:n EPUB verkkosisällön saavutettavuusohjeiden tai PDF UA -standardien mukaisesti. Se täyttää sisällön rakennetta, semanttista merkintää ja vaihtoehtoisia tekstejä koskevat saavutettavuuden perusvaatimukset.",
+            "Inaccessible": "Tämä e-kirja ei ole W3C EPUB -saavutettavuusohjeiden tai PDF UA -standardien mukaisesti optimoitu esteettömyyden kannalta. Se saattaa sisältää muita kuin esteettömiä elementtejä"
+          },
+          "fr": {
+            "language_name": "French",
+            "AA": "Ce livre électronique a été testé selon les directives d‘accessibilité W3C EPUB ou les normes PDF UA pour une accessibilité sans barrières. Il répond aux exigences d‘accessibilité concernant la structure du contenu, le marquage sémantique et les textes alternatifs",
+            "A": "Ce livre électronique a été testé selon les directives d‘accessibilité EPUB du W3C ou les normes PDF UA pour une accessibilité sans barrières. Il satisfait aux exigences de base en matière d‘accessibilité concernant la structure du contenu, le marquage sémantique et les textes alternatifs.",
+            "Inaccessible": "Ce livre électronique n‘a pas été optimisé pour une accessibilité sans barrières conformément aux directives d‘accessibilité EPUB du W3C ou aux normes PDF UA. Il peut contenir des éléments non accessibles."
+          },
+          "sv": {
+            "language_name": "Swedish",
+            "AA": "Denna e-bok har testats för tillgänglighet i enlighet med W3C:s EPUB Accessibility Guidelines eller PDF UAstandarder. Den uppfyller tillgänglighetskraven för innehållsstruktur, semantisk markering och alternativa texter",
+            "A": "Den här e-boken har testats för tillgänglighet i enlighet med W3C EPUB Accessibility Guidelines eller PDF UAstandarderna. Den uppfyller de grundläggande tillgänglighetskraven för innehållsstruktur, semantisk markering och alternativa texter.",
+            "Inaccessible": "Den här e-boken har inte optimerats för tillgänglighet i enlighet med W3C EPUB Accessibility Guidelines eller PDF UA-standarder. Den kan innehålla otillgängliga element"
+          },
+          "no": {
+            "language_name": "Norwegian",
+            "AA": "Denne e-boken er testet for tilgjengelighet i henhold til W3C EPUB Accessibility Guidelines eller PDF UAstandardene. Den oppfyller tilgjengelighetskravene for innholdsstruktur, semantisk markering og alternative tekster.",
+            "A": "Denne e-boken har blitt testet for tilgjengelighet i henhold til W3C EPUB Accessibility Guidelines eller PDF UAstandardene. Den oppfyller de grundleggende tilgjengelighetskravene for innholdsstruktur, semantisk markering og alternative tekster.",
+            "Inaccessible": "Denne e-boken har ikke blitt optimalisert for tilgjengelighet i samsvar med W3C EPUB Accessibility Guidelines eller PDF UA-standardene. Den kan inneholde utilgjengelige elementer."
+          },
+          "es": {
+            "language_name": "Spanish",
+            "AA": "Este libro electrónico ha sido sometido a pruebas de accesibilidad de acuerdo con las Directrices de Accesibilidad EPUB del W3C o las normas PDF UA. Cumple los requisitos de accesibilidad relativos a la estructura del contenido, el marcado semántico y los textos alternativos.",
+            "A": "Este libro electrónico ha sido sometido a pruebas de accesibilidad de acuerdo con las Pautas de Accesibilidad para EPUB del W3C o las normas PDF UA. Cumple los requisitos básicos de accesibilidad en cuanto a estructura del contenido, marcado semántico y textos alternativos.",
+            "Inaccessible": "Este libro electrónico no ha sido optimizado para la accesibilidad de acuerdo con las Directrices de Accesibilidad EPUB del W3C o los estándares PDF UA. Puede contener elementos no accesibles."
+          },
+          "en": {
+            "language_name": "English",
+            "AA": "This e-book has been reviewed according to the W3C EPUB Accessibility Guidelines or PDF UA standards for accessible usability. It meets the requirements for accessibility regarding content structure, semantic markup and alternative texts.",
+            "A": "This e-book has been reviewed according to the W3C EPUB Accessibility Guidelines or PDF UA standards for accessible usability. It meets the basic requirements for accessibility regarding content structure, semantic markup and alternative texts.",
+            "Inaccessible": "This e-book has not been optimised according to the W3C EPUB Accessibility Guidelines or PDF UA standards for accessible usability. It may contain elements that are not accessibility-compliant."
+          },
+          "it": {
+            "language_name": "Italian",
+            "AA": "Questo e-book è stato verificato secondo le linee guida W3C EPUB Accessibility Guidelines o gli standard PDF UA per l'accessibilità. Soddisfa i requisiti di accessibilità relativi alla struttura del contenuto, alla marcatura semantica e ai testi alternativi.",
+            "A": "Questo e-book è stato verificato secondo le linee guida W3C EPUB Accessibility Guidelines o gli standard PDF UA per l'accessibilità. Soddisfa i requisiti fondamentali di accessibilità relativi alla struttura del contenuto, alla marcatura semantica e ai testi alternativi.",
+            "Inaccessible": "Questo e-book non è stato ottimizzato secondo le linee guida W3C EPUB Accessibility Guidelines o gli standard PDF UA per l'accessibilità. Potrebbe contenere elementi non accessibili."
+          },
+          "pt": {
+            "language_name": "Portuguese",
+            "AA": "Este e-book foi verificado de acordo com as Diretrizes de Acessibilidade W3C EPUB ou os padrões PDF UA para acessibilidade. Cumpre os requisitos de acessibilidade relativos à estrutura do conteúdo, marcação semântica e textos alternativos.",
+            "A": "Este e-book foi verificado de acordo com as Diretrizes de Acessibilidade W3C EPUB ou os padrões PDF UA para acessibilidade. Cumpre os requisitos básicos de acessibilidade relativos à estrutura do conteúdo, marcação semântica e textos alternativos.",
+            "Inaccessible": "Este e-book não foi otimizado de acordo com as Diretrizes de Acessibilidade W3C EPUB ou os padrões PDF UA para acessibilidade. Pode conter elementos não acessíveis."
+          },
+          "nl": {
+            "language_name": "Dutch",
+            "AA": "Dit e-book is gecontroleerd volgens de W3C EPUB Accessibility Guidelines of PDF UA-normen voor toegankelijkheid. Het voldoet aan de vereisten voor toegankelijkheid met betrekking tot inhoudsstructuur, semantische opmaak en alternatieve teksten.",
+            "A": "Dit e-book is gecontroleerd volgens de W3C EPUB Accessibility Guidelines of PDF UA-normen voor toegankelijkheid. Het voldoet aan de basisvereisten voor toegankelijkheid met betrekking tot inhoudsstructuur, semantische opmaak en alternatieve teksten.",
+            "Inaccessible": "Dit e-book is niet geoptimaliseerd volgens de W3C EPUB Accessibility Guidelines of PDF UA-normen voor toegankelijkheid. Het kan mogelijk niet-toegankelijke elementen bevatten."
+          },
+          "ca": {
+            "language_name": "Catalan",
+            "AA": "Aquest llibre electrònic ha estat verificat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Compleix els requisits d'accessibilitat pel que fa a l'estructura del contingut, el marcatge semàntic i els textos alternatius.",
+            "A": "Aquest llibre electrònic ha estat verificat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Compleix els requisits bàsics d'accessibilitat pel que fa a l'estructura del contingut, el marcatge semàntic i els textos alternatius.",
+            "Inaccessible": "Aquest llibre electrònic no ha estat optimitzat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Pot contenir elements no accessibles."
+          },
+          "va": {
+            "language_name": "Valencian",
+            "AA": "Aquest llibre electrònic ha sigut verificat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Compleix els requisits d'accessibilitat quant a l'estructura del contingut, el marcatge semàntic i els textos alternatius.",
+            "A": "Aquest llibre electrònic ha sigut verificat d'acord amb les directrius d'accessibilitat W3C EPUB o els standardes PDF UA per a l'accessibilitat. Compleix els requisits fonamentals d'accessibilitat quant a l'estructura del contingut, el marcatge semàntic i els textos alternatius.",
+            "Inaccessible": "Aquest llibre electrònic no ha sigut optimitzat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Pot contindre elements no accessibles."
+          }
+        }
       },
       "category": "Metadata Check"
     },
