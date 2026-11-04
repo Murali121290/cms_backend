@@ -46,3 +46,4 @@ def downgrade() -> None:
             op.drop_column('bod_jobs', 'cover_filepath')
         if 'cover_filename' in columns:
             op.drop_column('bod_jobs', 'cover_filename')
+
