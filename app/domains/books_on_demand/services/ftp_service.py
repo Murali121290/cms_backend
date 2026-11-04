@@ -56,18 +56,21 @@ class BodFtpService:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
-    def list_pdfs(self) -> List[str]:
-        """List all .pdf files in the current directory"""
+    def list_files(self) -> List[str]:
+        """List all files in the current directory"""
         files = []
         try:
-            # Use retrlines directly to catch and suppress SSLEOFError
             self.ftp.retrlines("NLST", files.append)
         except ssl.SSLEOFError:
-            pass # Server closed connection without TLS close_notify (common FTP server behavior)
+            pass
         except Exception as e:
-            logger.error(f"Failed to list PDFs on {self.host}: {str(e)}")
+            logger.error(f"Failed to list files on {self.host}: {str(e)}")
             return []
-            
+        return files
+
+    def list_pdfs(self) -> List[str]:
+        """List all .pdf files in the current directory"""
+        files = self.list_files()
         return [f for f in files if f.lower().endswith('.pdf')]
 
     def download_file(self, remote_filename: str, local_path: str):

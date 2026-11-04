@@ -44,7 +44,9 @@ def watch_ftp_for_new_pdfs():
                     logger.error(f"Failed to change directory to BOD on FTP {settings.BOD_FTP_HOST}: {str(e)}")
                     return
                     
-                pdfs = ftp.list_pdfs()
+                all_ftp_files = ftp.list_files()
+                pdfs = [f for f in all_ftp_files if f.lower().endswith('.pdf')]
+
                 for pdf_name in pdfs:
                     # Check if job already exists
                     existing_job = db.query(BodJob).filter(
@@ -60,6 +62,24 @@ def watch_ftp_for_new_pdfs():
                         
                         local_path = os.path.join(project_dir, pdf_name)
                         ftp.download_file(pdf_name, local_path)
+
+                        # Look for matching image/cover file (e.g. .jpg, .jpeg, .png)
+                        cover_filename = None
+                        cover_filepath = None
+                        for ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff'):
+                            candidate_name = f"{project_name}{ext}"
+                            candidate_match = next((f for f in all_ftp_files if f.lower() == candidate_name.lower()), None)
+                            if candidate_match:
+                                cover_filename = candidate_match
+                                cover_filepath = os.path.join(project_dir, candidate_match)
+                                try:
+                                    ftp.download_file(candidate_match, cover_filepath)
+                                    logger.info(f"Found and downloaded matching cover {candidate_match} for {pdf_name}")
+                                except Exception as err:
+                                    logger.error(f"Failed to download matching cover {candidate_match}: {err}")
+                                    cover_filename = None
+                                    cover_filepath = None
+                                break
                         
                         page_count = None
                         pdf_type = None
@@ -107,6 +127,8 @@ def watch_ftp_for_new_pdfs():
                             project_name=project_name,
                             pdf_filename=pdf_name,
                             pdf_filepath=local_path,
+                            cover_filename=cover_filename,
+                            cover_filepath=cover_filepath,
                             pdf_page_count=page_count,
                             pdf_type=pdf_type,
                             pdf_language=pdf_language,
@@ -122,7 +144,12 @@ def watch_ftp_for_new_pdfs():
                         db.refresh(new_job)
                         
                         if settings.BOD_MANAGER_EMAIL:
-                            send_bod_new_job_email(settings.BOD_MANAGER_EMAIL, new_job.project_name, pdf_name)
+                            send_bod_new_job_email(
+                                settings.BOD_MANAGER_EMAIL,
+                                new_job.project_name,
+                                pdf_name,
+                                cover_filename=cover_filename
+                            )
                         
         except Exception as e:
             logger.error(f"Error processing FTP for BOD: {str(e)}")

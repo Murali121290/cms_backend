@@ -41,8 +41,11 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
         pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
         job_dict = {
             "id": job.id,
+            "project_name": job.project_name,
             "pdf_filename": job.pdf_filename,
             "pdf_filepath": job.pdf_filepath,
+            "cover_filename": getattr(job, "cover_filename", None),
+            "cover_filepath": getattr(job, "cover_filepath", None),
             "pdf_page_count": job.pdf_page_count,
             "pdf_type": job.pdf_type,
             "pdf_language": job.pdf_language,
@@ -85,8 +88,11 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
     return {
         "id": job.id,
+        "project_name": job.project_name,
         "pdf_filename": job.pdf_filename,
         "pdf_filepath": job.pdf_filepath,
+        "cover_filename": getattr(job, "cover_filename", None),
+        "cover_filepath": getattr(job, "cover_filepath", None),
         "pdf_page_count": job.pdf_page_count,
         "pdf_type": job.pdf_type,
         "pdf_language": job.pdf_language,
@@ -136,6 +142,16 @@ def download_pdf(job_id: int, db: Session = Depends(get_db)):
             db.commit()
 
     return FileResponse(path=job.pdf_filepath, filename=job.pdf_filename, media_type='application/pdf')
+
+@router.get("/jobs/{job_id}/download-cover")
+def download_cover(job_id: int, db: Session = Depends(get_db)):
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job or not job.cover_filepath or not os.path.exists(job.cover_filepath):
+        raise HTTPException(status_code=404, detail="Cover image not found")
+        
+    ext = os.path.splitext(job.cover_filename or '')[1].lower()
+    media_type = 'image/jpeg' if ext in ('.jpg', '.jpeg') else 'image/png' if ext == '.png' else 'application/octet-stream'
+    return FileResponse(path=job.cover_filepath, filename=job.cover_filename or "cover.jpg", media_type=media_type)
 
 @router.post("/jobs/{job_id}/start-work")
 def start_work(job_id: int, db: Session = Depends(get_db)):
@@ -219,7 +235,8 @@ def get_customer_report(
     for job in jobs:
         customer_due = None
         if job.due_date:
-            customer_due = job.due_date + timedelta(days=1)
+            customer_due = job.due_date
+            # customer_due = job.due_date + timedelta(days=1)
         elif job.created_at:
             is_image = bool(job.pdf_type and "image" in str(job.pdf_type).lower())
             days = 7 if is_image else 4
@@ -228,7 +245,10 @@ def get_customer_report(
         report.append({
             "id": job.id,
             "client_name": "BOD",
+            "project_name": job.project_name,
             "pdf_filename": job.pdf_filename,
+            "cover_filename": getattr(job, "cover_filename", None),
+            "cover_filepath": getattr(job, "cover_filepath", None),
             "pdf_type": job.pdf_type,
             "pdf_language": job.pdf_language,
             "pdf_page_count": job.pdf_page_count,
@@ -242,7 +262,8 @@ def get_customer_report(
             "internal_due_date": job.due_date,
             "customer_due_date": customer_due,
             "is_fastrack": bool(job.is_fastrack),
-            "fastrack_requested_date": job.fastrack_requested_date
+            "fastrack_requested_date": job.fastrack_requested_date,
+            "due_date_history": job.due_date_history
         })
     return {"jobs": report}
 
@@ -281,34 +302,90 @@ def delete_job(job_id: int, db: Session = Depends(get_db), current_user = Depend
 class BodFastrackToggleRequest(BaseModel):
     is_fastrack: bool
     fastrack_requested_date: Optional[str] = None
+    reason: Optional[str] = None
 
 
 @router.put("/jobs/{job_id}/fastrack")
 def toggle_fastrack(
     job_id: int,
     payload: BodFastrackToggleRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user_from_cookie)
 ):
-    """Enable or disable fastrack status for a BOD job."""
+    """Enable, update, or disable fastrack status for a BOD job, tracking changes in due_date_history."""
     job = db.query(BodJob).filter(BodJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job.is_fastrack = bool(payload.is_fastrack)
-    if job.is_fastrack:
+    old_fastrack = bool(job.is_fastrack)
+    old_date = job.fastrack_requested_date
+    new_fastrack = bool(payload.is_fastrack)
+    new_date = None
+
+    if new_fastrack:
         if payload.fastrack_requested_date:
             try:
                 # Handle pure date "YYYY-MM-DD"
                 clean_date = payload.fastrack_requested_date.split('T')[0]
-                parsed_date = datetime.strptime(clean_date, "%Y-%m-%d")
-                job.fastrack_requested_date = parsed_date
+                new_date = datetime.strptime(clean_date, "%Y-%m-%d")
             except Exception as e:
                 logger.error(f"Error parsing fastrack_requested_date {payload.fastrack_requested_date}: {e}")
-                job.fastrack_requested_date = None
+                new_date = None
+
+    # Determine changes
+    changes = []
+    if old_fastrack != new_fastrack:
+        changes.append({
+            "field": "Priority",
+            "old": "Fastrack" if old_fastrack else "Normal",
+            "new": "Fastrack" if new_fastrack else "Normal"
+        })
+
+    old_date_str = old_date.strftime("%d %b %Y") if old_date else None
+    new_date_str = new_date.strftime("%d %b %Y") if new_date else None
+    if old_date_str != new_date_str:
+        changes.append({
+            "field": "Fastrack Date",
+            "old": old_date_str,
+            "new": new_date_str
+        })
+
+    # Update job state
+    job.is_fastrack = new_fastrack
+    job.fastrack_requested_date = new_date
+
+    # Record history if changes occurred
+    if changes:
+        fn = (getattr(current_user, "first_name", None) or "").strip() if current_user else ""
+        ln = (getattr(current_user, "last_name", None) or "").strip() if current_user else ""
+        if fn and ln:
+            full_name = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
         else:
-            job.fastrack_requested_date = None
-    else:
-        job.fastrack_requested_date = None
+            full_name = fn or ln or getattr(current_user, "username", getattr(current_user, "user_name", "System")) if current_user else "System"
+
+        reason = (payload.reason or "").strip()
+        if not reason:
+            if not new_fastrack:
+                reason = "Turned off Fastrack"
+            elif not old_fastrack:
+                reason = "Enabled Fastrack"
+            else:
+                reason = "Updated Fastrack expected date"
+
+        history_entry = {
+            "changes": changes,
+            "reason": reason,
+            "changed_by": full_name,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        if new_date:
+            history_entry["date"] = new_date.strftime("%Y-%m-%d")
+
+        history = list(job.due_date_history) if job.due_date_history else []
+        history.append(history_entry)
+        job.due_date_history = history
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(job, "due_date_history")
 
     db.commit()
     db.refresh(job)
@@ -319,7 +396,7 @@ def toggle_fastrack(
         if settings.BOD_MANAGER_EMAIL:
             try:
                 formatted_expected = job.fastrack_requested_date.strftime("%d %b %Y")
-                formatted_due = job.due_date.strftime("%d %b %Y, %I:%M %p") if job.due_date else "Not set"
+                formatted_due = job.due_date.strftime("%d %b %Y") if job.due_date else "Not set"
                 send_bod_fastrack_alert_email(
                     manager_email=settings.BOD_MANAGER_EMAIL,
                     project_name=job.project_name or "",
@@ -334,7 +411,8 @@ def toggle_fastrack(
         "status": "success",
         "job_id": job.id,
         "is_fastrack": bool(job.is_fastrack),
-        "fastrack_requested_date": job.fastrack_requested_date.strftime("%Y-%m-%d") if job.fastrack_requested_date else None
+        "fastrack_requested_date": job.fastrack_requested_date.strftime("%Y-%m-%d") if job.fastrack_requested_date else None,
+        "due_date_history": job.due_date_history
     }
 
 
