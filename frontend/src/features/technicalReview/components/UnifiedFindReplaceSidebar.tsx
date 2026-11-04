@@ -45,6 +45,12 @@ export interface UnifiedFindReplaceSidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   // Comments / Author Queries
+  stylesheetFilter?: "all" | "in_stylesheet" | "other";
+  onStylesheetFilterChange?: (filter: "all" | "in_stylesheet" | "other") => void;
+  hasActiveStylesheet?: boolean;
+  activeStylesheetName?: string | null;
+  selectedRuleFilter?: string | null;
+  onSelectedRuleFilterChange?: (ruleKey: string | null) => void;
   comments?: CommentRecord[];
   commentsLoading?: boolean;
   newCommentText?: string;
@@ -85,6 +91,12 @@ export function UnifiedFindReplaceSidebar({
   editorRef,
   isCollapsed,
   onToggleCollapse,
+  stylesheetFilter = "all",
+  onStylesheetFilterChange,
+  hasActiveStylesheet = false,
+  activeStylesheetName = null,
+  selectedRuleFilter = null,
+  onSelectedRuleFilterChange,
   comments = [],
   commentsLoading = false,
   newCommentText = "",
@@ -102,21 +114,51 @@ export function UnifiedFindReplaceSidebar({
   const [activeTab, setActiveTab] = useState<"findReplace" | "comments" | "tracked">("findReplace");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  // Counts for Category Pills
+  // List of distinct rules present in findings scoped to current stylesheetFilter
+  const ruleOptions = useMemo(() => {
+    const map = new Map<string, { label: string; count: number; ceRuleNo?: number }>();
+    const base = stylesheetFilter === "in_stylesheet"
+      ? findings.filter((f: any) => f.in_stylesheet === true)
+      : stylesheetFilter === "other"
+      ? findings.filter((f: any) => f.in_stylesheet !== true)
+      : findings;
+
+    base.forEach((f: any) => {
+      const key = f.rule_label || f.rule_id;
+      if (!map.has(key)) {
+        map.set(key, { label: key, count: 0, ceRuleNo: f.ce_rule_no });
+      }
+      map.get(key)!.count++;
+    });
+    return Array.from(map.entries())
+      .map(([key, val]) => ({
+        key,
+        label: val.ceRuleNo ? `R${val.ceRuleNo}: ${val.label}` : val.label,
+        count: val.count,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [findings, stylesheetFilter]);
+
+  // Counts for Category and Stylesheet Pills
   const counts = useMemo(() => {
     let teCount = 0;
     let mechCount = 0;
+    let inSsCount = 0;
     findings.forEach((f: any) => {
       if (f.category === "te_point") {
         teCount++;
       } else {
         mechCount++;
       }
+      if (f.in_stylesheet === true) {
+        inSsCount++;
+      }
     });
     return {
       all: findings.length,
       te: teCount,
       mechanical: mechCount,
+      in_stylesheet: inSsCount,
     };
   }, [findings]);
 
@@ -222,6 +264,59 @@ export function UnifiedFindReplaceSidebar({
               />
             </div>
 
+            {/* Stylesheet Scope Toggle */}
+            {hasActiveStylesheet && (
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-md text-[11px] font-semibold">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStylesheetFilterChange?.("in_stylesheet");
+                    onSelectedRuleFilterChange?.(null);
+                  }}
+                  className={`flex-1 py-1 px-2 rounded text-center transition-all cursor-pointer ${
+                    stylesheetFilter === "in_stylesheet"
+                      ? "bg-white text-sky-800 shadow-xs font-bold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title={activeStylesheetName ? `Active stylesheet: ${activeStylesheetName}` : "Show only occurrences matching active stylesheet"}
+                >
+                  Stylesheet ({counts.in_stylesheet})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStylesheetFilterChange?.("all");
+                    onSelectedRuleFilterChange?.(null);
+                  }}
+                  className={`flex-1 py-1 px-2 rounded text-center transition-all cursor-pointer ${
+                    stylesheetFilter === "all"
+                      ? "bg-white text-slate-900 shadow-xs font-bold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title="Show all occurrences detected across all rules"
+                >
+                  All ({counts.all})
+                </button>
+                {counts.all > counts.in_stylesheet && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onStylesheetFilterChange?.("other");
+                      onSelectedRuleFilterChange?.(null);
+                    }}
+                    className={`py-1 px-2 rounded text-center transition-all cursor-pointer ${
+                      stylesheetFilter === "other"
+                        ? "bg-white text-amber-800 shadow-xs font-bold"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                    title="Show occurrences for rules not selected in the stylesheet"
+                  >
+                    Other ({counts.all - counts.in_stylesheet})
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Category Filter Pills (Technical vs Mechanical) */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
               <button
@@ -258,6 +353,47 @@ export function UnifiedFindReplaceSidebar({
                 MECHANICAL ({counts.mechanical})
               </button>
             </div>
+
+            {/* Rule Filter Dropdown */}
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <select
+                aria-label="Filter by specific rule"
+                value={selectedRuleFilter || ""}
+                onChange={(e) => onSelectedRuleFilterChange?.(e.target.value || null)}
+                className="w-full text-[11px] font-medium bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer truncate"
+              >
+                <option value="">
+                  {stylesheetFilter === "in_stylesheet"
+                    ? `All Stylesheet Rules (${counts.in_stylesheet} occurrences)`
+                    : stylesheetFilter === "other"
+                    ? `All Other Rules (${counts.all - counts.in_stylesheet} occurrences)`
+                    : `All Rules (${findings.length} occurrences)`}
+                </option>
+                {ruleOptions.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label} ({r.count})
+                  </option>
+                ))}
+              </select>
+              {selectedRuleFilter && (
+                <button
+                  type="button"
+                  onClick={() => onSelectedRuleFilterChange?.(null)}
+                  className="px-1.5 py-1 text-[10px] font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200 bg-slate-100 rounded shrink-0 transition-colors cursor-pointer"
+                  title="Clear rule filter"
+                >
+                  Clear ×
+                </button>
+              )}
+            </div>
+            {selectedRuleFilter && (
+              <div className="flex items-center justify-between bg-amber-50 border border-amber-200 px-2 py-0.5 rounded text-[10px] text-amber-900 font-semibold">
+                <span className="truncate">Rule: {selectedRuleFilter}</span>
+                <span className="text-[9.5px] text-amber-700 bg-amber-100 px-1 rounded ml-1 shrink-0">
+                  {filteredFindings.length} items
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Scrollable Center: The Single Find & Replace Card + Quick Jump Accordion */}
@@ -276,6 +412,10 @@ export function UnifiedFindReplaceSidebar({
               onHighlightAndNext={onHighlightAndNext}
               onSkipNext={onSkipNext}
               onBatchFixRule={onBatchFixRule}
+              onFilterByRule={(rule) =>
+                onSelectedRuleFilterChange?.(selectedRuleFilter === rule ? null : rule)
+              }
+              isFilteredByRule={Boolean(selectedRuleFilter)}
             />
 
             {/* Quick-Jump Drawer Accordion */}
@@ -287,7 +427,11 @@ export function UnifiedFindReplaceSidebar({
               >
                 <div className="flex items-center gap-1.5">
                   <Filter className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Browse All Occurrences ({filteredFindings.length})</span>
+                  <span>
+                    {selectedRuleFilter
+                      ? `Occurrences for "${selectedRuleFilter}" (${filteredFindings.length})`
+                      : `Browse All Occurrences (${filteredFindings.length})`}
+                  </span>
                 </div>
                 {isDrawerOpen ? (
                   <ChevronDown className="w-4 h-4 text-slate-400" />

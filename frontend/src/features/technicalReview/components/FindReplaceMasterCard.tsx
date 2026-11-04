@@ -20,6 +20,8 @@ export interface FindReplaceMasterCardProps {
   onHighlightAndNext: () => void;
   onSkipNext: () => void;
   onBatchFixRule?: (ruleId: string, replacement: string) => void;
+  onFilterByRule?: (ruleKey: string) => void;
+  isFilteredByRule?: boolean;
 }
 
 export function FindReplaceMasterCard({
@@ -35,6 +37,8 @@ export function FindReplaceMasterCard({
   onHighlightAndNext,
   onSkipNext,
   onBatchFixRule,
+  onFilterByRule,
+  isFilteredByRule = false,
 }: FindReplaceMasterCardProps) {
   const [replaceSuccess, setReplaceSuccess] = useState<string | null>(null);
 
@@ -79,12 +83,18 @@ export function FindReplaceMasterCard({
       {/* 1. Header & Integrated Stepper */}
       <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span
-            className="text-[10px] font-black uppercase tracking-wider text-slate-800 bg-slate-200 px-2 py-0.5 rounded-sm truncate max-w-[150px]"
-            title={ruleLabel}
+          <button
+            type="button"
+            onClick={() => onFilterByRule?.(ruleLabel || ruleId)}
+            className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-sm truncate max-w-[150px] transition-all cursor-pointer border ${
+              isFilteredByRule
+                ? "bg-amber-100 text-amber-900 border-amber-400 ring-1 ring-amber-400 shadow-2xs"
+                : "bg-slate-200 hover:bg-slate-300 text-slate-800 border-slate-300"
+            }`}
+            title={isFilteredByRule ? "Active filter — click to show all rules" : `Filter occurrences for "${ruleLabel}"`}
           >
             {ruleLabel}
-          </span>
+          </button>
           <span
             className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-xs shrink-0 ${
               category === "te_point"
@@ -95,12 +105,18 @@ export function FindReplaceMasterCard({
             {category === "te_point" ? "TE Point" : "Mechanical"}
           </span>
           {ceRuleNo !== null && (
-            <span
-              className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-xs shrink-0 bg-slate-100 text-slate-700 border border-slate-200"
-              title={activeOccurrence?.ce_rule_name || ""}
+            <button
+              type="button"
+              onClick={() => onFilterByRule?.(`R${ceRuleNo}`)}
+              className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-xs shrink-0 border transition-all cursor-pointer ${
+                isFilteredByRule
+                  ? "bg-amber-100 text-amber-900 border-amber-400 ring-1 ring-amber-400"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+              }`}
+              title={isFilteredByRule ? `Filtered by R${ceRuleNo} — click to clear` : `Filter by R${ceRuleNo}`}
             >
               R{ceRuleNo}
-            </span>
+            </button>
           )}
           {ceSeverity && (
             <span

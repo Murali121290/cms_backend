@@ -309,6 +309,148 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
     if rule_id == "equation_ref" and nums:
         return _unless_same(_opts(f"Equation ({nums[0]})", None, QUERY), s)
 
+    # R72 Figure Numbering & Citations:
+    # Option 1: Full spelled out: Figure 4.1 / Figures 4.1–4.4 (or to)
+    # Option 2: Abbreviated dotted: Fig. 4.1 / Figs. 4.1–4.4 (or to)
+    # Option 3: Abbreviated undotted: Fig 4.1 / Figs 4.1–4.4 (or to)
+    # Option 4: Lowercase: figure 4.1 / figures 4.1–4.4
+    if rule_id.startswith("ref_fig") or rule_id.startswith("ref_figure"):
+        is_plural = any(k in rule_id for k in ("_figs_", "_figures_"))
+        label_full = "Figures" if is_plural else "Figure"
+        label_dot = "Figs." if is_plural else "Fig."
+        label_nodot = "Figs" if is_plural else "Fig"
+        label_lc = "figures" if is_plural else "figure"
+        num_m = re.search(r"^(?:Figures?|Figs?\.?|figures?|figs?\.?)\s*(.*)$", s, re.IGNORECASE)
+        num_part = num_m.group(1).strip() if num_m else ""
+        return _unless_same(_opts(
+            f"{label_full} {num_part}".strip(),
+            f"{label_dot} {num_part}".strip(),
+            f"{label_nodot} {num_part}".strip(),
+            f"{label_lc} {num_part}".strip(),
+        ), s)
+
+    # R76 Figure Caption Consistency:
+    # Option 1: Figure 4.1
+    # Option 2: Fig. 4.1
+    # Option 3: Fig 4.1
+    if rule_id.startswith("cap_fig") or rule_id.startswith("cap_figure"):
+        is_plural = any(k in rule_id for k in ("_figs_", "_figures_"))
+        label_full = "Figures" if is_plural else "Figure"
+        label_dot = "Figs." if is_plural else "Fig."
+        label_nodot = "Figs" if is_plural else "Fig"
+        num_m = re.search(r"^(?:Figures?|Figs?\.?|figures?|figs?\.?)\s*(.*)$", s, re.IGNORECASE)
+        num_part = num_m.group(1).strip() if num_m else ""
+        return _unless_same(_opts(
+            f"{label_full} {num_part}".strip(),
+            f"{label_dot} {num_part}".strip(),
+            f"{label_nodot} {num_part}".strip(),
+        ), s)
+
+    # R71 Table Numbering & Citations:
+    # Option 1: Full spelled out: Table 4.1 / Tables 4.1–4.4
+    # Option 2: Abbreviated dotted: Tab. 4.1 / Tabs. 4.1–4.4
+    # Option 3: Abbreviated undotted: Tab 4.1 / Tabs 4.1–4.4
+    if rule_id.startswith("ref_tab") or rule_id.startswith("ref_table"):
+        is_plural = any(k in rule_id for k in ("_tabs_", "_tables_"))
+        label_full = "Tables" if is_plural else "Table"
+        label_dot = "Tabs." if is_plural else "Tab."
+        label_nodot = "Tabs" if is_plural else "Tab"
+        label_lc = "tables" if is_plural else "table"
+        num_m = re.search(r"^(?:Tables?|Tabs?\.?|tables?|tabs?\.?)\s*(.*)$", s, re.IGNORECASE)
+        num_part = num_m.group(1).strip() if num_m else ""
+        return _unless_same(_opts(
+            f"{label_full} {num_part}".strip(),
+            f"{label_dot} {num_part}".strip(),
+            f"{label_nodot} {num_part}".strip(),
+            f"{label_lc} {num_part}".strip(),
+        ), s)
+
+    # R75 Table Caption Consistency:
+    if rule_id.startswith("cap_tab") or rule_id.startswith("cap_table"):
+        is_plural = any(k in rule_id for k in ("_tabs_", "_tables_"))
+        label_full = "Tables" if is_plural else "Table"
+        label_dot = "Tabs." if is_plural else "Tab."
+        label_nodot = "Tabs" if is_plural else "Tab"
+        num_m = re.search(r"^(?:Tables?|Tabs?\.?|tables?|tabs?\.?)\s*(.*)$", s, re.IGNORECASE)
+        num_part = num_m.group(1).strip() if num_m else ""
+        return _unless_same(_opts(
+            f"{label_full} {num_part}".strip(),
+            f"{label_dot} {num_part}".strip(),
+            f"{label_nodot} {num_part}".strip(),
+        ), s)
+
+    # R40 Medical Terminology (-al endings: pathologic vs pathological):
+    # Option 1: -ic ending (e.g. pathologic)
+    # Option 2: -al ending (e.g. pathological)
+    # Option 3: Query author
+    if rule_id == "al_endings":
+        w = s.strip()
+        wl = w.lower()
+        if wl.endswith("ical"):
+            stem = w[:-4]
+            ic_form = stem + "ic"
+            al_form = w
+        elif wl.endswith("ic"):
+            ic_form = w
+            al_form = w + "al"
+        else:
+            return _opts()
+        return _unless_same(_opts(ic_form, al_form, QUERY), s)
+
+    # R16 Fractions:
+    # Option 1: Symbol / Slash: 1/2 or ½
+    # Option 2: Spelled out: one-half
+    # Option 3: Query author
+    _fract_map = {
+        "½": ("1/2", "one-half"), "1/2": ("1/2", "one-half"),
+        "¼": ("1/4", "one-quarter"), "1/4": ("1/4", "one-quarter"),
+        "¾": ("3/4", "three-quarters"), "3/4": ("3/4", "three-quarters"),
+        "⅓": ("1/3", "one-third"), "1/3": ("1/3", "one-third"),
+        "⅔": ("2/3", "two-thirds"), "2/3": ("2/3", "two-thirds"),
+    }
+    if rule_id.startswith("fract"):
+        fm = _fract_map.get(s.strip())
+        if fm:
+            slash, spelled = fm
+            return _unless_same(_opts(slash, spelled, QUERY), s)
+
+    # R11 Leading zero: 0.5 vs .5
+    if rule_id in ("leading_zero_missing", "leading_zero_present"):
+        dm = re.search(r"0?(\.\d+)", s)
+        if dm:
+            dec = dm.group(1)
+            return _unless_same(_opts(f"0{dec}", dec, QUERY), s)
+
+    # R13 Ordinals:
+    if rule_id.startswith("ordinal_") and nums:
+        n = int(nums[0])
+        suff = "st" if n % 10 == 1 and n % 100 != 11 else "nd" if n % 10 == 2 and n % 100 != 12 else "rd" if n % 10 == 3 and n % 100 != 13 else "th"
+        spelled_ord = {1:"first",2:"second",3:"third",4:"fourth",5:"fifth",6:"sixth",7:"seventh",8:"eighth",9:"ninth",10:"tenth"}.get(n, f"{n}{suff}")
+        return _unless_same(_opts(spelled_ord if n < 10 else f"{n}{suff}", f"{n}{suff}", spelled_ord), s)
+
+    # Era markers: AD / BC
+    if rule_id.startswith("era_"):
+        is_bc = "bc" in rule_id
+        label_nodot = "BC" if is_bc else "AD"
+        label_dot = "B.C." if is_bc else "A.D."
+        return _unless_same(_opts(label_nodot, label_dot, QUERY), s)
+
+    # Quotation marks: curly vs straight
+    if rule_id.startswith("quote_"):
+        inside = s.strip('\"\'\u201c\u201d\u2018\u2019')
+        return _unless_same(_opts(f"“{inside}”", f'\"{inside}\"', QUERY), s)
+
+    # R70 Heading Capitalisation:
+    # Option 1: Sentence case
+    # Option 2: Title case
+    # Option 3: Keep
+    if rule_id.startswith("heading_case"):
+        sentence_cased = s.capitalize()
+        words = s.split()
+        minor = {"a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by", "with", "in", "of"}
+        title_cased = " ".join((w.capitalize() if i == 0 or w.lower() not in minor else w.lower()) for i, w in enumerate(words))
+        return _unless_same(_opts(sentence_cased, title_cased, s), s)
+
     # Flag-only rules
     if rule_id in ("timezone_abbr", "equation_ref", "duplicate_paragraph"):
         return _opts()

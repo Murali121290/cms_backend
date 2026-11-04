@@ -8,9 +8,25 @@ import { Button } from '@/components/ui/Button'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { toast } from '@/store/useToastStore'
 import api from '@/api/client'
-import { formatDateTime as fmtUtcDateTime } from '@/utils/dateUtils'
+import { formatDateTime as fmtUtcDateTime, formatDate, parseUtcDate } from '@/utils/dateUtils'
 import { useUsersStore } from '@/stores/usersStore'
 import { useSessionStore } from '@/stores/sessionStore'
+
+export const BOD_LANGUAGES = [
+  'English',
+  'German',
+  'French',
+  'Danish',
+  'Swedish',
+  'Finnish',
+  'Italian',
+  'Spanish',
+  'Portuguese',
+  'Norwegian',
+  'Dutch',
+  'Catalan',
+  'Valencian',
+]
 
 export function BodInternalJobPage() {
   const { jobId } = useParams()
@@ -196,7 +212,7 @@ export function BodInternalJobPage() {
     setAnalysisPages(job.pdf_page_count ?? '')
     setAnalysisType(job.pdf_type || 'Text PDF')
     setAnalysisLanguage(job.pdf_language || 'English')
-    const dStr = job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toISOString().slice(0, 10) : ''
+    const dStr = job.due_date ? (parseUtcDate(job.due_date)?.toISOString().slice(0, 10) || '') : ''
     setAnalysisDueDate(dStr)
     setAnalysisReason('')
     setIsEditingAnalysis(true)
@@ -265,6 +281,21 @@ export function BodInternalJobPage() {
       fetchJob()
     } catch (err) {
       toast.error("Failed to download PDF")
+    }
+  }
+
+  const downloadCover = async () => {
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-cover`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', job.cover_filename || 'cover.jpg')
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+    } catch (err) {
+      toast.error("Failed to download cover image")
     }
   }
 
@@ -608,12 +639,12 @@ export function BodInternalJobPage() {
                   )}
                 </div>
                 <p className="text-base font-bold text-text mt-1 m-0">
-                  {job.due_date ? formatDateTime(job.due_date) : <span className="text-muted font-normal italic">No date set</span>}
+                  {job.due_date ? formatDate(job.due_date) : <span className="text-muted font-normal italic">No date set</span>}
                 </p>
                 {job.is_fastrack && job.fastrack_requested_date && (
                   <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mt-1 m-0 flex items-center gap-1">
                     <Clock size={11} className="shrink-0" />
-                    Target: {formatDateTime(job.fastrack_requested_date)}
+                    Target: {formatDate(job.fastrack_requested_date)}
                   </p>
                 )}
               </div>
@@ -634,43 +665,38 @@ export function BodInternalJobPage() {
 
               <div className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted">PDF Type</label>
-                <select
+                <Dropdown
+                  options={[
+                    { value: 'Text PDF', label: 'Text PDF' },
+                    { value: 'Image PDF', label: 'Image PDF' },
+                  ]}
                   value={analysisType}
-                  onChange={(e) => {
-                    const newType = e.target.value
+                  onChange={(newType) => {
                     setAnalysisType(newType)
                     const autoDate = calculateDefaultDueDate(newType, job?.created_at)
                     setAnalysisDueDate(autoDate)
                   }}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-                >
-                  <option value="Text PDF">Text PDF</option>
-                  <option value="Image PDF">Image PDF</option>
-                </select>
+                  className="w-full h-[34px] px-3 py-1.5 text-xs bg-background border border-border rounded-lg shadow-none"
+                  dropdownClassName="text-xs"
+                />
               </div>
 
               <div className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted">Language</label>
-                <input
-                  type="text"
-                  list="bod-language-options"
+                <Dropdown
+                  searchable
+                  searchPlaceholder="Search language..."
+                  options={[
+                    ...BOD_LANGUAGES.map((lang) => ({ value: lang, label: lang })),
+                    ...(analysisLanguage && !BOD_LANGUAGES.includes(analysisLanguage)
+                      ? [{ value: analysisLanguage, label: analysisLanguage }]
+                      : [])
+                  ]}
                   value={analysisLanguage}
-                  onChange={(e) => setAnalysisLanguage(e.target.value)}
-                  placeholder="e.g. English"
-                  className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-primary transition-colors"
+                  onChange={(val) => setAnalysisLanguage(val)}
+                  className="w-full h-[34px] px-3 py-1.5 text-xs bg-background border border-border rounded-lg shadow-none"
+                  dropdownClassName="text-xs"
                 />
-                <datalist id="bod-language-options">
-                  <option value="English" />
-                  <option value="German" />
-                  <option value="French" />
-                  <option value="Spanish" />
-                  <option value="Italian" />
-                  <option value="Dutch" />
-                  <option value="Portuguese" />
-                  <option value="Russian" />
-                  <option value="Chinese (Simplified)" />
-                  <option value="Japanese" />
-                </datalist>
               </div>
 
               <div className="space-y-1">
@@ -685,7 +711,6 @@ export function BodInternalJobPage() {
                     className="text-[10px] text-primary hover:underline font-semibold"
                     title="Calculate based on: Text (3 days) | Image (6 days)"
                   >
-                    Auto-calc ({analysisType.toLowerCase().includes('image') ? '6d' : '3d'})
                   </button>
                 </div>
                 <input
@@ -730,6 +755,18 @@ export function BodInternalJobPage() {
                 Download
               </Button>
             </div>
+
+            {job.cover_filename && (
+              <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Cover Image</p>
+                  <p className="text-sm font-semibold truncate text-emerald-600 dark:text-emerald-400">{job.cover_filename}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={downloadCover} leftIcon={<Download size={14} />}>
+                  Download
+                </Button>
+              </div>
+            )}
 
             {job.epub_filename && (
               <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">

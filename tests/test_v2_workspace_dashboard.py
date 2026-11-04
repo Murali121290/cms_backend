@@ -43,7 +43,8 @@ def test_v2_workspaces_editor_role(auth_cookie_client, db_session, roles):
         stage_name="Copyediting",
         assignee_name="editor_murali",
         actual_start_date=now,
-        planned_end_date=now + timedelta(days=1),
+        planned_end_date=now,
+        # planned_end_date=now + timedelta(days=1),
         stage_status="In-progress"
     )
     

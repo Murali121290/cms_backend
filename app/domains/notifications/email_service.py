@@ -51,16 +51,19 @@ def send_email(to_email: str, subject: str, text_body: str, html_body: str = Non
         print(f"FAILED to send email to {to_email}. Error: {str(e)}")
 
 
-def send_bod_new_job_email(manager_email: str, project_name: str, pdf_filename: str):
-    subject = f"Action Required: New Books on Demand Project [{project_name}]"
+def send_bod_new_job_email(manager_email: str, project_name: str, pdf_filename: str, cover_filename: str = None):
+    subject = f"Books on Demand - Action Required: New Project Ingested [{project_name}]"
     
+    cover_line_txt = f"\n- Cover Image: {cover_filename}" if cover_filename else ""
+    cover_line_html = f'<p style="margin: 5px 0 0 0;"><strong>Cover Image:</strong> {cover_filename}</p>' if cover_filename else ''
+
     text_body = f"""Hello,
 
 A new Books on Demand project has been successfully ingested into the system and requires assignment.
 
 Project Details:
 - Project Name: {project_name}
-- Source File: {pdf_filename}
+- Source File: {pdf_filename}{cover_line_txt}
 
 Please log in to Inkflow to assign this project to a team member to begin the Production stage.
 
@@ -76,8 +79,9 @@ S4Carlisle Inkflow Automated System
         <p>A new Books on Demand project has been successfully ingested into the system and requires assignment.</p>
         
         <div style="background-color: #f8f9fa; border-left: 4px solid #0056b3; padding: 15px; margin: 20px 0;">
-            <p style="margin: 0 0 10px 0;"><strong>Project Name:</strong> {project_name}</p>
-            <p style="margin: 0;"><strong>Source File:</strong> {pdf_filename}</p>
+            <p style="margin: 0 0 8px 0;"><strong>Project Name:</strong> {project_name}</p>
+            <p style="margin: 0 0 8px 0;"><strong>Source File:</strong> {pdf_filename}</p>
+            {cover_line_html}
         </div>
         
         <p>Please log in to Inkflow to assign this project to a team member so they can begin the Production stage.</p>
@@ -91,7 +95,7 @@ S4Carlisle Inkflow Automated System
 
 
 def send_bod_qc_ready_email(manager_email: str, project_name: str, epub_filename: str):
-    subject = f"Action Required: Books on Demand Project Ready for QC [{project_name}]"
+    subject = f"Books on Demand - Action Required: Project Ready for QC [{project_name}]"
     
     text_body = f"""Hello,
 
@@ -130,7 +134,7 @@ S4Carlisle Inkflow Automated System
 
 
 def send_bod_job_completed_email(manager_email: str, project_name: str, epub_filename: str):
-    subject = f"Books on Demand Project Completed [{project_name}]"
+    subject = f"Books on Demand - Project Completed [{project_name}]"
     
     text_body = f"""Hello,
 
@@ -175,7 +179,7 @@ def send_bod_fastrack_alert_email(
     expected_date: str,
     due_date: Optional[str] = None
 ):
-    subject = f"Action Required: Books on Demand Project Marked as Fastrack [{project_name or pdf_filename}]"
+    subject = f"Books on Demand - Action Required: Project Marked as Fastrack [{project_name or pdf_filename}]"
     
     text_body = f"""Hello,
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
@@ -818,6 +818,7 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
 export function ProjectWorkflow() {
   const { projectId, clientId } = useParams<{ projectId: string; clientId?: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const id = Number(projectId)
 
   const { roles, viewer, canAccess } = useRBAC()
@@ -1587,7 +1588,11 @@ export function ProjectWorkflow() {
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
             onClick={() => {
-              if (clientId) {
+              if (location.state?.from) {
+                navigate(location.state.from)
+              } else if (window.history.length > 1) {
+                navigate(-1)
+              } else if (clientId) {
                 navigate(`/clients/${clientId}/projects`)
               } else {
                 navigate('/clients')
@@ -1687,36 +1692,26 @@ export function ProjectWorkflow() {
             <Plus size={12} />
             New Chapter
           </button>
-          <button
-            onClick={() => navigate(uiPaths.projectStylesheets(id))}
-            title={activeStylesheet ? `Active: ${activeStylesheet.name}` : 'No active stylesheet'}
-            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
-          >
-            <BookMarked size={12} />
-            Stylesheets
-            {stylesheetCount > 0 && (
-              <span className="text-[10px] bg-primary/10 text-primary px-1 rounded font-bold">{stylesheetCount}</span>
-            )}
-            {activeStylesheet && (
-              <span className="w-2 h-2 rounded-full bg-emerald-500 absolute -top-0.5 -right-0.5 ring-1 ring-white" />
-            )}
-          </button>
-          <button
-            onClick={() => navigate(uiPaths.projectRules(id))}
-            title="Language-editing rules for this project"
-            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
-          >
-            <BookMarked size={12} />
-            Rules
-          </button>
-          <button
-            onClick={() => navigate(uiPaths.projectTermLists(id))}
-            title="Term lists assigned to this project — highlighted during Language Editing"
-            className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0"
-          >
-            <BookMarked size={12} />
-            Term Lists
-          </button>
+          {canAccess(ROLE_PERMISSIONS.access_editorial_standards) && (
+            <button
+              onClick={() => navigate(uiPaths.projectEditorial(id))}
+              title={activeStylesheet ? `Active Stylesheet: ${activeStylesheet.name}` : 'Configure project stylesheets, language rules, and term lists'}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0 shadow-2xs"
+            >
+              <BookMarked size={13} className="text-primary" />
+              <span>Editorial Standards</span>
+              {activeStylesheet ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span className="max-w-[120px] truncate">{activeStylesheet.name}</span>
+                </span>
+              ) : (
+                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.2 rounded-full font-semibold">
+                  Setup
+                </span>
+              )}
+            </button>
+          )}
         </div>
       </div>
 

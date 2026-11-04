@@ -11,15 +11,27 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string }
 
-export function ProjectTermListsPage() {
+interface ProjectTermListsPageProps {
+  embedded?: boolean;
+}
+
+export function ProjectTermListsPage({ embedded = false }: ProjectTermListsPageProps = {}) {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const { roles } = useRBAC()
   useDocumentTitle('Term Lists — S4 Carlisle CMS')
 
   const canEdit = useMemo(() => {
-    const normalised = roles.map((r) => r.toLowerCase().replace(/\s+/g, ''))
-    return normalised.includes('admin') || normalised.includes('projectmanager')
+    const normalised = roles.map((r) => r.toLowerCase().replace(/[\s-]/g, ''))
+    return (
+      normalised.includes('admin') ||
+      normalised.includes('projectmanager') ||
+      normalised.includes('editorialmanager') ||
+      normalised.includes('teamleadlanguageediting') ||
+      normalised.includes('teamleaderlanguageediting') ||
+      normalised.includes('technicaleditor') ||
+      normalised.includes('teamleadeditorial')
+    )
   }, [roles])
 
   const [loading, setLoading] = useState(true)
@@ -138,24 +150,28 @@ export function ProjectTermListsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className={`${embedded ? "flex-1 min-h-0 py-2" : "min-h-screen"} bg-slate-50`}>
       <header className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white px-6 py-5">
         <div className="max-w-6xl mx-auto flex items-center gap-4">
-          <button onClick={() => navigate(-1)}
-            className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center">
-            <ArrowLeft size={16} />
-          </button>
+          {!embedded && (
+            <button onClick={() => navigate(-1)}
+              className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center">
+              <ArrowLeft size={16} />
+            </button>
+          )}
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg">
             <BookOpen size={22} />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 text-xs text-indigo-200/70 mb-1">
-              <button onClick={() => navigate(`/projects/${projectId}`)} className="hover:text-white">
-                Project #{projectId}
-              </button>
-              <ChevronRight size={11} />
-              <span className="text-white font-medium">Term Lists</span>
-            </div>
+            {!embedded && (
+              <div className="flex items-center gap-1.5 text-xs text-indigo-200/70 mb-1">
+                <button onClick={() => navigate(`/projects/${projectId}`)} className="hover:text-white">
+                  Project #{projectId}
+                </button>
+                <ChevronRight size={11} />
+                <span className="text-white font-medium">Term Lists</span>
+              </div>
+            )}
             <h1 className="text-xl font-bold">Project Term Lists</h1>
             <p className="text-sm text-indigo-200/80">
               Term lists assigned here will be highlighted during Language Editing.

@@ -1,5 +1,16 @@
-import { useState, useEffect, useMemo } from "react";
-import { ChevronDown, ChevronUp, Maximize2, Minimize2, X } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Minimize2,
+  X,
+  FileText,
+  Upload,
+  Loader2,
+  CheckCircle2,
+  Sparkles,
+} from "lucide-react";
 
 import type {
   CERuleSettings,
@@ -7,9 +18,12 @@ import type {
   IATemplateRow,
   StylesheetUpdateRequest,
   StylesheetCreateRequest,
+  DocxStylesheetParseResponse,
+  CESeverity,
 } from "@/types/api";
 import { CERulesEditor } from "./CERulesEditor";
-import { useCeRulesQuery } from "./useStylesheetsQuery";
+import { useCeRulesQuery, useIATemplateQuery } from "./useStylesheetsQuery";
+import { parseDocxStylesheet } from "@/api/stylesheets";
 
 interface StylesheetFormDrawerProps {
   isOpen: boolean;
@@ -44,6 +58,14 @@ export function StylesheetFormDrawer({
   const [ceRules, setCeRules] = useState<CERuleSettings>({});
   const [section, setSection] = useState<"ia" | "ce">("ce");
   const ceRulesQuery = useCeRulesQuery();
+  const fallbackIaQuery = useIATemplateQuery();
+  const effectiveIaTemplate = iaTemplate.length > 0 ? iaTemplate : (fallbackIaQuery.data?.rows || []);
+
+  // DOCX Import states
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingDocx, setIsUploadingDocx] = useState(false);
+  const [docxImportData, setDocxImportData] = useState<DocxStylesheetParseResponse | null>(null);
+  const [showDocxDetails, setShowDocxDetails] = useState(false);
 
   useEffect(() => {
     if (editingStylesheet) {
@@ -75,14 +97,16 @@ export function StylesheetFormDrawer({
       setSection("ce");
     }
     setIsFullPage(true);
+    setDocxImportData(null);
+    setShowDocxDetails(false);
   }, [editingStylesheet, isOpen]);
 
   const linkedSelectedRows = useMemo(() => {
-    const link = new Map(iaTemplate.map((r) => [`${r.element}|${r.subtype}|${r.pattern}`, r]));
+    const link = new Map(effectiveIaTemplate.map((r) => [`${r.element}|${r.subtype}|${r.pattern}`, r]));
     return selectedRows.map((r) => ({ ...r, ...link.get(`${r.element}|${r.subtype}|${r.pattern}`) }));
-  }, [iaTemplate, selectedRows]);
+  }, [effectiveIaTemplate, selectedRows]);
 
-  const groupedRows = groupByElement(iaTemplate);
+  const groupedRows = groupByElement(effectiveIaTemplate);
 
   const toggleElement = (element: string) => {
     const newExpanded = new Set(expandedElements);
@@ -94,11 +118,27 @@ export function StylesheetFormDrawer({
     setExpandedElements(newExpanded);
   };
 
+  const normalizePattern = (p: string) => p.replace(/[\u2013\u2014–—]/g, "-").trim().toLowerCase();
+
   const toggleRowSelection = (row: IATemplateRow) => {
     setSelectedRows((prev) => {
-      const exists = prev.some((r) => r.element === row.element && r.subtype === row.subtype && r.pattern === row.pattern);
+      const exists = prev.some(
+        (r) =>
+          r.element.toLowerCase() === row.element.toLowerCase() &&
+          (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
+            normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
+          (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
+      );
       if (exists) {
-        return prev.filter((r) => !(r.element === row.element && r.subtype === row.subtype && r.pattern === row.pattern));
+        return prev.filter(
+          (r) =>
+            !(
+              r.element.toLowerCase() === row.element.toLowerCase() &&
+              (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
+                normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
+              (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
+            )
+        );
       } else {
         return [...prev, row];
       }
@@ -106,7 +146,96 @@ export function StylesheetFormDrawer({
   };
 
   const isRowSelected = (row: IATemplateRow) => {
-    return selectedRows.some((r) => r.element === row.element && r.subtype === row.subtype && r.pattern === row.pattern);
+    return selectedRows.some(
+      (r) =>
+        r.element.toLowerCase() === row.element.toLowerCase() &&
+        (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
+          normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
+        (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
+    );
+  };
+
+  const handleDocxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingDocx(true);
+      const res = await parseDocxStylesheet(projectId, file);
+      setDocxImportData(res);
+
+      // Auto-fill suggested name & description
+      if (res.suggested_name) setName(res.suggested_name);
+      if (res.suggested_description) setDescription(res.suggested_description);
+
+      // Auto-configure CE rules
+      const newCeRules: CERuleSettings = { ...ceRules };
+      for (const [sno, r] of Object.entries(res.matched_ce_rules)) {
+        newCeRules[sno] = {
+          enabled: r.enabled,
+          option: r.option,
+          severity: r.severity as CESeverity,
+        };
+      }
+      setCeRules(newCeRules);
+
+      // Auto-match IA rows from template
+      const newSelectedRows: IATemplateRow[] = [];
+      const newExpanded = new Set<string>(expandedElements);
+      for (const matchedIa of res.matched_ia_rows) {
+        const found =
+          effectiveIaTemplate.find(
+            (t) =>
+              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
+              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
+                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern)) &&
+              (!matchedIa.subtype || t.subtype.toLowerCase() === matchedIa.subtype.toLowerCase())
+          ) ||
+          effectiveIaTemplate.find(
+            (t) =>
+              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
+              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
+                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern))
+          ) ||
+          effectiveIaTemplate.find(
+            (t) =>
+              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
+              (normalizePattern(t.pattern).includes(normalizePattern(matchedIa.pattern)) ||
+                normalizePattern(matchedIa.pattern).includes(normalizePattern(t.pattern)))
+          );
+
+        const matchedRow: IATemplateRow = found || {
+          element: matchedIa.element,
+          subtype: matchedIa.subtype || "General",
+          pattern: matchedIa.pattern,
+          example: matchedIa.source_value || null,
+        };
+
+        if (
+          !newSelectedRows.some(
+            (r) =>
+              r.element.toLowerCase() === matchedRow.element.toLowerCase() &&
+              (r.pattern.toLowerCase() === matchedRow.pattern.toLowerCase() ||
+                normalizePattern(r.pattern) === normalizePattern(matchedRow.pattern)) &&
+              (!matchedRow.subtype || !r.subtype || r.subtype.toLowerCase() === matchedRow.subtype.toLowerCase())
+          )
+        ) {
+          newSelectedRows.push(matchedRow);
+          newExpanded.add(matchedRow.element);
+        }
+      }
+      setSelectedRows(newSelectedRows);
+      setExpandedElements(newExpanded);
+
+      // Switch to CE tab so user immediately sees imported rules
+      setSection("ce");
+    } catch (err: any) {
+      console.error("Failed to parse DOCX stylesheet:", err);
+      alert(err?.response?.data?.message || err?.message || "Failed to parse editorial style sheet (.docx).");
+    } finally {
+      setIsUploadingDocx(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const handleSubmit = () => {
@@ -167,9 +296,9 @@ export function StylesheetFormDrawer({
             </div>
           </div>
 
-          {/* Inline Name and Description Inputs */}
+          {/* Inline Name and Description Inputs + Import DOCX Button */}
           <div className="flex-1 max-w-2xl flex items-center gap-2">
-            <div className="flex-1 min-w-[220px]">
+            <div className="flex-1 min-w-[200px]">
               <input
                 id="name"
                 type="text"
@@ -179,7 +308,7 @@ export function StylesheetFormDrawer({
                 className="w-full px-3 py-1.5 text-xs font-semibold rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-primary bg-slate-50 focus:bg-white transition-colors"
               />
             </div>
-            <div className="hidden lg:block flex-1 min-w-[180px]">
+            <div className="hidden lg:block flex-1 min-w-[160px]">
               <input
                 id="description"
                 type="text"
@@ -189,6 +318,34 @@ export function StylesheetFormDrawer({
                 className="w-full px-3 py-1.5 text-xs rounded-md border border-slate-200 focus:outline-none focus:ring-1 focus:ring-primary bg-slate-50 focus:bg-white text-slate-600"
               />
             </div>
+
+            {/* Hidden DOCX input & Trigger Button */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".docx"
+              onChange={handleDocxUpload}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingDocx}
+              title="Upload existing Word style sheet (.docx) to automatically choose rules and options"
+              className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs disabled:opacity-50"
+            >
+              {isUploadingDocx ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                  <span>Parsing...</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Word Style Sheet</span>
+                </>
+              )}
+            </button>
           </div>
 
           {/* Section Tabs & Action Controls */}
@@ -199,11 +356,10 @@ export function StylesheetFormDrawer({
                 role="tab"
                 aria-selected={section === "ce"}
                 onClick={() => setSection("ce")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                  section === "ce"
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${section === "ce"
                     ? "bg-white text-slate-900 shadow-xs font-semibold"
                     : "text-slate-600 hover:text-slate-900"
-                }`}
+                  }`}
               >
                 CE Rules ({ceRulesQuery.data?.rules.length ?? 72})
               </button>
@@ -212,11 +368,10 @@ export function StylesheetFormDrawer({
                 role="tab"
                 aria-selected={section === "ia"}
                 onClick={() => setSection("ia")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                  section === "ia"
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${section === "ia"
                     ? "bg-white text-slate-900 shadow-xs font-semibold"
                     : "text-slate-600 hover:text-slate-900"
-                }`}
+                  }`}
               >
                 IA Rows ({selectedRows.length})
               </button>
@@ -257,6 +412,89 @@ export function StylesheetFormDrawer({
 
         {/* Main Full Page Body */}
         <div className="flex-1 overflow-y-auto bg-slate-50 p-6">
+          {/* DOCX Import Summary Banner */}
+          {docxImportData && (
+            <div className="mb-4 bg-emerald-50 border border-emerald-300 rounded-lg p-3.5 text-xs text-emerald-950 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-bold">
+                    Successfully imported specifications from editorial style sheet!
+                  </span>
+                  <span className="bg-emerald-200/80 text-emerald-900 font-mono font-bold px-2 py-0.5 rounded text-[10px] uppercase">
+                    {docxImportData.detected_preset_id.toUpperCase()} Preset
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDocxDetails(!showDocxDetails)}
+                    className="text-emerald-800 hover:text-emerald-950 underline font-medium text-[11px]"
+                  >
+                    {showDocxDetails ? "Hide Import Details" : "View Extracted Details"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDocxImportData(null)}
+                    className="text-emerald-700 hover:text-emerald-900 p-0.5"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-emerald-900 pt-1 border-t border-emerald-200/70">
+                <span>
+                  <strong>{docxImportData.matched_rules_count}</strong> CE checklist rules auto-configured
+                </span>
+                <span>•</span>
+                <span>
+                  <strong>{docxImportData.matched_ia_rows.length}</strong> IA structural rows matched
+                </span>
+                <span>•</span>
+                <span>
+                  <strong>{docxImportData.word_list.length}</strong> publisher word list terms extracted
+                </span>
+              </div>
+
+              {showDocxDetails && (
+                <div className="mt-2 pt-2 border-t border-emerald-200/80 space-y-2 text-[11px] bg-white/70 p-2.5 rounded">
+                  <div>
+                    <span className="font-bold text-slate-800 block mb-1">
+                      Auto-Configured Rules &amp; Options:
+                    </span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                      {Object.entries(docxImportData.matched_ce_rules).map(([sno, r]) => (
+                        <div key={sno} className="bg-white p-1.5 rounded border border-emerald-200 text-slate-800">
+                          <span className="font-mono font-bold text-emerald-800">R{sno}</span> ({r.rule_name}):{" "}
+                          <span className="font-semibold">Option {r.option}</span>
+                          <span className="block text-[10px] text-slate-500 truncate" title={r.source_value}>
+                            From: "{r.source_label}" → {r.source_value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {docxImportData.word_list.length > 0 && (
+                    <div>
+                      <span className="font-bold text-slate-800 block mb-1">
+                        Extracted Project Terminology ({docxImportData.word_list.length} terms):
+                      </span>
+                      <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto p-1 bg-white rounded border border-emerald-200">
+                        {docxImportData.word_list.map((w, i) => (
+                          <span key={i} className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                            {w}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {section === "ce" ? (
             <div>
               {ceRulesQuery.isPending ? (
@@ -368,6 +606,39 @@ export function StylesheetFormDrawer({
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
           <div className="space-y-4">
+            {/* DOCX Import Button in Drawer Mode */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-slate-800 block">Import Style Sheet (.docx)</span>
+                <span className="text-[11px] text-slate-500">Auto-choose CE rules &amp; IA rows from Word</span>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".docx"
+                onChange={handleDocxUpload}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadingDocx}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+              >
+                {isUploadingDocx ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                    <span>Parsing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Choose File</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <div>
               <label htmlFor="drawer-name" className="block text-xs font-semibold text-text mb-1.5 uppercase tracking-wide">
                 Name
@@ -402,9 +673,8 @@ export function StylesheetFormDrawer({
                 role="tab"
                 aria-selected={section === "ce"}
                 onClick={() => setSection("ce")}
-                className={`px-3 py-1 rounded-full text-xs font-medium border ${
-                  section === "ce" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
-                }`}
+                className={`px-3 py-1 rounded-full text-xs font-medium border ${section === "ce" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
+                  }`}
               >
                 CE rules ({ceRulesQuery.data?.rules.length ?? 72})
               </button>
@@ -413,9 +683,8 @@ export function StylesheetFormDrawer({
                 role="tab"
                 aria-selected={section === "ia"}
                 onClick={() => setSection("ia")}
-                className={`px-3 py-1 rounded-full text-xs font-medium border ${
-                  section === "ia" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
-                }`}
+                className={`px-3 py-1 rounded-full text-xs font-medium border ${section === "ia" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
+                  }`}
               >
                 IA rows ({selectedRows.length})
               </button>
@@ -456,9 +725,9 @@ export function StylesheetFormDrawer({
                       >
                         <span className="text-xs font-semibold text-text">{group.element}</span>
                         {expandedElements.has(group.element) ? (
-                          <ChevronUp className="w-4 h-4 text-muted" />
+                          <ChevronUp className="w-4 h-4" />
                         ) : (
-                          <ChevronDown className="w-4 h-4 text-muted" />
+                          <ChevronDown className="w-4 h-4" />
                         )}
                       </button>
                       {expandedElements.has(group.element) && (

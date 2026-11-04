@@ -10,6 +10,8 @@ class BodJob(Base):
     project_name = Column(String(255), nullable=True)
     pdf_filename = Column(String(255), nullable=False)
     pdf_filepath = Column(String(1024), nullable=True)
+    cover_filename = Column(String(255), nullable=True)
+    cover_filepath = Column(String(1024), nullable=True)
     pdf_page_count = Column(Integer, nullable=True)
     pdf_type = Column(String(50), nullable=True)
     pdf_language = Column(String(50), nullable=True)
@@ -24,13 +26,13 @@ class BodJob(Base):
     stage_history = Column(JSON, nullable=False, default=dict) # e.g. {"Production": {"assignee": "user", "start_time": "...", "end_time": "..."}}
     status = Column(String(50), default="Active") # "Active", "Completed", "Failed"
     is_deleted = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    due_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    due_date = Column(DateTime(timezone=True), nullable=True)
     due_date_history = Column(JSON, nullable=False, default=list) # [{"date": "...", "reason": "...", "changed_by": "...", "timestamp": "..."}]
     dispatched_by = Column(String(255), nullable=True)
-    dispatched_at = Column(DateTime, nullable=True)
+    dispatched_at = Column(DateTime(timezone=True), nullable=True)
     is_fastrack = Column(Boolean, default=False, nullable=False)
-    fastrack_requested_date = Column(DateTime, nullable=True)
+    fastrack_requested_date = Column(DateTime(timezone=True), nullable=True)
 
 

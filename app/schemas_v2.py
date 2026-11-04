@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -137,6 +137,7 @@ class ProjectSummary(BaseModel):
     isbn_no: str | None = None
     billing_location: str | None = None
     billing_type: str | None = None
+    project_type: str | None = None
     alt_text: str | None = None
     accessibility: str | None = None
     due_date: str | None = None
@@ -970,6 +971,42 @@ class AnalyzeFilesForStylesheetResponse(BaseModel):
     total_findings: int
 
 
+# ─── Editorial Style Sheet (.docx) Parser ─────────────────────────────────────
+
+class DocxMatchedRule(BaseModel):
+    sno: int = 0
+    rule_name: str = ""
+    option: int | str = 1
+    severity: str = "Major"
+    enabled: bool = True
+    confidence: float = 0.95
+    source_label: str = ""
+    source_value: str = ""
+    explanation: str = ""
+    notes: Optional[str] = ""
+
+
+class DocxMatchedIARow(BaseModel):
+    element: str
+    subtype: str
+    pattern: str
+    confidence: float = 0.95
+    source_label: str
+    source_value: str
+
+
+class DocxStylesheetParseResponse(BaseModel):
+    metadata: dict[str, str] = Field(default_factory=dict)
+    suggested_name: str
+    suggested_description: str
+    detected_preset_id: str
+    matched_ce_rules: dict[str, DocxMatchedRule] = Field(default_factory=dict)
+    matched_ia_rows: list[DocxMatchedIARow] = Field(default_factory=list)
+    word_list: list[str] = Field(default_factory=list)
+    total_specs_scanned: int = 0
+    matched_rules_count: int = 0
+
+
 # ─── WYSIWYG Editor XHTML Save ────────────────────────────────────────────────
 
 class XhtmlSaveRequest(BaseModel):
@@ -1120,6 +1157,7 @@ class ProjectUpdateRequest(BaseModel):
     isbn_no: str | None = None
     billing_location: str | None = None
     billing_type: str | None = None
+    project_type: str | None = None
     alt_text: str | None = None
     accessibility: str | None = None
     reason: str | None = None

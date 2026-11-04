@@ -1,6 +1,7 @@
 import { apiClient } from "@/api/client";
 import type {
   AnalyzeFilesForStylesheetResponse,
+  DocxStylesheetParseResponse,
   CERulesResponse,
   IATemplateResponse,
   StylesheetActivateResponse,
@@ -76,6 +77,24 @@ export async function analyzeFilesForStylesheet(
   const response = await apiClient.post<AnalyzeFilesForStylesheetResponse>(
     `/projects/${projectId}/analyze-files-for-stylesheet`,
     { file_ids: fileIds },
+  );
+  return response.data;
+}
+
+export async function parseDocxStylesheet(
+  projectId: number,
+  file: File,
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await apiClient.post<DocxStylesheetParseResponse>(
+    `/projects/${projectId}/stylesheets/parse-docx`,
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    },
   );
   return response.data;
 }

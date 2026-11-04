@@ -47,16 +47,16 @@ def detect_ellipsis(seg: Segment) -> Iterable[Finding]:
 # Rule 3: AM/PM style — split by AM vs PM and dot variant
 # ---------------------------------------------------------------------------
 AMPM_PATTERNS = [
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*A\.M\."), "ampm_am_upper_dots"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*P\.M\."), "ampm_pm_upper_dots"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*a\.m\."), "ampm_am_lower_dots"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*p\.m\."), "ampm_pm_lower_dots"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*A\.M(?!\.)\b"), "ampm_am_upper_nodot"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*P\.M(?!\.)\b"), "ampm_pm_upper_nodot"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*a\.m(?!\.)\b"), "ampm_am_lower_nodot"),
+    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*p\.m(?!\.)\b"), "ampm_pm_lower_nodot"),
     (re.compile(r"\b\d{1,2}(?::\d{2})?\s*AM\b"), "ampm_am_upper"),
     (re.compile(r"\b\d{1,2}(?::\d{2})?\s*PM\b"), "ampm_pm_upper"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*A\.M\b"), "ampm_am_upper_nodot"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*A\.M\."), "ampm_am_upper_dots"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*P\.M\b"), "ampm_pm_upper_nodot"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*P\.M\."), "ampm_pm_upper_dots"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*a\.m\b"), "ampm_am_lower_nodot"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*a\.m\."), "ampm_am_lower_dots"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*p\.m\b"), "ampm_pm_lower_nodot"),
-    (re.compile(r"\b\d{1,2}(?::\d{2})?\s*p\.m\."), "ampm_pm_lower_dots"),
     (re.compile(r"\b\d{1,2}(?::\d{2})?\s*am\b"), "ampm_am_lower"),
     (re.compile(r"\b\d{1,2}(?::\d{2})?\s*pm\b"), "ampm_pm_lower"),
 ]
@@ -806,15 +806,16 @@ def detect_currency(seg):
 # ---------------------------------------------------------------------------
 # Rule 32: (-al) endings - Medical/Scientific terms only
 # ---------------------------------------------------------------------------
-AL_ENDING_WORDS = {
-    "biological", "chronological", "cytological", "dermatological",
-    "ecological", "embryological", "epidemiological", "etiological",
-    "gynecological", "hematological", "histological", "immunological",
-    "morphological", "oncological", "ophthalmological", "pathological",
-    "pharmacological", "radiological", "rheumatological", "sociological",
-    "symptomatological", "toxicological", "traumatological", "urological",
-    "anatomical", "physiological", "neurological"
-}
+_AL_STEMS = [
+    "biolog", "chronolog", "cytolog", "dermatolog",
+    "ecolog", "embryolog", "epidemiolog", "etiolog",
+    "gynecolog", "hematolog", "histolog", "immunolog",
+    "morpholog", "oncolog", "ophthalmolog", "patholog",
+    "pharmacolog", "radiolog", "rheumatolog", "sociolog",
+    "symptomatolog", "toxicolog", "traumatolog", "urolog",
+    "anatom", "physiolog", "neurolog"
+]
+AL_ENDING_WORDS = {s + "ic" for s in _AL_STEMS} | {s + "ical" for s in _AL_STEMS}
 AL_ENDING_PATTERNS = [
     (re.compile(r"\b(" + "|".join(AL_ENDING_WORDS) + r")\b", re.IGNORECASE), "al_endings"),
 ]
@@ -926,26 +927,63 @@ def detect_latin_terms(seg: Segment) -> Iterable[Finding]:
 # Rule 38: Paras ending without full stop
 # ---------------------------------------------------------------------------
 _HEADING_TAG_RE = re.compile(r'^</?[A-Za-z][A-Za-z0-9._-]*>', re.IGNORECASE)
+_PARA_SKIP_STYLE_KEYWORDS = (
+    "table", "cell", "tbl",
+    "kt", "keyterm", "key-term", "term",
+    "head", "title", "subhead", "h1", "h2", "h3", "h4", "h5", "h6",
+    "chapter", "ch_", "pout", "outline",
+    "list", "bullet", "ul", "ol", "nl", "bl", "obj", "item",
+    "legend", "caption", "credit", "source", "author", "affil",
+    "ref", "bib", "index", "toc", "box", "bx", "sidebar", "pmi", "fmi",
+)
+_VALID_PARA_END_RE = re.compile(r"""[\.\!\?\u2026:;—–\-]['"”’\)\]\}]*$""")
+_URL_END_RE = re.compile(r'https?://\S+$|www\.\S+$|\b[a-z0-9.-]+\.(?:com|org|edu|gov|io|ly)/\S*$', re.IGNORECASE)
+_HEADING_TEXT_PREFIX_RE = re.compile(
+    r'^(?:Chapter|Section|Table|Figure|Box|Case|Part|Unit|Objective|\d+[\.:\)]|[A-Z][\.:\)])\b',
+    re.IGNORECASE
+)
+
 def detect_para_ending(seg: Segment) -> Iterable[Finding]:
-    # Skip table cells / rows completely
-    if seg.source == "table" or seg.region == "table":
+    # Skip non-body / auxiliary regions
+    if seg.source in ("table", "footnote", "endnote") or seg.region in ("table", "header", "footer", "caption"):
         return
-    if any(k in (seg.style or "").lower() for k in ("table", "cell", "tbl")):
+    if seg.exclude_reason in ("caption", "table", "heading", "footnote"):
         return
-    if seg.exclude_reason in ("caption", "table"):
+
+    style = (seg.style or "").lower()
+    if any(k in style for k in _PARA_SKIP_STYLE_KEYWORDS):
         return
+
     text = seg.text.rstrip()
     if not text:
         return
     if _HEADING_TAG_RE.match(text):
         return
-    last = text[-1]
-    if last not in '.!?……':
-        # Fake a match at the last character so we have position info
-        m = re.search(r'.{1}$', text)
-        if m:
-            yield _f(seg, m, "te_point", "para_no_full_stop",
-                     "Para ending without full stop", "para_ending_style")
+    if _HEADING_TEXT_PREFIX_RE.match(text):
+        return
+    if _URL_END_RE.search(text):
+        return
+
+    # Narrative paragraphs consist of multiple words; short fragments (< 8 words)
+    # are headings, labels, list items, or terms rather than complete paragraphs.
+    words = text.split()
+    if len(words) < 8:
+        return
+
+    # Punctuation check: sentence endings (.!?…) or clause/intro terminators (:;—–-,)
+    if _VALID_PARA_END_RE.search(text) or text.endswith(','):
+        return
+
+    # Check if ends with closing bracket/paren containing valid punctuation inside
+    if re.search(r'[\.\!\?\u2026][\)\]\}]+$', text):
+        return
+
+    # Fake a match at the last character so we have position info
+    m = re.search(r'.{1}$', text)
+    if m:
+        yield _f(seg, m, "te_point", "para_no_full_stop",
+                 "Para ending without full stop", "para_ending_style")
+
 # ---------------------------------------------------------------------------
 # Rule 39: Genus species patterns
 # ---------------------------------------------------------------------------

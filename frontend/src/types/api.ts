@@ -774,6 +774,39 @@ export interface AnalyzeFilesForStylesheetResponse {
   total_findings: number;
 }
 
+export interface DocxMatchedRule {
+  sno: number;
+  rule_name: string;
+  option: number | string;
+  severity: CESeverity;
+  enabled: boolean;
+  confidence: number;
+  source_label: string;
+  source_value: string;
+  explanation: string;
+}
+
+export interface DocxMatchedIARow {
+  element: string;
+  subtype: string;
+  pattern: string;
+  confidence: number;
+  source_label: string;
+  source_value: string;
+}
+
+export interface DocxStylesheetParseResponse {
+  metadata: Record<string, string>;
+  suggested_name: string;
+  suggested_description: string;
+  detected_preset_id: string;
+  matched_ce_rules: Record<string, DocxMatchedRule>;
+  matched_ia_rows: DocxMatchedIARow[];
+  word_list: string[];
+  total_specs_scanned: number;
+  matched_rules_count: number;
+}
+
 export interface XhtmlSaveResponse {
   status: "ok";
   file_id: number;

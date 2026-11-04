@@ -31,7 +31,20 @@ from app.services.language_rule_service import (
 )
 
 # Roles permitted to edit (not just view) the per-project rule selection.
-RULES_EDIT_ROLES = {"admin", "projectmanager", "project manager"}
+RULES_EDIT_ROLES = {
+    "admin",
+    "projectmanager",
+    "project manager",
+    "editorial manager",
+    "editorialmanager",
+    "team lead - language editing",
+    "team lead language editing",
+    "team leader - language editing",
+    "team leader language editing",
+    "team lead - editorial",
+    "technical editor",
+    "technicaleditor",
+}
 
 logger = logging.getLogger(__name__)
 

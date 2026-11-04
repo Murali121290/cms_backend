@@ -125,7 +125,7 @@ export function Dropdown({
     : regularOptions
 
   return (
-    <div className={cn("relative inline-block text-left", className?.includes('w-') ? '' : 'w-full')}>
+    <div className={cn("relative w-full text-left", className?.includes('inline') ? 'inline-block w-auto' : 'block')}>
       <button
         ref={triggerRef}
         type="button"
@@ -168,12 +168,12 @@ export function Dropdown({
             position: 'fixed',
             top: coords.top,
             left: coords.left,
-            minWidth: Math.max(200, coords.width),
+            width: coords.width,
             maxHeight: coords.maxHeight,
             zIndex: 99999,
           }}
           className={cn(
-            "w-max max-w-[280px] bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] rounded-xl py-1.5 flex flex-col backdrop-blur-3xl ring-1 ring-black/5 animate-in fade-in duration-150 text-text font-sans",
+            "bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] rounded-xl py-1.5 flex flex-col backdrop-blur-3xl ring-1 ring-black/5 animate-in fade-in duration-150 text-text font-sans",
             dropdownClassName
           )}
           onClick={(e) => e.stopPropagation()}

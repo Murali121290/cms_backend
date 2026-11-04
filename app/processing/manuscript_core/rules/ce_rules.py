@@ -39,17 +39,89 @@ IA_ROW_TO_CE: dict[tuple[str, str], tuple[int, int]] = {
     ("Units (abbreviated)", "mL / ml"): (4, 1),
     ("Units (abbreviated)", "mm"): (4, 1),
     ("Units (abbreviated)", "cm"): (4, 1),
+    ("Time units", "h / hr"): (4, 1),
+    ("Time units", "min"): (4, 1),
+    ("Time units", "s / sec"): (4, 1),
     ("Symbols", "™ trademark symbol"): (43, 3),
     ("Symbols", "® registered symbol"): (43, 3),
     ("Symbols", "© copyright symbol"): (44, 1),
     ("Degree Celsius", "°C"): (5, 1),
+    ("Degree Fahrenheit", "°F"): (5, 1),
     ("Degree spelled", "degree(s) (spelled)"): (30, 2),
+    ("Degree symbol", "° (bare degree)"): (30, 1),
     ("Thousand separator (use/non-use)", "1,000 (comma)"): (11, 1),
     ("Thousand separator (use/non-use)", "1000 (none)"): (11, 3),
+    ("Leading zero", "0.^#"): (11, 1),
+    ("Ordinals - numerals", "^#th"): (13, 1),
+    ("Ordinals - spelled out", "first, second, … hundredth, thousandth"): (13, 1),
+    ("Fractions", "½ [symbol]"): (16, 1),
+    ("Fractions", "^#/^# [slash]"): (16, 1),
+    ("Fractions", "spelled fraction"): (16, 2),
     ("Latin abbreviations", "e.g."): (35, 1),
     ("Latin abbreviations", "i.e."): (35, 1),
+    ("Latin abbreviations", "eg"): (35, 2),
+    ("Latin abbreviations", "ie"): (35, 2),
+    ("Genus species", "[Genus species]"): (36, 1),
+    ("Genus species", "[G. species] (abbreviated)"): (36, 2),
+    ("Genus species", "[G species] (no dot)"): (36, 1),
+    ("Greek letters", "Lowercase Greek"): (8, 1),
+    ("Greek letters", "Greek letter spelled out"): (8, 2),
+    ("(-al) endings", "(-al) endings"): (40, 2),
     ("UK date", "D Mon YYYY (long form)"): (17, 1),
     ("US date", "Month D, YYYY (long form)"): (17, 2),
+    ("Periods", "am"): (19, 3),
+    ("Periods", "pm"): (19, 3),
+    ("Periods", "AM"): (19, 4),
+    ("Periods", "PM"): (19, 4),
+    ("Periods", "a.m."): (19, 1),
+    ("Periods", "p.m."): (19, 1),
+    ("Periods", "a.m"): (19, 1),
+    ("Periods", "p.m"): (19, 1),
+    ("Periods", "A.M."): (19, 4),
+    ("Periods", "P.M."): (19, 4),
+    ("Periods", "A.M"): (19, 4),
+    ("Periods", "P.M"): (19, 4),
+    ("Table", "Table ^#"): (71, 1),
+    ("Table", "Table ^#.^#"): (71, 1),
+    ("Table", "Table ^#-^#"): (71, 1),
+    ("Table", "Tables ^#.^# to ^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^# and ^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^# & ^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^#-^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^#–^#.^#"): (71, 1),
+    ("Table", "Tables ^#.^# through ^#.^#"): (71, 1),
+    ("Table", "Tab ^#"): (71, 2),
+    ("Table", "Tab ^#.^#"): (71, 2),
+    ("Table", "Tab ^#-^#"): (71, 2),
+    ("Table", "Tabs ^#.^# to ^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^# and ^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^# & ^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^#-^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^#–^#.^#"): (71, 2),
+    ("Table", "Tabs ^#.^# through ^#.^#"): (71, 2),
+    ("Table", "table ^# (lowercase)"): (71, 4),
+    ("Figure", "Figure ^#"): (72, 1),
+    ("Figure", "Figure ^#.^#"): (72, 1),
+    ("Figure", "Figure ^#-^#"): (72, 1),
+    ("Figure", "Figures ^#.^# to ^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^# and ^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^# & ^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^#-^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^#–^#.^#"): (72, 1),
+    ("Figure", "Figures ^#.^# through ^#.^#"): (72, 1),
+    ("Figure", "Fig ^#"): (72, 2),
+    ("Figure", "Fig ^#.^#"): (72, 2),
+    ("Figure", "Fig ^#-^#"): (72, 2),
+    ("Figure", "Figs ^#.^# to ^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^# and ^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^# & ^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^#-^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^#–^#.^#"): (72, 2),
+    ("Figure", "Figs ^#.^# through ^#.^#"): (72, 2),
+    ("Figure", "figure ^# (lowercase)"): (72, 4),
+    ("Figure", "figures ^# (lowercase)"): (72, 4),
+    ("Abbreviations", "Abbreviations in heading"): (34, 1),
+    ("Abbreviations", "Abbreviations in FC/TC"): (81, 1),
 }
 
 _QUERY_OPTION_RE = re.compile(r"^query author|only if the author confirms|only after", re.IGNORECASE)
@@ -120,15 +192,24 @@ def derive_from_ia_rows(selected_rows: Iterable[dict]) -> tuple[dict[int, dict],
     derived: dict[int, dict] = {}
     conflicts: list[int] = []
     for row in selected_rows or []:
-        hit = IA_ROW_TO_CE.get((row.get("element"), row.get("pattern")))
+        elem = row.get("element")
+        subtype = (row.get("subtype") or "").lower()
+        patt = row.get("pattern")
+        hit = IA_ROW_TO_CE.get((elem, patt))
         if not hit:
             continue
         sno, option = hit
+        # Route Caption vs Citation to correct CE rules
+        if subtype == "caption" and sno in (71, 72):
+            sno = 75 if sno == 71 else 76
+        elif subtype == "citation" and sno in (75, 76):
+            sno = 71 if sno == 75 else 72
+
         if sno in derived:
             if derived[sno]["option"] != option and sno not in conflicts:
                 conflicts.append(sno)
             continue
-        derived[sno] = {"option": option, "from": f"{row.get('element')}: {row.get('pattern')}"}
+        derived[sno] = {"option": option, "from": f"{elem} ({row.get('subtype') or 'General'}): {patt}"}
     return derived, conflicts
 
 

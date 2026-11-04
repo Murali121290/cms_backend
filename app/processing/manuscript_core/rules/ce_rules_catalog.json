@@ -103,11 +103,9 @@
    "editing_type": "Technical editing",
    "description": "Check the formatting of temperature values and symbols, such as 25 °C, according to the required scientific style.",
    "options": [
-    "25 °C (spaced, standard scientific)",
-    "25°C (closed, AMA 11th / medical)",
-    "25 deg C (abbreviated without symbol)",
-    "25 degrees Celsius (spelled out)",
-    "25 °C (77 °F) (dual with Fahrenheit)"
+    "25 °C (space, degree sign, capital C)",
+    "25°C (closed) if the style requires it",
+    "Spell out: 25 degrees Celsius (sentence start)"
    ],
    "handling": "Auto Fix",
    "behaviour": "Auto-correct",
@@ -133,12 +131,9 @@
    "editing_type": "Technical editing",
    "description": "Standardise percentage presentation, such as 25% or 25 %, according to the applicable style guide.",
    "options": [
-    "25% (closed symbol, Science/AMA)",
-    "25 % (spaced symbol, ISO)",
-    "25 percent (US single word, Chicago)",
-    "25 per cent (UK two words, Oxford)",
-    "25 percentage points (delta / difference)",
-    "percentage (abstract proportion without number)"
+    "25%",
+    "25 %",
+    "25 percent"
    ],
    "handling": "Auto Fix",
    "behaviour": "Auto-correct",
@@ -271,7 +266,8 @@
    "notes": "A separator change can alter a value (1.000 vs 1,000): check the language variant first.",
    "source_point": 41,
    "te_rule_ids": [
-    "thousands_*"
+    "thousands_*",
+    "leading_zero_*"
    ],
    "detectable": "auto"
   },
@@ -315,7 +311,8 @@
    "notes": "",
    "source_point": 43,
    "te_rule_ids": [
-    "num_*"
+    "num_*",
+    "ordinal_*"
    ],
    "detectable": "auto"
   },
@@ -326,11 +323,9 @@
    "editing_type": "Technical editing",
    "description": "Standardise number ranges, such as 10–15, pp. 25–30, or other prescribed forms.",
    "options": [
-    "10–15 (en dash, closed)",
-    "10 to 15 (spelled 'to' in prose)",
-    "from 10 to 15 / between 10 and 15 (preceded form)",
-    "10 – 15 (en dash, spaced)",
-    "10-15 (hyphen, code/computing)"
+    "Use an en dash (10–15; pp. 25–30)",
+    "Use 'to' in running text (10 to 15)",
+    "Use 'from … to …' (from 10 to 15)"
    ],
    "handling": "Auto Fix",
    "behaviour": "Auto-correct",
@@ -353,10 +348,9 @@
    "editing_type": "Technical editing",
    "description": "Verify the consistent representation of negative values using the correct minus sign rather than an inappropriate hyphen.",
    "options": [
-    "−5 (true minus sign)",
-    "–5 (en dash minus)",
-    "-5 (hyphen-minus)",
-    "negative 5 (spelled out)"
+    "Use a true minus sign (−5)",
+    "Use an en dash if the house style requires it (–5)",
+    "Keep the hyphen-minus in code and computing text"
    ],
    "handling": "Auto Fix",
    "behaviour": "Auto-correct",
@@ -389,7 +383,8 @@
    "notes": "",
    "source_point": 46,
    "te_rule_ids": [
-    "fraction_*"
+    "fraction_*",
+    "fract_*"
    ],
    "detectable": "auto"
   },
@@ -400,11 +395,9 @@
    "editing_type": "Technical editing",
    "description": "Standardise dates according to the required format, such as October 10, 2026 for US English or 10 October 2026 for UK English.",
    "options": [
-    "10 October 2026 (UK / International long)",
-    "October 10, 2026 (US long with comma)",
-    "2026-10-10 (ISO 8601, tables/data)",
-    "10th October 2026 (ordinal date)",
-    "Oct. 10, 2026 (abbreviated month)"
+    "10 October 2026 (UK)",
+    "October 10, 2026 (US)",
+    "2026-10-10 (ISO; tables and data only)"
    ],
    "handling": "Auto Fix",
    "behaviour": "Auto-correct",
@@ -414,7 +407,8 @@
    "notes": "",
    "source_point": 47,
    "te_rule_ids": [
-    "date_*"
+    "date_*",
+    "era_*"
    ],
    "detectable": "auto"
   },
@@ -446,10 +440,9 @@
    "editing_type": "Technical editing",
    "description": "Standardise time presentation, including 12-hour or 24-hour notation, according to the specified style.",
    "options": [
-    "3:30 p.m. (12-hour dotted lowercase, US)",
-    "15:30 (24-hour military/scientific)",
-    "3:30 pm (12-hour undotted lowercase, UK)",
-    "3:30 PM (12-hour uppercase / small caps)"
+    "12-hour with a.m./p.m. (3:30 p.m.)",
+    "24-hour (15:30)",
+    "Spell out in running text (half past three)"
    ],
    "handling": "Auto Fix",
    "behaviour": "Auto-correct",
@@ -813,10 +806,9 @@
    "editing_type": "Technical editing",
    "description": "Verify the presentation of Latin abbreviations such as et al., i.e., and e.g. according to the specified style.",
    "options": [
-    "e.g., & vs. (roman with comma, US standard)",
-    "e.g. & vs (roman without comma, UK standard)",
-    "for example, & versus (spelled out in English)",
-    "v. (italicized single letter, legal citation)"
+    "Roman type with a comma after i.e. and e.g.",
+    "Italicise et al. and other Latin terms if the style requires",
+    "Replace with English (that is; for example)"
    ],
    "handling": "Auto Fix",
    "behaviour": "Auto-correct",
@@ -935,8 +927,10 @@
    "confirm": false,
    "notes": "",
    "source_point": 70,
-   "te_rule_ids": [],
-   "detectable": "manual"
+   "te_rule_ids": [
+    "al_endings*"
+   ],
+   "detectable": "flag"
   },
   {
    "sno": 41,
@@ -1178,8 +1172,10 @@
    "confirm": false,
    "notes": "",
    "source_point": 103,
-   "te_rule_ids": [],
-   "detectable": "manual"
+   "te_rule_ids": [
+    "heading_case_*"
+   ],
+   "detectable": "flag"
   },
   {
    "sno": 71,

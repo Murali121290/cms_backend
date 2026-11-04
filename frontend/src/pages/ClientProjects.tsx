@@ -32,6 +32,17 @@ function clientDisplayName(c: Client): string {
   return `Client #${c.id}`
 }
 
+const PROJECT_TYPE_LABEL_MAP: Record<string, string> = {
+  TX: 'Text-TX',
+  WB: 'Whole Book-WB',
+  ANC: 'Ancillary content - ANC',
+  PPT: 'PPT',
+  ART: 'ART',
+  'Text-TX': 'Text-TX',
+  'Whole Book-WB': 'Whole Book-WB',
+  'Ancillary content - ANC': 'Ancillary content - ANC',
+}
+
 function projectLabel(p: Project): string {
   return p.project_title || p.project_code || `Project #${p.id}`
 }
@@ -379,6 +390,11 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
 
         {/* Fast Track toggle + workflow */}
         <div className="flex flex-wrap items-center gap-2">
+          {project.project_type && (
+            <span className="text-xs bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30 rounded-md px-2 py-0.5 font-semibold">
+              {PROJECT_TYPE_LABEL_MAP[project.project_type] || project.project_type}
+            </span>
+          )}
           {project.workflow_name && (
             <span className="text-xs bg-accent text-primary border border-primary/20 rounded-md px-2 py-0.5 font-medium">
               {project.workflow_name}
@@ -808,9 +824,16 @@ export function ClientProjects() {
                       </div>
                       {project.status && <Badge variant={statusV} className="flex-shrink-0 text-[10px]">{project.status}</Badge>}
                     </div>
-                    {project.workflow_name && (
-                      <span className="text-[10px] bg-accent text-primary border border-primary/20 rounded-md px-2 py-0.5 font-medium w-fit">{project.workflow_name}</span>
-                    )}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {project.project_type && (
+                        <span className="text-[10px] bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30 rounded px-1.5 py-0.2 font-semibold">
+                          {PROJECT_TYPE_LABEL_MAP[project.project_type] || project.project_type}
+                        </span>
+                      )}
+                      {project.workflow_name && (
+                        <span className="text-[10px] bg-accent text-primary border border-primary/20 rounded-md px-2 py-0.5 font-medium w-fit">{project.workflow_name}</span>
+                      )}
+                    </div>
                     <div className="flex items-center justify-between text-xs text-muted mt-auto pt-1 border-t border-border">
                       {project.project_manager
                         ? <span className="truncate">PM: {useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager)}</span>

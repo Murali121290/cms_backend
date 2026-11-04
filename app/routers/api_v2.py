@@ -288,6 +288,7 @@ def _serialize_project_summary(project: Project):
         composition=getattr(project, "composition", None),
         copyediting_level=getattr(project, "copyediting_level", None),
         project_manager=getattr(project, "project_manager", None),
+        client_project_manager=getattr(project, "client_project_manager", None),
         sales_person=getattr(project, "sales_person", None),
         priority=getattr(project, "priority", None),
         edition=getattr(project, "edition", None),
@@ -300,6 +301,7 @@ def _serialize_project_summary(project: Project):
         isbn_no=getattr(project, "isbn_no", None),
         billing_location=getattr(project, "billing_location", None),
         billing_type=getattr(project, "billing_type", None),
+        project_type=getattr(project, "project_type", None),
         alt_text=getattr(project, "alt_text", None),
         accessibility=getattr(project, "accessibility", None),
         due_date=due,
@@ -1847,6 +1849,7 @@ def api_v2_project_bootstrap(
     isbn_no: str | None = Form(None),
     billing_location: str | None = Form(None),
     billing_type: str | None = Form(None),
+    project_type: str | None = Form(None),
     alt_text: str | None = Form(None),
     accessibility: str | None = Form(None),
     due_date: str | None = Form(None),
@@ -1943,7 +1946,7 @@ def api_v2_project_bootstrap(
     for _f in ("division_code", "customer_contact", "category", "composition", "copyediting_level",
                "project_manager", "client_project_manager", "sales_person", "priority", "edition", "color",
                "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
-               "actual_pages", "isbn_no", "billing_location", "billing_type", "alt_text", "accessibility"):
+               "actual_pages", "isbn_no", "billing_location", "billing_type", "project_type", "alt_text", "accessibility"):
         _v = locals().get(_f)
         if _v is not None:
             setattr(project, _f, _v)
@@ -2204,7 +2207,7 @@ def api_v2_update_project(
 
     for _f in ("project_manager", "client_project_manager", "priority", "composition", "copyediting_level", "category", "edition",
                "color", "trim_size", "copyright_year", "estimated_pages", "actual_pages", "manuscript_pages",
-               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location", "billing_type", "alt_text", "accessibility"):
+               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location", "billing_type", "project_type", "alt_text", "accessibility"):
         _v = getattr(payload, _f, None)
         if _v is not None:
             setattr(project, _f, _v)
@@ -5858,12 +5861,13 @@ def api_v2_technical_scan(
             )
     elif findings and file_record and file_record.project_id and active_stylesheet:
         # No stylesheet chosen on the page: the project's active stylesheet decides the
-        # CE checklist options, so switching stylesheets needs no re-scan.
-        from app.processing.manuscript_core.ia_selection import apply_ce_settings
-        apply_ce_settings(
+        # CE checklist options and annotates findings with in_stylesheet matching.
+        from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
+        annotate_with_stylesheet(
             findings,
             [row.model_dump() for row in active_stylesheet.selected_ia_rows],
-            {k: v.model_dump(exclude_none=True) for k, v in active_stylesheet.ce_rules.items()},
+            raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
+            ce_rules={k: v.model_dump(exclude_none=True) for k, v in active_stylesheet.ce_rules.items()},
         )
 
     # Ensure inconsistencies is a dict (convert list to dict if needed)
@@ -6082,6 +6086,56 @@ def api_v2_bulk_export_analysis(
             content=excel_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": 'attachment; filename="consolidated_consistency_report.xlsx"'},
+        )
+
+
+@router.post(
+    "/projects/{project_id}/stylesheets/parse-docx",
+    response_model=schemas_v2.DocxStylesheetParseResponse,
+)
+async def api_v2_parse_docx_stylesheet(
+    project_id: int,
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Parses an editorial stylesheet (.docx) file and returns structured rule recommendations."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    filename = file.filename or ""
+    if not filename.lower().endswith(".docx"):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_FILE_TYPE",
+            message="Please upload a Microsoft Word document (.docx).",
+        )
+
+    try:
+        content_bytes = await file.read()
+        from app.processing.manuscript_core.parsers.docx_stylesheet_parser import DocxStylesheetParser
+        parser = DocxStylesheetParser()
+        result = parser.parse(content_bytes)
+        return schemas_v2.DocxStylesheetParseResponse(**result)
+    except Exception as e:
+        logger.error(f"Failed to parse docx stylesheet: {e}", exc_info=True)
+        return _error_response(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            code="PARSE_FAILED",
+            message=f"Failed to parse editorial style sheet: {str(e)}",
         )
 
 
