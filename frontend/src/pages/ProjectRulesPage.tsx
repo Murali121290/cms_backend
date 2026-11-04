@@ -163,6 +163,24 @@ function catOf(rule: LanguageRule): CategoryKey {
 
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string }
 
+// The Styles dropdown whitelist. The backend's get_available_style_profiles
+// is naïve — it loads every JSON in config/profiles/ which picks up workbook
+// data files (hyphen_dash_*, abbreviations_*, medical_terms_*,
+// uk_us_spelling_*, lww_ne_terms) as if they were style profiles. The
+// dropdown filters through this allow-list so users only see real editorial
+// style profiles.
+//
+// Deliberately excluded:
+//   - "NE" is not a profile_key — NE handling is driven by the LWW_NE
+//     term-list assignment (id=11) per the Q2a Option C decision. See
+//     app/processing/language_editing/lww_ne.py::get_lww_ne_term_list_id.
+//   - "Medical" (medical_pharmaceutical profile) is hidden pending further
+//     editorial direction. Projects already configured with it continue to
+//     load and execute — the backend still accepts the key.
+//   - Workbook-data JSONs leak through get_available_style_profiles but are
+//     not meaningful style profiles (zero rules, zero variants).
+const ALLOWED_PROFILE_KEYS = new Set<string>(['apa', 'ama', 'uk', 'us', 'canadian', 'chicago'])
+
 interface ProjectRulesPageProps {
   embedded?: boolean;
 }
@@ -281,7 +299,10 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
           ? data.active_rules.profile_keys
           : [data.active_rules?.profile_key ?? 'uk']
         setProfileKeys(keys)
-        setProfileChoices(Object.keys(data.available_profiles ?? {}))
+        setProfileChoices(
+          Object.keys(data.available_profiles ?? {})
+            .filter((k) => ALLOWED_PROFILE_KEYS.has(k))
+        )
         setAvailableProfiles(data.available_profiles ?? {})
         setProjectCode(data.active_rules?.project_code)
         setDirty(false)
