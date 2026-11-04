@@ -102,6 +102,11 @@ class SaveRulesRequest(BaseModel):
     # 'All' | 'US spelling' | 'UK spelling' | 'Possessive' | 'Nonpossessive'.
     # Omit to inherit the project's existing value (default 'All').
     medical_style_profile: Optional[str] = None
+    # UK/US Spelling workbook (S-C): per-project document variant for
+    # direction-aware regional spelling. 'en-US' | 'en-GB' | 'en-GB-oxendict'.
+    # Omit to inherit the project's existing value (default inferred
+    # from profile_keys[0]).
+    document_variant: Optional[str] = None
 
 
 class CustomRuleRequest(BaseModel):
@@ -168,6 +173,13 @@ def get_project_rules(
         logger.warning("Failed to surface medical terms workbook rules: %s", exc)
         medical_rules = []
         medical_summary = {"total": 0, "enabled": 0, "flag": 0, "auto_replace": 0}
+    try:
+        uk_us_rules = _ws.list_uk_us_spelling_rules(overrides)
+        uk_us_summary = _ws.uk_us_spelling_rule_summary(overrides)
+    except Exception as exc:
+        logger.warning("Failed to surface uk_us spelling workbook rules: %s", exc)
+        uk_us_rules = []
+        uk_us_summary = {"total": 0, "enabled": 0, "flag": 0, "auto_replace": 0}
 
     # Scope D: user-authored custom regex rules. Each entry is normalised
     # by the service at save time; here we only apply the per-rule
@@ -203,12 +215,14 @@ def get_project_rules(
             "hyphenation": hyphen_rules,
             "abbreviations": abbr_rules,
             "medical_terms": medical_rules,
+            "uk_us_spelling": uk_us_rules,
             "custom": custom_rules,
         },
         "workbook_summary": {
             "hyphenation": hyphen_summary,
             "abbreviations": abbr_summary,
             "medical_terms": medical_summary,
+            "uk_us_spelling": uk_us_summary,
             "custom": custom_summary,
         },
     }
@@ -262,6 +276,10 @@ def update_project_rules(
         if medical_style_profile is None:
             existing = existing or get_project_language_rules(db, project_id=project_id)
             medical_style_profile = existing.get("medical_style_profile")
+        document_variant = body.document_variant
+        if document_variant is None:
+            existing = existing or get_project_language_rules(db, project_id=project_id)
+            document_variant = existing.get("document_variant")
         # Scope D: the main save endpoint never clobbers custom_rules — a
         # style-profile switch or override toggle should preserve the
         # project's authored rules. Dedicated POST/DELETE endpoints handle
@@ -284,6 +302,7 @@ def update_project_rules(
             scope_reset=scope_reset,
             custom_rules=preserved_custom,
             medical_style_profile=medical_style_profile,
+            document_variant=document_variant,
         )
         db.commit()
         return {"ok": True, "rules": updated}
@@ -610,11 +629,35 @@ def start_language_edit_analysis(
     except Exception as exc:
         logger.warning("Failed to load medical terms whitelist: %s", exc)
         medical_whitelist = frozenset()
+
+    # UK/US Spelling workbook: feed pyspellchecker whitelist with the
+    # project's preferred spellings for the active document_variant,
+    # plus the 552 Common_Spellings (always-valid words like advertise /
+    # advise / comprise) and the Protected_Terms phrases (WHO / ISO /
+    # NIH …). Direction-aware — a UK project gets 'colour', 'organise'
+    # etc; a US project gets 'color', 'organize'.
+    from app.processing.language_editing import uk_us_spelling as _uk_us
+    document_variant = project_rules_cfg.get("document_variant") or "en-GB"
+    try:
+        uk_us_whitelist = _uk_us.preferred_terms_for(document_variant)
+        uk_us_common = _uk_us._common_spellings_lc()
+        uk_us_protected = _uk_us.protected_phrases()
+    except Exception as exc:
+        logger.warning("Failed to load uk_us_spelling whitelist: %s", exc)
+        uk_us_whitelist = frozenset()
+        uk_us_common = frozenset()
+        uk_us_protected = []
     spell_whitelist = spell_check.build_whitelist(
         variant_to_canonical=project_rules_cfg.get("variant_to_canonical", {}),
         uk_us_pairs=UK_US_PAIRS,
         term_vocabulary=term_vocab,
-        extras=list(custom_dict_words) + list(medical_whitelist),
+        extras=(
+            list(custom_dict_words)
+            + list(medical_whitelist)
+            + list(uk_us_whitelist)
+            + list(uk_us_common)
+            + uk_us_protected
+        ),
     )
     # Also feed custom dict words into pyspellchecker's known-word frequency
     # table so morphological variants (plurals, -ed forms) of a dic entry
@@ -687,6 +730,8 @@ def start_language_edit_analysis(
     # always fire. Default ``All`` keeps subprofile rules silent until the
     # project opts in via the Rules Picker.
     medical_style_profile = project_rules_cfg.get("medical_style_profile") or "All"
+    # Re-use the document_variant resolved above for the spell-check
+    # whitelist — it drives direction-aware uk_us_spelling finding emission.
 
     # Pre-compute the document-scope abbreviation state ONCE per analyze
     # request (or ONCE per paragraph when scope_reset is True — crude
@@ -785,6 +830,7 @@ def start_language_edit_analysis(
             min_uses=min_uses,
             para_roles=para_roles,
             medical_style_profile=medical_style_profile,
+            document_variant=document_variant,
         )
         # Build exact-span dedup set: only (start, end) pairs from word-level
         # rules — so a Sentence finding covering a whole clause doesn't

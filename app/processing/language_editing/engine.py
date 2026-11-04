@@ -10,6 +10,7 @@ from .sentence_checks import FUNCTIONS
 from . import hyphen_dash
 from . import abbreviations
 from . import medical_terms
+from . import uk_us_spelling
 
 
 def _match_case(src: str, canon: str) -> str:
@@ -140,26 +141,24 @@ def run_manuscript_core_rules(
     """
     out: list[Finding] = []
 
-    # 1. UK/US Spelling Pairs
-    if enable_uk_us:
-        try:
-            from app.processing.manuscript_core.data.uk_us_pairs import UK_US_PAIRS
-            for uk, us in UK_US_PAIRS:
-                pat_uk = re.compile(r"\b" + re.escape(uk) + r"\b", re.IGNORECASE)
-                for m in pat_uk.finditer(text):
-                    sug = _match_case(m.group(0), us)
-                    out.append(Finding(
-                        rule_id=f"uk_us_{us}",
-                        category="spelling",
-                        start=m.start(),
-                        end=m.end(),
-                        original=m.group(0),
-                        suggestion=sug,
-                        message=f"UK/US spelling: '{m.group(0)}' -> suggested US form '{sug}'.",
-                        severity="warning"
-                    ))
-        except Exception:
-            pass
+    # 1. UK/US Spelling Pairs — LEGACY HARDCODED PATH, DISABLED.
+    #
+    # Replaced by the workbook-driven ``uk_us_spelling`` module which
+    # provides direction awareness (document_variant), status-based
+    # autocorrect safety (dictionary_checked / needs_review / disputed),
+    # a 552-word Common_Spellings exclusion (advertise / advise /
+    # comprise never fire), and 28 Protected_Terms (WHO / ISO / NIH /
+    # … never flagged inside protected phrases).
+    #
+    # The MC_UK_US meta-toggle remains the kill switch — flipping it off
+    # in a profile silences BOTH the legacy path (gated below for one
+    # release) and the new workbook path (gated at the engine.analyze
+    # call site). The ``UK_US_PAIRS`` data file is kept in-tree for one
+    # release so any downstream importer isn't broken; it's unreferenced
+    # at runtime and will be deleted in a follow-up PR after dependency
+    # confirmation. See uk_us_spelling.analyze_uk_us_spelling for the
+    # new path (invoked at the end of engine.analyze below).
+    pass  # legacy path intentionally no-op
 
     # 2. Inclusive Language & Bias Terms
     if enable_bias:
@@ -287,6 +286,7 @@ def analyze(
     min_uses: int = 2,
     para_roles: Optional[dict[int, dict]] = None,
     medical_style_profile: str = "All",
+    document_variant: str = "en-GB",
 ) -> list[Finding]:
     """Runs all enabled rules over paragraph text and returns de-conflicted findings.
 
@@ -375,6 +375,22 @@ def analyze(
         ))
     except Exception:
         pass
+
+    # UK/US Spelling workbook — direction-aware regional spelling check.
+    # Flags words that use the wrong-regional spelling for the project's
+    # ``document_variant`` (en-US / en-GB / en-GB-oxendict). Replaces the
+    # legacy hardcoded UK_US_PAIRS iteration above. Honours the same
+    # MC_UK_US meta-toggle so profiles that disabled UK/US stay silent.
+    # Scope-C overrides apply per entry_id (SV-00001 … SV-01329).
+    if mc_toggles.get("enable_uk_us", True):
+        try:
+            findings.extend(uk_us_spelling.analyze_uk_us_spelling(
+                text,
+                document_variant=document_variant,
+                rule_overrides=overrides,
+            ))
+        except Exception:
+            pass
 
     # Filter against protected spans BEFORE overlap resolution so a
     # protected span never wins a tie-break and causes a legitimate

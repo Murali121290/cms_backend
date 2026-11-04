@@ -60,11 +60,13 @@ from typing import Any, Optional
 from . import abbreviations as _ab
 from . import hyphen_dash
 from . import medical_terms as _mt
+from . import uk_us_spelling as _uus
 
 
 _WORKBOOK_CATEGORY = "hyphenation"
 _ABBREVIATIONS_CATEGORY = "abbreviations"
 _MEDICAL_CATEGORY = "medical_terms"
+_UK_US_SPELLING_CATEGORY = "spelling"
 
 
 # Short, human-friendly source labels for the UI's provenance badge. Keys
@@ -557,6 +559,121 @@ def medical_terms_rule_summary(
     return {"total": total, "enabled": enabled, "flag": flag, "auto_replace": auto_replace}
 
 
+# ---------------------------------------------------------------------------
+# UK/US Spelling surface (variants + common + protected)
+# ---------------------------------------------------------------------------
+
+def _normalise_uk_us_variant(row: dict[str, Any]) -> dict[str, Any]:
+    """US_UK_Spelling_Variants row → unified LanguageRule wire dict.
+
+    Rendered as a ``phrase_lookup`` so the existing RuleDetails
+    renderer displays the ``US → UK`` (or ``UK → US``) pair. Every
+    editorial column is preserved for Rules Picker + Review Page
+    display: validation_status, us_preference, uk_preference,
+    spelling_pattern, requires_context, part_of_speech, etc.
+    """
+    status = (row.get("validation_status") or "needs_review").lower()
+    # tool_behaviour defaults to the UK-doc action (most projects are UK;
+    # the US-doc half is symmetric). Projects always see both directions
+    # at analyze time — this flag is just the Rules Picker preview.
+    uk_action = row.get("uk_doc_action") or "flag_suggest"
+    autocorrect_safe = bool(row.get("uk_doc_autocorrect_safe"))
+    if status == "disputed":
+        tb = "flag"
+    elif status == "needs_review":
+        tb = "flag"
+    elif uk_action == "flag_autocorrect" and autocorrect_safe:
+        tb = "auto_replace"
+    else:
+        tb = "flag"
+    severity_raw = (row.get("uk_doc_severity") or "warning").lower()
+    severity = "error" if severity_raw == "error" else "suggestion" if severity_raw in ("info", "info or warning") else "warning"
+    us = row.get("us_spelling") or ""
+    uk = row.get("uk_spelling") or ""
+    return {
+        "id": row["entry_id"],
+        "category": _UK_US_SPELLING_CATEGORY,
+        "type": "phrase_lookup",
+        "enabled": True,
+        "tool_behaviour": tb,
+        "severity": severity,
+        "message": f"{us} (US) ↔ {uk} (UK)",
+        "source_of": "workbook",
+        "source": us,
+        "suggestions": [uk],
+        "replacement": uk,
+        "alt_suggestions": [],
+        # Preserved editorial metadata — RuleDetails ignores keys it
+        # doesn't render but they're round-tripped for anyone who wants
+        # to see them (API consumers, future UI).
+        "us_spelling": us,
+        "uk_spelling": uk,
+        "us_alternatives": list(row.get("us_alternatives") or []),
+        "uk_alternatives": list(row.get("uk_alternatives") or []),
+        "spelling_pattern": row.get("spelling_pattern") or "",
+        "part_of_speech": row.get("part_of_speech") or "",
+        "word_family": row.get("word_family") or "",
+        "variant_type": row.get("variant_type") or "",
+        "us_preference": row.get("us_preference") or "",
+        "uk_preference": row.get("uk_preference") or "",
+        "validation_status": status,
+        "requires_context": bool(row.get("requires_context")),
+        "formality_level": row.get("formality_level") or "",
+        "style_guide_notes": row.get("style_guide_notes") or "",
+        "exceptions_notes": row.get("exceptions_notes") or "",
+        "source_dictionary": row.get("source_dictionary") or "",
+        "source_badge": "US/UK workbook",
+        "source_raw": "Ninja Inkflow CE US and UK Spelling Database",
+    }
+
+
+@lru_cache(maxsize=1)
+def _base_uk_us_rules() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in (_uus._variants_data().get("entries") or []):
+        if not row.get("entry_id"):
+            continue
+        out.append(_normalise_uk_us_variant(row))
+    return out
+
+
+def list_uk_us_spelling_rules(
+    overrides: Optional[dict[str, dict[str, Any]]] = None,
+) -> list[dict[str, Any]]:
+    """Return the full normalised UK/US spelling rule list with overrides applied."""
+    overrides = overrides or {}
+    base = _base_uk_us_rules()
+    if not overrides:
+        return [dict(r) for r in base]
+    out: list[dict[str, Any]] = []
+    for r in base:
+        o = overrides.get(r["id"])
+        if o:
+            out.append(_apply_override(r, o))
+        else:
+            out.append(dict(r))
+    return out
+
+
+def uk_us_spelling_rule_summary(
+    overrides: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, int]:
+    overrides = overrides or {}
+    total = enabled = flag = auto_replace = 0
+    for r in _base_uk_us_rules():
+        total += 1
+        o = overrides.get(r["id"]) or {}
+        eff_enabled = bool(o["enabled"]) if "enabled" in o else bool(r.get("enabled", True))
+        eff_tb = o.get("tool_behaviour") or r.get("tool_behaviour") or "flag"
+        if eff_enabled:
+            enabled += 1
+            if eff_tb == "auto_replace":
+                auto_replace += 1
+            else:
+                flag += 1
+    return {"total": total, "enabled": enabled, "flag": flag, "auto_replace": auto_replace}
+
+
 # Allow tests to force a reload after regenerating JSON.
 _original_clear_cache = clear_cache
 
@@ -565,5 +682,7 @@ def clear_cache() -> None:  # noqa: F811  (deliberate override to extend)
     _original_clear_cache()
     _base_abbreviation_rules.cache_clear()
     _base_medical_rules.cache_clear()
+    _base_uk_us_rules.cache_clear()
     _ab.clear_cache()
     _mt.clear_cache()
+    _uus.clear_cache()

@@ -129,17 +129,22 @@ def test_custom_rule_respects_rule_overrides():
 def test_custom_rule_profile_and_custom_coexist():
     """A profile rule and a custom rule in the same analyze pass each fire
     independently — a known-regression guard against accidental deduping
-    of the two sources."""
+    of the two sources.
+
+    Uses an ad-hoc word (``xyzzy``) NOT present in the uk_us_spelling
+    workbook so the profile rule has no competing finding on the same
+    span (otherwise the workbook's error-severity SV-xxxx wins the
+    resolve_overlaps tie-break)."""
     rules = load_rules_from_dict([
         {"id": "PR01", "category": "spelling", "type": "regex",
-         "pattern": r"\bcolor\b", "replacement": "colour",
-         "message": "UK: colour", "enabled": True},
+         "pattern": r"\bxyzzy\b", "replacement": "widget",
+         "message": "replace placeholder", "enabled": True},
         {"id": "CUST-and-or", "category": "custom", "type": "regex",
          "pattern": r"\band/or\b", "replacement": "and or",
          "message": "avoid and/or", "enabled": True, "flags": [],
          "tool_behaviour": "flag"},
     ])
-    text = "I like color and/or coffee."
+    text = "I like xyzzy and/or coffee."
     findings = engine.analyze(text, rules, {}, [(0, len(text), text)])
     ids = {f.rule_id for f in findings}
     assert "PR01" in ids

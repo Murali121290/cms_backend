@@ -85,6 +85,11 @@ export type Audience = 'general' | 'professional'
 // subprofiles only fire when the project opts in via the Rules Picker.
 export type MedicalStyleProfile = 'All' | 'US spelling' | 'UK spelling' | 'Possessive' | 'Nonpossessive'
 
+// UK/US Spelling workbook (S-C). Default derives from the project's
+// profile_keys[0] — uk → en-GB, us/ama → en-US. Users explicitly pick
+// en-GB-oxendict for UK projects following Oxford (-ize) spelling.
+export type DocumentVariant = 'en-US' | 'en-GB' | 'en-GB-oxendict'
+
 export interface ActiveRulesConfig {
   project_id?: number
   project_code?: string
@@ -100,6 +105,7 @@ export interface ActiveRulesConfig {
   min_uses?: number
   scope_reset?: boolean
   medical_style_profile?: MedicalStyleProfile
+  document_variant?: DocumentVariant
 }
 
 export interface AvailableProfiles {
@@ -141,6 +147,7 @@ export interface SaveRulesBody {
   min_uses?: number
   scope_reset?: boolean
   medical_style_profile?: MedicalStyleProfile
+  document_variant?: DocumentVariant
 }
 
 export interface RuleHistoryEntry {
