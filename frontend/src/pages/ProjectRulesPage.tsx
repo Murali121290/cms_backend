@@ -249,6 +249,7 @@ export function ProjectRulesPage() {
           .concat((wbBuckets.abbreviations ?? []) as LanguageRule[])
           .concat((wbBuckets.medical_terms ?? []) as LanguageRule[])
           .concat((wbBuckets.uk_us_spelling ?? []) as LanguageRule[])
+          .concat((wbBuckets.lww_ne ?? []) as LanguageRule[])
           .concat((wbBuckets.custom ?? []) as LanguageRule[])
         setWorkbookRules(wb)
         const overrides = (data.active_rules?.rule_overrides ?? {}) as RuleOverrides

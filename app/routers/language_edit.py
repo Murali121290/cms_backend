@@ -180,6 +180,13 @@ def get_project_rules(
         logger.warning("Failed to surface uk_us spelling workbook rules: %s", exc)
         uk_us_rules = []
         uk_us_summary = {"total": 0, "enabled": 0, "flag": 0, "auto_replace": 0}
+    try:
+        lww_ne_rules = _ws.list_lww_ne_rules(overrides)
+        lww_ne_summary = _ws.lww_ne_rule_summary(overrides)
+    except Exception as exc:
+        logger.warning("Failed to surface LWW-NE workbook rules: %s", exc)
+        lww_ne_rules = []
+        lww_ne_summary = {"total": 0, "enabled": 0, "flag": 0, "auto_replace": 0}
 
     # Scope D: user-authored custom regex rules. Each entry is normalised
     # by the service at save time; here we only apply the per-rule
@@ -216,6 +223,7 @@ def get_project_rules(
             "abbreviations": abbr_rules,
             "medical_terms": medical_rules,
             "uk_us_spelling": uk_us_rules,
+            "lww_ne": lww_ne_rules,
             "custom": custom_rules,
         },
         "workbook_summary": {
@@ -223,6 +231,7 @@ def get_project_rules(
             "abbreviations": abbr_summary,
             "medical_terms": medical_summary,
             "uk_us_spelling": uk_us_summary,
+            "lww_ne": lww_ne_summary,
             "custom": custom_summary,
         },
     }
@@ -603,6 +612,32 @@ def start_language_edit_analysis(
     from app.processing.language_editing.term_matcher import build_matcher_for_project, find_term_matches
     compiled_term_lists = build_matcher_for_project(db, project_id=file_record.project_id)
 
+    # LWW-NE workbook (Phase 2) — detect whether this project is tagged
+    # as an "NE" project per decision Q2a. The term-list assignment is
+    # the sole signal: if the project has the LWW_NE term list assigned,
+    # the workbook's NE-tagged rows fire. Name-based lookup (with fallback
+    # to historical id=11) makes this robust across environments. No new
+    # DB schema is required — reuses existing project_term_lists table.
+    from app.processing.language_editing import lww_ne as _lww_ne
+    try:
+        from app.domains.term_lists.models import ProjectTermList
+        _assigned_term_list_ids = {
+            pt.term_list_id for pt in
+            db.query(ProjectTermList)
+              .filter(ProjectTermList.project_id == file_record.project_id)
+              .all()
+        }
+        _lww_ne_id = _lww_ne.get_lww_ne_term_list_id(db)
+        is_lww_ne_project = _lww_ne_id in _assigned_term_list_ids
+    except Exception:
+        logger.exception(
+            "Failed to resolve LWW-NE project status for project_id=%s; "
+            "defaulting to False (NE-tagged workbook rows will not fire)",
+            file_record.project_id,
+        )
+        is_lww_ne_project = False
+    project_profile_keys = project_rules_cfg.get("profile_keys") or []
+
     # Build the spell-check whitelist once per analyze run. Terms, house-style
     # canonical pairs, and UK/US pair words are all considered correct — so
     # pyspellchecker won't flag them as typos.
@@ -831,6 +866,8 @@ def start_language_edit_analysis(
             para_roles=para_roles,
             medical_style_profile=medical_style_profile,
             document_variant=document_variant,
+            project_profile_keys=project_profile_keys,
+            is_lww_ne_project=is_lww_ne_project,
         )
         # Build exact-span dedup set: only (start, end) pairs from word-level
         # rules — so a Sentence finding covering a whole clause doesn't
@@ -890,7 +927,23 @@ def start_language_edit_analysis(
         # Term-list highlights (separate category, no suggestion, view-only).
         # find_term_matches already dedupes overlapping spans across lists —
         # one finding per span, attribution via message.
+        #
+        # Decision D1 (LWW-NE Phase 2): when the workbook has already
+        # emitted an actionable finding covering the same span in this
+        # paragraph, suppress the view-only DB term highlight for that
+        # occurrence. This avoids double-highlighting the same word with
+        # a "Term" chip AND a "Spelling" chip. Term highlights for text
+        # NOT covered by a workbook finding continue to fire so existing
+        # customer-specific term lists remain visible.
+        lww_ne_spans_in_para = {
+            (fd.start, fd.end) for fd in found
+            if fd.rule_id and fd.rule_id.startswith("LWW-NE-")
+        }
         for tm in find_term_matches(text, compiled_term_lists):
+            # D1 suppression: skip DB term highlight if a workbook LWW-NE
+            # finding covers the exact same (start, end) span.
+            if (tm["start"], tm["end"]) in lww_ne_spans_in_para:
+                continue
             term_match_count += 1
             total_findings_count += 1
             if tm.get("also_in_list_names"):
