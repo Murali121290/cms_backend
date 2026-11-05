@@ -48,108 +48,113 @@ def watch_ftp_for_new_pdfs():
                 pdfs = [f for f in all_ftp_files if f.lower().endswith('.pdf')]
 
                 for pdf_name in pdfs:
-                    # Check if job already exists
-                    existing_job = db.query(BodJob).filter(
-                        BodJob.pdf_filename == pdf_name
+                    # Check if an active (non-deleted) job already exists
+                    active_job = db.query(BodJob).filter(
+                        BodJob.pdf_filename == pdf_name,
+                        BodJob.is_deleted == False
                     ).first()
                     
-                    if not existing_job:
-                        logger.info(f"Found new PDF for BOD folder: {pdf_name}")
-                        project_name = pdf_name.rsplit('.', 1)[0]
-                        
-                        project_dir = os.path.join(bod_upload_dir, "BOD", project_name)
-                        os.makedirs(project_dir, exist_ok=True)
-                        
-                        local_path = os.path.join(project_dir, pdf_name)
-                        ftp.download_file(pdf_name, local_path)
+                    if active_job:
+                        # Skip if there is already an active job for this PDF
+                        continue
 
-                        # Look for matching image/cover file (e.g. .jpg, .jpeg, .png)
-                        cover_filename = None
-                        cover_filepath = None
-                        for ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff'):
-                            candidate_name = f"{project_name}{ext}"
-                            candidate_match = next((f for f in all_ftp_files if f.lower() == candidate_name.lower()), None)
-                            if candidate_match:
-                                cover_filename = candidate_match
-                                cover_filepath = os.path.join(project_dir, candidate_match)
-                                try:
-                                    ftp.download_file(candidate_match, cover_filepath)
-                                    logger.info(f"Found and downloaded matching cover {candidate_match} for {pdf_name}")
-                                except Exception as err:
-                                    logger.error(f"Failed to download matching cover {candidate_match}: {err}")
-                                    cover_filename = None
-                                    cover_filepath = None
-                                break
-                        
-                        page_count = None
-                        pdf_type = None
-                        pdf_language = "None"
-                        try:
-                            import fitz
-                            doc = fitz.open(local_path)
-                            page_count = doc.page_count
-                            
-                            pdf_type = "Image PDF"
-                            text_content = ""
-                            for i in range(min(5, doc.page_count)):
-                                page = doc[i]
-                                text = page.get_text().strip()
-                                if text:
-                                    pdf_type = "Text PDF"
-                                    text_content += text + " "
-                            
-                            if text_content:
-                                try:
-                                    from langdetect import detect
-                                    code = detect(text_content)
-                                    from app.core.config import LANGUAGE_MAP
-                                    pdf_language = LANGUAGE_MAP.get(code, code.upper())
-                                except Exception:
-                                    pass
-                                    
-                            doc.close()
-                        except Exception as e:
-                            logger.error(f"Failed to extract page count and type for {pdf_name}: {e}")
-                        
-                        stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
-                        stages = [s.strip() for s in stages_str.split(",")]
-                        initial_stage_name = stages[0]
-                        now_utc = datetime.now(timezone.utc)
-                        now_iso = now_utc.isoformat()
-                        
-                        initial_history = {
-                            initial_stage_name: {
-                                "start_time": now_iso
-                            }
-                        }
+                    # If no active job exists (or previous was soft-deleted), ingest as a new row
+                    logger.info(f"Found new PDF for BOD folder: {pdf_name}")
+                    project_name = pdf_name.rsplit('.', 1)[0]
                     
-                        new_job = BodJob(
-                            project_name=project_name,
-                            pdf_filename=pdf_name,
-                            pdf_filepath=local_path,
-                            cover_filename=cover_filename,
-                            cover_filepath=cover_filepath,
-                            pdf_page_count=page_count,
-                            pdf_type=pdf_type,
-                            pdf_language=pdf_language,
-                            current_stage_index=0,
-                            current_stage_name=initial_stage_name,
-                            stage_history=initial_history,
-                            status="Active",
-                            created_at=now_utc,
-                            due_date=calculate_bod_due_date(pdf_type, page_count, now_utc)
-                        )
-                        db.add(new_job)
-                        db.commit()
-                        db.refresh(new_job)
+                    project_dir = os.path.join(bod_upload_dir, "BOD", project_name)
+                    os.makedirs(project_dir, exist_ok=True)
+                    
+                    local_path = os.path.join(project_dir, pdf_name)
+                    ftp.download_file(pdf_name, local_path)
+
+                    # Look for matching image/cover file (e.g. .jpg, .jpeg, .png)
+                    cover_filename = None
+                    cover_filepath = None
+                    for ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff'):
+                        candidate_name = f"{project_name}{ext}"
+                        candidate_match = next((f for f in all_ftp_files if f.lower() == candidate_name.lower()), None)
+                        if candidate_match:
+                            cover_filename = candidate_match
+                            cover_filepath = os.path.join(project_dir, candidate_match)
+                            try:
+                                ftp.download_file(candidate_match, cover_filepath)
+                                logger.info(f"Found and downloaded matching cover {candidate_match} for {pdf_name}")
+                            except Exception as err:
+                                logger.error(f"Failed to download matching cover {candidate_match}: {err}")
+                                cover_filename = None
+                                cover_filepath = None
+                            break
+                    
+                    page_count = None
+                    pdf_type = None
+                    pdf_language = "None"
+                    try:
+                        import fitz
+                        doc = fitz.open(local_path)
+                        page_count = doc.page_count
                         
-                        if settings.BOD_MANAGER_EMAIL:
-                            send_bod_new_job_email(
-                                settings.BOD_MANAGER_EMAIL,
-                                new_job.project_name,
-                                pdf_name,
-                                cover_filename=cover_filename
-                            )
+                        pdf_type = "Image PDF"
+                        text_content = ""
+                        for i in range(min(5, doc.page_count)):
+                            page = doc[i]
+                            text = page.get_text().strip()
+                            if text:
+                                pdf_type = "Text PDF"
+                                text_content += text + " "
+                        
+                        if text_content:
+                            try:
+                                from langdetect import detect
+                                code = detect(text_content)
+                                from app.core.config import LANGUAGE_MAP
+                                pdf_language = LANGUAGE_MAP.get(code, code.upper())
+                            except Exception:
+                                pass
+                                
+                        doc.close()
+                    except Exception as e:
+                        logger.error(f"Failed to extract page count and type for {pdf_name}: {e}")
+                    
+                    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+                    stages = [s.strip() for s in stages_str.split(",")]
+                    initial_stage_name = stages[0]
+                    now_utc = datetime.now(timezone.utc)
+                    now_iso = now_utc.isoformat()
+                    
+                    initial_history = {
+                        initial_stage_name: {
+                            "start_time": now_iso
+                        }
+                    }
+                
+                    new_job = BodJob(
+                        project_name=project_name,
+                        pdf_filename=pdf_name,
+                        pdf_filepath=local_path,
+                        cover_filename=cover_filename,
+                        cover_filepath=cover_filepath,
+                        pdf_page_count=page_count,
+                        pdf_type=pdf_type,
+                        pdf_language=pdf_language,
+                        current_stage_index=0,
+                        current_stage_name=initial_stage_name,
+                        stage_history=initial_history,
+                        status="Active",
+                        created_at=now_utc,
+                        due_date=calculate_bod_due_date(pdf_type, page_count, now_utc)
+                    )
+                    db.add(new_job)
+                    db.commit()
+                    db.refresh(new_job)
+                    
+                    if settings.BOD_MANAGER_EMAIL:
+                        send_bod_new_job_email(
+                            settings.BOD_MANAGER_EMAIL,
+                            new_job.project_name,
+                            pdf_name,
+                            cover_filename=cover_filename
+                        )
                         
         except Exception as e:
             logger.error(f"Error processing FTP for BOD: {str(e)}")

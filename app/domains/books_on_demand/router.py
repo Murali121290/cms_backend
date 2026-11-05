@@ -288,15 +288,41 @@ def delete_job(job_id: int, db: Session = Depends(get_db), current_user = Depend
     job.is_deleted = True
     db.commit()
     
-    # Attempt to delete local project directory
-    import os, shutil
+    # Clean up local project files and any linked EPUB validator files
+    import os, shutil, re
     if job.pdf_filepath:
         project_dir = os.path.dirname(job.pdf_filepath)
         if os.path.exists(project_dir):
             try:
-                shutil.rmtree(project_dir)
+                shutil.rmtree(project_dir, ignore_errors=True)
             except Exception as e:
                 print(f"Error removing {project_dir}: {e}")
+
+    if job.epub_filepath:
+        epub_dir = os.path.dirname(job.epub_filepath)
+        if os.path.exists(epub_dir):
+            try:
+                shutil.rmtree(epub_dir, ignore_errors=True)
+            except Exception as e:
+                print(f"Error removing {epub_dir}: {e}")
+
+    try:
+        from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+        from app.domains.post_prod.epub_validator.services import ev_projects_db
+        from app.domains.post_prod.epub_validator.models import EvProject
+
+        folder_name = job.project_name or (job.pdf_filename.rsplit('.', 1)[0] if job.pdf_filename else f"bod_job_{job.id}")
+        folder_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', folder_name)
+
+        ev_proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+        if ev_proj:
+            ev_projects_db.hard_delete_project(db, project_id=ev_proj.id)
+
+        validator_disk_folder = os.path.join(UPLOAD_DIR, folder_name)
+        if os.path.exists(validator_disk_folder):
+            shutil.rmtree(validator_disk_folder, ignore_errors=True)
+    except Exception as e:
+        print(f"Error cleaning up EPUB validator project for deleted BOD job {job.id}: {e}")
             
     return {"status": "success"}
 
