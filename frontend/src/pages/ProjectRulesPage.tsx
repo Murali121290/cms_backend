@@ -191,6 +191,119 @@ type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string }
 //     not meaningful style profiles (zero rules, zero variants).
 const ALLOWED_PROFILE_KEYS = new Set<string>(['apa', 'ama', 'uk', 'us', 'canadian', 'chicago'])
 
+// Styles dropdown filter options — superset of the profile keys. 'NE' is a
+// display-only filter (never saved to profile_keys) that narrows the view
+// to LWW-NE rules carrying the 'NE' tag in rule_runs_raw. NE off by
+// default; session-only (resets on reload). Order matches the dropdown
+// render order.
+const STYLE_FILTER_OPTIONS = ['APA', 'AMA', 'NE', 'UK', 'US', 'Canadian', 'Chicago'] as const
+type StyleFilterOption = typeof STYLE_FILTER_OPTIONS[number]
+
+// Which style_filter entries correspond to real backend profile_keys
+// (lowercased equivalents saved to the sidecar on Save). 'NE' is
+// excluded intentionally — it's a filter-only pseudo-style.
+const STYLE_FILTER_TO_PROFILE_KEY: Record<string, string | null> = {
+  APA: 'apa', AMA: 'ama', UK: 'uk', US: 'us', Canadian: 'canadian', Chicago: 'chicago',
+  NE: null,
+}
+const PROFILE_KEY_TO_STYLE_FILTER: Record<string, StyleFilterOption> = {
+  apa: 'APA', ama: 'AMA', uk: 'UK', us: 'US', canadian: 'Canadian', chicago: 'Chicago',
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Path-2 style-filter classification — per-source mapping table ratified
+// in the plan discussion. Returns one of:
+//   'show'    — the rule matches at least one selected style and should display
+//   'exempt'  — rule is unaffected by Styles filter (orthogonal axis like
+//                 document_variant / eponym capitalisation / typographic
+//                 character conversion / no per-rule style tag model)
+//   'hide'    — rule is Generic / unclassified / explicitly out-of-style
+//
+// When styleFilter is empty, this helper isn't consulted — the memo
+// short-circuits to show everything (matches pre-filter baseline).
+// ────────────────────────────────────────────────────────────────────────
+type FilterVerdict = 'show' | 'exempt' | 'hide'
+
+function classifyRuleForStyleFilter(rule: LanguageRule, styleFilter: Set<StyleFilterOption>): FilterVerdict {
+  // Profile rules — backend has already filtered these via profile_keys
+  // at load time, so anything present is by definition applicable.
+  if (rule.source_of === 'profile') return 'show'
+
+  const badge = rule.source_badge ?? ''
+
+  // LWW-NE: strict intersection against rule_runs_raw. Tags of interest
+  // are APA / AMA / NE; the workbook doesn't tag UK / US / Canadian /
+  // Chicago at all. Generic-only rows (no explicit APA/AMA/NE tag) hide
+  // per the user's "Do not display Generic" direction.
+  if (badge === 'LWW-NE') {
+    const tags = new Set(Array.isArray(rule.rule_runs_raw) ? rule.rule_runs_raw : [])
+    // Remove classification-only tags before matching.
+    tags.delete('Generic')
+    tags.delete('Eponym')
+    if (tags.size === 0) return 'hide'
+    for (const sel of styleFilter) {
+      if (tags.has(sel)) return 'show'
+    }
+    return 'hide'
+  }
+
+  // Hyphenation workbook: identified by category + presence of
+  // style_profile field + ABSENCE of rule_runs_raw (which would route
+  // the row to LWW-NE above). source_badge is ``null`` for all
+  // hyphenation workbook rows (verified against live data).
+  if (
+    rule.category === 'hyphenation'
+    && !Array.isArray(rule.rule_runs_raw)
+    && typeof rule.style_profile === 'string'
+  ) {
+    const sp = rule.style_profile
+    if (sp === 'all') return 'hide'  // Generic — hidden per spec
+    if (sp === 'optional_typographic_minus') return 'exempt'  // C2
+    if (sp === 'chicago_ama_apa') {
+      return (styleFilter.has('APA') || styleFilter.has('AMA') || styleFilter.has('Chicago')) ? 'show' : 'hide'
+    }
+    if (sp === 'us_mw_and_chicago') {
+      return (styleFilter.has('US') || styleFilter.has('Chicago')) ? 'show' : 'hide'
+    }
+    if (sp === 'mw_dictionary') {
+      return styleFilter.has('US') ? 'show' : 'hide'  // C1 — MW = American dictionary
+    }
+    // Any other style_profile value we don't recognise: treat as unclassified.
+    return 'hide'
+  }
+
+  // Medical workbook.
+  if (badge === 'Medical workbook') {
+    const sp = (rule.style_profile ?? null) as string | null
+    if (sp === 'All') return 'hide'  // Generic — hidden per spec
+    if (sp === 'US spelling') return styleFilter.has('US') ? 'show' : 'hide'
+    if (sp === 'Possessive' || sp === 'Nonpossessive') return 'exempt'  // C3 — orthogonal axis
+    if (sp === null || sp === '') return 'hide'  // C4 — unclassified
+    return 'hide'
+  }
+
+  // UK/US Spelling workbook — no per-rule style tag, driven by
+  // document_variant project setting (orthogonal axis). Exempt from
+  // Styles filter entirely (C5).
+  if (badge === 'US/UK workbook') return 'exempt'
+
+  // Abbreviations workbook — no per-rule style tag; always-apply (C6).
+  // Various source_badge values (ISMP, Joint Commission, null, …).
+  // LWW-NE rules routed into the abbreviations category are already
+  // handled above (badge='LWW-NE' short-circuits), so this branch only
+  // catches true abbreviations-workbook rows.
+  if (rule.category === 'abbreviations') return 'exempt'
+
+  // Custom rules — user-authored, project-scoped by design (C7).
+  // LanguageRule.source_of is 'profile' | 'workbook' only; custom rules
+  // are identified by category or by id prefix.
+  if (rule.category === 'custom' || (typeof rule.id === 'string' && rule.id.startsWith('CUST-'))) return 'exempt'
+
+  // Anything else (shouldn't normally reach here): treat as exempt so
+  // the filter doesn't silently drop unknown rule sources.
+  return 'exempt'
+}
+
 interface ProjectRulesPageProps {
   embedded?: boolean;
 }
@@ -244,6 +357,11 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
   const [documentVariant, setDocumentVariant] = useState<DocumentVariant>('en-GB')
   const [initialDocumentVariant, setInitialDocumentVariant] = useState<DocumentVariant>('en-GB')
   const [profileKeys, setProfileKeys] = useState<string[]>(['uk'])
+  // Styles-dropdown display filter. Superset of profileKeys that may
+  // include 'NE' (filter-only, never persisted). Recomputed from
+  // profileKeys on initial load; NE is always OFF at start per spec.
+  // Session-only — resets to the profile-derived state on every reload.
+  const [styleFilter, setStyleFilter] = useState<Set<StyleFilterOption>>(new Set())
   const [profileChoices, setProfileChoices] = useState<string[]>([])
   const [availableProfiles, setAvailableProfiles] = useState<Record<string, any>>({})
   const [search, setSearch] = useState('')
@@ -309,6 +427,14 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
           ? data.active_rules.profile_keys
           : [data.active_rules?.profile_key ?? 'uk']
         setProfileKeys(keys)
+        // Initialise styleFilter from the project's profile_keys. NE is
+        // always OFF at startup per the spec (session-only, resets on
+        // reload — no localStorage or sidecar persistence).
+        setStyleFilter(new Set(
+          keys
+            .map((k: string) => PROFILE_KEY_TO_STYLE_FILTER[k.toLowerCase()])
+            .filter((s): s is StyleFilterOption => Boolean(s))
+        ))
         setProfileChoices(
           Object.keys(data.available_profiles ?? {})
             .filter((k) => ALLOWED_PROFILE_KEYS.has(k))
@@ -356,12 +482,46 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
     return [...rules.map(apply), ...workbookRules.map(apply)]
   }, [rules, workbookRules, ruleOverrides])
 
+  /** Pre-compute the Path-2 style-filter verdict for every rule. When
+   *  styleFilter is empty the memo short-circuits and every rule
+   *  classifies as 'show' (baseline behaviour — no filter effect).
+   *  Done once per (allRules + styleFilter) change so downstream memos
+   *  don't re-classify on every search keystroke. */
+  const styleFilterVerdicts = useMemo(() => {
+    const out = new Map<string, FilterVerdict>()
+    if (styleFilter.size === 0) {
+      for (const r of allRules) out.set(r.id, 'show')
+      return out
+    }
+    for (const r of allRules) out.set(r.id, classifyRuleForStyleFilter(r, styleFilter))
+    return out
+  }, [allRules, styleFilter])
+
+  /** Aggregate stats for the "Filter status" chip under the dropdown.
+   *  Reports how many rules the current style filter is actively hiding
+   *  vs exempting (always-shown), so reviewers see what the filter is
+   *  doing without hunting for omitted rules. Only recomputed when the
+   *  verdict map changes. */
+  const styleFilterStats = useMemo(() => {
+    let shown = 0, hidden = 0, exempt = 0
+    for (const v of styleFilterVerdicts.values()) {
+      if (v === 'show') shown++
+      else if (v === 'hide') hidden++
+      else exempt++
+    }
+    return { shown, hidden, exempt, total: shown + hidden + exempt }
+  }, [styleFilterVerdicts])
+
   const grouped = useMemo(() => {
     const q = search.trim().toLowerCase()
     const g: Record<CategoryKey, LanguageRule[]> = {
       grammar: [], spelling: [], sentence: [], compounds: [], inclusive: [], hyphenation: [], abbreviations: [], medical_terms: [], custom: [], other: [],
     }
     for (const r of allRules) {
+      // Style filter: hide rules classified as 'hide' when a filter is
+      // active. 'exempt' rules stay visible (orthogonal applicability
+      // axes); 'show' rules match the selected style(s).
+      if (styleFilter.size > 0 && styleFilterVerdicts.get(r.id) === 'hide') continue
       if (activeCategory !== 'all' && catOf(r) !== activeCategory) continue
       if (q) {
         const hay = `${r.id} ${r.message ?? ''} ${r.pattern ?? ''} ${r.source ?? ''}`.toLowerCase()
@@ -370,11 +530,18 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
       g[catOf(r)].push(r)
     }
     return g
-  }, [allRules, search, activeCategory])
+  }, [allRules, search, activeCategory, styleFilter, styleFilterVerdicts])
 
   const counts = useMemo(() => {
-    const total = allRules.length
-    const enabled = allRules.filter((r) => r.enabled !== false).length
+    // Counts respect the style filter so sidebar category tiles + enabled
+    // totals reflect what the user actually sees. Empty categories hide
+    // via visibleCats downstream (same as pre-filter behaviour, per Q4).
+    const filtered = styleFilter.size > 0
+      ? allRules.filter((r) => styleFilterVerdicts.get(r.id) !== 'hide')
+      : allRules
+
+    const total = filtered.length
+    const enabled = filtered.filter((r) => r.enabled !== false).length
     const byCat: Record<CategoryKey, { total: number; enabled: number }> = {
       grammar: { total: 0, enabled: 0 }, spelling: { total: 0, enabled: 0 },
       sentence: { total: 0, enabled: 0 }, compounds: { total: 0, enabled: 0 },
@@ -383,7 +550,7 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
       custom: { total: 0, enabled: 0 }, other: { total: 0, enabled: 0 },
     }
     const bySeverity = { error: 0, warning: 0, suggestion: 0 }
-    for (const r of allRules) {
+    for (const r of filtered) {
       const c = catOf(r); byCat[c].total += 1
       if (r.enabled !== false) {
         byCat[c].enabled += 1
@@ -392,7 +559,7 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
       }
     }
     return { total, enabled, byCat, bySeverity, pct: total ? Math.round((enabled / total) * 100) : 0 }
-  }, [allRules])
+  }, [allRules, styleFilter, styleFilterVerdicts])
 
   /** Per-rule membership: does this rule live in the profile store or the
    *  workbook store? Toggle / behaviour-change writes land in different
@@ -444,20 +611,58 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
       medicalStyleProfile, initialMedicalStyleProfile,
       documentVariant, initialDocumentVariant])
 
-  /** Rebuild the rule union when the selected styles change.
-   *  - Preserves existing enabled/disabled flags for rule IDs that stay in the union.
-   *  - Adds new rules (from newly-selected styles) with each style's default enabled flag.
-   *  - Drops rules that are no longer in any selected style's profile. */
-  function toggleStyle(key: string) {
+  /** Toggle a display-filter chip in the Styles dropdown.
+   *  - NE (filter-only) updates ONLY ``styleFilter`` — never saved to
+   *    profile_keys, never sent to the backend. Preserves the Q2a
+   *    Option C decision that NE identity is a term-list signal.
+   *  - Real profile keys (apa/ama/uk/us/canadian/chicago) update BOTH
+   *    ``profileKeys`` (saved) and ``styleFilter`` (display) so the
+   *    dropdown stays in sync with the loaded rule union.
+   *  - When toggling a profile off reduces ``profileKeys`` to zero we
+   *    refuse the change (backend requires >=1) but still allow an
+   *    NE-only styleFilter to narrow the display within the baseline.
+   *
+   *  Rebuilds the rule union from the newly-selected profile keys:
+   *  - Preserves existing enabled/disabled flags for rule IDs that stay.
+   *  - Adds rules from newly-selected profiles with each profile's default.
+   *  - Drops rules that are no longer in any selected profile. */
+  function toggleStyle(key: StyleFilterOption) {
     if (!canEdit) return
-    const nextKeys = profileKeys.includes(key)
-      ? profileKeys.filter((k) => k !== key)
-      : [...profileKeys, key]
+
+    // NE is a filter-only toggle — flip the styleFilter and return.
+    // profileKeys stays untouched; the backend has no knowledge of NE.
+    if (key === 'NE') {
+      setStyleFilter((prev) => {
+        const next = new Set(prev)
+        next.has('NE') ? next.delete('NE') : next.add('NE')
+        return next
+      })
+      return
+    }
+
+    // Real profile — must map to a known profile_key.
+    const pk = STYLE_FILTER_TO_PROFILE_KEY[key]
+    if (!pk) return  // defensive: unknown style name
+
+    const nextKeys = profileKeys.includes(pk)
+      ? profileKeys.filter((k) => k !== pk)
+      : [...profileKeys, pk]
     if (nextKeys.length === 0) {
       pushToast('error', 'At least one style must be selected')
       return
     }
     setProfileKeys(nextKeys)
+    // Keep styleFilter in sync with profileKeys (preserve NE membership
+    // separately — profile-key toggles must never clear the NE filter).
+    setStyleFilter((prev) => {
+      const next = new Set<StyleFilterOption>()
+      if (prev.has('NE')) next.add('NE')
+      for (const k of nextKeys) {
+        const s = PROFILE_KEY_TO_STYLE_FILTER[k.toLowerCase()]
+        if (s) next.add(s)
+      }
+      return next
+    })
 
     const existingById = new Map(rules.map((r) => [r.id, r]))
     const seen = new Set<string>()
@@ -852,13 +1057,55 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
             <ToolbarButton onClick={openHistory} icon={<HistoryIcon size={13} />} label="History" />
             <div className="h-6 w-px bg-slate-200" />
             <StylePickerMenu
-              available={profileChoices}
-              selected={profileKeys}
+              styleFilter={styleFilter}
               onToggle={toggleStyle}
               disabled={!canEdit || profileChoices.length === 0}
             />
           </div>
         </div>
+
+        {/* Path-2 style filter status chip (Decision E (iii)). Shows only
+            when a style filter is active, so the baseline unfiltered view
+            stays visually clean. Reports how many rules the filter is
+            hiding vs exempting (always-shown for orthogonal axes). */}
+        {styleFilter.size > 0 && (
+          <div className="max-w-7xl mx-auto px-6 pb-2.5 flex items-center gap-2 text-[11px] text-slate-600 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 font-medium">
+              <span className="text-violet-400">Filtering by:</span>
+              {Array.from(styleFilter).map((s) => (
+                <span key={s} className="font-semibold">{s}</span>
+              )).reduce<React.ReactNode[]>((acc, el, i) => i === 0 ? [el] : [...acc, <span key={`sep-${i}`} className="text-violet-300">·</span>, el], [])}
+            </span>
+            <span
+              className="text-slate-500"
+              title={
+                `Showing: rules explicitly tagged for the selected style(s).\n` +
+                `Hidden: Generic / unclassified rules, and workbook rules not matching any selected style.\n` +
+                `Exempt: rules without a per-rule style tag (orthogonal axes like document_variant, eponym capitalisation, typographic-minus, abbreviations, custom).`
+              }
+            >
+              <span className="font-semibold text-emerald-700">{styleFilterStats.shown}</span> shown ·{' '}
+              <span className="font-semibold text-slate-500">{styleFilterStats.hidden}</span> hidden ·{' '}
+              <span className="font-semibold text-sky-700">{styleFilterStats.exempt}</span> exempt
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                // Clear the filter by resetting to the current profile_keys
+                // (NE drops; real profiles stay so the dropdown doesn't
+                // desync from the saved state).
+                setStyleFilter(new Set(
+                  profileKeys
+                    .map((k) => PROFILE_KEY_TO_STYLE_FILTER[k.toLowerCase()])
+                    .filter((s): s is StyleFilterOption => Boolean(s))
+                ))
+              }}
+              className="text-violet-600 hover:text-violet-800 hover:underline font-medium"
+            >
+              Reset to project default
+            </button>
+          </div>
+        )}
 
       </div>
 
@@ -1426,23 +1673,30 @@ function SummaryTile({ label, value, total, pct, icon, grad }: {
 }
 
 function StylePickerMenu({
-  available, selected, onToggle, disabled,
+  styleFilter, onToggle, disabled,
 }: {
-  available: string[]; selected: string[]; onToggle: (k: string) => void; disabled?: boolean
+  styleFilter: Set<StyleFilterOption>
+  onToggle: (k: StyleFilterOption) => void
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const PROFILE_META: Record<string, { label: string; description: string }> = {
-    uk:                      { label: 'UK',       description: 'British English' },
-    us:                      { label: 'US',       description: 'US English' },
-    ama:                     { label: 'AMA',      description: 'American Medical Association' },
-    apa:                     { label: 'APA',      description: 'American Psychological Association' },
-    chicago:                 { label: 'Chicago',  description: 'Chicago Manual of Style' },
-    canadian:                { label: 'Canadian', description: 'Canadian English' },
-    medical_pharmaceutical:  { label: 'Medical',  description: 'Medical / Pharmaceutical' },
+  // Display metadata for each dropdown entry. NE is the filter-only
+  // option; everything else maps 1:1 to a backend profile_key.
+  const STYLE_META: Record<StyleFilterOption, { label: string; description: string; filterOnly?: boolean }> = {
+    APA:      { label: 'APA',      description: 'American Psychological Association' },
+    AMA:      { label: 'AMA',      description: 'American Medical Association' },
+    NE:       { label: 'NE',       description: 'LWW-NE workbook filter (session only)', filterOnly: true },
+    UK:       { label: 'UK',       description: 'British English' },
+    US:       { label: 'US',       description: 'US English' },
+    Canadian: { label: 'Canadian', description: 'Canadian English' },
+    Chicago:  { label: 'Chicago',  description: 'Chicago Manual of Style' },
   }
-  const summary = selected.length === 1
-    ? (PROFILE_META[selected[0]]?.label || selected[0].toUpperCase())
-    : `${selected.length} styles`
+  const selected = Array.from(styleFilter)
+  const summary = selected.length === 0
+    ? 'None'
+    : selected.length === 1
+      ? STYLE_META[selected[0]].label
+      : `${selected.length} styles`
 
   return (
     <div className="relative">
@@ -1451,19 +1705,19 @@ function StylePickerMenu({
         onClick={() => setOpen((v) => !v)}
         onBlur={() => setTimeout(() => setOpen(false), 180)}
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs text-slate-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-        title="Pick one or more style standards. Rules Picker shows the union."
+        title="Pick one or more style standards. Rules Picker shows the union. NE is a filter-only option (session state)."
       >
         <Hash size={13} className="text-violet-500" /> Styles: <span className="font-semibold">{summary}</span>
         <ChevronDown size={11} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-2 min-w-[260px] z-20 animate-in fade-in zoom-in-95">
+        <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-2 min-w-[280px] z-20 animate-in fade-in zoom-in-95">
           <div className="px-3 pb-2 text-[11px] uppercase tracking-wide text-slate-400 font-semibold border-b">
             Style standards
           </div>
-          {available.map((key) => {
-            const meta = PROFILE_META[key] || { label: key.toUpperCase(), description: '' }
-            const on = selected.includes(key)
+          {STYLE_FILTER_OPTIONS.map((key) => {
+            const meta = STYLE_META[key]
+            const on = styleFilter.has(key)
             return (
               <button
                 key={key}
@@ -1476,14 +1730,16 @@ function StylePickerMenu({
                   {on && <Check size={10} className="text-white" strokeWidth={3} />}
                 </span>
                 <div className="flex-1">
-                  <div className="text-sm font-medium text-slate-800">{meta.label}</div>
+                  <div className="text-sm font-medium text-slate-800">
+                    {meta.label}
+                  </div>
                   <div className="text-[11px] text-slate-500">{meta.description}</div>
                 </div>
               </button>
             )
           })}
           <div className="border-t px-3 pt-2 pb-1 text-[11px] text-slate-500">
-            {selected.length} selected · rules shown = union of all
+            {selected.length} selected · union filter
           </div>
         </div>
       )}
