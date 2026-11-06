@@ -66,7 +66,14 @@ AVAILABLE_VARIABLES = [
         "key": "{client_name}",
         "label": "Client Name",
         "description": "Name of the publishing client / imprint",
-        "sample": "Cambridge University Press",
+        "sample": "Wolters Kluwer Health",
+        "category": "Project"
+    },
+    {
+        "key": "{customer_name}",
+        "label": "Customer Name",
+        "description": "Alias for Client Name / Publishing Imprint",
+        "sample": "Wolters Kluwer Health",
         "category": "Project"
     },
     {
@@ -104,6 +111,104 @@ AVAILABLE_VARIABLES = [
         "sample": "pre_editing_team@example.com",
         "category": "Teams"
     },
+    {
+        "key": "{next_stage_owner_emails}",
+        "label": "Next Stage Owner and Group Mail",
+        "description": "Dynamic destination combining Next Stage Lead and Team Group Mail ID",
+        "sample": "sarah.jenkins@example.com, preediting-team@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{next_stage_owner_email}",
+        "label": "Next Stage Owner Email",
+        "description": "Designated individual lead email for next stage",
+        "sample": "sarah.jenkins@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{next_stage_group_email}",
+        "label": "Next Stage Group Mail ID",
+        "description": "Shared mailbox / DL for next stage department",
+        "sample": "preediting-team@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{stage_owner_emails}",
+        "label": "Current Stage Owner and Group Mail",
+        "description": "Current Stage Lead and Team Group Mail ID combined",
+        "sample": "david.ross@example.com, analysis-team@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{stage_owner_email}",
+        "label": "Current Stage Owner Email",
+        "description": "Designated individual lead email for completed stage",
+        "sample": "david.ross@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{stage_group_email}",
+        "label": "Current Stage Group Mail ID",
+        "description": "Shared mailbox / DL for completed stage department",
+        "sample": "analysis-team@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{stage_owner_name}",
+        "label": "Current Stage Owner Name",
+        "description": "Full name of the completed stage lead",
+        "sample": "David Ross",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{next_stage_owner_name}",
+        "label": "Next Stage Owner Name",
+        "description": "Full name of the destination stage lead",
+        "sample": "Sarah Jenkins",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{project_manager_email}",
+        "label": "Project Manager Email",
+        "description": "Assigned Project Manager email from project record",
+        "sample": "pm.editorial@example.com",
+        "category": "Project"
+    },
+    {
+        "key": "{project_manager_name}",
+        "label": "Project Manager Name",
+        "description": "Assigned Project Manager full display name",
+        "sample": "John Smith",
+        "category": "Project"
+    },
+    {
+        "key": "{stage_transition}",
+        "label": "Stage Transition Flow",
+        "description": "Current stage to next stage flow (e.g. Pre-editing → XML)",
+        "sample": "Pre-editing → XML",
+        "category": "Workflow"
+    },
+    {
+        "key": "{due_date}",
+        "label": "Due Date",
+        "description": "Chapter target completion or delivery due date",
+        "sample": "04-Nov-2026",
+        "category": "Chapter"
+    },
+    {
+        "key": "{shipment_notes}",
+        "label": "Shipment Notes",
+        "description": "Transition shipment remarks or dispatch instructions",
+        "sample": "Batch 01 priority ingest",
+        "category": "Chapter"
+    },
+    {
+        "key": "{chapter_table}",
+        "label": "Chapter Transition Table",
+        "description": "Multi-chapter table listing Chapter, Stage (Current → Next), Due Date, and Notes",
+        "sample": "| Chapter | Stage | Due Date | Shipment Notes |",
+        "category": "Chapter"
+    },
 ]
 
 
@@ -111,6 +216,11 @@ AVAILABLE_VARIABLES = [
 
 class StageEmailConfig(BaseModel):
     enabled: bool = True
+    stage_owner_username: Optional[str] = None
+    stage_owner_first_name: Optional[str] = None
+    stage_owner_email: Optional[str] = None
+    stage_group_email: Optional[str] = None
+    stage_owner_mode: Optional[str] = "both"
     custom_message: Optional[str] = ""
     to: List[str] = Field(default_factory=list)
     cc: List[str] = Field(default_factory=list)
@@ -121,6 +231,10 @@ class StageEmailConfig(BaseModel):
 class AddStagePayload(BaseModel):
     stage_name: str
     add_to_system_master: bool = False
+    stage_owner_username: Optional[str] = None
+    stage_owner_email: Optional[str] = None
+    stage_group_email: Optional[str] = None
+    stage_owner_mode: Optional[str] = "both"
     custom_message: Optional[str] = None
     to: Optional[List[str]] = None
     cc: Optional[List[str]] = None
@@ -458,11 +572,26 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
 
     stages_data, is_custom, is_in_db = _get_raw_config_for_client(db, safe_code)
 
+    user_fn_map = {}
+    try:
+        from app.domains.auth.models import User
+        users_list = db.query(User).all()
+        user_fn_map = {str(u.username): (u.first_name or u.username) for u in users_list if u.username}
+    except Exception:
+        user_fn_map = {}
+
     parsed_stages: Dict[str, StageEmailConfig] = {}
     for stage_name, cfg in stages_data.items():
         if isinstance(cfg, dict):
+            u_name = cfg.get("stage_owner_username")
+            fn = user_fn_map.get(str(u_name)) if u_name else None
             parsed_stages[stage_name] = StageEmailConfig(
                 enabled=cfg.get("enabled", True),
+                stage_owner_username=u_name,
+                stage_owner_first_name=fn or cfg.get("stage_owner_first_name"),
+                stage_owner_email=cfg.get("stage_owner_email"),
+                stage_group_email=cfg.get("stage_group_email"),
+                stage_owner_mode=cfg.get("stage_owner_mode", "both"),
                 custom_message=cfg.get("custom_message", ""),
                 to=cfg.get("to") if isinstance(cfg.get("to"), list) else [],
                 cc=cfg.get("cc") if isinstance(cfg.get("cc"), list) else [],
@@ -496,6 +625,11 @@ def save_customer_transition_config(
     for stage_name, stage_cfg in payload.stages.items():
         stages_dict[stage_name] = {
             "enabled": stage_cfg.enabled,
+            "stage_owner_username": stage_cfg.stage_owner_username or None,
+            "stage_owner_first_name": stage_cfg.stage_owner_first_name or None,
+            "stage_owner_email": stage_cfg.stage_owner_email or None,
+            "stage_group_email": stage_cfg.stage_group_email or None,
+            "stage_owner_mode": stage_cfg.stage_owner_mode or "both",
             "custom_message": stage_cfg.custom_message or "",
             "to": [t.strip() for t in stage_cfg.to if t and t.strip()],
             "cc": [c.strip() for c in stage_cfg.cc if c and c.strip()],
@@ -553,11 +687,16 @@ def add_stage_to_config(
 
     default_template = {
         "enabled": payload.enabled,
+        "stage_owner_username": payload.stage_owner_username or None,
+        "stage_owner_first_name": payload.stage_owner_first_name or None,
+        "stage_owner_email": payload.stage_owner_email or None,
+        "stage_group_email": payload.stage_group_email or None,
+        "stage_owner_mode": payload.stage_owner_mode or "both",
         "custom_message": payload.custom_message or "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
-        "to": [t.strip() for t in (payload.to or ["{next_stage_team_email}"]) if t and t.strip()],
-        "cc": [c.strip() for c in (payload.cc or []) if c and c.strip()],
-        "subject": payload.subject or "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} → {next_stage} | Stage Transition Notification",
-        "body": payload.body or "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+        "to": [t.strip() for t in (payload.to or ["{next_stage_owner_emails}"]) if t and t.strip()],
+        "cc": [c.strip() for c in (payload.cc or ["{project_manager_email}", "{stage_owner_emails}"]) if c and c.strip()],
+        "subject": payload.subject or "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
+        "body": payload.body or "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply."
     }
 
     existing[stage_name] = default_template

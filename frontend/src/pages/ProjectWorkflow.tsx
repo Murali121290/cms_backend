@@ -4,7 +4,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Search, Trash2
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Truck, Search, Trash2
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -893,6 +893,7 @@ export function ProjectWorkflow() {
   const [loadingGroupProceedConfig, setLoadingGroupProceedConfig] = useState(false)
   const [executingGroupProceed, setExecutingGroupProceed] = useState(false)
   const [sendEmailToggle, setSendEmailToggle] = useState(true)
+  const [groupShipmentNotes, setGroupShipmentNotes] = useState('')
 
   const [batchModalType, setBatchModalType] = useState<'word_to_xml' | 'word_to_indesign' | 'style_validation' | 'structuring' | 'xml_to_indesign' | 'indesign_to_xml' | null>(null)
   const [batchSelectedChapterIds, setBatchSelectedChapterIds] = useState<Set<number>>(new Set())
@@ -1267,6 +1268,7 @@ export function ProjectWorkflow() {
         stage_name: groupProceedStage,
         chapter_ids: Array.from(selectedGroupProceedChapterIds),
         send_email: sendEmailToggle,
+        shipment_notes: groupShipmentNotes.trim() || undefined,
       })
       toast.success(`Successfully transitioned ${res.transitioned_count} chapter(s) to their next stage.`)
       setGroupProceedModalOpen(false)
@@ -2516,6 +2518,34 @@ export function ProjectWorkflow() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Shipment Notes Query Section */}
+          {sendEmailToggle && (
+            <div className="border border-border rounded-xl p-3 bg-surface/40 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="bulkShipmentNotes" className="text-xs font-semibold text-text flex items-center gap-1.5">
+                  <Truck size={14} className="text-emerald-600 flex-shrink-0" />
+                  <span>Any shipment notes available?</span>
+                </label>
+                <span className="text-[10px] text-muted font-medium bg-surface px-2 py-0.5 rounded border border-border">
+                  Optional
+                </span>
+              </div>
+              <input
+                id="bulkShipmentNotes"
+                type="text"
+                value={groupShipmentNotes}
+                onChange={e => setGroupShipmentNotes(e.target.value)}
+                placeholder="e.g. Batch 01 priority ingest, Dispatched to client via FTP, etc."
+                className="w-full text-xs px-3 py-2 bg-background border border-border rounded-lg text-text placeholder:text-muted/60 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
+              />
+              <p className="text-[11px] text-muted">
+                {groupShipmentNotes.trim()
+                  ? "✓ Notes will be populated across all transitioned chapters in the notification table."
+                  : 'Leave blank to display as "—" in the email notification table.'}
+              </p>
             </div>
           )}
 

@@ -105,17 +105,23 @@ export function ChapterDetailPage() {
   }, [chapterId, projectId, refreshKey])
 
   // Proceed: same logic as the old ChapterDetailModal's confirmProceed
-  async function executeTransitionAndEmail() {
+  async function executeTransitionAndEmail(notes?: string) {
     if (!chapter || !transitionParams || !transitionConfig) return
     setProceedLoading(true)
     try {
+      let resolvedBody = transitionConfig.body
+      if (notes) {
+        resolvedBody = resolvedBody.replace("{shipment_notes}", notes)
+        resolvedBody = resolvedBody.replace(/\|\s*—\s*\|(?=\s*\n|$)/g, `| ${notes} |`)
+      }
       await apiClient.post(`/chapters/${chapter.id}/transition-email`, {
         from_stage: transitionParams.fromStage,
         to_stage: transitionParams.toStage,
         to_emails: transitionConfig.to,
         cc_emails: transitionConfig.cc,
         subject: transitionConfig.subject,
-        body: transitionConfig.body,
+        body: resolvedBody,
+        shipment_notes: notes || undefined,
       })
       toast.success(`Moved to ${transitionParams.toStage}`)
       setConfirmModalOpen(false)

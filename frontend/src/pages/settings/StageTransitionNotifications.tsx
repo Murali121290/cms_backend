@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -27,8 +27,12 @@ import {
   Sliders,
   Check,
   ExternalLink,
-  Database
+  Database,
+  User,
+  Users,
+  UserCheck
 } from 'lucide-react'
+import { useUsersStore } from '@/stores/usersStore'
 import {
   transitionNotificationsApi,
   type CustomerSummary,
@@ -46,6 +50,14 @@ import { Dropdown } from '@/components/ui/Dropdown'
 
 export function StageTransitionNotifications() {
   const navigate = useNavigate()
+
+  // ── Users Store ──────────────────────────────────────────────────────────────
+  const users = useUsersStore(state => state.users)
+  const fetchUsers = useUsersStore(state => state.fetchUsers)
+
+  useEffect(() => {
+    fetchUsers()
+  }, [fetchUsers])
 
   // ── Global State ─────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true)
@@ -190,6 +202,10 @@ export function StageTransitionNotifications() {
     if (!selectedStage || !workingStages[selectedStage]) {
       return {
         enabled: true,
+        stage_owner_username: null,
+        stage_owner_email: null,
+        stage_group_email: null,
+        stage_owner_mode: 'both',
         custom_message: '',
         to: [],
         cc: [],
@@ -465,11 +481,15 @@ export function StageTransitionNotifications() {
     setAddingStage(true)
     const defaultTemplate: StageEmailConfig = {
       enabled: true,
+      stage_owner_username: null,
+      stage_owner_email: null,
+      stage_group_email: null,
+      stage_owner_mode: 'both',
       custom_message: 'The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.',
-      to: ['{next_stage_team_email}'],
-      cc: [],
-      subject: '[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} → {next_stage} | Stage Transition Notification',
-      body: `Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply.`,
+      to: ['{next_stage_owner_emails}'],
+      cc: ['{project_manager_email}', '{stage_owner_emails}'],
+      subject: '[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification',
+      body: `Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.`,
     }
 
     try {
@@ -539,20 +559,63 @@ export function StageTransitionNotifications() {
     toast.success(`Removed "${stageName}" from configuration. Click "Save Changes" to apply.`)
   }
 
+  // Helper to resolve user first name from username/email/loaded users
+  const getOwnerDisplayName = useCallback((stageCfg: StageEmailConfig | undefined): string => {
+    if (!stageCfg) return ''
+    if (stageCfg.stage_owner_first_name && stageCfg.stage_owner_first_name.trim()) {
+      return stageCfg.stage_owner_first_name.trim()
+    }
+    const username = String(stageCfg.stage_owner_username || '').trim()
+    const email = String(stageCfg.stage_owner_email || '').trim().toLowerCase()
+    if (username || email) {
+      const found = users.find(u =>
+        (username && (String(u.user_name) === username || String(u.id) === username || (u as any).username === username)) ||
+        (email && u.email && u.email.toLowerCase() === email)
+      )
+      if (found) {
+        if (found.first_name && found.first_name.trim()) {
+          return found.first_name.trim()
+        }
+        if (found.last_name && found.last_name.trim()) {
+          return found.last_name.trim()
+        }
+      }
+    }
+    return stageCfg.stage_owner_username || stageCfg.stage_owner_email || ''
+  }, [users])
+
   // Live rendered preview
   const renderedPreview = useMemo(() => {
     const sampleMap: Record<string, string> = {
-      '{chapter_name}': '01',
+      '{chapter_name}': '03',
       '{chapter_title}': 'Foundations of Modern Publishing & Digital Workflows',
       '{current_stage}': selectedStage || 'Manuscript Analysis',
       '{next_stage}': 'Pre-editing',
-      '{project_code}': clientConfig?.client_code === 'default' ? 'PRJ-DEMO-2026' : `PRJ-${clientConfig?.client_code}-01`,
-      '{client_name}': clientConfig?.client_name || 'Publisher Media Group',
+      '{stage}': `${selectedStage || 'Manuscript Analysis'} → Pre-editing`,
+      '{stage_transition}': `${selectedStage || 'Manuscript Analysis'} → Pre-editing`,
+      '{due_date}': '04-Nov-2026',
+      '{shipment_notes}': '—',
+      '{project_code}': clientConfig?.client_code === 'default' ? 'Gabbard_190377' : `PRJ-${clientConfig?.client_code}-01`,
+      '{client_name}': clientConfig?.client_name || 'Wolters Kluwer Health',
+      '{customer_name}': clientConfig?.client_name || 'Wolters Kluwer Health',
+      '{current stage}': selectedStage || 'Pre-editing',
       '{author_email}': 'lead_author@university.edu',
       '{client_email}': 'editorial_desk@publisher.org',
       '{languageediting_team_email}': 'languageediting_team@example.com',
       '{pre_editing_team_email}': 'pre_editing_team@example.com',
       '{next_stage_team_email}': 'pre_editing_team@example.com',
+      '{next_stage_owner_emails}': 'sarah.jenkins@example.com, preediting-dept@example.com',
+      '{next_stage_owner_email}': 'sarah.jenkins@example.com',
+      '{next_stage_group_email}': 'preediting-dept@example.com',
+      '{next_stage_owner_name}': 'Sarah Jenkins',
+      '{stage_owner_emails}': currentStageConfig.stage_owner_email && currentStageConfig.stage_group_email
+        ? `${currentStageConfig.stage_owner_email}, ${currentStageConfig.stage_group_email}`
+        : currentStageConfig.stage_owner_email || currentStageConfig.stage_group_email || 'david.ross@example.com',
+      '{stage_owner_email}': currentStageConfig.stage_owner_email || 'david.ross@example.com',
+      '{stage_group_email}': currentStageConfig.stage_group_email || 'analysis-team@example.com',
+      '{stage_owner_name}': getOwnerDisplayName(currentStageConfig) || 'David Ross',
+      '{project_manager_email}': 'john.pm@example.com',
+      '{project_manager_name}': 'John Smith (PM)',
     }
 
     let subj = currentStageConfig.subject || ''
@@ -858,11 +921,12 @@ export function StageTransitionNotifications() {
               <thead>
                 <tr className="border-b border-border bg-surface/50 text-[11px] font-bold text-muted uppercase tracking-wider">
                   <th className="py-3 px-4 w-32">Email Status</th>
-                  <th className="py-3 px-4 min-w-[200px]">Workflow Stage</th>
-                  <th className="py-3 px-4 min-w-[220px]">TO Recipients</th>
-                  <th className="py-3 px-4 min-w-[160px]">CC Recipients</th>
-                  <th className="py-3 px-4 min-w-[260px]">Subject Template</th>
-                  <th className="py-3 px-4 w-36 text-right">Actions</th>
+                  <th className="py-3 px-4 min-w-[180px]">Workflow Stage</th>
+                  <th className="py-3 px-4 min-w-[200px]">Stage Owner & Group DL</th>
+                  <th className="py-3 px-4 min-w-[200px]">TO Recipients</th>
+                  <th className="py-3 px-4 min-w-[180px]">CC Recipients</th>
+                  <th className="py-3 px-4 min-w-[240px]">Subject Template</th>
+                  <th className="py-3 px-4 w-32 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border text-xs">
@@ -919,6 +983,31 @@ export function StageTransitionNotifications() {
                             {desc}
                           </p>
                         )}
+                      </td>
+
+                      {/* 2b. Stage Owner & Group DL */}
+                      <td className="py-3.5 px-4">
+                        <div className="space-y-1">
+                          {(stageCfg?.stage_owner_username || stageCfg?.stage_owner_email || stageCfg?.stage_owner_first_name) ? (
+                            <div className="flex items-center gap-1.5 text-text" title={stageCfg.stage_owner_email ? `${getOwnerDisplayName(stageCfg)} (${stageCfg.stage_owner_username || ''}) - ${stageCfg.stage_owner_email}` : (stageCfg.stage_owner_username || '')}>
+                              <User size={13} className="text-primary shrink-0" />
+                              <span className="font-medium truncate max-w-[170px]">
+                                {getOwnerDisplayName(stageCfg)}
+                              </span>
+                            </div>
+                          ) : null}
+                          {stageCfg?.stage_group_email ? (
+                            <div className="flex items-center gap-1.5 text-indigo-700" title={stageCfg.stage_group_email}>
+                              <Users size={13} className="shrink-0" />
+                              <span className="font-mono text-[11px] truncate max-w-[170px]">
+                                {stageCfg.stage_group_email}
+                              </span>
+                            </div>
+                          ) : null}
+                          {!stageCfg?.stage_owner_username && !stageCfg?.stage_owner_email && !stageCfg?.stage_group_email && (
+                            <span className="text-muted/60 text-[11px] italic">Not configured</span>
+                          )}
+                        </div>
                       </td>
 
                       {/* 3. TO Recipients */}
@@ -1120,6 +1209,95 @@ export function StageTransitionNotifications() {
 
               {drawerTab === 'editor' ? (
                 <div className="space-y-4">
+                  {/* Stage Ownership Configuration Card */}
+                  <div className="p-4 bg-indigo-50/40 border border-indigo-200/80 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between border-b border-indigo-200/60 pb-2">
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-text">
+                        <UserCheck size={15} className="text-indigo-600" />
+                        <span>Stage Ownership (Lead User & Group Mail DL)</span>
+                      </div>
+                      <span className="text-[10px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
+                        Responsible Leads
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Individual Stage Owner */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-text flex items-center gap-1">
+                          <User size={12} className="text-muted" /> Individual Stage Owner (Lead)
+                        </label>
+                        <select
+                          value={currentStageConfig.stage_owner_username || ''}
+                          onChange={e => {
+                            const val = e.target.value
+                            const found = users.find(u => u.user_name === val || (u as any).username === val || String(u.id) === val)
+                            updateCurrentStage('stage_owner_username', val || null)
+                            updateCurrentStage('stage_owner_first_name', found ? (found.first_name || null) : null)
+                            updateCurrentStage('stage_owner_email', found ? found.email : null)
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                        >
+                          <option value="">-- Select user lead (Optional) --</option>
+                          {users.map(u => (
+                            <option key={u.user_name} value={u.user_name}>
+                              {u.first_name || ''} {u.last_name || ''} ({u.user_name})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Group Mail ID / Team DL */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-text flex items-center gap-1">
+                          <Users size={12} className="text-indigo-600" /> Group Mail ID (DL / Team)
+                        </label>
+                        <input
+                          type="email"
+                          placeholder="e.g. preediting-team@company.com"
+                          value={currentStageConfig.stage_group_email || ''}
+                          onChange={e => updateCurrentStage('stage_group_email', e.target.value || null)}
+                          className="w-full px-2.5 py-1.5 text-xs font-mono bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Ownership Notification Mode */}
+                    <div className="pt-1 border-t border-indigo-200/40 flex flex-wrap items-center gap-4 text-[11px] text-text">
+                      <span className="font-semibold text-muted">When resolving Stage Owner email:</span>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name={`ownerMode_${selectedStage}`}
+                          checked={currentStageConfig.stage_owner_mode !== 'group_only' && currentStageConfig.stage_owner_mode !== 'user_only'}
+                          onChange={() => updateCurrentStage('stage_owner_mode', 'both')}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span>Both (Lead User + Group Mail)</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name={`ownerMode_${selectedStage}`}
+                          checked={currentStageConfig.stage_owner_mode === 'group_only'}
+                          onChange={() => updateCurrentStage('stage_owner_mode', 'group_only')}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span>Group Mail Only</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name={`ownerMode_${selectedStage}`}
+                          checked={currentStageConfig.stage_owner_mode === 'user_only'}
+                          onChange={() => updateCurrentStage('stage_owner_mode', 'user_only')}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span>Lead User Only</span>
+                      </label>
+                    </div>
+                  </div>
+
                   {/* Transition Alert Message */}
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-text flex items-center gap-1.5">
@@ -1144,6 +1322,14 @@ export function StageTransitionNotifications() {
                       {/* Quick tokens */}
                       <div className="flex items-center gap-1.5 text-[11px]">
                         <span className="text-muted">Quick add:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleAddToEmail('{next_stage_owner_emails}')}
+                          className="text-primary hover:underline font-mono font-semibold"
+                          title="Dynamic destination combining Next Stage Lead and Team Group Mail ID"
+                        >
+                          +NextStageOwner&Group
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleAddToEmail('{next_stage_team_email}')}
@@ -1217,17 +1403,19 @@ export function StageTransitionNotifications() {
                         <span className="text-muted">Quick add:</span>
                         <button
                           type="button"
-                          onClick={() => handleAddCcEmail('{pre_editing_team_email}')}
-                          className="text-primary hover:underline font-mono"
+                          onClick={() => handleAddCcEmail('{project_manager_email}')}
+                          className="text-primary hover:underline font-mono font-semibold"
+                          title="Assigned Project Manager email from project record"
                         >
-                          +Pre-editing
+                          +ProjectManager
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleAddCcEmail('{languageediting_team_email}')}
-                          className="text-primary hover:underline font-mono"
+                          onClick={() => handleAddCcEmail('{stage_owner_emails}')}
+                          className="text-primary hover:underline font-mono font-semibold"
+                          title="Current Stage Lead and Team Group Mail ID combined"
                         >
-                          +LanguageEditing
+                          +CurrentStageOwner&Group
                         </button>
                       </div>
                     </div>

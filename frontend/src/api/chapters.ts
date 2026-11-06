@@ -179,6 +179,7 @@ export interface BulkTransitionExecutePayload {
   stage_name: string
   chapter_ids: number[]
   send_email: boolean
+  shipment_notes?: string
   email_to?: string
   email_cc?: string
   email_subject?: string

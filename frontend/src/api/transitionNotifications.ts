@@ -10,6 +10,11 @@ export interface TemplateVariable {
 
 export interface StageEmailConfig {
   enabled?: boolean
+  stage_owner_username?: string | null
+  stage_owner_first_name?: string | null
+  stage_owner_email?: string | null
+  stage_group_email?: string | null
+  stage_owner_mode?: 'both' | 'group_only' | 'user_only'
   custom_message: string
   to: string[]
   cc: string[]

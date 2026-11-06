@@ -1338,11 +1338,17 @@ class BulkTransitionConfigResponse(BaseModel):
 
 class BulkTransitionExecuteRequest(BaseModel):
     chapter_ids: list[int]
+    stage_name: Optional[str] = None
     send_email: bool = False
     to_emails: list[str] = Field(default_factory=list)
     cc_emails: list[str] = Field(default_factory=list)
     subject: str = ""
     body: str = ""
+    shipment_notes: Optional[str] = None
+    email_to: Optional[str] = None
+    email_cc: Optional[str] = None
+    email_subject: Optional[str] = None
+    email_body: Optional[str] = None
 
 
 
