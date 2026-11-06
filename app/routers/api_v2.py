@@ -9257,7 +9257,7 @@ def _get_stage_notification_config(client_name: str, stage_name: str, db=None) -
                             from app.domains.auth.models import User
                             from sqlalchemy import select, or_
                             u_rec = db.execute(
-                                select(User).where(or_(User.username == str(u_ident).strip(), User.id == (int(u_ident) if str(u_ident).strip().isdigit() else -1)))
+                                select(User).where(User.username == str(u_ident).strip())
                             ).scalars().first()
                             if u_rec and u_rec.email:
                                 cfg = dict(cfg)
@@ -9338,7 +9338,7 @@ def _extract_stage_owner_recipients(stage_cfg: Optional[dict], db=None) -> tuple
             from app.domains.auth.models import User
             from sqlalchemy import select, or_
             user_rec = db.execute(
-                select(User).where(or_(User.username == user_name, User.id == (int(user_name) if user_name.isdigit() else -1)))
+                select(User).where(User.username == user_name)
             ).scalars().first()
             if user_rec and user_rec.email:
                 user_email = user_rec.email.strip()

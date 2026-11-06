@@ -594,15 +594,11 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
             if display_first and not display_first.isdigit():
                 if u.username:
                     user_fn_map[str(u.username).strip()] = display_first
-                if u.id:
-                    user_fn_map[str(u.id)] = display_first
                 if u.email:
                     user_fn_map[str(u.email).strip().lower()] = display_first
             if u.email:
                 if u.username:
                     user_email_map[str(u.username).strip()] = u.email.strip()
-                if u.id:
-                    user_email_map[str(u.id)] = u.email.strip()
     except Exception as e:
         logger.warning(f"Could not build user map: {e}")
 
@@ -682,15 +678,11 @@ def save_customer_transition_config(
             if display_first and not display_first.isdigit():
                 if u.username:
                     user_fn_map[str(u.username).strip()] = display_first
-                if u.id:
-                    user_fn_map[str(u.id)] = display_first
                 if u.email:
                     user_fn_map[str(u.email).strip().lower()] = display_first
             if u.email:
                 if u.username:
                     user_email_map[str(u.username).strip()] = u.email.strip()
-                if u.id:
-                    user_email_map[str(u.id)] = u.email.strip()
     except Exception:
         user_fn_map = {}
         user_email_map = {}

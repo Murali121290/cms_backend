@@ -593,7 +593,7 @@ export function StageTransitionNotifications() {
     const email = String(stageCfg.stage_owner_email || '').trim().toLowerCase()
     if (username || email) {
       const found = users.find(u =>
-        (username && (String(u.user_name) === username || String(u.id) === username || (u as any).username === username)) ||
+        (username && (String(u.user_name) === username || (u as any).username === username)) ||
         (email && u.email && u.email.toLowerCase() === email)
       )
       if (found) {
@@ -1262,7 +1262,7 @@ export function StageTransitionNotifications() {
                           value={currentStageConfig.stage_owner_username || ''}
                           onChange={e => {
                             const val = e.target.value
-                            const found = users.find(u => u.user_name === val || (u as any).username === val || String(u.id) === val)
+                            const found = users.find(u => u.user_name === val || (u as any).username === val)
                             const displayFn = found ? (found.first_name?.trim() || found.last_name?.trim() || null) : null
                             updateCurrentStageFields({
                               stage_owner_username: val || null,
@@ -1276,7 +1276,7 @@ export function StageTransitionNotifications() {
                           {users.map(u => {
                             const displayName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim() || u.user_name
                             return (
-                              <option key={u.user_name || u.id} value={u.user_name}>
+                              <option key={u.user_name} value={u.user_name}>
                                 {displayName} ({u.user_name})
                               </option>
                             )
