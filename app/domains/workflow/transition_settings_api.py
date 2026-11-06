@@ -354,17 +354,20 @@ def _get_raw_config_for_client(db: Session, safe_code: str) -> tuple[Dict[str, A
 
 def _save_raw_config_to_db(db: Session, safe_code: str, stages_dict: Dict[str, Any]):
     """Save or update transition configuration directly in PostgreSQL."""
+    from sqlalchemy.orm.attributes import flag_modified
     db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == safe_code).first()
     if db_rec:
-        db_rec.stages_config = stages_dict
+        db_rec.stages_config = dict(stages_dict)
+        flag_modified(db_rec, "stages_config")
         db_rec.updated_at = datetime.utcnow()
     else:
         db_rec = StageTransitionConfig(
             client_code=safe_code,
-            stages_config=stages_dict
+            stages_config=dict(stages_dict)
         )
         db.add(db_rec)
     db.commit()
+    db.refresh(db_rec)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -396,12 +399,14 @@ def sync_all_json_to_db(db: Session = Depends(get_db)):
 
                 db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == code).first()
                 if db_rec:
-                    db_rec.stages_config = clean_stages
+                    db_rec.stages_config = dict(clean_stages)
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(db_rec, "stages_config")
                     db_rec.updated_at = datetime.utcnow()
                 else:
                     db_rec = StageTransitionConfig(
                         client_code=code,
-                        stages_config=clean_stages
+                        stages_config=dict(clean_stages)
                     )
                     db.add(db_rec)
                 synced_clients.append(code)
@@ -580,30 +585,68 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
     stages_data, is_custom, is_in_db = _get_raw_config_for_client(db, safe_code)
 
     user_fn_map = {}
+    user_email_map = {}
     try:
         from app.domains.auth.models import User
         users_list = db.query(User).all()
-        user_fn_map = {str(u.username): (u.first_name or u.username) for u in users_list if u.username}
-    except Exception:
-        user_fn_map = {}
+        for u in users_list:
+            display_first = (u.first_name or "").strip() or (u.last_name or "").strip()
+            if display_first and not display_first.isdigit():
+                if u.username:
+                    user_fn_map[str(u.username).strip()] = display_first
+                if u.id:
+                    user_fn_map[str(u.id)] = display_first
+                if u.email:
+                    user_fn_map[str(u.email).strip().lower()] = display_first
+            if u.email:
+                if u.username:
+                    user_email_map[str(u.username).strip()] = u.email.strip()
+                if u.id:
+                    user_email_map[str(u.id)] = u.email.strip()
+    except Exception as e:
+        logger.warning(f"Could not build user map: {e}")
 
     parsed_stages: Dict[str, StageEmailConfig] = {}
     for stage_name, cfg in stages_data.items():
         if isinstance(cfg, dict):
             u_name = cfg.get("stage_owner_username")
-            fn = user_fn_map.get(str(u_name)) if u_name else None
+            u_email = cfg.get("stage_owner_email")
+            
+            resolved_fn = None
+            if u_name and str(u_name).strip() in user_fn_map:
+                resolved_fn = user_fn_map[str(u_name).strip()]
+            elif u_email and str(u_email).strip().lower() in user_fn_map:
+                resolved_fn = user_fn_map[str(u_email).strip().lower()]
+
+            stored_fn = cfg.get("stage_owner_first_name")
+            if not resolved_fn and stored_fn and not str(stored_fn).strip().isdigit():
+                resolved_fn = str(stored_fn).strip()
+
+            resolved_email = (user_email_map.get(str(u_name).strip()) if (u_name and str(u_name).strip() in user_email_map) else u_email)
+
+            stage_body = cfg.get("body", "")
+            import re
+            stage_body = re.sub(r'\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+', '{chapter_table}', stage_body)
+            stage_body = re.sub(r'\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+', '', stage_body)
+            if "{chapter_table}" not in stage_body:
+                if "Regards," in stage_body:
+                    parts = stage_body.split("Regards,")
+                    stage_body = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
+                else:
+                    stage_body = stage_body.rstrip() + "\n\n{chapter_table}"
+
             parsed_stages[stage_name] = StageEmailConfig(
                 enabled=cfg.get("enabled", True),
                 stage_owner_username=u_name,
-                stage_owner_first_name=fn or cfg.get("stage_owner_first_name"),
-                stage_owner_email=cfg.get("stage_owner_email"),
+                stage_owner_first_name=resolved_fn,
+                stage_owner_email=resolved_email,
                 stage_group_email=cfg.get("stage_group_email"),
                 stage_owner_mode=cfg.get("stage_owner_mode", "both"),
                 custom_message=cfg.get("custom_message", ""),
                 to=cfg.get("to") if isinstance(cfg.get("to"), list) else [],
                 cc=cfg.get("cc") if isinstance(cfg.get("cc"), list) else [],
                 subject=cfg.get("subject", ""),
-                body=cfg.get("body", "")
+                body=stage_body
             )
 
     return CustomerConfigResponse(
@@ -629,19 +672,67 @@ def save_customer_transition_config(
     safe_code = _sanitize_code(client_code)
     stages_dict: Dict[str, Any] = {}
 
+    user_fn_map = {}
+    user_email_map = {}
+    try:
+        from app.domains.auth.models import User
+        users_list = db.query(User).all()
+        for u in users_list:
+            display_first = (u.first_name or "").strip() or (u.last_name or "").strip()
+            if display_first and not display_first.isdigit():
+                if u.username:
+                    user_fn_map[str(u.username).strip()] = display_first
+                if u.id:
+                    user_fn_map[str(u.id)] = display_first
+                if u.email:
+                    user_fn_map[str(u.email).strip().lower()] = display_first
+            if u.email:
+                if u.username:
+                    user_email_map[str(u.username).strip()] = u.email.strip()
+                if u.id:
+                    user_email_map[str(u.id)] = u.email.strip()
+    except Exception:
+        user_fn_map = {}
+        user_email_map = {}
+
     for stage_name, stage_cfg in payload.stages.items():
+        u_name = str(stage_cfg.stage_owner_username).strip() if stage_cfg.stage_owner_username else None
+
+        resolved_fn = stage_cfg.stage_owner_first_name
+        if u_name and u_name in user_fn_map:
+            resolved_fn = user_fn_map[u_name]
+        elif not resolved_fn or str(resolved_fn).strip().isdigit():
+            u_ident = stage_cfg.stage_owner_username or stage_cfg.stage_owner_email
+            if u_ident and str(u_ident).strip() in user_fn_map:
+                resolved_fn = user_fn_map[str(u_ident).strip()]
+
+        resolved_email = stage_cfg.stage_owner_email
+        if u_name and u_name in user_email_map:
+            resolved_email = user_email_map[u_name]
+
+        body_text = stage_cfg.body or ""
+        import re
+        body_text = re.sub(r'\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+', '{chapter_table}', body_text)
+        body_text = re.sub(r'\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+', '', body_text)
+        if "{chapter_table}" not in body_text:
+            if "Regards," in body_text:
+                parts = body_text.split("Regards,")
+                body_text = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
+            else:
+                body_text = body_text.rstrip() + "\n\n{chapter_table}"
+
         stages_dict[stage_name] = {
             "enabled": stage_cfg.enabled,
-            "stage_owner_username": stage_cfg.stage_owner_username or None,
-            "stage_owner_first_name": stage_cfg.stage_owner_first_name or None,
-            "stage_owner_email": stage_cfg.stage_owner_email or None,
+            "stage_owner_username": u_name,
+            "stage_owner_first_name": resolved_fn or None,
+            "stage_owner_email": resolved_email or None,
             "stage_group_email": stage_cfg.stage_group_email or None,
             "stage_owner_mode": stage_cfg.stage_owner_mode or "both",
             "custom_message": stage_cfg.custom_message or "",
             "to": [t.strip() for t in stage_cfg.to if t and t.strip()],
             "cc": [c.strip() for c in stage_cfg.cc if c and c.strip()],
             "subject": stage_cfg.subject or "",
-            "body": stage_cfg.body or ""
+            "body": body_text
         }
 
     _save_raw_config_to_db(db, safe_code, stages_dict)
@@ -703,7 +794,7 @@ def add_stage_to_config(
         "to": [t.strip() for t in (payload.to or ["{next_stage_owner_emails}"]) if t and t.strip()],
         "cc": [c.strip() for c in (payload.cc or ["{project_manager_email}", "{stage_owner_emails}"]) if c and c.strip()],
         "subject": payload.subject or "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-        "body": payload.body or "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply."
+        "body": payload.body or "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply."
     }
 
     existing[stage_name] = default_template

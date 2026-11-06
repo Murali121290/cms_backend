@@ -35,9 +35,18 @@ export function TransitionConfirmModal({
   const [shipmentNotes, setShipmentNotes] = useState("");
   const displayMsg = config.custom_message || `Complete ${currentStage} and move to ${nextStage}?`;
 
-  // Format today's date if dueDate is not provided
+  // Format due date or today's date cleanly as DD-Mon-YYYY
   const todayFormatted = useMemo(() => {
-    if (dueDate && dueDate !== "—") return dueDate;
+    const raw = (dueDate && dueDate !== "—") ? dueDate : null;
+    if (raw) {
+      const match = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const mIdx = parseInt(match[2], 10) - 1;
+        return `${match[3]}-${months[mIdx] || match[2]}-${match[1]}`;
+      }
+      return String(raw).replace(/\s+00:00:00(\+00:00)?$/, "");
+    }
     const now = new Date();
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const d = String(now.getDate()).padStart(2, "0");
@@ -62,9 +71,19 @@ export function TransitionConfirmModal({
   // Parse body around {chapter_table} or ASCII table pattern
   const { introText, outroText } = useMemo(() => {
     let raw = config.body || "";
-    const asciiTableRegex = /\+[-+]+\+[\s\S]*?\+[-+]+\+/;
+    const asciiTableRegex = /\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+/g;
     if (asciiTableRegex.test(raw)) {
       raw = raw.replace(asciiTableRegex, "{chapter_table}");
+    }
+    raw = raw.replace(/\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+/g, "");
+
+    if (!raw.includes("{chapter_table}")) {
+      if (raw.includes("Regards,")) {
+        const parts = raw.split("Regards,");
+        raw = parts[0].trim() + "\n\n{chapter_table}\n\nRegards," + parts[1];
+      } else {
+        raw += "\n\n{chapter_table}";
+      }
     }
 
     if (raw.includes("{chapter_table}")) {

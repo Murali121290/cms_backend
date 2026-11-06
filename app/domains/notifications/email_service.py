@@ -1,4 +1,7 @@
 import smtplib
+import socket
+import struct
+import ssl
 from email.message import EmailMessage
 from typing import Optional
 import logging
@@ -6,16 +9,92 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+
+def resolve_hostname_fallback(hostname: str) -> str:
+    """
+    Attempts standard socket resolution first.
+    If DNS resolution fails (e.g. Errno -5 in Docker where 127.0.0.11 fails to route external queries),
+    queries fallback DNS servers directly over UDP port 53.
+    """
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+        if infos:
+            return hostname
+    except Exception:
+        pass
+
+    dns_servers = ['10.1.1.65', '10.1.1.17', '8.8.8.8', '1.1.1.1']
+    for dns_ip in dns_servers:
+        try:
+            tid = 0x1234
+            flags = 0x0100
+            packet = struct.pack('!HHHHHH', tid, flags, 1, 0, 0, 0)
+            qname = b''.join(bytes([len(p)]) + p.encode('ascii') for p in hostname.split('.')) + bytes([0])
+            packet += qname + struct.pack('!HH', 1, 1)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(2.0)
+            sock.sendto(packet, (dns_ip, 53))
+            data, _ = sock.recvfrom(1024)
+            sock.close()
+            ancount = struct.unpack('!H', data[6:8])[0]
+            offset = 12 + len(qname) + 4
+            for _ in range(ancount):
+                if offset >= len(data):
+                    break
+                if data[offset] & 0xc0 == 0xc0:
+                    offset += 2
+                else:
+                    while offset < len(data) and data[offset] != 0:
+                        offset += 1 + data[offset]
+                    offset += 1
+                atype, aclass, ttl, rdlength = struct.unpack('!HHIH', data[offset:offset+10])
+                offset += 10
+                if atype == 1 and rdlength == 4:
+                    resolved_ip = socket.inet_ntoa(data[offset:offset+4])
+                    logger.info("Resolved %s -> %s via fallback DNS %s", hostname, resolved_ip, dns_ip)
+                    return resolved_ip
+                offset += rdlength
+        except Exception:
+            continue
+    return hostname
+
+
+def get_smtp_client():
+    """
+    Constructs an authenticated SMTP / SMTP_SSL client with DNS fallback resilience.
+    """
+    settings = get_settings()
+    raw_host = getattr(settings, 'SMTP_HOST', 'localhost')
+    target_host = resolve_hostname_fallback(raw_host)
+    port = int(getattr(settings, 'SMTP_PORT', 25))
+    use_ssl = getattr(settings, 'SMTP_USE_SSL', False)
+    use_tls = getattr(settings, 'SMTP_USE_TLS', False)
+    smtp_user = getattr(settings, 'SMTP_USERNAME', None)
+    smtp_pass = getattr(settings, 'SMTP_PASSWORD', None)
+
+    if use_ssl:
+        server = smtplib.SMTP_SSL(target_host, port, timeout=15)
+    else:
+        server = smtplib.SMTP(target_host, port, timeout=15)
+
+    server._host = raw_host
+    server.ehlo(raw_host)
+
+    if not use_ssl and use_tls:
+        context = ssl.create_default_context()
+        server.starttls(context=context)
+        server.ehlo(raw_host)
+
+    if smtp_user and smtp_pass:
+        server.login(smtp_user, smtp_pass)
+
+    return server
+
+
 def send_email(to_email: str, subject: str, text_body: str, html_body: str = None):
     settings = get_settings()
-
-    smtp_host = getattr(settings, "SMTP_HOST", "localhost")
-    smtp_port = int(getattr(settings, "SMTP_PORT", 25))
-    smtp_user = getattr(settings, "SMTP_USERNAME", None)
-    smtp_pass = getattr(settings, "SMTP_PASSWORD", None)
-    smtp_from = getattr(settings, "SMTP_FROM", "noreply@example.com")
-    use_tls = getattr(settings, "SMTP_USE_TLS", False)
-    use_ssl = getattr(settings, "SMTP_USE_SSL", False)
+    smtp_from = getattr(settings, 'SMTP_FROM', 'noreply@example.com')
+    smtp_user = getattr(settings, 'SMTP_USERNAME', None)
 
     msg = EmailMessage()
     msg['Subject'] = subject
@@ -27,16 +106,8 @@ def send_email(to_email: str, subject: str, text_body: str, html_body: str = Non
         msg.add_alternative(html_body, subtype='html')
 
     try:
-        if use_ssl:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
-
+        server = get_smtp_client()
         with server:
-            if use_tls and not use_ssl:
-                server.starttls()
-            if smtp_user and smtp_pass:
-                server.login(smtp_user, smtp_pass)
             server.send_message(msg)
         logger.info(f"Sent email to {to_email} with subject: {subject}")
         print(f"SUCCESS: Sent email to {to_email} with subject: {subject}")

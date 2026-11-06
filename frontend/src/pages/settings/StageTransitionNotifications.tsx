@@ -286,6 +286,25 @@ export function StageTransitionNotifications() {
     setHasUnsavedChanges(true)
   }
 
+  const updateCurrentStageFields = (fields: Partial<StageEmailConfig>) => {
+    if (!selectedStage) return
+    setWorkingStages(prev => ({
+      ...prev,
+      [selectedStage]: {
+        ...(prev[selectedStage] || {
+          enabled: true,
+          custom_message: '',
+          to: [],
+          cc: [],
+          subject: '',
+          body: '',
+        }),
+        ...fields,
+      },
+    }))
+    setHasUnsavedChanges(true)
+  }
+
   // Instant toggle from table row
   const handleToggleStageEnabled = (stageName: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
@@ -388,6 +407,7 @@ export function StageTransitionNotifications() {
         transitionNotificationsApi.listCustomers(),
       ])
       setClientConfig(updatedConfig)
+      setWorkingStages(JSON.parse(JSON.stringify(updatedConfig.stages || {})))
       setCustomers(updatedCustList)
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Failed to save configuration.')
@@ -407,6 +427,7 @@ export function StageTransitionNotifications() {
         transitionNotificationsApi.listCustomers(),
       ])
       setClientConfig(updatedConfig)
+      setWorkingStages(JSON.parse(JSON.stringify(updatedConfig.stages || {})))
       setCustomers(updatedCustList)
       setHasUnsavedChanges(false)
     } catch (err: any) {
@@ -563,7 +584,10 @@ export function StageTransitionNotifications() {
   const getOwnerDisplayName = useCallback((stageCfg: StageEmailConfig | undefined): string => {
     if (!stageCfg) return ''
     if (stageCfg.stage_owner_first_name && stageCfg.stage_owner_first_name.trim()) {
-      return stageCfg.stage_owner_first_name.trim()
+      const fn = stageCfg.stage_owner_first_name.trim()
+      if (!/^\d+$/.test(fn)) {
+        return fn
+      }
     }
     const username = String(stageCfg.stage_owner_username || '').trim()
     const email = String(stageCfg.stage_owner_email || '').trim().toLowerCase()
@@ -573,11 +597,18 @@ export function StageTransitionNotifications() {
         (email && u.email && u.email.toLowerCase() === email)
       )
       if (found) {
-        if (found.first_name && found.first_name.trim()) {
-          return found.first_name.trim()
+        const candidate = (found.first_name || '').trim() || (found.last_name || '').trim()
+        if (candidate && !/^\d+$/.test(candidate)) {
+          return candidate
         }
-        if (found.last_name && found.last_name.trim()) {
-          return found.last_name.trim()
+      }
+      if (username) {
+        const storeUser = useUsersStore.getState().usersByUsername[username] || useUsersStore.getState().usersByUsername[username.toLowerCase()]
+        if (storeUser) {
+          const candidate = (storeUser.first_name || '').trim() || (storeUser.last_name || '').trim()
+          if (candidate && !/^\d+$/.test(candidate)) {
+            return candidate
+          }
         }
       }
     }
@@ -1232,18 +1263,24 @@ export function StageTransitionNotifications() {
                           onChange={e => {
                             const val = e.target.value
                             const found = users.find(u => u.user_name === val || (u as any).username === val || String(u.id) === val)
-                            updateCurrentStage('stage_owner_username', val || null)
-                            updateCurrentStage('stage_owner_first_name', found ? (found.first_name || null) : null)
-                            updateCurrentStage('stage_owner_email', found ? found.email : null)
+                            const displayFn = found ? (found.first_name?.trim() || found.last_name?.trim() || null) : null
+                            updateCurrentStageFields({
+                              stage_owner_username: val || null,
+                              stage_owner_first_name: displayFn,
+                              stage_owner_email: found ? found.email : null
+                            })
                           }}
                           className="w-full px-2.5 py-1.5 text-xs bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-1 focus:ring-primary"
                         >
                           <option value="">-- Select user lead (Optional) --</option>
-                          {users.map(u => (
-                            <option key={u.user_name} value={u.user_name}>
-                              {u.first_name || ''} {u.last_name || ''} ({u.user_name})
-                            </option>
-                          ))}
+                          {users.map(u => {
+                            const displayName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim() || u.user_name
+                            return (
+                              <option key={u.user_name || u.id} value={u.user_name}>
+                                {displayName} ({u.user_name})
+                              </option>
+                            )
+                          })}
                         </select>
                       </div>
 
