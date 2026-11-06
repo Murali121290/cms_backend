@@ -2464,8 +2464,12 @@ export function ProjectWorkflow() {
                       }}
                       className="rounded border-border"
                     />
-                    <span className="font-semibold text-primary text-xs uppercase w-8 flex-shrink-0">{c.chapters}</span>
-                    <span className="truncate text-text flex-1 min-w-0 font-medium">{c.chapter_title || c.chapters}</span>
+                    <span className="font-semibold text-primary text-xs uppercase w-8 flex-shrink-0">
+                      {c.chapters === "00" ? "Book" : c.chapters}
+                    </span>
+                    <span className="truncate text-text flex-1 min-w-0 font-medium">
+                      {(c.chapters === "00" && !c.chapter_title) ? "Book" : (c.chapter_title || c.chapters)}
+                    </span>
                     <span className="text-xs text-muted font-medium bg-surface px-2 py-0.5 rounded border border-border">
                       {c.workflow || 'Default'}
                     </span>
@@ -2494,12 +2498,15 @@ export function ProjectWorkflow() {
                       <th className="px-3 py-2">Workflow</th>
                       <th className="px-3 py-2">Current Stage</th>
                       <th className="px-3 py-2">Next Stage</th>
+                      <th className="px-3 py-2">Target Due Date</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {(groupProceedConfig?.chapters || groupProceedConfig?.preview_items || []).map(item => (
                       <tr key={item.chapter_id} className="hover:bg-accent/20">
-                        <td className="px-3 py-2 font-semibold text-primary uppercase">{item.chapter_number || item.chapter_num}</td>
+                        <td className="px-3 py-2 font-semibold text-primary uppercase">
+                          {(item.chapter_number === "00" || item.chapter_num === "00") ? "Book" : (item.chapter_number || item.chapter_num)}
+                        </td>
                         <td className="px-3 py-2 text-muted">{item.workflow_name}</td>
                         <td className="px-3 py-2 text-text font-medium">{item.current_stage}</td>
                         <td className="px-3 py-2">
@@ -2512,6 +2519,9 @@ export function ProjectWorkflow() {
                               ✓ Final Stage (Complete)
                             </span>
                           )}
+                        </td>
+                        <td className="px-3 py-2 text-text font-medium">
+                          {item.next_stage_due_date || '—'}
                         </td>
                       </tr>
                     ))}

@@ -1303,6 +1303,7 @@ class BulkTransitionItemPreview(BaseModel):
     next_stage: str | None = None
     workflow_name: str
     is_last_stage: bool = False
+    next_stage_due_date: str | None = None
 
     def model_post_init(self, __context):
         if not self.chapter_num:
@@ -1324,6 +1325,7 @@ class BulkTransitionConfigResponse(BaseModel):
     subject: str | None = None
     body: str | None = None
     from_email: str | None = None
+    next_stage_due_date: str | None = None
 
     def model_post_init(self, __context):
         if not self.preview_items and self.chapters:

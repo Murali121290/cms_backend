@@ -18,6 +18,7 @@ interface TransitionConfirmModalProps {
     subject: string;
     body: string;
     from_email?: string;
+    next_stage_due_date?: string;
   };
 }
 
@@ -35,9 +36,9 @@ export function TransitionConfirmModal({
   const [shipmentNotes, setShipmentNotes] = useState("");
   const displayMsg = config.custom_message || `Complete ${currentStage} and move to ${nextStage}?`;
 
-  // Format due date or today's date cleanly as DD-Mon-YYYY
-  const todayFormatted = useMemo(() => {
-    const raw = (dueDate && dueDate !== "—") ? dueDate : null;
+  // Format next stage due date or target date cleanly as DD-Mon-YYYY
+  const displayDueDate = useMemo(() => {
+    const raw = config.next_stage_due_date || ((dueDate && dueDate !== "—") ? dueDate : null);
     if (raw) {
       const match = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
       if (match) {
@@ -53,34 +54,60 @@ export function TransitionConfirmModal({
     const m = months[now.getMonth()];
     const y = now.getFullYear();
     return `${d}-${m}-${y}`;
-  }, [dueDate]);
+  }, [config.next_stage_due_date, dueDate]);
 
   // Resolve chapter number from props or fallback from subject
   const resolvedChapterNumber = useMemo(() => {
+    let raw = "";
     if (chapterNumber) {
       const c = chapterNumber.trim();
-      return c.toLowerCase().startsWith("chapter ") ? c.slice(8).trim() : c;
+      raw = c.toLowerCase().startsWith("chapter ") ? c.slice(8).trim() : c;
+    } else {
+      const match = (config.subject || "").match(/Chapter(?:s)?\s+([^|]+)/i);
+      if (match) {
+        raw = match[1].trim();
+      } else if (config.subject?.includes(" - Book |") || config.subject?.includes(" - Book ")) {
+        raw = "Book";
+      } else {
+        raw = "01";
+      }
     }
-    const match = (config.subject || "").match(/Chapter(?:s)?\s+([^|]+)/i);
-    if (match) {
-      return match[1].trim();
+    if (raw === "00" || raw === "0" || raw.toLowerCase() === "book") {
+      return "Book";
     }
-    return "01";
+    return raw;
   }, [chapterNumber, config.subject]);
+
+  const isBook = resolvedChapterNumber === "Book";
+
+  // Clean subject if chapter is 00 / Book
+  const displaySubject = useMemo(() => {
+    let subj = config.subject || "—";
+    if (isBook) {
+      subj = subj.replace(/\bChapter(?:s)?\s+(?:Book|00|0)\b/gi, "Book");
+    }
+    return subj;
+  }, [config.subject, isBook]);
 
   // Parse body around {chapter_table} or ASCII table pattern
   const { introText, outroText } = useMemo(() => {
     let raw = config.body || "";
-    const asciiTableRegex = /\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+/g;
-    if (asciiTableRegex.test(raw)) {
-      raw = raw.replace(asciiTableRegex, "{chapter_table}");
+    // Clean any full ASCII box table block
+    raw = raw.replace(/(?:^[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$))(?:[ \t]*[+|][^\r\n]*(?:\r?\n|$))*?[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$)?/gm, "{chapter_table}\n");
+    // Clean any residual ASCII table lines
+    raw = raw.replace(/^[ \t]*\|[^\r\n]*\|[ \t]*$/gm, "");
+    raw = raw.replace(/^[ \t]*\+[-+]+\+[ \t]*$/gm, "");
+    raw = raw.replace(/(\{chapter_table\}\s*)+/g, "{chapter_table}\n");
+
+    if (isBook) {
+      raw = raw.replace(/\bChapter(?:s)?\s+(?:Book|00|0)\b/gi, "Book");
+      raw = raw.replace(/\bChapter\s*:\s*(?:Book|00|0)\b/gi, "Chapter: Book");
     }
-    raw = raw.replace(/\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+/g, "");
 
     if (!raw.includes("{chapter_table}")) {
       if (raw.includes("Regards,")) {
         const parts = raw.split("Regards,");
-        raw = parts[0].trim() + "\n\n{chapter_table}\n\nRegards," + parts[1];
+        raw = parts[0].trim() + "\n\n{chapter_table}\n\nRegards," + parts.slice(1).join("Regards,");
       } else {
         raw += "\n\n{chapter_table}";
       }
@@ -90,14 +117,14 @@ export function TransitionConfirmModal({
       const parts = raw.split("{chapter_table}");
       return {
         introText: parts[0].trim(),
-        outroText: parts[1]?.trim() || "",
+        outroText: parts.slice(1).join("{chapter_table}").trim(),
       };
     }
     return {
       introText: raw.trim(),
       outroText: "",
     };
-  }, [config.body]);
+  }, [config.body, isBook]);
 
   return (
     <Modal
@@ -174,7 +201,7 @@ export function TransitionConfirmModal({
             )}
             <div className="flex items-start text-sm border-t border-border/50 pt-2 mt-1">
               <span className="w-16 font-medium text-muted flex-shrink-0">Subject:</span>
-              <span className="text-text font-semibold break-words">{config.subject || "—"}</span>
+              <span className="text-text font-semibold break-words">{displaySubject}</span>
             </div>
           </div>
 
@@ -213,7 +240,7 @@ export function TransitionConfirmModal({
                   <tr className="bg-surface/80 border-b border-border text-muted font-semibold">
                     <th className="py-2.5 px-3 border-r border-border">Chapter</th>
                     <th className="py-2.5 px-3 border-r border-border">Stage</th>
-                    <th className="py-2.5 px-3 border-r border-border">Due Date</th>
+                    <th className="py-2.5 px-3 border-r border-border">Due Date {nextStage ? `( ${nextStage} )` : ""}</th>
                     <th className="py-2.5 px-3">Shipment Notes</th>
                   </tr>
                 </thead>
@@ -230,7 +257,7 @@ export function TransitionConfirmModal({
                       </span>
                     </td>
                     <td className="py-2.5 px-3 border-r border-border text-text">
-                      {todayFormatted}
+                      {displayDueDate}
                     </td>
                     <td className="py-2.5 px-3 text-text">
                       {shipmentNotes.trim() ? (

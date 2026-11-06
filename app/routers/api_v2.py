@@ -9225,6 +9225,7 @@ class TransitionConfigResponse(BaseModel):
     subject: Optional[str] = None
     body: Optional[str] = None
     from_email: Optional[str] = None
+    next_stage_due_date: Optional[str] = None
 
 class TransitionEmailRequest(BaseModel):
     from_stage: str
@@ -9359,6 +9360,9 @@ def _resolve_placeholders(text: str, chapter, project, client, current_stage: st
     if clean_ch_num.lower().startswith("chapter "):
         clean_ch_num = clean_ch_num[8:].strip()
     
+    is_book = clean_ch_num in ("00", "0") or clean_ch_num.lower() == "book"
+    display_ch_name = "Book" if is_book else clean_ch_num
+
     # Format due date if available
     raw_due = getattr(chapter, "due_date", None) or (getattr(project, "due_date", None) if project else None)
     due_str = _format_transition_date(raw_due)
@@ -9368,7 +9372,7 @@ def _resolve_placeholders(text: str, chapter, project, client, current_stage: st
     client_display = getattr(client, "company", None) or getattr(client, "name_company", None) or (getattr(project, "client_name", "") if project else "") or ""
 
     placeholders = {
-        "{chapter_name}": clean_ch_num,
+        "{chapter_name}": display_ch_name,
         "{chapter_title}": getattr(chapter, "chapter_title", None) or "",
         "{current_stage}": current_stage,
         "{current stage}": current_stage,
@@ -9394,6 +9398,12 @@ def _resolve_placeholders(text: str, chapter, project, client, current_stage: st
         if value is not None:
             resolved = resolved.replace(key, str(value))
     resolved = re.sub(r"\bChapter\s+Chapter\b", "Chapter", resolved)
+
+    if is_book:
+        resolved = re.sub(r"\bChapter(?:s)?\s+(?:Book|00|0)\b", "Book", resolved, flags=re.IGNORECASE)
+        resolved = re.sub(r"\bChapter\s*:\s*(?:Book|00|0)\b", "Chapter: Book", resolved, flags=re.IGNORECASE)
+        resolved = re.sub(r"\|\s*00\s*\|", "| Book |", resolved)
+
     return resolved
 
 def _format_transition_date(val) -> str:
@@ -9431,7 +9441,7 @@ def _format_transition_date(val) -> str:
 
 def _sort_chapter_key(ch_str: str):
     import re
-    if ch_str == 'FM':
+    if ch_str in ('FM', 'Book'):
         return (0, 0, '')
     if ch_str == 'BM':
         return (2, 0, '')
@@ -9440,15 +9450,81 @@ def _sort_chapter_key(ch_str: str):
         return (1, int(match.group(0)), ch_str)
     return (3, 0, ch_str)
 
-def _build_html_table(rows: list[dict]) -> str:
+def _resolve_next_stage_due_date(db, project_code: str, chapter_num: str, to_stage: str, chapter_obj=None) -> str:
+    from app.domains.workflow.models import StageDetail, WorkflowMaster
+    from sqlalchemy import select
+    from datetime import datetime, timedelta
+
+    clean_ch = chapter_num.strip() if chapter_num else ""
+    if clean_ch.lower().startswith("chapter "):
+        clean_ch = clean_ch[8:].strip()
+
+    # 1. Check StageDetail for to_stage
+    to_sd = None
+    if project_code and clean_ch and to_stage:
+        try:
+            to_sd = db.execute(
+                select(StageDetail).where(
+                    StageDetail.project == project_code,
+                    StageDetail.chapters == clean_ch,
+                    StageDetail.stage_name == to_stage
+                )
+            ).scalars().first()
+        except Exception:
+            pass
+
+    if to_sd and to_sd.planned_end_date:
+        return _format_transition_date(to_sd.planned_end_date)
+
+    # 2. Check SLA if planned_end_date not yet populated
+    sla_days = getattr(to_sd, "sla", None) if to_sd else None
+    if not sla_days and to_stage:
+        try:
+            wf_name = (to_sd.workflow if to_sd else None) or getattr(chapter_obj, "workflow", None) or "Workflow1"
+            wm = db.execute(
+                select(WorkflowMaster).where(
+                    WorkflowMaster.workflow_name == wf_name,
+                    WorkflowMaster.stage_name == to_stage
+                )
+            ).scalars().first()
+            if wm and wm.sla:
+                sla_days = wm.sla
+        except Exception:
+            pass
+
+    if sla_days and sla_days > 0:
+        base_date = datetime.now()
+        target = base_date + timedelta(days=int(sla_days))
+        return target.strftime("%d-%b-%Y")
+
+    # 3. Fallback to chapter due_date
+    if chapter_obj and getattr(chapter_obj, "due_date", None):
+        return _format_transition_date(getattr(chapter_obj, "due_date", None))
+
+    return "—"
+
+
+def _build_html_table(rows: list[dict], next_stage: Optional[str] = None) -> str:
     """
     Generate an HTML table matching the Pathfinder report format.
-    Columns: Chapter | Stage | Due Date | Shipment Notes
+    Columns: Chapter | Stage | Due Date ( {next_stage} ) | Shipment Notes
     Fully compatible with Microsoft Outlook, Gmail, Apple Mail, and webmail.
     """
+    st_header_name = next_stage
+    if not st_header_name and rows:
+        st_header_name = rows[0].get("to_stage")
+        if not st_header_name:
+            st_raw = rows[0].get("stage", "")
+            if "→" in st_raw:
+                st_header_name = st_raw.split("→")[-1].strip()
+
+    due_col_header = f"Due Date ( {st_header_name} )" if st_header_name else "Due Date"
+
     html_rows = []
     for r in rows:
         ch = r.get("chapter") or "—"
+        if str(ch).strip() in ("00", "0") or str(ch).strip().lower() in ("chapter 00", "chapter 0", "book"):
+            ch = "Book"
         st = r.get("stage")
         if not st or st == "—":
             from_st = r.get("from_stage")
@@ -9469,12 +9545,12 @@ def _build_html_table(rows: list[dict]) -> str:
         )
     tbody = "\n".join(html_rows)
     return (
-        '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; max-width: 680px; margin: 16px 0; border: 1px solid #777777; font-family: Calibri, Arial, sans-serif; font-size: 13px; text-align: left;">\n'
+        '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; max-width: 720px; margin: 16px 0; border: 1px solid #777777; font-family: Calibri, Arial, sans-serif; font-size: 13px; text-align: left;">\n'
         '  <thead>\n'
         '    <tr style="background-color: #f2f2f2; color: #111111;">\n'
         '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Chapter</th>\n'
         '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Stage</th>\n'
-        '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Due Date</th>\n'
+        f'      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">{due_col_header}</th>\n'
         '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Shipment Notes</th>\n'
         '    </tr>\n'
         '  </thead>\n'
@@ -9485,17 +9561,34 @@ def _build_html_table(rows: list[dict]) -> str:
     )
 
 
-def _build_plain_table(rows: list[dict]) -> str:
+def _build_plain_table(rows: list[dict], next_stage: Optional[str] = None) -> str:
     """
-    Generate clean plain text table fallback.
+    Generate clean plain text table fallback with dynamic Due Date ( {next_stage} ) header.
     """
+    st_header_name = next_stage
+    if not st_header_name and rows:
+        st_header_name = rows[0].get("to_stage")
+        if not st_header_name:
+            st_raw = rows[0].get("stage", "")
+            if "→" in st_raw:
+                st_header_name = st_raw.split("→")[-1].strip()
+
+    due_hdr = f"Due Date ( {st_header_name} )" if st_header_name else "Due Date"
+    col_due_width = max(len(due_hdr), 14)
+    due_hdr_padded = due_hdr.ljust(col_due_width)
+    border_due = "-" * (col_due_width + 2)
+
+    sep = f"+----------------------------+-----------------------------+{border_due}+------------------+"
     table_lines = [
-        "+----------------------------+-----------------------------+--------------+------------------+",
-        "| Chapter                    | Stage                       | Due Date     | Shipment Notes   |",
-        "+----------------------------+-----------------------------+--------------+------------------+",
+        sep,
+        f"| Chapter                    | Stage                       | {due_hdr_padded} | Shipment Notes   |",
+        sep,
     ]
     for r in rows:
-        ch_val = str(r.get("chapter") or "—")[:26].ljust(26)
+        raw_ch = str(r.get("chapter") or "—").strip()
+        if raw_ch in ("00", "0") or raw_ch.lower() in ("chapter 00", "chapter 0", "book"):
+            raw_ch = "Book"
+        ch_val = raw_ch[:26].ljust(26)
         st_raw = r.get("stage")
         if not st_raw or st_raw == "—":
             from_st = r.get("from_stage")
@@ -9505,17 +9598,50 @@ def _build_plain_table(rows: list[dict]) -> str:
             else:
                 st_raw = to_st or from_st or "—"
         st_val = str(st_raw)[:27].ljust(27)
-        due_val = _format_transition_date(r.get("due_date"))[:12].ljust(12)
+        due_val = str(_format_transition_date(r.get("due_date"))).ljust(col_due_width)
         notes_val = str(r.get("notes") or r.get("shipment_notes") or "—")[:16].ljust(16)
         table_lines.append(f"| {ch_val} | {st_val} | {due_val} | {notes_val} |")
-    table_lines.append("+----------------------------+-----------------------------+--------------+------------------+")
+    table_lines.append(sep)
     return "\n".join(table_lines)
+
+
+def _clean_body_template_tables(body_text: str) -> str:
+    """
+    Safely replace any ASCII box table in the body template with {chapter_table},
+    strip any residual ASCII border or row lines, and ensure {chapter_table}
+    is positioned right before 'Regards,'.
+    """
+    if not body_text:
+        return ""
+    import re
+    # Match any multi-line ascii table starting and ending with +---+
+    cleaned = re.sub(
+        r'(?:^[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$))(?:[ \t]*[+|][^\r\n]*(?:\r?\n|$))*?[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$)?',
+        '{chapter_table}\n',
+        body_text,
+        flags=re.MULTILINE
+    )
+    # Strip any stray leftover table border or row lines
+    cleaned = re.sub(r'^[ \t]*\|[^\r\n]*\|[ \t]*(?:\r?\n|$)', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'^[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$)', '', cleaned, flags=re.MULTILINE)
+    # Collapse multiple {chapter_table} placeholders into one
+    cleaned = re.sub(r'(\{chapter_table\}\s*)+', '{chapter_table}\n', cleaned)
+
+    if "{chapter_table}" not in cleaned:
+        if "Regards," in cleaned:
+            parts = cleaned.split("Regards,", 1)
+            cleaned = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
+        else:
+            cleaned = cleaned.rstrip() + "\n\n{chapter_table}"
+
+    return cleaned
 
 
 def _prepare_transition_email_content(
     body_template: str,
     chapter_rows: list[dict],
-    shipment_notes: Optional[str] = None
+    shipment_notes: Optional[str] = None,
+    next_stage: Optional[str] = None
 ) -> tuple[str, str]:
     """
     Generate both plain text and rich HTML email documents.
@@ -9526,26 +9652,15 @@ def _prepare_transition_email_content(
     import html
 
     notes_str = (shipment_notes or "").strip() or "—"
-    table_html = _build_html_table(chapter_rows)
-    table_plain = _build_plain_table(chapter_rows)
+    table_html = _build_html_table(chapter_rows, next_stage=next_stage)
+    table_plain = _build_plain_table(chapter_rows, next_stage=next_stage)
 
     normalized = body_template or ""
     if "{shipment_notes}" in normalized:
         normalized = normalized.replace("{shipment_notes}", notes_str)
 
-    # Normalize ASCII table if present to {chapter_table}
-    ascii_table_regex = r"\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+"
-    if re.search(ascii_table_regex, normalized):
-        normalized = re.sub(ascii_table_regex, "{chapter_table}", normalized)
-    normalized = re.sub(r'\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+', '', normalized)
-
-    # Ensure {chapter_table} is placed before "Regards," if missing
-    if "{chapter_table}" not in normalized:
-        if "Regards," in normalized:
-            parts = normalized.split("Regards,")
-            normalized = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
-        else:
-            normalized = normalized.rstrip() + "\n\n{chapter_table}"
+    # Normalize ASCII tables and guarantee {chapter_table} placement before Regards,
+    normalized = _clean_body_template_tables(normalized)
 
     # Plain text version
     if "{chapter_table}" in normalized:
@@ -9634,18 +9749,8 @@ def _format_multi_chapter_email(
     elif first_ch_num and first_ch_num in new_subject:
         new_subject = new_subject.replace(first_ch_num, ch_names_str)
 
-    # 2. Normalize body to retain clean {chapter_table} token
-    new_body = body
-    ascii_table_regex = r"\+[-+]+\+[\s\S]*?\+[-+]+\+"
-    if re.search(ascii_table_regex, new_body):
-        new_body = re.sub(ascii_table_regex, "{chapter_table}", new_body)
-
-    if "{chapter_table}" not in new_body:
-        if "Regards," in new_body:
-            parts = new_body.split("Regards,")
-            new_body = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
-        else:
-            new_body += "\n\n{chapter_table}"
+    # 2. Normalize body to retain clean {chapter_table} token positioned properly
+    new_body = _clean_body_template_tables(body)
 
     # Adapt text phrases
     if first_ch_num and f"Chapter {first_ch_num}" in new_body:
@@ -9783,16 +9888,21 @@ def api_v2_get_chapter_transition_config(
     custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), chapter, project, client, current_stage, next_stage, extra_vars)
     subj_resolved = _resolve_placeholders(cfg.get("subject", ""), chapter, project, client, current_stage, next_stage, extra_vars)
     body_resolved = _resolve_placeholders(cfg.get("body", ""), chapter, project, client, current_stage, next_stage, extra_vars)
-    import re
-    body_resolved = re.sub(r'\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+', '{chapter_table}', body_resolved)
-    body_resolved = re.sub(r'\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+', '', body_resolved)
-    if "{chapter_table}" not in body_resolved:
-        if "Regards," in body_resolved:
-            parts = body_resolved.split("Regards,")
-            body_resolved = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
-        else:
-            body_resolved = body_resolved.rstrip() + "\n\n{chapter_table}"
+
+    ch_raw = chapter.chapters.strip() if chapter.chapters else ""
+    if ch_raw.lower().startswith("chapter "):
+        ch_raw = ch_raw[8:].strip()
+    if ch_raw in ("00", "0") or ch_raw.lower() == "book":
+        import re
+        subj_resolved = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', subj_resolved, flags=re.IGNORECASE)
+        body_resolved = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', body_resolved, flags=re.IGNORECASE)
+        body_resolved = re.sub(r'\|\s*00\s*\|', '| Book |', body_resolved)
+
+    body_resolved = _clean_body_template_tables(body_resolved)
     
+    proj_code = project.code if project else (chapter.project if chapter else "")
+    next_stage_due = _resolve_next_stage_due_date(db, proj_code, chapter.chapters, next_stage, chapter_obj=chapter)
+
     return TransitionConfigResponse(
         has_config=True,
         custom_message=custom_msg,
@@ -9800,7 +9910,8 @@ def api_v2_get_chapter_transition_config(
         cc=cc_resolved,
         subject=subj_resolved,
         body=body_resolved,
-        from_email=settings.SMTP_FROM
+        from_email=settings.SMTP_FROM,
+        next_stage_due_date=next_stage_due
     )
 
 @router.post("/chapters/{chapter_id}/transition-email")
@@ -9870,30 +9981,40 @@ def api_v2_chapter_transition_email(
     
     # Send transition email via SMTP (log failure but proceed)
     if payload.to_emails:
-        raw_due = getattr(chapter, "due_date", None) or (getattr(project, "due_date", None) if project else None)
-        due_str = _format_transition_date(raw_due)
-
-        clean_ch_num = chapter.chapters.strip() if chapter.chapters else ""
-        if clean_ch_num.lower().startswith("chapter "):
-            clean_ch_num = clean_ch_num[8:].strip()
-
         from_st = payload.from_stage or getattr(chapter, "stage_name", "") or ""
         to_st = payload.to_stage or ""
         st_flow = f"{from_st} → {to_st}" if (from_st and to_st) else (to_st or from_st or "—")
 
+        # Resolve next stage due date specifically for this chapter and target stage
+        next_due_str = _resolve_next_stage_due_date(db, project_code, chapter.chapters, to_st, chapter_obj=chapter)
+
+        clean_ch_num = chapter.chapters.strip() if chapter.chapters else ""
+        if clean_ch_num.lower().startswith("chapter "):
+            clean_ch_num = clean_ch_num[8:].strip()
+        is_book = clean_ch_num in ("00", "0") or clean_ch_num.lower() == "book"
+        display_ch = "Book" if is_book else (clean_ch_num or "01")
+
+        send_subject = payload.subject or ""
+        send_body = payload.body or ""
+        if is_book:
+            import re
+            send_subject = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', send_subject, flags=re.IGNORECASE)
+            send_body = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', send_body, flags=re.IGNORECASE)
+
         row_item = {
-            "chapter": clean_ch_num or "01",
+            "chapter": display_ch,
             "stage": st_flow,
             "from_stage": from_st,
             "to_stage": to_st,
-            "due_date": due_str,
+            "due_date": next_due_str,
             "notes": payload.shipment_notes or "—"
         }
 
         plain_body, html_body = _prepare_transition_email_content(
-            body_template=payload.body,
+            body_template=send_body,
             chapter_rows=[row_item],
-            shipment_notes=payload.shipment_notes
+            shipment_notes=payload.shipment_notes,
+            next_stage=to_st
         )
 
         valid_to = [e.strip() for e in payload.to_emails if e and "@" in e and "{" not in e and "}" not in e]
@@ -9908,7 +10029,7 @@ def api_v2_chapter_transition_email(
             msg['To'] = ", ".join(valid_to)
             if valid_cc:
                 msg['Cc'] = ", ".join(valid_cc)
-            msg['Subject'] = payload.subject
+            msg['Subject'] = send_subject
             msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
             msg.attach(MIMEText(html_body, 'html', 'utf-8'))
             
@@ -10000,24 +10121,34 @@ def api_v2_bulk_transition_config(
             if active_stages and active_stages[-1].stage_name == (next_stage_name or current_stage):
                 is_last = True
 
+        ch_proj_code = project.code if project else (ch.project if ch else "")
+        next_due_date_str = _resolve_next_stage_due_date(db, ch_proj_code, ch.chapters, next_stage_name or "", chapter_obj=ch)
+
+        ch_raw = ch.chapters.strip() if ch.chapters else ""
+        if ch_raw.lower().startswith("chapter "):
+            ch_raw = ch_raw[8:].strip()
+        ch_display = "Book" if (ch_raw in ("00", "0") or ch_raw.lower() == "book") else ch.chapters
+
         previews.append(schemas_v2.BulkTransitionItemPreview(
             chapter_id=ch.id,
-            chapter_number=ch.chapters,
+            chapter_number=ch_display,
             chapter_title=ch.chapter_title,
             current_stage=current_stage,
             next_stage=next_stage_name,
             workflow_name=ch_workflow,
             is_last_stage=is_last,
+            next_stage_due_date=next_due_date_str,
         ))
 
     client_name = first_project.client_name if first_project else first_ch.client
     client_identifier = first_client.division if (first_client and first_client.division) else client_name
     current_stage_label = first_ch.stage_name or ""
     sample_next_stage = previews[0].next_stage or ""
+    sample_due_date = previews[0].next_stage_due_date if previews else None
 
     cfg = _get_stage_notification_config(client_identifier, current_stage_label, db=db)
     if not cfg:
-        return schemas_v2.BulkTransitionConfigResponse(has_config=False, chapters=previews)
+        return schemas_v2.BulkTransitionConfigResponse(has_config=False, chapters=previews, next_stage_due_date=sample_due_date)
 
     extra_vars = _resolve_transition_extra_vars(db, client_identifier, current_stage_label, sample_next_stage, first_project, first_ch)
     raw_to = cfg.get("to", []) or ["{next_stage_owner_emails}"]
@@ -10028,6 +10159,7 @@ def api_v2_bulk_transition_config(
     custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
     subj_resolved = _resolve_placeholders(cfg.get("subject", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
     body_resolved = _resolve_placeholders(cfg.get("body", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
+    body_resolved = _clean_body_template_tables(body_resolved)
 
     if len(previews) > 1:
         subj_resolved, body_resolved = _format_multi_chapter_email(
@@ -10045,7 +10177,8 @@ def api_v2_bulk_transition_config(
         cc=cc_resolved,
         subject=subj_resolved,
         body=body_resolved,
-        from_email=settings.SMTP_FROM
+        from_email=settings.SMTP_FROM,
+        next_stage_due_date=sample_due_date
     )
 
 
@@ -10184,10 +10317,6 @@ def api_v2_bulk_transition_execute(
                 for item in transitioned_chapters:
                     if item.get("chapter"):
                         ch_obj = chs_map.get(item.get("id"))
-                        raw_due = getattr(ch_obj, "due_date", None) if ch_obj else None
-                        if not raw_due:
-                            raw_due = getattr(first_ch, "due_date", None) or (getattr(first_project, "due_date", None) if first_project else None)
-
                         from_st = item.get("from_stage", "")
                         to_st = item.get("to_stage", "")
                         st_flow = f"{from_st} → {to_st}" if (from_st and to_st) else (to_st or from_st or "—")
@@ -10195,13 +10324,18 @@ def api_v2_bulk_transition_execute(
                         clean_ch = item["chapter"].strip()
                         if clean_ch.lower().startswith("chapter "):
                             clean_ch = clean_ch[8:].strip()
+                        if clean_ch in ("00", "0") or clean_ch.lower() == "book":
+                            clean_ch = "Book"
+
+                        ch_p_code = ch_obj.project if ch_obj else (first_project.code if first_project else "")
+                        next_due_str = _resolve_next_stage_due_date(db, ch_p_code, item["chapter"], to_st, chapter_obj=ch_obj)
 
                         chapter_row_items.append({
                             "chapter": clean_ch or item["chapter"],
                             "stage": st_flow,
                             "from_stage": from_st, 
                             "to_stage": to_st, 
-                            "due_date": _format_transition_date(raw_due),
+                            "due_date": next_due_str,
                             "notes": payload.shipment_notes or "—"
                         })
 
@@ -10225,7 +10359,8 @@ def api_v2_bulk_transition_execute(
                     plain_body, html_body = _prepare_transition_email_content(
                         body_template=body or "",
                         chapter_rows=chapter_row_items,
-                        shipment_notes=payload.shipment_notes
+                        shipment_notes=payload.shipment_notes,
+                        next_stage=sample_next_stage
                     )
 
                     msg = MIMEMultipart('alternative')
