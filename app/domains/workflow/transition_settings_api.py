@@ -28,6 +28,13 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 
 AVAILABLE_VARIABLES = [
     {
+        "key": "{chapter_table}",
+        "label": "Chapter Transition Table",
+        "description": "Structured table: Chapter | Stage (Current → Next) | Due Date | Shipment Notes",
+        "sample": "{chapter_table}",
+        "category": "Layout"
+    },
+    {
         "key": "{chapter_name}",
         "label": "Chapter Number",
         "description": "Chapter number or identifier (e.g., 01, FM, BM)",
@@ -832,17 +839,30 @@ def send_test_notification(req: TestEmailRequest):
 
     final_subject = f"[TEST] {rendered_subject}" if not rendered_subject.startswith("[TEST]") else rendered_subject
 
+    sample_rows = [{
+        "chapter": "01",
+        "stage": f"{req.stage_name or 'Manuscript Analysis'} → Editorial Assessment",
+        "due_date": datetime.now().strftime("%d-%b-%Y"),
+        "notes": "—"
+    }]
+    from app.routers.api_v2 import _prepare_transition_email_content
+    plain_body, html_body = _prepare_transition_email_content(
+        body_template=rendered_body,
+        chapter_rows=sample_rows
+    )
+
     try:
         send_email(
             to_email=req.to_email,
             subject=final_subject,
-            text_body=rendered_body
+            text_body=plain_body,
+            html_body=html_body
         )
         return {
             "success": True,
             "message": f"Test email sent to {req.to_email}.",
             "rendered_subject": final_subject,
-            "rendered_body": rendered_body
+            "rendered_body": plain_body
         }
     except Exception as e:
         logger.error(f"Failed to send test email: {e}")

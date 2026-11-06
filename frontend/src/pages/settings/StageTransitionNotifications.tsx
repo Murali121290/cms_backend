@@ -489,7 +489,7 @@ export function StageTransitionNotifications() {
       to: ['{next_stage_owner_emails}'],
       cc: ['{project_manager_email}', '{stage_owner_emails}'],
       subject: '[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification',
-      body: `Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.`,
+      body: `Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.`,
     }
 
     try {
@@ -1560,9 +1560,70 @@ export function StageTransitionNotifications() {
                       </div>
                     </div>
 
-                    <div className="pt-2 whitespace-pre-wrap font-sans text-xs leading-relaxed text-text bg-card p-3 rounded-lg border border-border/60">
-                      {renderedPreview.body || '(Empty body)'}
-                    </div>
+                    {(() => {
+                      const raw = renderedPreview.body || ''
+                      const asciiRegex = /\+[-+]+\+[\s\S]*?\+[-+]+\+/
+                      let norm = raw
+                      if (asciiRegex.test(norm)) {
+                        norm = norm.replace(asciiRegex, '{chapter_table}')
+                      }
+                      if (norm.includes('{chapter_table}')) {
+                        const parts = norm.split('{chapter_table}')
+                        const intro = parts[0]?.trim() || ''
+                        const outro = parts[1]?.trim() || ''
+                        return (
+                          <div className="p-3 bg-card rounded-lg border border-border/60 space-y-3 font-sans text-xs leading-relaxed text-text">
+                            {intro && (
+                              <div className="space-y-1.5 whitespace-pre-wrap">
+                                {intro.split('\n\n').map((p, idx) => (
+                                  <p key={idx}>{p}</p>
+                                ))}
+                              </div>
+                            )}
+                            <div className="my-2 overflow-hidden rounded-lg border border-border shadow-xs bg-surface/30">
+                              <table className="w-full text-xs text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-surface/80 border-b border-border text-muted font-semibold">
+                                    <th className="py-2 px-3 border-r border-border">Chapter</th>
+                                    <th className="py-2 px-3 border-r border-border">Stage</th>
+                                    <th className="py-2 px-3 border-r border-border">Due Date</th>
+                                    <th className="py-2 px-3">Shipment Notes</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border bg-card">
+                                  <tr>
+                                    <td className="py-2 px-3 border-r border-border font-medium text-text">01</td>
+                                    <td className="py-2 px-3 border-r border-border text-text">
+                                      <span className="inline-flex items-center gap-1.5 font-medium">
+                                        <span>{selectedStage || 'Manuscript Analysis'}</span>
+                                        <span className="text-muted">→</span>
+                                        <span className="text-primary font-semibold">Editorial Assessment</span>
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3 border-r border-border text-text">06-Nov-2026</td>
+                                    <td className="py-2 px-3 text-muted">—</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                            {outro && (
+                              <div className="space-y-1.5 whitespace-pre-wrap pt-1">
+                                {outro.split('\n\n').map((p, idx) => (
+                                  <p key={idx} className={p.toLowerCase().includes('note :') ? 'text-muted italic text-[11px]' : ''}>
+                                    {p}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      }
+                      return (
+                        <div className="pt-2 whitespace-pre-wrap font-sans text-xs leading-relaxed text-text bg-card p-3 rounded-lg border border-border/60">
+                          {raw || '(Empty body)'}
+                        </div>
+                      )
+                    })()}
                   </div>
 
                   {/* Send Test Email Card */}

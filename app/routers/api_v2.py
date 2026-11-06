@@ -9386,6 +9386,137 @@ def _sort_chapter_key(ch_str: str):
         return (1, int(match.group(0)), ch_str)
     return (3, 0, ch_str)
 
+def _build_html_table(rows: list[dict]) -> str:
+    """
+    Generate an HTML table matching the Pathfinder report format.
+    Columns: Chapter | Stage | Due Date | Shipment Notes
+    Fully compatible with Microsoft Outlook, Gmail, Apple Mail, and webmail.
+    """
+    html_rows = []
+    for r in rows:
+        ch = r.get("chapter") or "—"
+        st = r.get("stage") or "—"
+        due = r.get("due_date") or "—"
+        notes = r.get("notes") or r.get("shipment_notes") or "—"
+        html_rows.append(
+            f'    <tr>\n'
+            f'      <td style="border: 1px solid #777777; padding: 6px 12px; font-family: Calibri, Arial, sans-serif; font-size: 13px; color: #222222;">{ch}</td>\n'
+            f'      <td style="border: 1px solid #777777; padding: 6px 12px; font-family: Calibri, Arial, sans-serif; font-size: 13px; color: #222222;">{st}</td>\n'
+            f'      <td style="border: 1px solid #777777; padding: 6px 12px; font-family: Calibri, Arial, sans-serif; font-size: 13px; color: #222222;">{due}</td>\n'
+            f'      <td style="border: 1px solid #777777; padding: 6px 12px; font-family: Calibri, Arial, sans-serif; font-size: 13px; color: #222222;">{notes}</td>\n'
+            f'    </tr>'
+        )
+    tbody = "\n".join(html_rows)
+    return (
+        '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; max-width: 680px; margin: 16px 0; border: 1px solid #777777; font-family: Calibri, Arial, sans-serif; font-size: 13px; text-align: left;">\n'
+        '  <thead>\n'
+        '    <tr style="background-color: #f2f2f2; color: #111111;">\n'
+        '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Chapter</th>\n'
+        '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Stage</th>\n'
+        '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Due Date</th>\n'
+        '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Shipment Notes</th>\n'
+        '    </tr>\n'
+        '  </thead>\n'
+        '  <tbody>\n'
+        f'{tbody}\n'
+        '  </tbody>\n'
+        '</table>'
+    )
+
+
+def _build_plain_table(rows: list[dict]) -> str:
+    """
+    Generate clean plain text table fallback.
+    """
+    table_lines = [
+        "+----------------------------+-----------------------------+--------------+------------------+",
+        "| Chapter                    | Stage                       | Due Date     | Shipment Notes   |",
+        "+----------------------------+-----------------------------+--------------+------------------+",
+    ]
+    for r in rows:
+        ch_val = str(r.get("chapter") or "—")[:26].ljust(26)
+        st_val = str(r.get("stage") or "—")[:27].ljust(27)
+        due_val = str(r.get("due_date") or "—")[:12].ljust(12)
+        notes_val = str(r.get("notes") or r.get("shipment_notes") or "—")[:16].ljust(16)
+        table_lines.append(f"| {ch_val} | {st_val} | {due_val} | {notes_val} |")
+    table_lines.append("+----------------------------+-----------------------------+--------------+------------------+")
+    return "\n".join(table_lines)
+
+
+def _prepare_transition_email_content(
+    body_template: str,
+    chapter_rows: list[dict],
+    shipment_notes: Optional[str] = None
+) -> tuple[str, str]:
+    """
+    Generate both plain text and rich HTML email documents.
+    In the HTML version, {chapter_table} (or ASCII box) is replaced with
+    a genuine <table> with borders, styling, and headers matching Pathfinder.
+    """
+    import re
+    import html
+
+    notes_str = (shipment_notes or "").strip() or "—"
+    table_html = _build_html_table(chapter_rows)
+    table_plain = _build_plain_table(chapter_rows)
+
+    normalized = body_template or ""
+    if "{shipment_notes}" in normalized:
+        normalized = normalized.replace("{shipment_notes}", notes_str)
+
+    # Normalize ASCII table if present to {chapter_table}
+    ascii_table_regex = r"\+[-+]+\+[\s\S]*?\+[-+]+\+"
+    if re.search(ascii_table_regex, normalized):
+        normalized = re.sub(ascii_table_regex, "{chapter_table}", normalized)
+
+    # Plain text version
+    if "{chapter_table}" in normalized:
+        plain_body = normalized.replace("{chapter_table}", table_plain)
+    else:
+        plain_body = f"{normalized.rstrip()}\n\n{table_plain}"
+
+    # HTML version
+    if "{chapter_table}" in normalized:
+        parts = normalized.split("{chapter_table}")
+        intro_text = parts[0].strip()
+        outro_text = parts[1].strip() if len(parts) > 1 else ""
+    else:
+        intro_text = normalized.strip()
+        outro_text = ""
+
+    def _format_para_lines(text_block: str) -> str:
+        if not text_block:
+            return ""
+        paras = [p.strip() for p in text_block.split("\n\n") if p.strip()]
+        out = []
+        for p in paras:
+            lines = [html.escape(l.strip()) for l in p.split("\n")]
+            p_content = "<br>\n".join(lines)
+            p_content = re.sub(r"^(Project Name:)", r"<strong>\1</strong>", p_content)
+            p_content = re.sub(r"^(Client Name:)", r"<strong>\1</strong>", p_content)
+            if "Note :" in p_content:
+                p_content = f"<em>{p_content}</em>"
+            out.append(f'<p style="margin: 0 0 12px 0; font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #222222; line-height: 1.5;">{p_content}</p>')
+        return "\n".join(out)
+
+    intro_html = _format_para_lines(intro_text)
+    outro_html = _format_para_lines(outro_text)
+
+    html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+</head>
+<body style="font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #222222; line-height: 1.5; margin: 0; padding: 12px; background-color: #ffffff;">
+{intro_html}
+{table_html}
+{outro_html}
+</body>
+</html>"""
+
+    return plain_body, html_doc
+
+
 def _format_multi_chapter_email(
     subject: str,
     body: str,
@@ -9397,39 +9528,18 @@ def _format_multi_chapter_email(
     # Extract chapter numbers and metadata
     unique_chs = []
     seen = set()
-    normalized_rows = []
 
     for item in chapter_rows:
         if isinstance(item, dict):
             ch = str(item.get("chapter") or item.get("chapter_number") or "").strip()
-            from_st = item.get("from_stage") or item.get("current_stage") or ""
-            to_st = item.get("to_stage") or item.get("next_stage") or ""
-            due = str(item.get("due_date") or "—").strip()
-            notes = str(item.get("notes") or item.get("shipment_notes") or "—").strip()
         elif hasattr(item, "chapter_number"):
             ch = str(item.chapter_number or "").strip()
-            from_st = getattr(item, "current_stage", "") or ""
-            to_st = getattr(item, "next_stage", "") or ""
-            due = "—"
-            notes = "—"
         else:
             ch = str(item).strip()
-            from_st = ""
-            to_st = ""
-            due = "—"
-            notes = "—"
 
         if ch and ch not in seen:
             seen.add(ch)
             unique_chs.append(ch)
-
-        st_flow = f"{from_st} → {to_st}" if (from_st and to_st) else (to_st or from_st or "—")
-        normalized_rows.append({
-            "chapter": ch,
-            "stage": st_flow,
-            "due_date": due,
-            "notes": notes
-        })
 
     sorted_chs = sorted(unique_chs, key=_sort_chapter_key)
     ch_names_str = ", ".join(sorted_chs)
@@ -9446,53 +9556,28 @@ def _format_multi_chapter_email(
     elif first_ch_num and first_ch_num in new_subject:
         new_subject = new_subject.replace(first_ch_num, ch_names_str)
 
-    # 2. Build multi-chapter table
-    # Columns: Chapter | Stage (Current → Next) | Due Date | Shipment Notes
-    table_lines = [
-        "+----------------------------+-----------------------------+--------------+------------------+",
-        "| Chapter                    | Stage                       | Due Date     | Shipment Notes   |",
-        "+----------------------------+-----------------------------+--------------+------------------+",
-    ]
-    for r in normalized_rows:
-        ch_val = r["chapter"][:26].ljust(26)
-        st_val = r["stage"][:27].ljust(27)
-        due_val = r["due_date"][:12].ljust(12)
-        notes_val = r["notes"][:16].ljust(16)
-        table_lines.append(f"| {ch_val} | {st_val} | {due_val} | {notes_val} |")
-    table_lines.append("+----------------------------+-----------------------------+--------------+------------------+")
-    table_block = "\n".join(table_lines)
-
-    # 3. Insert table into body
+    # 2. Normalize body to retain clean {chapter_table} token
     new_body = body
-    if "{chapter_table}" in new_body:
-        new_body = new_body.replace("{chapter_table}", table_block)
-    elif "+---" in new_body and "| Chapter" in new_body:
-        # Replace existing single-row table in template with multi-row table
-        start_idx = new_body.find("+---")
-        last_boundary = new_body.rfind("+---")
-        if start_idx != -1 and last_boundary != -1 and last_boundary > start_idx:
-            eol = new_body.find("\n", last_boundary)
-            end_pos = eol if eol != -1 else len(new_body)
-            new_body = new_body[:start_idx] + table_block + new_body[end_pos:]
-        else:
-            new_body += f"\n\n{table_block}"
-    else:
-        # Adapt text phrases
-        if first_ch_num and f"Chapter {first_ch_num}" in new_body:
-            new_body = new_body.replace(f"Chapter {first_ch_num}", f"Chapters {ch_names_str}")
-        elif first_ch_num and first_ch_num in new_body:
-            new_body = new_body.replace(first_ch_num, ch_names_str)
+    ascii_table_regex = r"\+[-+]+\+[\s\S]*?\+[-+]+\+"
+    if re.search(ascii_table_regex, new_body):
+        new_body = re.sub(ascii_table_regex, "{chapter_table}", new_body)
 
-        new_body = new_body.replace("The chapter has been moved", "The chapters have been moved")
-        new_body = new_body.replace("is now ready for processing", "are now ready for processing")
-        new_body = new_body.replace("The file has been moved", "The files have been moved")
-        
-        # Append the structured table before sign-off
+    if "{chapter_table}" not in new_body:
         if "Regards," in new_body:
             parts = new_body.split("Regards,")
-            new_body = parts[0].rstrip() + "\n\n" + table_block + "\n\nRegards," + parts[1]
+            new_body = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
         else:
-            new_body += f"\n\n{table_block}"
+            new_body += "\n\n{chapter_table}"
+
+    # Adapt text phrases
+    if first_ch_num and f"Chapter {first_ch_num}" in new_body:
+        new_body = new_body.replace(f"Chapter {first_ch_num}", f"Chapters {ch_names_str}")
+    elif first_ch_num and first_ch_num in new_body:
+        new_body = new_body.replace(first_ch_num, ch_names_str)
+
+    new_body = new_body.replace("The chapter has been moved", "The chapters have been moved")
+    new_body = new_body.replace("is now ready for processing", "are now ready for processing")
+    new_body = new_body.replace("The file has been moved", "The files have been moved")
 
     return new_subject, new_body
 
@@ -9679,13 +9764,39 @@ def api_v2_chapter_transition_email(
     
     # Send transition email via SMTP (log failure but proceed)
     if payload.to_emails:
-        msg = MIMEMultipart()
+        due_str = "—"
+        raw_due = getattr(chapter, "due_date", None) or (getattr(project, "due_date", None) if project else None)
+        if raw_due:
+            try:
+                due_str = raw_due.strftime("%d-%b-%Y") if hasattr(raw_due, "strftime") else str(raw_due)
+            except Exception:
+                due_str = str(raw_due)
+
+        clean_ch_num = chapter.chapters.strip() if chapter.chapters else ""
+        if clean_ch_num.lower().startswith("chapter "):
+            clean_ch_num = clean_ch_num[8:].strip()
+
+        row_item = {
+            "chapter": clean_ch_num or "01",
+            "stage": f"{payload.from_stage} → {payload.to_stage}",
+            "due_date": due_str,
+            "notes": payload.shipment_notes or "—"
+        }
+
+        plain_body, html_body = _prepare_transition_email_content(
+            body_template=payload.body,
+            chapter_rows=[row_item],
+            shipment_notes=payload.shipment_notes
+        )
+
+        msg = MIMEMultipart('alternative')
         msg['From'] = settings.SMTP_FROM
         msg['To'] = ", ".join(payload.to_emails)
         if payload.cc_emails:
             msg['Cc'] = ", ".join(payload.cc_emails)
         msg['Subject'] = payload.subject
-        msg.attach(MIMEText(payload.body, 'plain'))
+        msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
         
         print("================== SENDING TRANSITION EMAIL ==================")
         print(f"TO: {payload.to_emails}")
@@ -9973,13 +10084,20 @@ def api_v2_bulk_transition_execute(
                     )
 
         if to_emails:
-            msg = MIMEMultipart()
+            plain_body, html_body = _prepare_transition_email_content(
+                body_template=body or "",
+                chapter_rows=chapter_row_items,
+                shipment_notes=payload.shipment_notes
+            )
+
+            msg = MIMEMultipart('alternative')
             msg['From'] = settings.SMTP_FROM
             msg['To'] = ", ".join(to_emails)
             if cc_emails:
                 msg['Cc'] = ", ".join(cc_emails)
             msg['Subject'] = subject or "Bulk Stage Transition Notification"
-            msg.attach(MIMEText(body or "", 'plain'))
+            msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
+            msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
             try:
                 if settings.SMTP_USE_SSL:

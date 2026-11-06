@@ -257,6 +257,8 @@ export function ChapterDetailPage() {
           loading={proceedLoading}
           currentStage={transitionParams.fromStage}
           nextStage={transitionParams.toStage}
+          chapterNumber={chapter?.chapters || undefined}
+          dueDate={chapter?.due_date || undefined}
           config={transitionConfig}
         />
       )}

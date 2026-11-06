@@ -10,7 +10,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -26,7 +26,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -42,7 +42,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -58,7 +58,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -74,7 +74,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -90,7 +90,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -106,7 +106,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -122,7 +122,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -138,7 +138,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -154,7 +154,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -170,7 +170,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -186,7 +186,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -202,7 +202,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -218,7 +218,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -234,7 +234,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -250,7 +250,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -266,7 +266,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -282,7 +282,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -298,7 +298,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -314,7 +314,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -330,7 +330,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -346,7 +346,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -362,7 +362,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,
@@ -378,7 +378,7 @@
       "{stage_owner_emails}"
     ],
     "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n+----------------------------+-----------------------------+--------------+------------------+\n| Chapter                    | Stage                       | Due Date     | Shipment Notes   |\n+----------------------------+-----------------------------+--------------+------------------+\n| {chapter_name}             | {stage}                     | {due_date}   | {shipment_notes} |\n+----------------------------+-----------------------------+--------------+------------------+\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
     "stage_owner_mode": "both",
     "stage_owner_username": null,
     "stage_owner_email": null,

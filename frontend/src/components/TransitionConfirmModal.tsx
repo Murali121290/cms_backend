@@ -9,6 +9,8 @@ interface TransitionConfirmModalProps {
   loading?: boolean;
   currentStage: string;
   nextStage: string;
+  chapterNumber?: string;
+  dueDate?: string;
   config: {
     custom_message?: string;
     to: string[];
@@ -26,22 +28,57 @@ export function TransitionConfirmModal({
   loading = false,
   currentStage,
   nextStage,
+  chapterNumber,
+  dueDate,
   config,
 }: TransitionConfirmModalProps) {
   const [shipmentNotes, setShipmentNotes] = useState("");
   const displayMsg = config.custom_message || `Complete ${currentStage} and move to ${nextStage}?`;
 
-  const displayedBody = useMemo(() => {
-    let raw = config.body || "—";
-    const notesVal = shipmentNotes.trim() || "—";
-    if (raw.includes("{shipment_notes}")) {
-      raw = raw.split("{shipment_notes}").join(notesVal);
-    } else if (shipmentNotes.trim()) {
-      // In ASCII table format, replace the shipment notes column or trailing dash
-      raw = raw.replace(/\|\s*—\s*\|(?=\s*\n|$)/g, `| ${notesVal} |`);
+  // Format today's date if dueDate is not provided
+  const todayFormatted = useMemo(() => {
+    if (dueDate && dueDate !== "—") return dueDate;
+    const now = new Date();
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const d = String(now.getDate()).padStart(2, "0");
+    const m = months[now.getMonth()];
+    const y = now.getFullYear();
+    return `${d}-${m}-${y}`;
+  }, [dueDate]);
+
+  // Resolve chapter number from props or fallback from subject
+  const resolvedChapterNumber = useMemo(() => {
+    if (chapterNumber) {
+      const c = chapterNumber.trim();
+      return c.toLowerCase().startsWith("chapter ") ? c.slice(8).trim() : c;
     }
-    return raw;
-  }, [config.body, shipmentNotes]);
+    const match = (config.subject || "").match(/Chapter(?:s)?\s+([^|]+)/i);
+    if (match) {
+      return match[1].trim();
+    }
+    return "01";
+  }, [chapterNumber, config.subject]);
+
+  // Parse body around {chapter_table} or ASCII table pattern
+  const { introText, outroText } = useMemo(() => {
+    let raw = config.body || "";
+    const asciiTableRegex = /\+[-+]+\+[\s\S]*?\+[-+]+\+/;
+    if (asciiTableRegex.test(raw)) {
+      raw = raw.replace(asciiTableRegex, "{chapter_table}");
+    }
+
+    if (raw.includes("{chapter_table}")) {
+      const parts = raw.split("{chapter_table}");
+      return {
+        introText: parts[0].trim(),
+        outroText: parts[1]?.trim() || "",
+      };
+    }
+    return {
+      introText: raw.trim(),
+      outroText: "",
+    };
+  }, [config.body]);
 
   return (
     <Modal
@@ -93,7 +130,7 @@ export function TransitionConfirmModal({
           />
           <p className="text-[11px] text-muted">
             {shipmentNotes.trim()
-              ? "✓ Notes will be included in the email table and recorded on this chapter."
+              ? "✓ Notes will be rendered in the email table and recorded on this chapter."
               : 'Leave blank to display as "—" in the email notification table.'}
           </p>
         </div>
@@ -122,11 +159,91 @@ export function TransitionConfirmModal({
             </div>
           </div>
 
-          {/* Email Content Body */}
-          <div className="p-4 bg-card min-h-[150px]">
-            <pre className="text-sm text-text font-sans whitespace-pre-wrap leading-relaxed">
-              {displayedBody}
-            </pre>
+          {/* Email Content Body with REAL Table */}
+          <div className="p-4 bg-card min-h-[150px] space-y-3 font-sans text-xs leading-relaxed text-text">
+            {/* Intro text */}
+            {introText && (
+              <div className="space-y-2 whitespace-pre-wrap">
+                {introText.split("\n\n").map((para, idx) => (
+                  <p key={idx} className="leading-relaxed">
+                    {para.split("\n").map((line, lIdx) => {
+                      const pMatch = line.match(/^(Project Name:|Client Name:)(.*)$/);
+                      if (pMatch) {
+                        return (
+                          <span key={lIdx} className="block">
+                            <strong className="font-semibold text-text">{pMatch[1]}</strong>
+                            <span className="text-text">{pMatch[2]}</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <span key={lIdx} className="block">
+                          {line}
+                        </span>
+                      );
+                    })}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* The REAL Structured HTML/React Table */}
+            <div className="my-3 overflow-hidden rounded-lg border border-border shadow-xs bg-surface/30">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-surface/80 border-b border-border text-muted font-semibold">
+                    <th className="py-2.5 px-3 border-r border-border">Chapter</th>
+                    <th className="py-2.5 px-3 border-r border-border">Stage</th>
+                    <th className="py-2.5 px-3 border-r border-border">Due Date</th>
+                    <th className="py-2.5 px-3">Shipment Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border bg-card">
+                  <tr>
+                    <td className="py-2.5 px-3 border-r border-border font-medium text-text">
+                      {resolvedChapterNumber}
+                    </td>
+                    <td className="py-2.5 px-3 border-r border-border text-text">
+                      <span className="inline-flex items-center gap-1.5 font-medium">
+                        <span>{currentStage}</span>
+                        <span className="text-muted">→</span>
+                        <span className="text-primary font-semibold">{nextStage}</span>
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 border-r border-border text-text">
+                      {todayFormatted}
+                    </td>
+                    <td className="py-2.5 px-3 text-text">
+                      {shipmentNotes.trim() ? (
+                        <span className="text-primary font-semibold bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {shipmentNotes.trim()}
+                        </span>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Outro text */}
+            {outroText && (
+              <div className="space-y-2 whitespace-pre-wrap pt-1">
+                {outroText.split("\n\n").map((para, idx) => (
+                  <p
+                    key={idx}
+                    className={
+                      para.toLowerCase().includes("note :")
+                        ? "text-muted italic text-[11px] pt-1"
+                        : "leading-relaxed"
+                    }
+                  >
+                    {para}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
