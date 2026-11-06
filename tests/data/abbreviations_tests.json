@@ -9,8 +9,8 @@
       "area": "First-use rule",
       "expected": "The patient was admitted to the intensive care unit (ICU) after surgery. The ICU staff monitored blood pressure. Later the patient left the ICU.",
       "id": "T-001",
-      "input": "The patient was admitted to the intensive care unit after surgery. The intensive care unit staff monitored blood pressure. Later the patient left the intensive care unit.",
-      "notes": "AB01 and AB02 together. Blood pressure is used once, so it is not abbreviated",
+      "input": "The patient was admitted to the intensive care unit after surgery. The ICU staff monitored blood pressure. Later the patient left the intensive care unit.",
+      "notes": "AB01 introduces the abbreviation at first use and AB02 abbreviates the later expansion. Blood pressure is used once so it is not abbreviated. AB01 requires the abbreviation form (ICU) to appear in the document.",
       "settings": "audience=general; minUses=2",
       "test_type": "Should change"
     },
@@ -70,10 +70,10 @@
     },
     {
       "area": "First-use rule",
-      "expected": "Two intensive care units (ICUs) were closed. The ICUs reopened.",
+      "expected": "Two intensive care units (ICUs) were closed. The ICU reopened.",
       "id": "T-008",
-      "input": "Two intensive care units were closed. The intensive care units reopened.",
-      "notes": "Plurals: ICUs",
+      "input": "Two intensive care units were closed. The ICU reopened.",
+      "notes": "Plurals: ICUs introduced by AB01 at the first plural expansion. AB01 requires the abbreviation form to appear somewhere in the document.",
       "settings": "audience=general; minUses=2",
       "test_type": "Should change"
     },
@@ -117,8 +117,8 @@
       "area": "First-use rule",
       "expected": "Blood pressure (BP) was measured twice. BP was normal.",
       "id": "T-013",
-      "input": "Blood pressure was measured twice. Blood pressure was normal.",
-      "notes": "Rule G entries are expanded for a general audience",
+      "input": "Blood pressure was measured twice. BP was normal.",
+      "notes": "Rule G entries are expanded for a general audience. AB01 fires on the first 'Blood pressure' because the abbreviation BP appears later in the document.",
       "settings": "audience=general; minUses=2",
       "test_type": "Should change"
     },
