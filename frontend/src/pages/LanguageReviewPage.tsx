@@ -1367,12 +1367,18 @@ export function LanguageReviewPage() {
                       : f.category === 'medical_terms'
                         ? 'medical'
                         : f.category
-                    // Provenance badge: distinguishes workbook rules from the
-                    // smaller hand-curated LWW compound list without needing a
-                    // second filter tab.
-                    const hyphSource = displayCategory === 'hyphenation'
-                      ? (f.rule_id?.startsWith('compound_') ? 'LWW list' : 'Workbook')
-                      : null
+                    // Provenance badge: distinguishes rule sources without
+                    // needing separate filter tabs. Hyphenation findings
+                    // get "Workbook" (hyphen/dash workbook) vs "LWW list"
+                    // (hardcoded compound_* rules). All categories gain
+                    // an "LWW-NE" badge when the finding came from the
+                    // LWW-NE workbook (rule_id prefix 'LWW-NE-').
+                    const isLwwNe = f.rule_id?.startsWith('LWW-NE-')
+                    const hyphSource = isLwwNe
+                      ? 'LWW-NE'
+                      : displayCategory === 'hyphenation'
+                        ? (f.rule_id?.startsWith('compound_') ? 'LWW list' : 'Workbook')
+                        : null
 
                     if (isTerm) {
                       const { listName, alsoIn } = parseTermMeta(f.message)
@@ -1453,7 +1459,11 @@ export function LanguageReviewPage() {
                                 title={
                                   hyphSource === 'Workbook'
                                     ? 'Rule from the hyphen & en-dash workbook'
-                                    : 'Rule from the LWW curated compound list'
+                                    : hyphSource === 'LWW list'
+                                      ? 'Rule from the LWW curated compound list'
+                                      : hyphSource === 'LWW-NE'
+                                        ? 'Rule from the LWW-NE language-tool workbook'
+                                        : ''
                                 }
                               >
                                 {hyphSource}

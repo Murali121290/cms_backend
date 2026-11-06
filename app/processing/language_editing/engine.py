@@ -3,6 +3,7 @@ Rule engine for Ninja Inkflow Language Editing.
 Applies rules to text and returns findings for human review.
 The engine NEVER mutates the source text during analysis.
 """
+import logging
 import re
 from typing import Any, Optional
 from .rules import Finding, Rule
@@ -11,6 +12,9 @@ from . import hyphen_dash
 from . import abbreviations
 from . import medical_terms
 from . import uk_us_spelling
+from . import lww_ne
+
+logger = logging.getLogger(__name__)
 
 
 def _match_case(src: str, canon: str) -> str:
@@ -178,7 +182,7 @@ def run_manuscript_core_rules(
                         severity="warning"
                     ))
         except Exception:
-            pass
+            logger.exception("manuscript_core bias-terms rule family failed for this paragraph")
 
     # 3. Compound Variants
     if enable_compounds:
@@ -191,6 +195,7 @@ def run_manuscript_core_rules(
             try:
                 covered = hyphen_dash.workbook_covered_compound_bases()
             except Exception:
+                logger.warning("hyphen_dash.workbook_covered_compound_bases() failed; assuming empty set", exc_info=True)
                 covered = frozenset()
             for base in COMPOUND_BASES:
                 parts = base.split()
@@ -218,7 +223,7 @@ def run_manuscript_core_rules(
                             severity="suggestion"
                         ))
         except Exception:
-            pass
+            logger.exception("manuscript_core compound-variants rule family failed for this paragraph")
 
     return out
 
@@ -287,6 +292,15 @@ def analyze(
     para_roles: Optional[dict[int, dict]] = None,
     medical_style_profile: str = "All",
     document_variant: str = "en-GB",
+    # LWW-NE workbook (Phase 2): project context used by the workbook's
+    # per-row filter. ``project_profile_keys`` carries the project's
+    # existing style profiles (uk/us/ama/apa/chicago/canadian). An
+    # ``is_lww_ne_project`` flag is derived by the router from the
+    # project's term_list assignments (True when LWW_NE term list is
+    # assigned). Both default to safe-no-op values so legacy callers
+    # continue to work unchanged.
+    project_profile_keys: Optional[list[str]] = None,
+    is_lww_ne_project: bool = False,
 ) -> list[Finding]:
     """Runs all enabled rules over paragraph text and returns de-conflicted findings.
 
@@ -305,6 +319,7 @@ def analyze(
                 text, dash_profile=dash_profile,
             )
         except Exception:
+            logger.exception("hyphen_dash.build_protected_spans failed; proceeding with empty span list")
             protected_spans = []
 
     overrides = rule_overrides or {}
@@ -342,7 +357,7 @@ def analyze(
     except Exception:
         # Never let a workbook glitch break the whole analyze pass; existing
         # rule families still produce findings so the user isn't blocked.
-        pass
+        logger.exception("hyphen_dash.analyze_hyphen_dash failed; skipping this workbook for this paragraph")
 
     # Abbreviations workbook — Phase A fires Do_Not_Use regex rules
     # per-paragraph; Phase B adds AB01/AB02/AB04/AB05/AB09/AB10/AB13
@@ -358,7 +373,7 @@ def analyze(
             para_roles=para_roles,
         ))
     except Exception:
-        pass
+        logger.exception("abbreviations.analyze_abbreviations failed; skipping this workbook for this paragraph")
 
     # Medical Terminology workbook — Detect_List phrase/word lookup +
     # Spelling_Patterns regex + Confusable_Terms paragraph-scoped context
@@ -374,7 +389,7 @@ def analyze(
             rule_overrides=overrides,
         ))
     except Exception:
-        pass
+        logger.exception("medical_terms.analyze_medical_terms failed; skipping this workbook for this paragraph")
 
     # UK/US Spelling workbook — direction-aware regional spelling check.
     # Flags words that use the wrong-regional spelling for the project's
@@ -390,7 +405,25 @@ def analyze(
                 rule_overrides=overrides,
             ))
         except Exception:
-            pass
+            logger.exception("uk_us_spelling.analyze_uk_us_spelling failed; skipping this workbook for this paragraph")
+
+    # LWW-NE workbook (Phase 2) — per-row filter driven by
+    # ``project_profile_keys`` (APA/AMA via profile_keys) +
+    # ``is_lww_ne_project`` (derived by router from term_list
+    # assignment). Generic-tagged rows fire in every project regardless
+    # of the filter (Decision 8). Scope-C overrides apply per
+    # ``LWW-NE-{source_term}`` rule id. Four safety layers inside the
+    # analyser already enforce Q4-Q7 (quarantined / annotation-
+    # unclarified / editor_hint / Unknown-confidence) exclusions.
+    try:
+        findings.extend(lww_ne.analyze_lww_ne(
+            text,
+            project_profile_keys=project_profile_keys,
+            is_lww_ne_project=is_lww_ne_project,
+            rule_overrides=overrides,
+        ))
+    except Exception:
+        logger.exception("lww_ne.analyze_lww_ne failed; skipping this workbook for this paragraph")
 
     # Filter against protected spans BEFORE overlap resolution so a
     # protected span never wins a tie-break and causes a legitimate

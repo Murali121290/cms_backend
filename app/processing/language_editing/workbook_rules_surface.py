@@ -61,12 +61,18 @@ from . import abbreviations as _ab
 from . import hyphen_dash
 from . import medical_terms as _mt
 from . import uk_us_spelling as _uus
+from . import lww_ne as _lww_ne
 
 
 _WORKBOOK_CATEGORY = "hyphenation"
 _ABBREVIATIONS_CATEGORY = "abbreviations"
 _MEDICAL_CATEGORY = "medical_terms"
 _UK_US_SPELLING_CATEGORY = "spelling"
+# LWW-NE entries route to multiple existing categories based on their
+# workbook Category column — spelling / hyphenation / abbreviations /
+# bias. The mapping helper lives in the runtime module to keep a single
+# source of truth.
+_LWW_NE_CATEGORY_MAPPER = _lww_ne._category_to_engine_category
 
 
 # Short, human-friendly source labels for the UI's provenance badge. Keys
@@ -674,6 +680,158 @@ def uk_us_spelling_rule_summary(
     return {"total": total, "enabled": enabled, "flag": flag, "auto_replace": auto_replace}
 
 
+# ---------------------------------------------------------------------------
+# LWW-NE workbook surface (Phase 4)
+# ---------------------------------------------------------------------------
+#
+# The LWW-NE workbook is unusual among our integrations in that its
+# rows span FOUR engine-facing categories (spelling / hyphenation /
+# abbreviations / bias) based on each row's workbook Category column.
+# We surface them as a single "lww_ne" workbook bucket in the GET
+# payload, but each row carries its own ``category`` field so the
+# Rules Picker renders it under the correct existing chip.
+#
+# Phase-1/2 Decisions applied in the surface (consistent with the
+# runtime filter in ``lww_ne.analyze_lww_ne``):
+#   - validation_status != "ok"      → not surfaced (quarantined / annotation)
+#   - runtime_mode != "scan"         → not surfaced (editor_hint / Partial word)
+#   - "No action (protected form)"   → not surfaced (protect-only rows)
+# Result: the Rules Picker shows exactly the rows that CAN fire at
+# runtime, so toggling one off actually changes analyze output.
+
+def _normalise_lww_ne_entry(row: dict[str, Any]) -> dict[str, Any]:
+    """LWW-NE Tool_Input row → unified ``LanguageRule`` wire dict.
+
+    Rendered as ``phrase_lookup`` so the existing RuleDetails
+    component shows the source → suggestions pair. Every editorial
+    column is preserved for Rules Picker display: workbook Category,
+    Action, Tool behaviour, Match type, Match case, Confidence,
+    Rule Runs, MW note, Original text (if cleaned).
+    """
+    source = row.get("source_term") or ""
+    suggestions = list(row.get("suggestions") or [])
+    primary = suggestions[0] if suggestions else source
+    alt = list(suggestions[1:]) if len(suggestions) > 1 else []
+
+    # Tool behaviour mirrors the runtime module's resolution.
+    confidence = row.get("confidence") or ""
+    wb_tb = row.get("tool_behaviour") or ""
+    if confidence == "Unknown":
+        tb = "flag"
+    elif wb_tb == "Auto-replace":
+        tb = "auto_replace"
+    else:
+        tb = "flag"
+
+    # Severity mirrors the runtime module.
+    if confidence == "Unknown" or wb_tb == "Flag only (review)":
+        severity = "suggestion"
+    else:
+        severity = "warning"
+
+    # Rule-run display: the raw list of base tags (annotations stripped
+    # for display; the full workbook text is preserved in rule_runs_raw
+    # for anyone who wants to see the parenthetical annotations).
+    rule_runs = row.get("rule_runs") or []
+    tag_display = ", ".join(r["rule_run"] for r in rule_runs if r.get("rule_run"))
+    rule_runs_raw = []
+    for r in rule_runs:
+        base = r.get("rule_run") or ""
+        annotation = r.get("annotation")
+        rule_runs_raw.append(f"{base} ({annotation})" if annotation else base)
+
+    engine_category = _LWW_NE_CATEGORY_MAPPER(row.get("category"))
+
+    return {
+        "id": f"LWW-NE-{source}",
+        "category": engine_category,
+        "type": "phrase_lookup",
+        "enabled": True,
+        "tool_behaviour": tb,
+        "severity": severity,
+        "message": f"{source} → {primary}" if suggestions else source,
+        "source_of": "workbook",
+        # phrase_lookup wire shape reused by hyphenation / medical workbooks
+        "source": source,
+        "suggestions": suggestions,
+        "replacement": primary if suggestions else None,
+        "alt_suggestions": alt,
+        # Editorial metadata preserved for RuleDetails + Rules Picker
+        "workbook_category": row.get("category") or "",
+        "action": row.get("action") or "",
+        "tool_behaviour_raw": wb_tb,
+        "match_type": row.get("match_type") or "",
+        "match_case": bool(row.get("match_case")),
+        "confidence": confidence,
+        "mw_note": row.get("mw_note") or "",
+        "rule_runs_display": tag_display,
+        "rule_runs_raw": rule_runs_raw,
+        "is_generic": bool(row.get("is_generic")),
+        "original_text": row.get("original_text") or "",
+        "source_badge": "LWW-NE",
+        "source_raw": "LWW-NE language-tool workbook",
+    }
+
+
+@lru_cache(maxsize=1)
+def _base_lww_ne_rules() -> list[dict[str, Any]]:
+    """Return the Rules-Picker-ready LWW-NE entries.
+
+    Filters at surface time (mirrors the runtime module) so toggling
+    a surfaced rule actually affects analyze output:
+      * validation_status == "ok"
+      * runtime_mode == "scan"
+      * tool_behaviour != "No action (protected form)"
+    """
+    out: list[dict[str, Any]] = []
+    for row in (_lww_ne._terms_data().get("entries") or []):
+        if row.get("validation_status") != "ok":
+            continue
+        if row.get("runtime_mode") != "scan":
+            continue
+        if (row.get("tool_behaviour") or "") == "No action (protected form)":
+            continue
+        out.append(_normalise_lww_ne_entry(row))
+    return out
+
+
+def list_lww_ne_rules(
+    overrides: Optional[dict[str, dict[str, Any]]] = None,
+) -> list[dict[str, Any]]:
+    """Return the full normalised LWW-NE rule list with overrides applied."""
+    overrides = overrides or {}
+    base = _base_lww_ne_rules()
+    if not overrides:
+        return [dict(r) for r in base]
+    out: list[dict[str, Any]] = []
+    for r in base:
+        o = overrides.get(r["id"])
+        if o:
+            out.append(_apply_override(r, o))
+        else:
+            out.append(dict(r))
+    return out
+
+
+def lww_ne_rule_summary(
+    overrides: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, int]:
+    overrides = overrides or {}
+    total = enabled = flag = auto_replace = 0
+    for r in _base_lww_ne_rules():
+        total += 1
+        o = overrides.get(r["id"]) or {}
+        eff_enabled = bool(o["enabled"]) if "enabled" in o else bool(r.get("enabled", True))
+        eff_tb = o.get("tool_behaviour") or r.get("tool_behaviour") or "flag"
+        if eff_enabled:
+            enabled += 1
+            if eff_tb == "auto_replace":
+                auto_replace += 1
+            else:
+                flag += 1
+    return {"total": total, "enabled": enabled, "flag": flag, "auto_replace": auto_replace}
+
+
 # Allow tests to force a reload after regenerating JSON.
 _original_clear_cache = clear_cache
 
@@ -683,6 +841,8 @@ def clear_cache() -> None:  # noqa: F811  (deliberate override to extend)
     _base_abbreviation_rules.cache_clear()
     _base_medical_rules.cache_clear()
     _base_uk_us_rules.cache_clear()
+    _base_lww_ne_rules.cache_clear()
     _ab.clear_cache()
     _mt.clear_cache()
     _uus.clear_cache()
+    _lww_ne.clear_cache()
