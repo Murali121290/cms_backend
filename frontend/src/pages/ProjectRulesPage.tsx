@@ -191,6 +191,14 @@ type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string }
 //     not meaningful style profiles (zero rules, zero variants).
 const ALLOWED_PROFILE_KEYS = new Set<string>(['apa', 'ama', 'uk', 'us', 'canadian', 'chicago'])
 
+// Temporary UI hide-flags for the sidebar configuration sections. Flip to
+// true to restore the panel without any other code change. Backend
+// wiring, loaded project values, save payload, diff tracking, and rule
+// execution remain intact while hidden.
+const SHOW_ABBREVIATIONS_SETTINGS = false
+const SHOW_MEDICAL_TERMS_SETTINGS = false
+const SHOW_SPELLING_SETTINGS = false
+
 // Styles dropdown filter options — superset of the profile keys. 'NE' is a
 // display-only filter (never saved to profile_keys) that narrows the view
 // to LWW-NE rules carrying the 'NE' tag in rule_runs_raw. NE off by
@@ -1176,7 +1184,7 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
           </div>
 
           {/* Abbreviations settings — only when the workbook is loaded */}
-          {counts.byCat.abbreviations.total > 0 && (
+          {SHOW_ABBREVIATIONS_SETTINGS && counts.byCat.abbreviations.total > 0 && (
             <div>
               <h3 className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 mb-2">
                 Abbreviations
@@ -1247,7 +1255,7 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
           )}
 
           {/* Medical Terms settings — only when the workbook is loaded */}
-          {counts.byCat.medical_terms.total > 0 && (
+          {SHOW_MEDICAL_TERMS_SETTINGS && counts.byCat.medical_terms.total > 0 && (
             <div>
               <h3 className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 mb-2 mt-4">
                 Medical Terms
@@ -1275,7 +1283,7 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
           )}
 
           {/* Spelling settings — direction for the UK/US workbook */}
-          {counts.byCat.spelling.total > 0 && (
+          {SHOW_SPELLING_SETTINGS && counts.byCat.spelling.total > 0 && (
             <div>
               <h3 className="text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 mb-2 mt-4">
                 Spelling
