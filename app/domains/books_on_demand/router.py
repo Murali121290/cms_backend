@@ -859,13 +859,31 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
         os.makedirs(local_dir, exist_ok=True)
         zip_filepath = os.path.join(local_dir, zip_filename)
 
+        # Determine eisbn base from PDF filename (e.g. "9783695720996.pdf" -> "9783695720996")
+        eisbn = ""
+        if job.pdf_filename:
+            eisbn = job.pdf_filename.rsplit('.', 1)[0].strip()
+        elif job.project_name:
+            eisbn = str(job.project_name).strip()
+        elif job.epub_filename:
+            m_eisbn = re.search(r'(\d{10,13})', job.epub_filename)
+            eisbn = m_eisbn.group(1) if m_eisbn else job.epub_filename.rsplit('.', 1)[0].strip()
+
+        # Target entry names inside the deliverable ZIP:
+        # 1. ACE_report.zip
+        # 2. EPUB-checker_log.txt
+        # 3. {eisbn}_1_ePub_all.epub
+        target_epub_entry_name = f"{eisbn}_1_ePub_all.epub" if eisbn else os.path.basename(job.epub_filepath)
+        target_ace_entry_name = "ACE_report.zip"
+        target_epubcheck_entry_name = "EPUB-checker_log.txt"
+
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
             if os.path.exists(job.epub_filepath):
-                zipf.write(job.epub_filepath, os.path.basename(job.epub_filepath))
+                zipf.write(job.epub_filepath, target_epub_entry_name)
             if job.ace_report_filepath and os.path.exists(job.ace_report_filepath):
-                zipf.write(job.ace_report_filepath, os.path.basename(job.ace_report_filepath))
+                zipf.write(job.ace_report_filepath, target_ace_entry_name)
             if job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath):
-                zipf.write(job.epubcheck_report_filepath, os.path.basename(job.epubcheck_report_filepath))
+                zipf.write(job.epubcheck_report_filepath, target_epubcheck_entry_name)
 
         # Upload to FTP server
         with BodFtpService(
@@ -1038,16 +1056,18 @@ def upload_qc_reports(
     os.makedirs(project_dir, exist_ok=True)
     
     if ace_report:
-        if not ace_report.filename.endswith("_ace_report.zip"):
-            raise HTTPException(status_code=400, detail="ACE validation report must end with '_ace_report.zip'")
+        ace_name_lower = (ace_report.filename or "").lower()
+        if not (ace_name_lower.endswith("_ace_report.zip") or ace_name_lower.endswith("ace_report.zip") or ace_name_lower.endswith(".zip")):
+            raise HTTPException(status_code=400, detail="ACE validation report must be a .zip file (e.g. 'ACE_report.zip' or ending with '_ace_report.zip')")
         ace_path = os.path.join(project_dir, ace_report.filename)
         with open(ace_path, "wb") as buffer:
             shutil.copyfileobj(ace_report.file, buffer)
         job.ace_report_filepath = ace_path
         
     if epubcheck_report:
-        if not epubcheck_report.filename.endswith("_log.txt"):
-            raise HTTPException(status_code=400, detail="Epubcheck validation report must end with '_log.txt'")
+        epubcheck_name_lower = (epubcheck_report.filename or "").lower()
+        if not (epubcheck_name_lower.endswith("_log.txt") or epubcheck_name_lower.endswith("epub-checker_log.txt") or epubcheck_name_lower.endswith(".txt")):
+            raise HTTPException(status_code=400, detail="Epubcheck validation report must be a .txt file (e.g. 'EPUB-checker_log.txt' or ending with '_log.txt')")
         epubcheck_path = os.path.join(project_dir, epubcheck_report.filename)
         with open(epubcheck_path, "wb") as buffer:
             shutil.copyfileobj(epubcheck_report.file, buffer)

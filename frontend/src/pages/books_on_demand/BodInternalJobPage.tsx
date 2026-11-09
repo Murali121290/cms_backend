@@ -42,7 +42,7 @@ export function BodInternalJobPage() {
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [isOpeningValidator, setIsOpeningValidator] = useState(false)
-  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'files'>('stage')
+  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files'>('stage')
   const [aceFile, setAceFile] = useState<File | null>(null)
   const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
   const [isUploadingReports, setIsUploadingReports] = useState(false)
@@ -830,13 +830,26 @@ export function BodInternalJobPage() {
                 Assignment History
               </button>
             )}
-            {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
+            {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
+              (!h.changes || h.changes.length === 0) || h.changes.some((c: any) => c.field === 'Due Date')
+            ) && (
               <button
                 onClick={() => setActiveTab('duedate')}
                 className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
                   }`}
               >
-                Update History
+                Due Date History
+              </button>
+            )}
+            {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
+              h.changes && h.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
+            ) && (
+              <button
+                onClick={() => setActiveTab('priority')}
+                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                  }`}
+              >
+                Priority History
               </button>
             )}
             {job.file_history && Array.isArray(job.file_history) && job.file_history.length > 0 && (
@@ -940,49 +953,101 @@ export function BodInternalJobPage() {
               </div>
             )}
 
-            {activeTab === 'duedate' && job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
+            {activeTab === 'duedate' && job.due_date_history && Array.isArray(job.due_date_history) && (
               <div className="space-y-3">
-                {[...job.due_date_history].reverse().map((historyItem: any, idx: number) => {
-                  const hasChanges = Array.isArray(historyItem.changes) && historyItem.changes.length > 0;
-                  return (
+                {[...job.due_date_history]
+                  .filter((historyItem: any) =>
+                    (!historyItem.changes || historyItem.changes.length === 0) ||
+                    historyItem.changes.some((c: any) => c.field === 'Due Date')
+                  )
+                  .reverse().map((historyItem: any, idx: number) => {
+                    const hasChanges = Array.isArray(historyItem.changes) && historyItem.changes.length > 0;
+                    return (
+                      <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-3">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
+                            <Calendar size={14} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {hasChanges ? (
+                              <div className="space-y-1.5">
+                                {historyItem.changes.filter((c: any) => c.field === 'Due Date').map((change: any, cIdx: number) => (
+                                  <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                    <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded border border-border text-[10px] uppercase tracking-wider">
+                                      {change.field}
+                                    </span>
+                                    {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                      <>
+                                        <span className="text-muted line-through">{String(change.old)}</span>
+                                        <span className="text-muted text-[10px]">→</span>
+                                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">{String(change.new)}</span>
+                                      </>
+                                    ) : (
+                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">set to {String(change.new)}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm font-semibold text-text m-0">
+                                Changed Due Date to: {historyItem.date ? new Date(historyItem.date).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' }) : 'None'}
+                              </p>
+                            )}
+
+                            {historyItem.reason && (
+                              <p className="text-xs text-text/80 mt-1.5 mb-0 break-words">
+                                <span className="text-muted">Reason:</span> {historyItem.reason}
+                              </p>
+                            )}
+                            <p className="text-[10px] text-muted m-0 mt-1">
+                              Changed By: <span className="font-medium text-text/90">{historyItem.changed_by || 'Unknown'}</span>
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted font-medium shrink-0 pt-0.5 text-right whitespace-nowrap">
+                          {formatDateTime(historyItem.timestamp)}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+
+            {activeTab === 'priority' && job.due_date_history && Array.isArray(job.due_date_history) && (
+              <div className="space-y-3">
+                {[...job.due_date_history]
+                  .filter((historyItem: any) =>
+                    historyItem.changes && historyItem.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
+                  )
+                  .reverse().map((historyItem: any, idx: number) => (
                     <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-3">
                       <div className="flex items-start gap-3 flex-1 min-w-0">
-                        <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
-                          {hasChanges && historyItem.changes.length === 1 && historyItem.changes[0].field === 'Due Date' ? (
-                            <Calendar size={14} />
-                          ) : (
-                            <Edit3 size={14} />
-                          )}
+                        <div className="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg shrink-0 mt-0.5">
+                          <Zap size={14} className="fill-amber-500 text-amber-500" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          {hasChanges ? (
-                            <div className="space-y-1.5">
-                              {historyItem.changes.map((change: any, cIdx: number) => (
-                                <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
-                                  <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded border border-border text-[10px] uppercase tracking-wider">
-                                    {change.field}
-                                  </span>
-                                  {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
-                                    <>
-                                      <span className="text-muted line-through">{String(change.old)}</span>
-                                      <span className="text-muted text-[10px]">→</span>
-                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">{String(change.new)}</span>
-                                    </>
-                                  ) : (
-                                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">set to {String(change.new)}</span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-sm font-semibold text-text m-0">
-                              Changed Due Date to: {historyItem.date ? new Date(historyItem.date).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' }) : 'None'}
-                            </p>
-                          )}
+                          <div className="space-y-1.5">
+                            {historyItem.changes.filter((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date').map((change: any, cIdx: number) => (
+                              <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded border border-border text-[10px] uppercase tracking-wider">
+                                  {change.field}
+                                </span>
+                                {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                  <>
+                                    <span className="text-muted line-through">{String(change.old)}</span>
+                                    <span className="text-muted text-[10px]">→</span>
+                                    <span className="font-semibold text-amber-600 dark:text-amber-400">{String(change.new)}</span>
+                                  </>
+                                ) : (
+                                  <span className="font-semibold text-amber-600 dark:text-amber-400">set to {String(change.new)}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
 
                           {historyItem.reason && (
                             <p className="text-xs text-text/80 mt-1.5 mb-0 break-words">
-                              <span className="text-muted">Reason:</span> {historyItem.reason}
+                              <span className="text-muted">Reason / Note:</span> {historyItem.reason}
                             </p>
                           )}
                           <p className="text-[10px] text-muted m-0 mt-1">
@@ -994,8 +1059,7 @@ export function BodInternalJobPage() {
                         {formatDateTime(historyItem.timestamp)}
                       </div>
                     </div>
-                  );
-                })}
+                  ))}
               </div>
             )}
 
