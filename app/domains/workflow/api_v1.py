@@ -484,13 +484,27 @@ def _send_planning_approved_email(
                 return dt.strftime("%d %b %Y")
             return str(dt)
 
+        def _fmt_composition(comp: Optional[str]) -> Optional[str]:
+            if not comp:
+                return None
+            comp_clean = str(comp).strip()
+            comp_map = {
+                "low": "Level 1",
+                "medium": "Level 2",
+                "high": "Level 3",
+                "level 1": "Level 1",
+                "level 2": "Level 2",
+                "level 3": "Level 3",
+            }
+            return comp_map.get(comp_clean.lower(), comp_clean)
+
         # Build Project Info HTML & Text tables
         proj_fields_raw = [
             ("project_code", "Project Code", project.project_code),
             ("client_name", "Client Name", client_name),
             ("xml_standard", "XML Standard", project.xml_standard),
             ("category", "Category", project.category),
-            ("composition", "Composition", project.composition),
+            ("composition", "Composition", _fmt_composition(project.composition)),
             ("workflow_name", "Workflow Name", wf_name or project.workflow_name),
             ("project_manager", "Project Manager", project.project_manager),
             ("priority", "Priority", project.priority),
@@ -675,7 +689,21 @@ def _send_planning_approved_email(
         sched_table_text = "\n\n".join(sched_text_blocks) if sched_text_blocks else "No schedule items found."
 
         # Template placeholders substitution
-        raw_subject = planning_cfg.get("subject") or "{client_name} - {project_code} - Project Planning {approval_type}"
+        if approval_type == "Re-approved":
+            default_subject = "{client_name} - {project_code} : {project_title} - Project Planning Re-approved"
+            planning_status_label = "Project Planning Re-approved"
+        else:
+            default_subject = "New title - {client_name} - {project_code} : {project_title} - Project launch"
+            planning_status_label = "Project launch"
+
+        raw_subject = planning_cfg.get("subject")
+        if not raw_subject or raw_subject.strip() in (
+            "{client_name} - {project_code} - Project Planning {approval_type}",
+            "{client_name} - {project_code} : {project_title} - {planning_status_label}",
+            "New title - {client_name} - {project_code} : {project_title} - {planning_status_label}",
+        ):
+            raw_subject = default_subject
+
         raw_body = planning_cfg.get("body") or (
             "Hi Team,\n\n"
             "The project planning for {project_code} has been {approval_type}.\n\n"
@@ -692,9 +720,10 @@ def _send_planning_approved_email(
             "{project_code}": project.project_code or "",
             "{project_title}": project.project_title or "",
             "{workflow_name}": wf_name or "",
-            "{composition}": project.composition or "Medium",
+            "{composition}": _fmt_composition(project.composition) or "Level 2",
             "{priority}": project.priority or "Normal",
             "{approval_type}": approval_type,
+            "{planning_status_label}": planning_status_label,
             "{adjustment_reason}": reason or "—",
             "{project_manager_email}": pm_email or "",
             "{project_manager_name}": project.project_manager or "Project Manager",
