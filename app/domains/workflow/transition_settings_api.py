@@ -216,6 +216,69 @@ AVAILABLE_VARIABLES = [
         "sample": "| Chapter | Stage | Due Date | Shipment Notes |",
         "category": "Chapter"
     },
+    {
+        "key": "{project_info_table}",
+        "label": "Project Info Table",
+        "description": "Project metadata table (Code, Client, Title, Composition, Due Date, Pages, etc.)",
+        "sample": "{project_info_table}",
+        "category": "Layout"
+    },
+    {
+        "key": "{planning_schedule_table}",
+        "label": "Planning Schedule Table",
+        "description": "Stages schedule table with Start Date, Due Date, SLA, and Stage Owner",
+        "sample": "{planning_schedule_table}",
+        "category": "Layout"
+    },
+    {
+        "key": "{workflow_stage_owners}",
+        "label": "All Workflow Stage Owners",
+        "description": "Comma-separated email addresses of all stage owners in the selected workflow",
+        "sample": "le_lead@s4carlisle.com, pre_lead@s4carlisle.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{project_title}",
+        "label": "Project Title",
+        "description": "Full title of the project / book",
+        "sample": "Digital Consumer Behavior",
+        "category": "Project"
+    },
+    {
+        "key": "{workflow_name}",
+        "label": "Workflow Name",
+        "description": "Name of the workflow template assigned to the project",
+        "sample": "WF-01 Fresh Book",
+        "category": "Workflow"
+    },
+    {
+        "key": "{composition}",
+        "label": "Composition Complexity",
+        "description": "Complexity level (Low, Medium, High)",
+        "sample": "Medium",
+        "category": "Project"
+    },
+    {
+        "key": "{priority}",
+        "label": "Project Priority",
+        "description": "Priority level (e.g. Normal, High, Urgent)",
+        "sample": "Normal",
+        "category": "Project"
+    },
+    {
+        "key": "{approval_type}",
+        "label": "Approval Type",
+        "description": "Approved or Re-approved status label",
+        "sample": "Approved",
+        "category": "Workflow"
+    },
+    {
+        "key": "{adjustment_reason}",
+        "label": "Adjustment Reason",
+        "description": "Reason provided when re-approving a project plan",
+        "sample": "Author requested revised schedule",
+        "category": "Workflow"
+    },
 ]
 
 
