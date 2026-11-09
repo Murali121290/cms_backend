@@ -88,28 +88,42 @@ class WordToInDesignEngine:
         project_dir = os.path.abspath(os.path.join(upload_dir or UPLOAD_DIR, project.client_name or "unknown", project.code))
         chapter_dir = os.path.abspath(os.path.join(project_dir, chapter.number))
 
+        from app.services.file_service import resolve_chapter_art_folder, resolve_project_common_art_files
+        common_art_files = resolve_project_common_art_files(project_dir=project_dir, db=db, project_id=project.id)
+
         try:
             logger.info(f"Packaging Word-to-InDesign assets into ZIP: {temp_zip_path}")
             with zipfile.ZipFile(temp_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                written_in_zip = set()
+
+                def safe_zf_write(src_path: str, arc_name: str):
+                    norm_arc = arc_name.replace("\\", "/")
+                    if norm_arc not in written_in_zip and os.path.exists(src_path) and os.path.isfile(src_path):
+                        zf.write(src_path, norm_arc)
+                        written_in_zip.add(norm_arc)
+
                 # Add Word file at root of the zip
                 docx_filename = os.path.basename(file_path)
-                zf.write(file_path, docx_filename)
+                safe_zf_write(file_path, docx_filename)
 
                 # Add Template (.indt/.indd) file
-                template_rel = os.path.relpath(template_path, project_dir) if project_dir in template_path else os.path.basename(template_path)
-                zf.write(template_path, template_rel)
+                template_rel = (os.path.relpath(template_path, project_dir) if project_dir in template_path else os.path.basename(template_path)).replace("\\", "/")
+                safe_zf_write(template_path, template_rel)
                 fname = os.path.basename(template_path)
-                zf.write(template_path, f"Design/template/indesign/{fname}")
-                zf.write(template_path, f"Design/template/InDesign/{fname}")
+                safe_zf_write(template_path, f"Design/template/indesign/{fname}")
+                safe_zf_write(template_path, f"Design/template/InDesign/{fname}")
 
-                # Add Design folders (Fonts, Libraries, Common Art)
+                # Add Design folders
                 design_folders = [
-                    "Design/template/Common Art",
                     "Design/template/Font",
+                    "Design/template/Fonts",
                     "Design/template/Document fonts",
                     "Design/template/Library",
+                    "Design/template/Libraries",
                     "Design/template/indesign",
                     "Design/template/InDesign",
+                    "Design/Font",
+                    "Design/Library",
                 ]
                 for folder in design_folders:
                     folder_path = os.path.join(project_dir, folder)
@@ -118,13 +132,19 @@ class WordToInDesignEngine:
                             dirs[:] = [d for d in dirs if d.lower() != "archive"]
                             for file in files:
                                 full_file_path = os.path.join(root, file)
-                                rel_path = os.path.relpath(full_file_path, project_dir)
-                                if "archive" in rel_path.lower().replace("\\", "/").split("/"):
+                                rel_path = os.path.relpath(full_file_path, project_dir).replace("\\", "/")
+                                if "archive" in rel_path.lower().split("/"):
                                     continue
-                                zf.write(full_file_path, rel_path)
+                                safe_zf_write(full_file_path, rel_path)
+
+                # Explicitly package all discovered project Common Art files ONLY into 'Design/template/Common Art/'
+                if common_art_files:
+                    logger.info(f"Packaging {len(common_art_files)} Common Art file(s) into Design/template/Common Art/...")
+                    for ca_file in common_art_files:
+                        ca_fname = os.path.basename(ca_file)
+                        safe_zf_write(ca_file, f"Design/template/Common Art/{ca_fname}")
 
                 # Add Chapter Art files packaged under 'artfile/'
-                from app.services.file_service import resolve_chapter_art_folder
                 art_folder = resolve_chapter_art_folder(
                     project_dir=project_dir,
                     chapter_dir=chapter_dir,
@@ -136,8 +156,8 @@ class WordToInDesignEngine:
                     for root, _, files in os.walk(art_folder):
                         for file in files:
                             full_file_path = os.path.join(root, file)
-                            rel_path = os.path.relpath(full_file_path, art_folder)
-                            zf.write(full_file_path, os.path.join("artfile", rel_path))
+                            rel_path = os.path.relpath(full_file_path, art_folder).replace("\\", "/")
+                            safe_zf_write(full_file_path, f"artfile/{rel_path}")
                 else:
                     logger.warning(f"Could not locate art folder for chapter {chapter.number} (searched project dir {project_dir})")
 
@@ -259,6 +279,18 @@ class WordToInDesignEngine:
                                 dst_art_path = os.path.join(ch_art_dir, rel_art_path)
                                 os.makedirs(os.path.dirname(dst_art_path), exist_ok=True)
                                 shutil.copy2(src_art_path, dst_art_path)
+
+                # Also copy Common Art files into indesign_dir/artfile and indesign_dir/Links
+                if common_art_files:
+                    for sub_folder_name in ["artfile", "Links"]:
+                        target_art_dir = os.path.join(indesign_dir, sub_folder_name)
+                        os.makedirs(target_art_dir, exist_ok=True)
+                        for ca_path in common_art_files:
+                            dst_ca_path = os.path.join(target_art_dir, os.path.basename(ca_path))
+                            try:
+                                shutil.copy2(ca_path, dst_ca_path)
+                            except Exception as ca_ex:
+                                logger.warning(f"Could not copy common art file {ca_path} to {dst_ca_path}: {ca_ex}")
 
                 # 6b. Process PDF file
                 pdf_in_zip = next((f for f in file_list if f.lower().endswith(".pdf")), None)

@@ -116,6 +116,85 @@ def resolve_chapter_art_folder(project_dir: str, chapter_dir: str, chapter_numbe
     return None
 
 
+def resolve_project_common_art_files(project_dir: str, db: Session = None, project_id: int = None) -> list[str]:
+    """Find all common art files (.ai, .eps, .tif, .jpg, .png, etc.) for a project.
+
+    Searches:
+    1. Known project common art folders:
+       - <project_dir>/Design/template/Common Art
+       - <project_dir>/Design/template/Common_Art
+       - <project_dir>/Design/Common Art
+       - <project_dir>/Design/Common_Art
+       - <project_dir>/template/Common Art
+       - <project_dir>/template/Common_Art
+    2. Any subfolder inside <project_dir>/Design or <project_dir>/Design/template whose name
+       case-insensitively contains 'common' and 'art'.
+    3. Database records (if db and project_id are provided) where category matches 'common art' or 'template/common art'.
+    Returns a deduplicated list of verified physical file paths.
+    """
+    found_paths = []
+    seen_names = set()
+
+    def add_file(p: str):
+        if not p or not os.path.exists(p) or not os.path.isfile(p):
+            return
+        abs_p = os.path.abspath(p)
+        fname_lower = os.path.basename(abs_p).lower()
+        if fname_lower not in seen_names:
+            seen_names.add(fname_lower)
+            found_paths.append(abs_p)
+
+    if project_dir and os.path.exists(project_dir):
+        candidate_subdirs = [
+            os.path.join(project_dir, "Design", "template", "Common Art"),
+            os.path.join(project_dir, "Design", "template", "Common_Art"),
+            os.path.join(project_dir, "Design", "Common Art"),
+            os.path.join(project_dir, "Design", "Common_Art"),
+            os.path.join(project_dir, "template", "Common Art"),
+            os.path.join(project_dir, "template", "Common_Art"),
+        ]
+        # Dynamic scan of Design folder
+        design_dir = os.path.join(project_dir, "Design")
+        if os.path.exists(design_dir):
+            for root, dirs, _ in os.walk(design_dir):
+                dirs[:] = [d for d in dirs if d.lower() != "archive"]
+                for d in dirs:
+                    d_clean = d.lower().replace("_", " ").strip()
+                    if "common" in d_clean and "art" in d_clean:
+                        candidate_subdirs.append(os.path.join(root, d))
+
+        for folder in candidate_subdirs:
+            if os.path.exists(folder) and os.path.isdir(folder):
+                for root, dirs, files in os.walk(folder):
+                    dirs[:] = [d for d in dirs if d.lower() != "archive"]
+                    if "archive" in root.lower().replace("\\", "/").split("/"):
+                        continue
+                    for file in files:
+                        if not file.startswith("."):
+                            add_file(os.path.join(root, file))
+
+    if db and project_id:
+        try:
+            from app.domains.processing.service import resolve_physical_file_path
+            db_files = db.query(models.File).filter(
+                models.File.project_id == project_id,
+                func.lower(models.File.category).in_([
+                    "common art", "common_art", "commonart",
+                    "template/common art", "template/common_art", "template/commonart",
+                    "template_common_art"
+                ])
+            ).all()
+            for db_f in db_files:
+                if db_f.path:
+                    phys = resolve_physical_file_path(db_f.path, UPLOAD_DIR)
+                    if phys and os.path.exists(phys):
+                        add_file(phys)
+        except Exception:
+            pass
+
+    return found_paths
+
+
 def save_upload_file(upload_file: UploadFile, destination: str):
     try:
         with open(destination, "wb") as buffer:
@@ -232,8 +311,17 @@ def upload_chapter_files(
                         else:
                             member_category = normalized_category
 
+                        member_literal_base = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{member_category}"
                         member_safe_cat = member_category.replace(" ", "_")
-                        member_base_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{member_safe_cat}"
+                        member_safe_base = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{member_safe_cat}"
+                        if os.path.exists(member_literal_base):
+                            member_base_path = member_literal_base
+                        elif os.path.exists(member_safe_base):
+                            member_base_path = member_safe_base
+                        elif os.path.exists(os.path.dirname(member_literal_base)):
+                            member_base_path = member_literal_base
+                        else:
+                            member_base_path = member_safe_base
                         os.makedirs(member_base_path, exist_ok=True)
 
                         existing_file = db.query(models.File).filter(
@@ -314,8 +402,17 @@ def upload_chapter_files(
                     }
                 )
         else:
+            file_literal_base = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{file_category}"
             file_safe_cat = file_category.replace(" ", "_")
-            file_base_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{file_safe_cat}"
+            file_safe_base = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.number}/{file_safe_cat}"
+            if os.path.exists(file_literal_base):
+                file_base_path = file_literal_base
+            elif os.path.exists(file_safe_base):
+                file_base_path = file_safe_base
+            elif os.path.exists(os.path.dirname(file_literal_base)):
+                file_base_path = file_literal_base
+            else:
+                file_base_path = file_safe_base
             os.makedirs(file_base_path, exist_ok=True)
 
             existing_file = db.query(models.File).filter(

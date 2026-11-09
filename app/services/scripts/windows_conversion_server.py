@@ -24,6 +24,10 @@ logger = logging.getLogger("WindowsConversionServer")
 
 app = FastAPI(title="Windows InDesign to Word Conversion Server")
 
+def sync_temp_common_art_assets(temp_dir: str, artwork_path: str = None):
+    """No-op: assets remain strictly in Design/template/Common Art without duplicate copying."""
+    pass
+
 def get_indesign_application(session_id: str):
     """
     Safely acquires an InDesign COM application instance.
@@ -872,6 +876,7 @@ def convert_xml_to_indesign(file: UploadFile = File(...)):
     artwork_path = os.path.join(temp_dir, "artfile")
     if not os.path.exists(artwork_path):
         artwork_path = temp_dir
+    sync_temp_common_art_assets(temp_dir, artwork_path)
 
     if not os.path.exists(local_jsx):
         raise HTTPException(status_code=500, detail=f"Local InDesign script missing: {local_jsx}")
@@ -1005,6 +1010,8 @@ def convert_word_to_indesign(file: UploadFile = File(...), client: str = None, p
     except Exception as zip_ex:
         logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
         raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
+
+    sync_temp_common_art_assets(temp_dir)
 
     # Locate DOCX, INDT/INDD, and assets folder
     docx_path = None
@@ -1626,6 +1633,7 @@ def convert_indesign_to_proof(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
 
     # Locate the .indd file recursively
+    sync_temp_common_art_assets(temp_dir)
     indd_path = None
     for root, _, filenames in os.walk(temp_dir):
         for fname in filenames:
@@ -1789,6 +1797,7 @@ def view_proof(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
 
     # Locate the .indd, .xhtml, and .xml files
+    sync_temp_common_art_assets(temp_dir)
     indd_path = None
     xhtml_path = None
     xml_path = None
