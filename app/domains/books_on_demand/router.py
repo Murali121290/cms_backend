@@ -81,7 +81,7 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
 @router.get("/jobs/{job_id}")
 def get_job(job_id: int, db: Session = Depends(get_db)):
     """Get a specific BOD job."""
-    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
