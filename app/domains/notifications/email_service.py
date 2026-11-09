@@ -91,7 +91,7 @@ def get_smtp_client():
     return server
 
 
-def send_email(to_email: str, subject: str, text_body: str, html_body: str = None):
+def send_email(to_email: str, subject: str, text_body: str, html_body: str = None, cc_emails: Optional[list] = None):
     settings = get_settings()
     smtp_from = getattr(settings, 'SMTP_FROM', 'noreply@example.com')
     smtp_user = getattr(settings, 'SMTP_USERNAME', None)
@@ -100,17 +100,23 @@ def send_email(to_email: str, subject: str, text_body: str, html_body: str = Non
     msg['Subject'] = subject
     msg['From'] = smtp_from
     msg['To'] = to_email
+    if cc_emails:
+        msg['Cc'] = ", ".join(cc_emails) if isinstance(cc_emails, (list, tuple)) else str(cc_emails)
 
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype='html')
 
+    to_list = [e.strip() for e in to_email.split(',') if e.strip()] if isinstance(to_email, str) else list(to_email)
+    cc_list = [e.strip() for e in (cc_emails if isinstance(cc_emails, (list, tuple)) else str(cc_emails).split(','))] if cc_emails else []
+    all_recipients = to_list + cc_list
+
     try:
         server = get_smtp_client()
         with server:
-            server.send_message(msg)
-        logger.info(f"Sent email to {to_email} with subject: {subject}")
-        print(f"SUCCESS: Sent email to {to_email} with subject: {subject}")
+            server.send_message(msg, to_addrs=all_recipients)
+        logger.info(f"Sent email to {to_email} (cc: {cc_emails}) with subject: {subject}")
+        print(f"SUCCESS: Sent email to {to_email} (cc: {cc_emails}) with subject: {subject}")
     except smtplib.SMTPAuthenticationError as e:
         logger.error(f"SMTP Authentication failed for {smtp_user}: {str(e)}. Check credentials or use App Password for Office 365.")
         print(f"FAILED: Authentication error. For Office 365, use an App Password instead of regular password.")
