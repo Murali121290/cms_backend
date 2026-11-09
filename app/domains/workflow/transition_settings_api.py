@@ -620,7 +620,10 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
 
             resolved_email = (user_email_map.get(str(u_name).strip()) if (u_name and str(u_name).strip() in user_email_map) else u_email)
 
-            stage_body = cfg.get("body", "")
+            from app.routers.api_v2 import _normalize_transition_subject, _normalize_transition_body_template
+            stage_subject = _normalize_transition_subject(cfg.get("subject", ""))
+            stage_body = _normalize_transition_body_template(cfg.get("body", ""))
+
             import re
             stage_body = re.sub(r'\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+', '{chapter_table}', stage_body)
             stage_body = re.sub(r'\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+', '', stage_body)
@@ -641,7 +644,7 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
                 custom_message=cfg.get("custom_message", ""),
                 to=cfg.get("to") if isinstance(cfg.get("to"), list) else [],
                 cc=cfg.get("cc") if isinstance(cfg.get("cc"), list) else [],
-                subject=cfg.get("subject", ""),
+                subject=stage_subject,
                 body=stage_body
             )
 
@@ -702,7 +705,9 @@ def save_customer_transition_config(
         if u_name and u_name in user_email_map:
             resolved_email = user_email_map[u_name]
 
-        body_text = stage_cfg.body or ""
+        from app.routers.api_v2 import _normalize_transition_subject, _normalize_transition_body_template
+        normalized_subject = _normalize_transition_subject(stage_cfg.subject or "")
+        body_text = _normalize_transition_body_template(stage_cfg.body or "")
         import re
         body_text = re.sub(r'\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+', '{chapter_table}', body_text)
         body_text = re.sub(r'\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+', '', body_text)
@@ -723,7 +728,7 @@ def save_customer_transition_config(
             "custom_message": stage_cfg.custom_message or "",
             "to": [t.strip() for t in stage_cfg.to if t and t.strip()],
             "cc": [c.strip() for c in stage_cfg.cc if c and c.strip()],
-            "subject": stage_cfg.subject or "",
+            "subject": normalized_subject,
             "body": body_text
         }
 
@@ -785,8 +790,8 @@ def add_stage_to_config(
         "custom_message": payload.custom_message or "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
         "to": [t.strip() for t in (payload.to or ["{next_stage_owner_emails}"]) if t and t.strip()],
         "cc": [c.strip() for c in (payload.cc or ["{project_manager_email}", "{stage_owner_emails}"]) if c and c.strip()],
-        "subject": payload.subject or "[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification",
-        "body": payload.body or "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply."
+        "subject": payload.subject or "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+        "body": payload.body or "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply."
     }
 
     existing[stage_name] = default_template

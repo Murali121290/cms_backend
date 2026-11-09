@@ -9639,6 +9639,93 @@ def _clean_body_template_tables(body_text: str) -> str:
     return cleaned
 
 
+def _normalize_transition_subject(
+    subject: str,
+    client_name: Optional[str] = None,
+    project_code: Optional[str] = None,
+    stage_transition: Optional[str] = None
+) -> str:
+    """
+    Format transition email subject to the strict standard:
+    {client_name}-- {project_code} - {stage_transition} | Stage Transition Notification
+    - No brackets around client name; followed by '-- '
+    - No brackets around project code
+    - No chapter details in the subject line (chapters are listed in the table)
+    - Separator between project code and stage transition is ' - '
+    """
+    import re
+    clean_client = re.sub(r"^\[|\]$", "", (client_name or "").strip()).strip()
+    clean_proj = re.sub(r"^\[|\]$", "", (project_code or "").strip()).strip()
+    clean_flow = (stage_transition or "").strip()
+
+    s = (subject or "").strip()
+    # Replace leading [Client] with Client-- 
+    s = re.sub(r"^\[([^\]]+)\]\s*", r"\1-- ", s)
+    # Remove brackets around project code if any: -- [Project] -> -- Project
+    s = re.sub(r"--\s*\[([^\]]+)\]", r"-- \1", s)
+    # Remove chapter details: - Chapters? ... or - Book
+    s = re.sub(r"\s*-\s*Chapters?\s+[^|\n]+", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*-\s*Book\b", "", s, flags=re.IGNORECASE)
+    # Normalize separator between project and stage flow to ' - '
+    s = re.sub(r"(--\s*[^\-|]+?)\s*[\|\-]\s*([^|]+?)\s*\|\s*Stage Transition Notification", r"\1 - \2 | Stage Transition Notification", s)
+
+    if not s or s.lower() in ("—", "none", "null") or "stage transition notification" not in s.lower():
+        if clean_client and clean_proj and clean_flow:
+            return f"{clean_client}-- {clean_proj} - {clean_flow} | Stage Transition Notification"
+
+    return s.strip()
+
+
+def _normalize_transition_body_template(
+    body_text: str,
+    client_name: Optional[str] = None,
+    project_code: Optional[str] = None,
+    current_stage: Optional[str] = None
+) -> str:
+    """
+    Ensure the body header places Client Name first, followed by one blank line,
+    then Project Name next (with no enclosing brackets).
+    Both details will be fully bolded when formatted to HTML and rendered in UI.
+    """
+    import re
+    b = (body_text or "").strip()
+    m_client = re.search(r"Client Name:\s*([^\n\r]+)", b, re.IGNORECASE)
+    m_proj = re.search(r"Project Name:\s*([^\n\r]+)", b, re.IGNORECASE)
+
+    c_val = m_client.group(1).strip() if m_client else (client_name or "{client_name}")
+    p_val = m_proj.group(1).strip() if m_proj else (project_code or "{project_code}")
+
+    c_val = re.sub(r"^\[|\]$", "", c_val).strip()
+    p_val = re.sub(r"^\[|\]$", "", p_val).strip()
+
+    header_block = f"Client Name: {c_val}\n\nProject Name: {p_val}"
+
+    # Strip existing Project Name and Client Name lines from anywhere in the body
+    cleaned = re.sub(r"^[ \t]*Project Name:.*(?:\r?\n|$)", "", b, flags=re.MULTILINE | re.IGNORECASE)
+    cleaned = re.sub(r"^[ \t]*Client Name:.*(?:\r?\n|$)", "", cleaned, flags=re.MULTILINE | re.IGNORECASE)
+
+    if "{chapter_table}" in cleaned:
+        parts = cleaned.split("{chapter_table}", 1)
+        res = f"{parts[0].rstrip()}\n\n{header_block}\n\n{{chapter_table}}{parts[1]}"
+    elif "Regards," in cleaned:
+        parts = cleaned.split("Regards,", 1)
+        res = f"{parts[0].rstrip()}\n\n{header_block}\n\n{{chapter_table}}\n\nRegards,{parts[1]}"
+    else:
+        st = current_stage or "{current_stage}"
+        res = (
+            f"Hi,\n\n"
+            f"Below Files are Completed {st} for your review and processing.\n\n"
+            f"{header_block}\n\n"
+            f"{{chapter_table}}\n\n"
+            f"Regards,\n"
+            f"S4C Ninja Inkflow Team\n\n"
+            f"Note : This is an automated mail and please do not reply."
+        )
+
+    res = re.sub(r"\n{3,}", "\n\n", res)
+    return res.strip()
+
+
 def _prepare_transition_email_content(
     body_template: str,
     chapter_rows: list[dict],
@@ -9649,6 +9736,7 @@ def _prepare_transition_email_content(
     Generate both plain text and rich HTML email documents.
     In the HTML version, {chapter_table} (or ASCII box) is replaced with
     a genuine <table> with borders, styling, and headers matching Pathfinder.
+    Client Name: and Project Name: lines are fully bolded.
     """
     import re
     import html
@@ -9663,6 +9751,7 @@ def _prepare_transition_email_content(
 
     # Normalize ASCII tables and guarantee {chapter_table} placement before Regards,
     normalized = _clean_body_template_tables(normalized)
+    normalized = _normalize_transition_body_template(normalized)
 
     # Plain text version
     if "{chapter_table}" in normalized:
@@ -9686,9 +9775,14 @@ def _prepare_transition_email_content(
         out = []
         for p in paras:
             lines = [html.escape(l.strip()) for l in p.split("\n")]
-            p_content = "<br>\n".join(lines)
-            p_content = re.sub(r"^(Project Name:)", r"<strong>\1</strong>", p_content)
-            p_content = re.sub(r"^(Client Name:)", r"<strong>\1</strong>", p_content)
+            formatted_lines = []
+            for line in lines:
+                if line.startswith("Client Name:") or line.startswith("Project Name:"):
+                    clean_line = re.sub(r"^\[|\]$", "", line)
+                    formatted_lines.append(f"<strong>{clean_line}</strong>")
+                else:
+                    formatted_lines.append(line)
+            p_content = "<br>\n".join(formatted_lines)
             if "Note :" in p_content:
                 p_content = f"<em>{p_content}</em>"
             out.append(f'<p style="margin: 0 0 12px 0; font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #222222; line-height: 1.5;">{p_content}</p>')
@@ -9739,20 +9833,13 @@ def _format_multi_chapter_email(
     sorted_chs = sorted(unique_chs, key=_sort_chapter_key)
     ch_names_str = ", ".join(sorted_chs)
 
-    # 1. Update subject with multi-chapter count or names
-    new_subject = subject
-    clean_first = first_ch_num.strip() if first_ch_num else ""
-    if clean_first.lower().startswith("chapter "):
-        clean_first = clean_first[8:].strip()
-    if clean_first and f"Chapter {clean_first}" in new_subject:
-        new_subject = new_subject.replace(f"Chapter {clean_first}", f"Chapters {ch_names_str}")
-    elif clean_first and clean_first in new_subject:
-        new_subject = new_subject.replace(clean_first, ch_names_str)
-    elif first_ch_num and first_ch_num in new_subject:
-        new_subject = new_subject.replace(first_ch_num, ch_names_str)
+    # 1. Subject does not include chapter details in the new format:
+    # Target: Client-- Project - Stage Flow | Stage Transition Notification
+    new_subject = _normalize_transition_subject(subject)
 
     # 2. Normalize body to retain clean {chapter_table} token positioned properly
     new_body = _clean_body_template_tables(body)
+    new_body = _normalize_transition_body_template(new_body)
 
     # Adapt text phrases
     if first_ch_num and f"Chapter {first_ch_num}" in new_body:
@@ -9902,24 +9989,36 @@ def api_v2_get_chapter_transition_config(
         body_resolved = re.sub(r'\bChapter(?:s)?\s*:\s*(?:Book|00|0)\b', 'Book', body_resolved, flags=re.IGNORECASE)
         body_resolved = re.sub(r'\|\s*00\s*\|', '| Book |', body_resolved)
 
+    p_code = (project.project_code if project and project.project_code else (project.code if project else chapter.project)) or ""
+    c_title = client_name or ""
+    proj_code = project.code if project else (chapter.project if chapter else "")
+
     # Normalize body to match new standard format if using legacy template
     if not body_resolved or "Below Files are Completed" not in body_resolved:
-        p_code = (project.project_code if project and project.project_code else (project.code if project else chapter.project)) or ""
-        c_title = client_name or ""
         body_resolved = (
             f"Hi,\n\n"
             f"Below Files are Completed {current_stage} for your review and processing.\n\n"
-            f"Project Name: [{p_code}]\n"
             f"Client Name: {c_title}\n\n"
+            f"Project Name: {p_code}\n\n"
             f"{{chapter_table}}\n\n"
             f"Regards,\n"
             f"S4C Ninja Inkflow Team\n\n"
             f"Note : This is an automated mail and please do not reply."
         )
 
+    subj_resolved = _normalize_transition_subject(
+        subj_resolved,
+        client_name=c_title,
+        project_code=p_code or proj_code,
+        stage_transition=f"{current_stage} → {next_stage}" if current_stage and next_stage else None
+    )
+    body_resolved = _normalize_transition_body_template(
+        body_resolved,
+        client_name=c_title,
+        project_code=p_code or proj_code,
+        current_stage=current_stage
+    )
     body_resolved = _clean_body_template_tables(body_resolved)
-    
-    proj_code = project.code if project else (chapter.project if chapter else "")
     next_stage_due = _resolve_next_stage_due_date(db, proj_code, chapter.chapters, next_stage, chapter_obj=chapter)
 
     from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
@@ -10037,8 +10136,18 @@ def api_v2_chapter_transition_email(
         is_book = clean_ch_num in ("00", "0") or clean_ch_num.lower() == "book"
         display_ch = "Book" if is_book else (clean_ch_num or "01")
 
-        send_subject = payload.subject or ""
-        send_body = payload.body or ""
+        send_subject = _normalize_transition_subject(
+            payload.subject or "",
+            client_name=client_ident,
+            project_code=project_code,
+            stage_transition=st_flow
+        )
+        send_body = _normalize_transition_body_template(
+            payload.body or "",
+            client_name=client_ident,
+            project_code=project_code,
+            current_stage=from_st
+        )
         if is_book:
             import re
             send_subject = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', send_subject, flags=re.IGNORECASE)
@@ -10202,6 +10311,19 @@ def api_v2_bulk_transition_config(
     custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
     subj_resolved = _resolve_placeholders(cfg.get("subject", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
     body_resolved = _resolve_placeholders(cfg.get("body", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
+    first_p_code = (first_project.project_code if first_project and first_project.project_code else (first_project.code if first_project else first_ch.project)) or ""
+    subj_resolved = _normalize_transition_subject(
+        subj_resolved,
+        client_name=client_name,
+        project_code=first_p_code,
+        stage_transition=f"{current_stage_label} → {sample_next_stage}" if current_stage_label and sample_next_stage else None
+    )
+    body_resolved = _normalize_transition_body_template(
+        body_resolved,
+        client_name=client_name,
+        project_code=first_p_code,
+        current_stage=current_stage_label
+    )
     body_resolved = _clean_body_template_tables(body_resolved)
 
     if len(previews) > 1:
@@ -10364,6 +10486,19 @@ def api_v2_bulk_transition_execute(
 
                 subject = _resolve_placeholders(raw_subject, first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_placeholders=extra_p)
                 body = _resolve_placeholders(raw_body, first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_placeholders=extra_p)
+                first_p_code = (first_project.project_code if first_project and first_project.project_code else (first_project.code if first_project else first_ch.project)) or ""
+                subject = _normalize_transition_subject(
+                    subject,
+                    client_name=client_name,
+                    project_code=first_p_code,
+                    stage_transition=f"{current_stage_label} → {sample_next_stage}" if current_stage_label and sample_next_stage else None
+                )
+                body = _normalize_transition_body_template(
+                    body,
+                    client_name=client_name,
+                    project_code=first_p_code,
+                    current_stage=current_stage_label
+                )
 
                 chs_map = {c.id: c for c in chapters}
                 chapter_row_items = []

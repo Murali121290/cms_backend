@@ -509,8 +509,8 @@ export function StageTransitionNotifications() {
       custom_message: 'The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.',
       to: ['{next_stage_owner_emails}'],
       cc: ['{project_manager_email}', '{stage_owner_emails}'],
-      subject: '[{client_name}] {project_code} - Chapter {chapter_name} | {stage_transition} | Stage Transition Notification',
-      body: `Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nProject Name: [{project_code}]\nClient Name: {client_name}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.`,
+      subject: '{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification',
+      body: `Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.`,
     }
 
     try {
@@ -1504,7 +1504,7 @@ export function StageTransitionNotifications() {
                       onFocus={() => setLastFocusedInput('subject')}
                       value={currentStageConfig.subject || ''}
                       onChange={e => updateCurrentStage('subject', e.target.value)}
-                      placeholder="[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} → {next_stage}..."
+                      placeholder="{client_name}-- {project_code} - {current_stage} → {next_stage} | Stage Transition Notification"
                       className="w-full px-3 py-2 text-xs font-mono bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
@@ -1612,9 +1612,14 @@ export function StageTransitionNotifications() {
                           <div className="p-3 bg-card rounded-lg border border-border/60 space-y-3 font-sans text-xs leading-relaxed text-text">
                             {intro && (
                               <div className="space-y-1.5 whitespace-pre-wrap">
-                                {intro.split('\n\n').map((p, idx) => (
-                                  <p key={idx}>{p}</p>
-                                ))}
+                                {intro.split('\n\n').map((p, idx) => {
+                                  const isHeader = p.startsWith('Client Name:') || p.startsWith('Project Name:')
+                                  return (
+                                    <p key={idx} className={isHeader ? 'font-bold text-text' : ''}>
+                                      {p.replace(/^(Project Name:\s*)\[(.*)\]$/, '$1$2')}
+                                    </p>
+                                  )
+                                })}
                               </div>
                             )}
                             <div className="my-2 overflow-hidden rounded-lg border border-border shadow-xs bg-surface/30">

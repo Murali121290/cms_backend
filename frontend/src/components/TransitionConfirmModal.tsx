@@ -82,15 +82,23 @@ export function TransitionConfirmModal({
 
   const isBook = resolvedChapterNumber === "Book";
 
-  // Clean subject if chapter is 00 / Book
+  // Clean subject:
+  // Target: {client_name}-- {project_code} - {stage_transition} | Stage Transition Notification
   const displaySubject = useMemo(() => {
     let subj = config.subject || "—";
-    if (isBook) {
-      subj = subj.replace(/\bChapter(?:s)?\s+(?:Book|00|0)\b/gi, "Book");
-      subj = subj.replace(/\bChapter(?:s)?\s*:\s*(?:Book|00|0)\b/gi, "Book");
+    if (subj !== "—") {
+      // 1. Remove open close brackets around client: [Client] -> Client--
+      subj = subj.replace(/^\[([^\]]+)\]\s*/, "$1-- ");
+      // 2. Remove brackets around project code if any: -- [Project] -> -- Project
+      subj = subj.replace(/--\s*\[([^\]]+)\]/, "-- $1");
+      // 3. Remove chapter details: - Chapters? ... or - Book
+      subj = subj.replace(/\s*-\s*Chapters?\s+[^|\n]+/gi, "");
+      subj = subj.replace(/\s*-\s*Book\b/gi, "");
+      // 4. Normalize separator between project and stage flow to ' - '
+      subj = subj.replace(/(--\s*[^\-|]+?)\s*[\|\-]\s*([^|]+?)\s*\|\s*Stage Transition Notification/, "$1 - $2 | Stage Transition Notification");
     }
-    return subj;
-  }, [config.subject, isBook]);
+    return subj.trim();
+  }, [config.subject]);
 
   // Parse body around {chapter_table} or ASCII table pattern
   const { introText, outroText } = useMemo(() => {
@@ -107,7 +115,26 @@ export function TransitionConfirmModal({
       raw = raw.replace(/\bChapter\s*:\s*(?:Book|00|0)\b/gi, "Chapter: Book");
     }
 
-    if (!raw.includes("{chapter_table}")) {
+    // Ensure Client Name comes first, Project Name next (no brackets), separated by blank line
+    const mClient = raw.match(/Client Name:\s*([^\n\r]+)/i);
+    const mProj = raw.match(/Project Name:\s*([^\n\r]+)/i);
+    if (mClient || mProj) {
+      let cVal = mClient ? mClient[1].trim().replace(/^\[|\]$/g, "") : "";
+      let pVal = mProj ? mProj[1].trim().replace(/^\[|\]$/g, "") : "";
+      raw = raw.replace(/^[ \t]*Project Name:.*(?:\r?\n|$)/gim, "");
+      raw = raw.replace(/^[ \t]*Client Name:.*(?:\r?\n|$)/gim, "");
+      const headerBlock = `Client Name: ${cVal}\n\nProject Name: ${pVal}`;
+      if (raw.includes("{chapter_table}")) {
+        const parts = raw.split("{chapter_table}");
+        raw = `${parts[0].trim()}\n\n${headerBlock}\n\n{chapter_table}${parts.slice(1).join("{chapter_table}")}`;
+      } else if (raw.includes("Regards,")) {
+        const parts = raw.split("Regards,");
+        raw = `${parts[0].trim()}\n\n${headerBlock}\n\n{chapter_table}\n\nRegards,${parts.slice(1).join("Regards,")}`;
+      } else {
+        raw = `${raw.trim()}\n\n${headerBlock}\n\n{chapter_table}`;
+      }
+      raw = raw.replace(/\n{3,}/g, "\n\n");
+    } else if (!raw.includes("{chapter_table}")) {
       if (raw.includes("Regards,")) {
         const parts = raw.split("Regards,");
         raw = parts[0].trim() + "\n\n{chapter_table}\n\nRegards," + parts.slice(1).join("Regards,");
@@ -225,12 +252,13 @@ export function TransitionConfirmModal({
                 {introText.split("\n\n").map((para, idx) => (
                   <p key={idx} className="leading-relaxed">
                     {para.split("\n").map((line, lIdx) => {
-                      const pMatch = line.match(/^(Project Name:|Client Name:)(.*)$/);
+                      const pMatch = line.match(/^(Client Name:|Project Name:)(.*)$/);
                       if (pMatch) {
+                        const cleanVal = pMatch[2].trim().replace(/^\[|\]$/g, "");
                         return (
-                          <span key={lIdx} className="block">
-                            <strong className="font-semibold text-text">{pMatch[1]}</strong>
-                            <span className="text-text">{pMatch[2]}</span>
+                          <span key={lIdx} className="block font-bold text-text">
+                            <span>{pMatch[1]} </span>
+                            <span>{cleanVal}</span>
                           </span>
                         );
                       }
