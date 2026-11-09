@@ -19,6 +19,8 @@ interface TransitionConfirmModalProps {
     body: string;
     from_email?: string;
     next_stage_due_date?: string;
+    next_stage_owner_name?: string;
+    next_stage_owner_username?: string;
   };
 }
 
@@ -85,6 +87,7 @@ export function TransitionConfirmModal({
     let subj = config.subject || "—";
     if (isBook) {
       subj = subj.replace(/\bChapter(?:s)?\s+(?:Book|00|0)\b/gi, "Book");
+      subj = subj.replace(/\bChapter(?:s)?\s*:\s*(?:Book|00|0)\b/gi, "Book");
     }
     return subj;
   }, [config.subject, isBook]);
@@ -145,12 +148,21 @@ export function TransitionConfirmModal({
         {/* Custom warning/transition message */}
         <div className="p-3 bg-accent/40 rounded-lg border border-border/80 flex items-start gap-3">
           <Mail className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-          <div>
+          <div className="flex-1">
             <p className="text-sm font-medium text-text">{displayMsg}</p>
-            <div className="flex items-center gap-1.5 mt-1 text-xs text-muted">
+            <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-muted">
               <span>{currentStage}</span>
               <ArrowRight size={10} />
               <span className="font-semibold text-primary">{nextStage}</span>
+              {config.next_stage_owner_name && (
+                <>
+                  <span className="text-border">|</span>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Stage Owner: {config.next_stage_owner_name}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>

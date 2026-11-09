@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Plus, Pencil, RefreshCw,
@@ -9,11 +9,63 @@ import { stagesApi } from '@/api/stages'
 import type { Stage, StagePayload, ProcessingActionDefinition } from '@/api/stages'
 import { rolesApi } from '@/api/workflow'
 import type { RolesMaster } from '@/api/workflow'
+import { usersApi } from '@/api/users'
+import type { User } from '@/api/users'
 import { Toggle } from '@/components/ui/Toggle'
 import { Spinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
 import { useStageActionsStore } from '@/store/useStageActionsStore'
 import { ProcessingActionsManager } from './ProcessingActionsManager'
+
+const PRESET_DESIGNATIONS = [
+  'Team Lead - LE',
+  'Team Lead - Language Editing',
+  'Team Lead - Editorial',
+  'Team Lead - Pre-editing',
+  'Team Lead - Production',
+  'Team Lead - Art',
+  'Language Editor',
+  'Senior Language Editor',
+  'Copyeditor',
+  'Senior Copyeditor',
+  'Technical Editor',
+  'Senior Technical Editor',
+  'Manuscript Analysis Manager',
+  'Manuscript Analysis Operator',
+  'Editorial Assistant',
+  'Pre-editor',
+  'Senior Pre-editor',
+  'Pre-editing QA',
+  'Graphics Manager',
+  'Graphics Designer',
+  'Senior Graphics Designer',
+  'Art Director',
+  'Art Assessment Operator',
+  'Template Team Manager',
+  'Template Designer',
+  'XML Manager',
+  'Senior XML Operator',
+  'XML Operator',
+  'Compositor',
+  'Senior Compositor',
+  'Typesetter',
+  'Senior Typesetter',
+  'Production Manager',
+  'Senior Production Manager',
+  'Project Manager',
+  'Senior Project Manager',
+  'Quality Controller',
+  'Quality Control Lead',
+  'Quality Assurance Manager',
+  'Index Manager',
+  'Index Operator',
+  'Accessibility Lead',
+  'Digital Processing Lead',
+  'Proofreader',
+  'Senior Proofreader',
+  'Publisher Reviewer',
+  'General Manager',
+]
 
 // ── Tiny helpers ───────────────────────────────────────────────────────────────
 
@@ -49,10 +101,12 @@ interface StageModalProps {
   initial: Stage | null
   allRoles: RolesMaster[]
   definitions: ProcessingActionDefinition[]
+  availableDesignations?: string[]
 }
 
 interface StageForm {
   stage_name: string
+  owner_designation: string
   sla_level1: string
   sla_level2: string
   sla_level3: string
@@ -66,12 +120,20 @@ interface StageForm {
 }
 
 const EMPTY_FORM: StageForm = {
-  stage_name: '', sla_level1: '', sla_level2: '', sla_level3: '',
+  stage_name: '', owner_designation: '', sla_level1: '', sla_level2: '', sla_level3: '',
   pages_level1: '', pages_level2: '', pages_level3: '',
   description: '', active_status: true, role_names: [], processing_actions: [],
 }
 
-function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }: StageModalProps) {
+function StageModal({
+  isOpen,
+  onClose,
+  onSaved,
+  initial,
+  allRoles,
+  definitions,
+  availableDesignations = PRESET_DESIGNATIONS,
+}: StageModalProps) {
   const [form, setForm] = useState<StageForm>(EMPTY_FORM)
   const [errors, setErrors] = useState<Partial<Record<keyof StageForm | 'general', string>>>({})
   const [saving, setSaving] = useState(false)
@@ -80,11 +142,22 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
   const [actionSearch, setActionSearch] = useState('')
   const roleDropRef = useRef<HTMLDivElement>(null)
 
+  const [desigDropOpen, setDesigDropOpen] = useState(false)
+  const [desigSearch, setDesigSearch] = useState('')
+  const desigDropRef = useRef<HTMLDivElement>(null)
+
+  const filteredDesignations = useMemo(() => {
+    if (!desigSearch.trim()) return availableDesignations
+    const q = desigSearch.toLowerCase()
+    return availableDesignations.filter(d => d.toLowerCase().includes(q))
+  }, [availableDesignations, desigSearch])
+
   useEffect(() => {
     if (!isOpen) return
     if (initial) {
       setForm({
         stage_name:   initial.stage_name,
+        owner_designation: initial.owner_designation ?? '',
         sla_level1:   initial.sla_level1 != null ? String(initial.sla_level1) : '',
         sla_level2:   initial.sla_level2 != null ? String(initial.sla_level2) : '',
         sla_level3:   initial.sla_level3 != null ? String(initial.sla_level3) : '',
@@ -102,13 +175,16 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
     setErrors({})
     setRoleSearch('')
     setActionSearch('')
+    setDesigSearch('')
     setRoleDropOpen(false)
+    setDesigDropOpen(false)
   }, [isOpen, initial])
 
   // Close dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (roleDropRef.current && !roleDropRef.current.contains(e.target as Node)) setRoleDropOpen(false)
+      if (desigDropRef.current && !desigDropRef.current.contains(e.target as Node)) setDesigDropOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -134,6 +210,7 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
     try {
       const payload: StagePayload = {
         stage_name:   form.stage_name.trim(),
+        owner_designation: form.owner_designation.trim() || undefined,
         sla_level1:   form.sla_level1 ? Number(form.sla_level1) : (initial ? null : undefined),
         sla_level2:   form.sla_level2 ? Number(form.sla_level2) : (initial ? null : undefined),
         sla_level3:   form.sla_level3 ? Number(form.sla_level3) : (initial ? null : undefined),
@@ -241,6 +318,138 @@ function StageModal({ isOpen, onClose, onSaved, initial, allRoles, definitions }
                 }`}
               />
               {errors.stage_name && <p className="text-xs text-red-500 mt-1">{errors.stage_name}</p>}
+            </div>
+
+            {/* Owner Stage (Designation) */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-text uppercase tracking-wider">
+                  Owner Stage (Designation)
+                </label>
+                {form.owner_designation && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm(f => ({ ...f, owner_designation: '' }))
+                      setDesigSearch('')
+                    }}
+                    className="text-[11px] text-muted hover:text-danger flex items-center gap-0.5"
+                  >
+                    <X size={12} /> Clear
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-muted mb-1.5">
+                Fixed stage owner designation (e.g. "Team Lead - LE"). When chapters move to this stage, they are automatically assigned to users with this designation.
+              </p>
+
+              <div className="relative" ref={desigDropRef}>
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    value={form.owner_designation}
+                    onChange={e => {
+                      setForm(f => ({ ...f, owner_designation: e.target.value }))
+                      setDesigSearch(e.target.value)
+                      setDesigDropOpen(true)
+                    }}
+                    onFocus={() => setDesigDropOpen(true)}
+                    placeholder="Click to choose designation or type to search…"
+                    className="w-full pl-3 pr-16 py-2 text-sm bg-background border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  <div className="absolute right-1.5 flex items-center gap-1">
+                    {form.owner_designation && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForm(f => ({ ...f, owner_designation: '' }))
+                          setDesigSearch('')
+                        }}
+                        className="p-1 text-muted hover:text-text rounded"
+                        title="Clear designation"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setDesigDropOpen(o => !o)}
+                      className="p-1 text-muted hover:text-text rounded"
+                      title="Show all designations"
+                    >
+                      <ChevronDown size={14} className={`transition-transform duration-150 ${desigDropOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {desigDropOpen && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+                    <div className="p-2 border-b border-border bg-surface/60">
+                      <div className="relative">
+                        <Search size={13} className="absolute left-2.5 top-2 text-muted" />
+                        <input
+                          autoFocus
+                          value={desigSearch}
+                          onChange={e => setDesigSearch(e.target.value)}
+                          className="w-full pl-7 pr-3 py-1.5 text-xs bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 text-text placeholder:text-muted/60"
+                          placeholder="Search designations…"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between mt-1.5 px-1 text-[10px] text-muted">
+                        <span>Showing {filteredDesignations.length} of {availableDesignations.length} designations</span>
+                        {form.owner_designation && (
+                          <span className="text-emerald-600 font-semibold truncate max-w-[160px]">
+                            Selected: {form.owner_designation}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="max-h-56 overflow-y-auto divide-y divide-border/40">
+                      {filteredDesignations.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-muted">
+                          <p>No designation matching "{desigSearch}"</p>
+                          {desigSearch.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setForm(f => ({ ...f, owner_designation: desigSearch.trim() }))
+                                setDesigDropOpen(false)
+                              }}
+                              className="mt-2 text-xs font-semibold text-primary hover:underline block mx-auto"
+                            >
+                              Use "{desigSearch.trim()}" as custom designation
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        filteredDesignations.map(d => {
+                          const isSelected = form.owner_designation.toLowerCase() === d.toLowerCase()
+                          return (
+                            <button
+                              key={d}
+                              type="button"
+                              onClick={() => {
+                                setForm(f => ({ ...f, owner_designation: d }))
+                                setDesigDropOpen(false)
+                              }}
+                              className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-surface transition-colors ${
+                                isSelected ? 'bg-primary/10 text-primary font-semibold' : 'text-text'
+                              }`}
+                            >
+                              <span className="flex items-center gap-2 truncate">
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-primary' : 'bg-muted/40'}`} />
+                                <span className="truncate">{d}</span>
+                              </span>
+                              {isSelected && <Check size={13} className="text-primary flex-shrink-0 ml-2" />}
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* SLA by Level */}
@@ -629,8 +838,18 @@ function ExpandedStageRow({ stage, definitions }: { stage: Stage; definitions: P
 
   return (
     <tr>
-      <td colSpan={7} className="bg-background/40 border-b border-border/50">
+      <td colSpan={8} className="bg-background/40 border-b border-border/50">
         <div className="px-12 py-3.5 space-y-3">
+          {stage.owner_designation && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1">Owner Stage (Designation)</p>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                {stage.owner_designation}
+              </span>
+            </div>
+          )}
+
           {stage.description && (
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1">Description</p>
@@ -744,12 +963,34 @@ export function StageManagement() {
   const [stageModalOpen, setStageModalOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<Stage | null>(null)
   const [stageStatusLoading, setStageStatusLoading] = useState<number | null>(null)
+  const [designationsList, setDesignationsList] = useState<string[]>(PRESET_DESIGNATIONS)
 
   const loadAll = useCallback(async () => {
     try {
-      const [s, r] = await Promise.all([stagesApi.list(), rolesApi.listActive()])
+      const [s, r, u] = await Promise.all([
+        stagesApi.list(),
+        rolesApi.listActive(),
+        usersApi.list().catch(() => [] as User[])
+      ])
       setStages(s)
       setRoles(r)
+
+      const userDesigs = (u || []).map((user: User) => user.designation?.trim()).filter(Boolean)
+      const userRoles = (u || []).map((user: User) => user.role?.trim()).filter(Boolean)
+      const roleNames = (r || []).map((role: RolesMaster) => role.role_name?.trim()).filter(Boolean)
+      const stageOwners = (s || []).map((st: Stage) => st.owner_designation?.trim()).filter(Boolean)
+
+      const merged = Array.from(
+        new Set([
+          ...PRESET_DESIGNATIONS,
+          ...userDesigs,
+          ...userRoles,
+          ...roleNames,
+          ...stageOwners,
+        ])
+      ).filter(Boolean).sort((a, b) => a.localeCompare(b))
+
+      setDesignationsList(merged)
       await fetchMapping(true)
     } catch {
       toast.error('Failed to load stage data')
@@ -877,6 +1118,7 @@ export function StageManagement() {
                   <th className="w-8"></th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Stage Name</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">SLA & Page Norms</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Owner Stage</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Roles</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Allowed Actions</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider">Status</th>
@@ -886,7 +1128,7 @@ export function StageManagement() {
               <tbody>
                 {filteredStages.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-sm text-muted">
+                    <td colSpan={8} className="px-6 py-12 text-center text-sm text-muted">
                       <Layers size={28} className="mx-auto mb-2 opacity-30" />
                       {stageSearch || stageStatusFilter ? 'No stages match your filters' : 'No stages yet — create your first stage'}
                     </td>
@@ -958,6 +1200,17 @@ export function StageManagement() {
                               <span className="text-muted">—</span>
                             )}
                           </td>
+                          {/* Owner Stage */}
+                          <td className="px-4 py-3">
+                            {stage.owner_designation ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                {stage.owner_designation}
+                              </span>
+                            ) : (
+                              <span className="text-muted text-xs">—</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3 max-w-[200px]">
                             {stage.roles.length === 0 ? (
                               <span className="text-muted">—</span>
@@ -1020,6 +1273,7 @@ export function StageManagement() {
         initial={editingStage}
         allRoles={roles}
         definitions={definitions}
+        availableDesignations={designationsList}
       />
     </div>
   )

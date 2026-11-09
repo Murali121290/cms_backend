@@ -9226,6 +9226,8 @@ class TransitionConfigResponse(BaseModel):
     body: Optional[str] = None
     from_email: Optional[str] = None
     next_stage_due_date: Optional[str] = None
+    next_stage_owner_name: Optional[str] = None
+    next_stage_owner_username: Optional[str] = None
 
 class TransitionEmailRequest(BaseModel):
     from_stage: str
@@ -9895,13 +9897,39 @@ def api_v2_get_chapter_transition_config(
     if ch_raw in ("00", "0") or ch_raw.lower() == "book":
         import re
         subj_resolved = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', subj_resolved, flags=re.IGNORECASE)
+        subj_resolved = re.sub(r'\bChapter(?:s)?\s*:\s*(?:Book|00|0)\b', 'Book', subj_resolved, flags=re.IGNORECASE)
         body_resolved = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', body_resolved, flags=re.IGNORECASE)
+        body_resolved = re.sub(r'\bChapter(?:s)?\s*:\s*(?:Book|00|0)\b', 'Book', body_resolved, flags=re.IGNORECASE)
         body_resolved = re.sub(r'\|\s*00\s*\|', '| Book |', body_resolved)
+
+    # Normalize body to match new standard format if using legacy template
+    if not body_resolved or "Below Files are Completed" not in body_resolved:
+        p_code = (project.project_code if project and project.project_code else (project.code if project else chapter.project)) or ""
+        c_title = client_name or ""
+        body_resolved = (
+            f"Hi,\n\n"
+            f"Below Files are Completed {current_stage} for your review and processing.\n\n"
+            f"Project Name: [{p_code}]\n"
+            f"Client Name: {c_title}\n\n"
+            f"{{chapter_table}}\n\n"
+            f"Regards,\n"
+            f"S4C Ninja Inkflow Team\n\n"
+            f"Note : This is an automated mail and please do not reply."
+        )
 
     body_resolved = _clean_body_template_tables(body_resolved)
     
     proj_code = project.code if project else (chapter.project if chapter else "")
     next_stage_due = _resolve_next_stage_due_date(db, proj_code, chapter.chapters, next_stage, chapter_obj=chapter)
+
+    from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+    owner_user = resolve_stage_owner_by_designation(db, next_stage, project_code=proj_code, client_identifier=client_identifier)
+    owner_name = None
+    owner_uname = None
+    if owner_user:
+        full_n = f"{owner_user.first_name or ''} {owner_user.last_name or ''}".strip()
+        owner_name = full_n if full_n else owner_user.username
+        owner_uname = owner_user.username
 
     return TransitionConfigResponse(
         has_config=True,
@@ -9911,7 +9939,9 @@ def api_v2_get_chapter_transition_config(
         subject=subj_resolved,
         body=body_resolved,
         from_email=settings.SMTP_FROM,
-        next_stage_due_date=next_stage_due
+        next_stage_due_date=next_stage_due,
+        next_stage_owner_name=owner_name,
+        next_stage_owner_username=owner_uname
     )
 
 @router.post("/chapters/{chapter_id}/transition-email")
@@ -9938,6 +9968,11 @@ def api_v2_chapter_transition_email(
     project_code = project.code if project else chapter.project
     if not project_code:
         raise HTTPException(status_code=400, detail="Project code not found")
+
+    from app.domains.clients.models import Client
+    client = None
+    if project and project.client_id:
+        client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
         
     # Execute stage transition
     transition_payload = TransitionPayload(
@@ -9950,7 +9985,15 @@ def api_v2_chapter_transition_email(
     
     # Update ChapterInfo table
     chapter.stage_name = payload.to_stage
-    chapter.current_assignee_name = None
+    from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+    client_ident = client.division if (client and client.division) else (project.client_name if project else chapter.client)
+    owner_user = resolve_stage_owner_by_designation(
+        db, payload.to_stage, project_code=project_code, client_identifier=client_ident
+    )
+    if owner_user:
+        chapter.current_assignee_name = owner_user.username
+    else:
+        chapter.current_assignee_name = None
     if payload.shipment_notes:
         chapter.remarks = payload.shipment_notes
     
@@ -10121,7 +10164,7 @@ def api_v2_bulk_transition_config(
             if active_stages and active_stages[-1].stage_name == (next_stage_name or current_stage):
                 is_last = True
 
-        ch_proj_code = project.code if project else (ch.project if ch else "")
+        ch_proj_code = (ch_project.code if (ch_project and ch_project.code) else (ch_project.project_code if ch_project else ch.project)) or ""
         next_due_date_str = _resolve_next_stage_due_date(db, ch_proj_code, ch.chapters, next_stage_name or "", chapter_obj=ch)
 
         ch_raw = ch.chapters.strip() if ch.chapters else ""
@@ -10255,7 +10298,17 @@ def api_v2_bulk_transition_execute(
             logging.error("Failed internal stage transition for chapter %s: %s", ch.chapters, err)
 
         ch.stage_name = next_stage_name
-        ch.current_assignee_name = None
+        from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+        ch_client_ident = project.client_name if project else ch.client
+        if project and project.client_id:
+            from app.domains.clients.models import Client
+            cl_obj = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
+            if cl_obj and cl_obj.division:
+                ch_client_ident = cl_obj.division
+        owner_user = resolve_stage_owner_by_designation(
+            db, next_stage_name, project_code=project_code, client_identifier=ch_client_ident
+        )
+        ch.current_assignee_name = owner_user.username if owner_user else None
         if payload.shipment_notes:
             ch.remarks = payload.shipment_notes
 

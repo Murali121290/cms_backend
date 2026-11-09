@@ -4,6 +4,7 @@ export interface Stage {
   id: number
   stage_name: string
   description: string | null
+  owner_designation?: string | null
   sla_level1: number | null
   sla_level2: number | null
   sla_level3: number | null
@@ -19,6 +20,7 @@ export interface Stage {
 export interface StagePayload {
   stage_name: string
   description?: string
+  owner_designation?: string | null
   sla_level1?: number | null
   sla_level2?: number | null
   sla_level3?: number | null

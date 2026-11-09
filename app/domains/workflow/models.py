@@ -82,6 +82,7 @@ class StageMaster(Base):
     id               = Column(BigInteger, primary_key=True, autoincrement=True)
     stage_name       = Column(String(100), unique=True, nullable=False, index=True)
     description      = Column(Text, nullable=True)
+    owner_designation = Column(String(100), nullable=True)                          # e.g., "Team Lead - LE"
     sla_level1       = Column(Integer,           nullable=True)                        # SLA in days for Level 1
     sla_level2       = Column(Integer,           nullable=True)                        # SLA in days for Level 2
     sla_level3       = Column(Integer,           nullable=True)                        # SLA in days for Level 3

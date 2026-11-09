@@ -159,6 +159,8 @@ def init_data():
 
         try:
             db.execute(text("ALTER TABLE users ALTER COLUMN team DROP NOT NULL;"))
+            db.execute(text("ALTER TABLE stage_master ADD COLUMN IF NOT EXISTS owner_designation VARCHAR(100);"))
+            db.execute(text("UPDATE stage_master SET owner_designation = 'Team Lead - LE' WHERE stage_name = 'Language Editing' AND (owner_designation IS NULL OR owner_designation = '');"))
             db.commit()
         except Exception:
             db.rollback()

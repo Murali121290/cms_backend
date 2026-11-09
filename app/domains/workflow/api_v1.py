@@ -596,6 +596,98 @@ def bulk_assign_stages(payload: BulkAssignPayload, db: Session = Depends(get_db)
     return updated_details
 
 
+def resolve_stage_owner_by_designation(
+    db: Session,
+    stage_name: str,
+    project_code: Optional[str] = None,
+    client_identifier: Optional[str] = None
+):
+    """
+    Finds the active user configured as the owner for the given stage name based on StageMaster.owner_designation.
+    1. Looks up StageMaster.owner_designation for stage_name.
+    2. If no owner_designation is configured, returns None.
+    3. Searches active users where User.designation or User.role matches owner_designation.
+    4. If multiple users match, prioritizes:
+       a. User whose customer_access includes client_identifier or project_code.
+       b. User who is in the project's assigned team (if project_code provided).
+       c. First active user matching designation.
+    5. Returns User model or None.
+    """
+    if not stage_name:
+        return None
+    from app.domains.workflow.models import StageMaster
+    from app.domains.auth.models import User
+    from sqlalchemy import select, func, or_
+    import json
+
+    stage_rec = db.execute(
+        select(StageMaster).where(StageMaster.stage_name == stage_name)
+    ).scalars().first()
+
+    if not stage_rec or not stage_rec.owner_designation:
+        return None
+
+    target_desig = stage_rec.owner_designation.strip()
+    if not target_desig:
+        return None
+
+    # Query active users matching designation or role
+    users = db.execute(
+        select(User).where(
+            User.active_status == True,
+            or_(
+                func.lower(func.trim(User.designation)) == target_desig.lower(),
+                func.lower(func.trim(User.role)) == target_desig.lower()
+            )
+        )
+    ).scalars().all()
+
+    if not users:
+        desig_norm = target_desig.lower().replace("-", " ").replace("_", " ").strip()
+        all_active = db.execute(select(User).where(User.active_status == True)).scalars().all()
+        for u in all_active:
+            u_d = (u.designation or "").lower().replace("-", " ").replace("_", " ").strip()
+            u_r = (u.role or "").lower().replace("-", " ").replace("_", " ").strip()
+            if u_d == desig_norm or u_r == desig_norm:
+                users.append(u)
+                continue
+            if u.additional_roles and isinstance(u.additional_roles, list):
+                if any(desig_norm == str(ar).lower().replace("-", " ").replace("_", " ").strip() for ar in u.additional_roles):
+                    users.append(u)
+
+    if not users:
+        return None
+
+    if len(users) == 1:
+        return users[0]
+
+    # Prioritize user with customer_access matching client_identifier or project_code
+    if client_identifier or project_code:
+        for u in users:
+            acc = u.customer_access or []
+            if isinstance(acc, str):
+                try:
+                    acc = json.loads(acc)
+                except Exception:
+                    acc = [acc]
+            if isinstance(acc, list):
+                if client_identifier and client_identifier in acc:
+                    return u
+                if project_code and project_code in acc:
+                    return u
+
+    # Prioritize user associated with project team if available
+    if project_code:
+        from app.domains.projects.models import Project
+        proj = db.execute(select(Project).where(Project.project_code == project_code)).scalars().first()
+        if proj and proj.team:
+            for u in users:
+                if u.team and u.team.lower() == proj.team.lower():
+                    return u
+
+    return users[0]
+
+
 class TransitionPayload(BaseModel):
     from_stage: str
     to_stage: str
@@ -737,6 +829,23 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
     else:
         to_detail.stage_status = "In-progress"
         to_detail.actual_end_date = None
+
+    # Auto-assign stage owner based on StageMaster.owner_designation
+    client_ident = from_detail.client if from_detail else None
+    owner_user = resolve_stage_owner_by_designation(
+        db, payload.to_stage, project_code=project, client_identifier=client_ident
+    )
+    if owner_user:
+        to_detail.assignee_name = owner_user.username
+        from app.domains.workflow.models import ChapterInfo
+        ch_info = db.execute(
+            select(ChapterInfo).where(
+                ChapterInfo.project == project,
+                ChapterInfo.chapters == chapters
+            )
+        ).scalars().first()
+        if ch_info:
+            ch_info.current_assignee_name = owner_user.username
 
     to_detail.actual_start_date = transition_time
     
