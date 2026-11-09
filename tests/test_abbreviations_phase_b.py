@@ -198,8 +198,14 @@ def test_rule_override_disables_abbreviation_entry():
 
 def test_audience_professional_skips_general_only_entries():
     """BP (blood pressure) is marked expand_for_general_only. Under
-    audience=professional it must not trigger first-use rewriting."""
-    text = "Blood pressure was measured twice. Blood pressure was normal."
+    audience=professional it must not trigger first-use rewriting.
+
+    The text mixes the expansion and the abbreviation so AB01 has a
+    legitimate subject in general mode — the AB01 guard requires the
+    abbreviation form to appear in the document, and this test covers
+    the audience branch rather than the empty-abbreviation branch.
+    """
+    text = "Blood pressure was measured twice. BP was normal."
     state_general = ab.build_document_state([(0, text)], audience="general", min_uses=2)
     state_prof = ab.build_document_state([(0, text)], audience="professional", min_uses=2)
     general_findings = ab.analyze_abbreviations(

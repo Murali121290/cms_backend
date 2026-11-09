@@ -947,10 +947,21 @@ def _emit_doc_scope_findings(
         # ─── AB01: introduce the abbreviation at the first mention ──
         # Only fires when:
         #   - the document already has NO explicit definition pair,
-        #   - the term appears at least ``min_uses`` times, and
-        #   - this paragraph owns the first mention.
+        #   - the term appears at least ``min_uses`` times,
+        #   - this paragraph owns the first mention, and
+        #   - the ABBREVIATION form itself appears somewhere in the
+        #     document. If the author only uses the expansion as regular
+        #     prose (e.g. "treatment" without ever writing "Tx"), the
+        #     rule has no subject — AB01's purpose is to introduce an
+        #     abbreviation the author is actually using, not to push one
+        #     onto text that doesn't need it. Without this guard, common
+        #     English words that happen to be expansions of informal
+        #     medical shorthands (symptoms→Sx, treatment→Tx, history→Hx,
+        #     blood pressure→BP, …) misfire whenever they appear ≥
+        #     min_uses times in normal prose.
         if (not defined and first_use and first_use[0] == para_idx
                 and total_uses >= min_uses
+                and s.abbr_occurrences
                 and not _rule_disabled_by_override("AB01", rule_overrides)):
             # Resolve which specific occurrence sits at first_use position.
             # It may be an abbreviation hit OR an expansion hit — the two

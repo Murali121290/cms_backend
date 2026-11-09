@@ -117,7 +117,7 @@ export function LanguageReviewPage() {
   // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
   const journal = useJournalReviewMode()
 
-  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'term' | 'typo' | 'hyphenation' | 'comments' | 'rules'>('all')
+  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'term' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules'>('all')
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [job, setJob] = useState<JobData | null>(null)
@@ -652,7 +652,7 @@ export function LanguageReviewPage() {
     // longer exists.
     const legacyCompoundCat = target.category === 'compounds' || target.category === 'compound'
     const resolvedCat = legacyCompoundCat ? 'hyphenation' : target.category
-    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'bias', 'term', 'typo', 'hyphenation'].includes(resolvedCat)) {
+    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'bias', 'term', 'typo', 'hyphenation', 'abbreviations', 'medical_terms'].includes(resolvedCat)) {
       setActiveRightTab(resolvedCat as any)
     }
 
@@ -710,6 +710,21 @@ export function LanguageReviewPage() {
     () => findings.filter(f => f.category === 'hyphenation' || f.category === 'compounds' || f.category === 'compound'),
     [findings],
   )
+  // Abbreviations workbook findings (abbreviations.py + LWW-NE rows
+  // routed to 'abbreviations'). Distinct from Terms (term_matcher) and
+  // Spell Check (typo) — these are workbook-driven expansions and
+  // first-use enforcement.
+  const abbreviationFindings = useMemo(
+    () => findings.filter(f => f.category === 'abbreviations'),
+    [findings],
+  )
+  // Medical Terminology workbook findings (medical_terms.py). Kept
+  // separate from Terms so reviewers can triage medical vocabulary
+  // independently of project-defined term lists.
+  const medicalTermsFindings = useMemo(
+    () => findings.filter(f => f.category === 'medical_terms'),
+    [findings],
+  )
 
   const activeCategoryFindings = useMemo(() => {
     let list: Finding[] = []
@@ -721,6 +736,8 @@ export function LanguageReviewPage() {
     else if (activeRightTab === 'term') list = termFindings
     else if (activeRightTab === 'typo') list = typoFindings
     else if (activeRightTab === 'hyphenation') list = hyphenationFindings
+    else if (activeRightTab === 'abbreviations') list = abbreviationFindings
+    else if (activeRightTab === 'medical_terms') list = medicalTermsFindings
 
     if (!searchQuery.trim()) return list
     const q = searchQuery.toLowerCase()
@@ -730,7 +747,7 @@ export function LanguageReviewPage() {
         f.message.toLowerCase().includes(q) ||
         f.rule_id.toLowerCase().includes(q),
     )
-  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, biasFindings, termFindings, typoFindings, hyphenationFindings, searchQuery])
+  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, biasFindings, termFindings, typoFindings, hyphenationFindings, abbreviationFindings, medicalTermsFindings, searchQuery])
 
   // Realtime progress statistics
   const totalFindingsCount = job?.total_findings || findings.length || 0
@@ -1108,6 +1125,30 @@ export function LanguageReviewPage() {
                   }`}
                 >
                   Terms {termFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('abbreviations')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'abbreviations'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                  }`}
+                  title="Abbreviation expansion and first-use rules (workbook-driven)"
+                >
+                  Abbreviations {abbreviationFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('medical_terms')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'medical_terms'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  }`}
+                  title="Medical Terminology workbook rules"
+                >
+                  Medical Terms {medicalTermsFindings.length}
                 </button>
 
                 <button
