@@ -52,6 +52,7 @@ import {
   applyCasePreservingStructure,
 } from '@/features/language_edit/caseTransforms'
 import { replaceOptionsFor } from '@/features/language_edit/replaceOptions'
+import { isAdvisoryIdentity } from '@/features/language_edit/advisoryFinding'
 import { SaveRegexAsRuleDialog, type RegexDraft } from '@/features/language_edit/SaveRegexAsRuleDialog'
 
 interface Finding {
@@ -125,6 +126,15 @@ export function LanguageReviewPage() {
 
   const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'term' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules'>('all')
   const [loading, setLoading] = useState(false)
+  // Three-phase loading message driven by the analyze endpoint's
+  // behaviour: the POST both checks the cache and (on miss) runs the
+  // engine, so the client can't observe the phase boundary directly.
+  // We therefore use a short timeout heuristic: cache checks resolve
+  // in <~100ms, so if the POST hasn't returned after ~800ms the engine
+  // is almost certainly running. The message switches to the cached-vs-
+  // fresh form once the POST actually returns and we can read the
+  // ``cached`` flag.
+  const [loadingMessage, setLoadingMessage] = useState<string>('Checking Language Editing results…')
   const [exporting, setExporting] = useState(false)
   const [job, setJob] = useState<JobData | null>(null)
   const [findings, setFindings] = useState<Finding[]>([])
@@ -334,6 +344,17 @@ export function LanguageReviewPage() {
     if (initJobInFlightFor.current === parsedFileId) return
     initJobInFlightFor.current = parsedFileId
     setLoading(true)
+    setLoadingMessage('Checking Language Editing results…')
+
+    // Cache lookups resolve in <~100ms; if the POST is still pending
+    // after ~800ms the engine is almost certainly running (cache miss).
+    // Switch the message so the reviewer knows the longer wait is a
+    // real analyze and not a stuck request. Timer is cleared the
+    // moment the POST returns so a fast cache hit never shows this.
+    const analyzeFallbackTimer = setTimeout(() => {
+      setLoadingMessage('Analyzing document…')
+    }, 800)
+
     try {
       // If the editor has unsaved changes, persist them before analyze
       // runs — the backend cache keys on the DOCX bytes on disk, so an
@@ -354,6 +375,23 @@ export function LanguageReviewPage() {
       }
 
       const res = await apiClient.post(`/files/${parsedFileId}/language-edit/analyze`)
+      clearTimeout(analyzeFallbackTimer)
+
+      // The analyze response carries ``cached: boolean``. A cache hit
+      // means the engine did not run; we're just about to fetch the
+      // persisted findings. A miss means the engine already ran
+      // synchronously inside the POST — the "Analyzing document…"
+      // message set by the fallback timer (if long enough) was correct.
+      if (res.data?.cached) {
+        setLoadingMessage('Loading existing Language Editing results…')
+      } else {
+        // Engine ran fresh; findings load in the next GET. Keep the
+        // analyze message if the fallback timer fired, otherwise the
+        // POST returned fast enough that no message change is needed
+        // (findings arrive almost immediately).
+        setLoadingMessage('Analyzing document…')
+      }
+
       const jobId = res.data.job_id
       if (res.data.file_name) setFileName(res.data.file_name)
       const findingsRes = await apiClient.get(`/language-edit/jobs/${jobId}/findings`)
@@ -374,6 +412,7 @@ export function LanguageReviewPage() {
       console.error('Failed to run Language Edit analysis:', err)
       toast.error(err?.response?.data?.detail || 'Failed to run Language Edit analysis.')
     } finally {
+      clearTimeout(analyzeFallbackTimer)
       setLoading(false)
       // Clear the in-flight sentinel so a legitimate re-trigger (e.g.
       // user navigates away and back) can run again.
@@ -479,10 +518,12 @@ export function LanguageReviewPage() {
 
   // Batch Accept All
   const handleAcceptAll = async () => {
-    // Skip advisory findings — they have no replacement to apply, so
-    // "Accept" is meaningless. They remain pending until the reviewer
-    // explicitly Highlights or Ignores them.
-    const pending = findings.filter(f => f.status === 'pending' && !f.advisory)
+    // Skip advisory-identity findings — they have no replacement to
+    // apply, so "Accept" is meaningless. An advisory finding that
+    // happens to carry a real text change would fall through this
+    // filter and still be accepted. They remain pending until the
+    // reviewer explicitly Highlights or Ignores them.
+    const pending = findings.filter(f => f.status === 'pending' && !isAdvisoryIdentity(f))
     if (pending.length === 0) {
       toast.info('No pending findings to accept.')
       return
@@ -720,11 +761,12 @@ export function LanguageReviewPage() {
       setActiveRightTab(resolvedCat as any)
     }
 
-    // Advisory findings have no replacement to propose — skip the
-    // inline "Edit occurrence" popover (it would show original ==
+    // Advisory-identity findings have no replacement to propose — skip
+    // the inline "Edit occurrence" popover (it would show original ==
     // replacement, which is confusing). The card in the sidebar is
-    // still selected so the reviewer can Highlight or Ignore.
-    if (target.advisory) return
+    // still selected so the reviewer can Highlight or Ignore. Advisory
+    // findings that ship a real suggestion still open the popover.
+    if (isAdvisoryIdentity(target)) return
 
     // Anchor the popover to the clicked span's rect. Two RAFs so ProseMirror
     // has finished its decoration render before we read the DOM.
@@ -1009,7 +1051,7 @@ export function LanguageReviewPage() {
       {loading ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-500 bg-slate-50">
           <Loader2 className="animate-spin text-violet-600" size={32} />
-          <p className="text-sm font-medium">Running Language Editing engine on document...</p>
+          <p className="text-sm font-medium">{loadingMessage}</p>
         </div>
       ) : (
         <div className="flex-1 flex overflow-hidden">
@@ -1591,7 +1633,7 @@ export function LanguageReviewPage() {
                                 {hyphSource}
                               </span>
                             )}
-                            {f.advisory && (
+                            {isAdvisoryIdentity(f) && (
                               <span
                                 className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
                                 title="Advisory finding — highlights a passage for your judgement without proposing a specific rewrite. Use Highlight to flag it or Ignore to dismiss."
@@ -1610,36 +1652,40 @@ export function LanguageReviewPage() {
                           {f.message}
                         </p>
 
-                        {/* Visual Diff Box — hidden for advisory findings
-                            (passive_voice, max_sentence_length) where
-                            original == suggestion by design. For those
-                            we show just the original span as a passage
-                            reference. */}
-                        {f.advisory ? (
+                        {/* Visual Diff Box — Case 1 (replacement) shows
+                            the red-strikethrough → green diff. Case 2
+                            (advisory finding with original == suggestion)
+                            shows just the referenced phrase once, as
+                            muted italic text, with no arrow. */}
+                        {isAdvisoryIdentity(f) ? (
                           <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
-                            <span className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 italic">
+                            <span
+                              data-testid="advisory-phrase"
+                              className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 italic"
+                            >
                               {f.original_text}
                             </span>
                           </div>
                         ) : (
                           <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
-                            <span className="diff-old px-2 py-1 rounded-lg">
+                            <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
                               {f.original_text}
                             </span>
-                            <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
-                            <span className="diff-new px-2 py-1 rounded-lg">
+                            <ArrowRight size={14} className="text-slate-300 flex-shrink-0" data-testid="diff-arrow" />
+                            <span data-testid="diff-new" className="diff-new px-2 py-1 rounded-lg">
                               {f.edited_text || f.suggestion}
                             </span>
                           </div>
                         )}
 
-                        {/* Action Buttons — advisory findings drop
-                            Accept + Edit (nothing to apply / replace)
-                            and keep Highlight + Ignore. */}
+                        {/* Action Buttons — Case 2 (advisory identity)
+                            drops Accept + Edit (nothing to apply /
+                            replace) and keeps Highlight + Ignore only. */}
                         <div className="mt-3 flex items-center gap-2 flex-wrap">
-                          {!f.advisory && (
+                          {!isAdvisoryIdentity(f) && (
                             <>
                               <button
+                                data-testid="action-accept"
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   handleDecide(f.id, 'accepted')
@@ -1650,6 +1696,7 @@ export function LanguageReviewPage() {
                               </button>
 
                               <button
+                                data-testid="action-edit"
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   setEditingFindingId(prev => prev === f.id ? null : f.id)
@@ -1662,16 +1709,18 @@ export function LanguageReviewPage() {
                           )}
 
                           <button
+                            data-testid="action-highlight"
                             onClick={(e) => {
                               e.stopPropagation()
                               handleDecide(f.id, 'highlighted')
                             }}
-                            className={`${f.advisory ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
+                            className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
                           >
                             Highlight
                           </button>
 
                           <button
+                            data-testid="action-ignore"
                             onClick={(e) => {
                               e.stopPropagation()
                               handleDecide(f.id, 'rejected')
@@ -1682,10 +1731,10 @@ export function LanguageReviewPage() {
                           </button>
                         </div>
 
-                        {/* Inline Custom Edit Row — advisory findings
+                        {/* Inline Custom Edit Row — Case 2 findings
                             never open the Edit input (Edit button is
                             hidden above). */}
-                        {!f.advisory && editingFindingId === f.id && (
+                        {!isAdvisoryIdentity(f) && editingFindingId === f.id && (
                           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="text"

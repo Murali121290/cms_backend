@@ -455,7 +455,25 @@ CACHE_VERSION: str = "v3"  # bumped for informal-title heading classification
 # serializer surfaces an ``advisory`` flag to the client. The frontend
 # uses this flag to drop the diff view + Accept/Edit actions (no
 # suggestion to apply) while keeping Highlight / Ignore.
-ADVISORY_RULE_IDS: frozenset[str] = frozenset({"max_sentence_length", "passive_voice"})
+#
+# Two kinds of IDs sit here:
+#   * The raw function names (``max_sentence_length`` / ``passive_voice``)
+#     — safe default if a profile authored a rule without an explicit id.
+#   * Profile-assigned IDs. Every shipped style profile (uk / us / apa
+#     / ama / chicago / canadian / medical_pharmaceutical) uses
+#     ``SL001`` for ``max_sentence_length`` and ``SL005`` for
+#     ``passive_voice``. These are the IDs that land in ``rule_id`` on
+#     every persisted Finding row, so the GET /findings serializer
+#     must recognise them to derive ``advisory=True``.
+#
+# If a new profile ever binds a different id to one of the advisory
+# functions, add that id here too — otherwise findings from that
+# profile will render in the frontend as Case 1 (diff + Accept) even
+# though they ship original == suggestion by design.
+ADVISORY_RULE_IDS: frozenset[str] = frozenset({
+    "max_sentence_length", "passive_voice",
+    "SL001", "SL005",
+})
 
 # Entire finding categories that are advisory. Term-matcher highlights
 # ("Term from list: …") have no replacement by design — the finding IS

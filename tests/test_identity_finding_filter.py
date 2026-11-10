@@ -112,6 +112,24 @@ def test_is_advisory_finding_unified_helper():
     assert engine.is_advisory_finding("SV-00042", "spelling") is False
 
 
+def test_is_advisory_finding_covers_profile_sentence_ids():
+    """Every shipped style profile (uk / us / apa / ama / chicago /
+    canadian / medical_pharmaceutical) assigns ``SL001`` to
+    ``max_sentence_length`` and ``SL005`` to ``passive_voice``. These
+    are the rule_ids that actually land in the DB on persisted
+    finding rows — the GET /findings serializer must recognise them
+    so the frontend renders them in Case-2 advisory layout instead of
+    as a (visually-broken) identical-text diff.
+
+    Regression guard: if a future profile uses a different id for one
+    of these functions, add that id to ``ADVISORY_RULE_IDS`` or this
+    test will fail."""
+    assert engine.is_advisory_finding("SL001", "sentence") is True
+    assert engine.is_advisory_finding("SL005", "sentence") is True
+    assert engine.is_advisory_rule("SL001") is True
+    assert engine.is_advisory_rule("SL005") is True
+
+
 # ─── 1. max_sentence_length — advisory, must survive ────────────────
 
 def test_regression_1_max_sentence_length_advisory_preserved():
