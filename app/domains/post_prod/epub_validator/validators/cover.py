@@ -210,6 +210,38 @@ def validate_cover_is_jpg(target, rule_config=None):
                 "category": "Error",
                 "file_path": rel_path,
             }]}
+
+        # Verify underlying image format / properties with PIL
+        try:
+            with Image.open(cover_path) as img:
+                actual_format = (img.format or "").upper()
+                # Determine expected PIL format names based on allowed_exts
+                expected_formats = set()
+                for e in allowed_exts:
+                    if e in ("jpg", "jpeg"):
+                        expected_formats.add("JPEG")
+                    elif e == "png":
+                        expected_formats.add("PNG")
+                    elif e == "gif":
+                        expected_formats.add("GIF")
+                    elif e == "webp":
+                        expected_formats.add("WEBP")
+
+                if expected_formats and actual_format not in expected_formats:
+                    return {"issues_count": 1, "issues": [{
+                        "type": "cover_invalid_image_property",
+                        "message": f"Cover image '{filename}' has extension '.{ext}' but internal image format is {actual_format}. Expected {'/'.join(sorted(expected_formats))}.",
+                        "category": "Error",
+                        "file_path": rel_path,
+                    }]}
+        except Exception as e:
+            return {"issues_count": 1, "issues": [{
+                "type": "cover_corrupt_image",
+                "message": f"Cover image '{filename}' could not be read or is corrupted: {str(e)}",
+                "category": "Error",
+                "file_path": rel_path,
+            }]}
+
         return {"issues_count": 0, "issues": []}
 
     # Otherwise invoked with book-scope
@@ -238,6 +270,36 @@ def validate_cover_is_jpg(target, rule_config=None):
                         "category": "Error",
                         "file_path": rel_path,
                     })
+                else:
+                    # Check internal image format with PIL
+                    try:
+                        with Image.open(full_img_path) as img:
+                            actual_format = (img.format or "").upper()
+                            expected_formats = set()
+                            for e in allowed_exts:
+                                if e in ("jpg", "jpeg"):
+                                    expected_formats.add("JPEG")
+                                elif e == "png":
+                                    expected_formats.add("PNG")
+                                elif e == "gif":
+                                    expected_formats.add("GIF")
+                                elif e == "webp":
+                                    expected_formats.add("WEBP")
+
+                            if expected_formats and actual_format not in expected_formats:
+                                issues.append({
+                                    "type": "cover_invalid_image_property",
+                                    "message": f"Cover image '{f}' has extension '.{ext}' but internal image format is {actual_format}. Expected {'/'.join(sorted(expected_formats))}.",
+                                    "category": "Error",
+                                    "file_path": rel_path,
+                                })
+                    except Exception as e:
+                        issues.append({
+                            "type": "cover_corrupt_image",
+                            "message": f"Cover image '{f}' could not be read or is corrupted: {str(e)}",
+                            "category": "Error",
+                            "file_path": rel_path,
+                        })
 
     if not found_cover and images_dirs:
         issues.append({

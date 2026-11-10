@@ -62,6 +62,44 @@ def validate_images_are_jpeg(file_details, rule_config=None):
             "extract": ext,
         }]}
 
+    # Verify actual image format using PIL (ensure image properties match expected format)
+    # Note: SVG files are vector XML files, skip PIL for .svg
+    if ext != ".svg" and full_path and os.path.exists(full_path):
+        try:
+            with Image.open(full_path) as img:
+                actual_format = (img.format or "").upper()
+                expected_formats = set()
+                for e in allowed_extensions:
+                    clean_e = e.lstrip(".").lower()
+                    if clean_e in ("jpg", "jpeg"):
+                        expected_formats.add("JPEG")
+                    elif clean_e == "png":
+                        expected_formats.add("PNG")
+                    elif clean_e == "gif":
+                        expected_formats.add("GIF")
+                    elif clean_e == "webp":
+                        expected_formats.add("WEBP")
+                    elif clean_e == "tiff":
+                        expected_formats.add("TIFF")
+                    elif clean_e == "bmp":
+                        expected_formats.add("BMP")
+
+                if expected_formats and actual_format not in expected_formats:
+                    return {"issues_count": 1, "issues": [{
+                        "type": "image_invalid_image_property",
+                        "message": f"Image '{file_path}' has extension '{ext}' but internal image format is {actual_format}. Expected {'/'.join(sorted(expected_formats))}.",
+                        "category": "Error",
+                        "file_path": file_path,
+                        "extract": actual_format,
+                    }]}
+        except Exception as e:
+            return {"issues_count": 1, "issues": [{
+                "type": "image_corrupt_or_unreadable",
+                "message": f"Image '{file_path}' could not be decoded or is corrupted: {str(e)}",
+                "category": "Error",
+                "file_path": file_path,
+            }]}
+
     return {"issues_count": 0, "issues": []}
 
 
