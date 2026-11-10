@@ -197,7 +197,11 @@ const ALLOWED_PROFILE_KEYS = new Set<string>(['apa', 'ama', 'uk', 'us', 'canadia
 // execution remain intact while hidden.
 const SHOW_ABBREVIATIONS_SETTINGS = false
 const SHOW_MEDICAL_TERMS_SETTINGS = false
-const SHOW_SPELLING_SETTINGS = false
+// Spelling panel re-enabled so users can opt into en-GB-oxendict. The
+// server now reconciles en-US / en-GB against profile_keys[0] so the
+// dropdown's two "standard" options cannot drift from the Styles
+// choice; en-GB-oxendict is preserved as an explicit UK-opt-in.
+const SHOW_SPELLING_SETTINGS = true
 
 // Styles dropdown filter options — superset of the profile keys. 'NE' is a
 // display-only filter (never saved to profile_keys) that narrows the view

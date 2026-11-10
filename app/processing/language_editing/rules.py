@@ -23,6 +23,11 @@ class Finding:
     # readers (DB persistence, API, UI dropdown) treat an empty list as
     # "no alternates" — identical to the pre-workbook behaviour.
     alt_suggestions: list[str] = field(default_factory=list)
+    # Advisory findings highlight a passage without proposing a rewrite
+    # (max_sentence_length, passive_voice). ``original`` equals
+    # ``suggestion`` on purpose here, so the engine-level identity filter
+    # must preserve them. Default False — regular rules never set this.
+    advisory: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -3,13 +3,17 @@ API router for Ninja Inkflow Language Editing.
 Provides endpoints for rule management (CE support JSON sync), job execution, finding reviews, and redlined DOCX export.
 """
 import datetime
+import hashlib
+import json
 import logging
 import os
 import uuid
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import models
@@ -590,6 +594,108 @@ def get_language_edit_file_info(
     }
 
 
+# ─── Analysis cache helpers ──────────────────────────────────────────
+#
+# A completed ``LanguageEditJob`` is keyed by
+# ``(file_id, content_hash, rules_hash)``. A repeat analyze request on
+# the same file + configuration short-circuits to the existing job
+# instead of rerunning the engine. The UNIQUE constraint on the triple
+# also makes the insert race-safe: concurrent callers that both miss
+# converge via IntegrityError onto the first writer's job_id.
+
+_FILE_HASH_CHUNK = 1 << 20  # 1 MiB — bounded memory for large DOCX files.
+
+
+def _sha256_of_file(path: str) -> str:
+    """sha256 of the file bytes on disk. ~20ms for a 10 MB DOCX —
+    negligible compared to a full engine pass."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            chunk = fh.read(_FILE_HASH_CHUNK)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sha256_of_rules_input(
+    project_rules_cfg: dict,
+    assigned_term_list_ids: Iterable[int],
+) -> str:
+    """Canonical sha256 over every analysis-affecting configuration
+    input. Any change to any field — including CACHE_VERSION — produces
+    a different hash and forces a fresh analyze on the next request."""
+    canonical = {
+        "cache_version": engine.CACHE_VERSION,
+        "profile_key": project_rules_cfg.get("profile_key"),
+        "profile_keys": sorted(project_rules_cfg.get("profile_keys") or []),
+        "dash_profile": project_rules_cfg.get("dash_profile"),
+        "audience": project_rules_cfg.get("audience"),
+        "min_uses": project_rules_cfg.get("min_uses"),
+        "scope_reset": project_rules_cfg.get("scope_reset"),
+        "medical_style_profile": project_rules_cfg.get("medical_style_profile"),
+        "document_variant": project_rules_cfg.get("document_variant"),
+        "rules": project_rules_cfg.get("rules") or [],
+        "custom_rules": project_rules_cfg.get("custom_rules") or [],
+        "rule_overrides": project_rules_cfg.get("rule_overrides") or {},
+        "variant_to_canonical": project_rules_cfg.get("variant_to_canonical") or {},
+        "term_list_ids": sorted(int(tid) for tid in assigned_term_list_ids),
+    }
+    blob = json.dumps(canonical, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _acquire_file_analysis_lock(db: Session, file_id: int) -> None:
+    """Postgres: serialise concurrent analyzes on the same file via a
+    transaction-scoped advisory lock. SQLite: no-op (tests + dev); the
+    UNIQUE constraint on (file_id, content_hash, rules_hash) still
+    protects against duplicate singleton rows via IntegrityError."""
+    dialect = db.bind.dialect.name if db.bind is not None else ""
+    if dialect != "postgresql":
+        return
+    # ``pg_advisory_xact_lock`` releases automatically at COMMIT /
+    # ROLLBACK, so there's no manual cleanup. 64-bit int keyspace;
+    # we hash a stable string so two different file_ids can't collide.
+    key = int(hashlib.sha256(f"language_edit:{file_id}".encode()).hexdigest()[:15], 16)
+    db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": key})
+
+
+def _cached_job_response(
+    db: Session,
+    job: LanguageEditJob,
+    file_record,
+    compiled_term_lists,
+    spell_checker,
+) -> dict:
+    """Shape the analyze response from a cached job row without
+    re-running the engine. Mirrors the keys returned by the fresh-
+    analyze path so clients can treat both responses identically. The
+    added ``cached: true`` flag is additive — existing clients ignore
+    unknown keys."""
+    counts = (
+        db.query(LanguageEditFinding.source, func.count())
+        .filter(LanguageEditFinding.job_id == job.job_id)
+        .group_by(LanguageEditFinding.source)
+        .all()
+    )
+    by_source = {src or "rule": cnt for src, cnt in counts}
+    return {
+        "ok": True,
+        "cached": True,
+        "job_id": job.job_id,
+        "total_findings": job.total_findings or sum(by_source.values()),
+        "rule_findings": by_source.get("rule", 0),
+        "term_matches": by_source.get("term", 0),
+        "typo_matches": by_source.get("typo", 0),
+        "spell_check_available": spell_checker is not None,
+        "term_lists_applied": [
+            {"id": cl.list_id, "name": cl.list_name} for cl in compiled_term_lists
+        ],
+        "file_name": file_record.filename,
+    }
+
+
 @router.post("/files/{file_id}/language-edit/analyze")
 def start_language_edit_analysis(
     file_id: int,
@@ -715,6 +821,42 @@ def start_language_edit_analysis(
         custom_words=custom_dict_words,
     )  # None if pyspellchecker missing
 
+    # ─── Cache lookup ────────────────────────────────────────────────
+    # Compute the (file, config) cache key and short-circuit to the
+    # existing job if a matching one is already persisted. All setup
+    # above is cheap; the expensive work (DOCX read + classify + the
+    # engine loop below + bulk insert of findings) is what we skip.
+    #
+    # Postgres: serialise concurrent analyzes on the same file via an
+    # advisory lock so the second caller waits for the first to commit
+    # and then hits the cache. SQLite: no-op; the UNIQUE constraint on
+    # (file_id, content_hash, rules_hash) still prevents duplicate rows
+    # via IntegrityError.
+    try:
+        content_hash = _sha256_of_file(file_record.path)
+    except OSError as exc:
+        logger.error("Failed to hash DOCX for cache lookup: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to read target DOCX file.")
+    rules_hash = _sha256_of_rules_input(project_rules_cfg, _assigned_term_list_ids)
+
+    _acquire_file_analysis_lock(db, file_record.id)
+
+    cached = (
+        db.query(LanguageEditJob)
+        .filter(
+            LanguageEditJob.file_id == file_record.id,
+            LanguageEditJob.content_hash == content_hash,
+            LanguageEditJob.rules_hash == rules_hash,
+            LanguageEditJob.status.in_(("in_review", "completed")),
+        )
+        .order_by(LanguageEditJob.created_at.desc())
+        .first()
+    )
+    if cached is not None:
+        return _cached_job_response(
+            db, cached, file_record, compiled_term_lists, spell_checker,
+        )
+
     # Read paragraphs from DOCX
     try:
         doc_obj, paragraphs = docx_io.read_paragraphs(file_record.path)
@@ -740,9 +882,34 @@ def start_language_edit_analysis(
         project_id=file_record.project_id,
         status="in_review",
         total_findings=0,
+        content_hash=content_hash,
+        rules_hash=rules_hash,
     )
     db.add(job)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # A concurrent analyze finished between our cache-miss check and
+        # our insert. Roll back, refetch the winner, and return its
+        # cached response — both callers now share the same job_id.
+        db.rollback()
+        winner = (
+            db.query(LanguageEditJob)
+            .filter(
+                LanguageEditJob.file_id == file_record.id,
+                LanguageEditJob.content_hash == content_hash,
+                LanguageEditJob.rules_hash == rules_hash,
+            )
+            .order_by(LanguageEditJob.created_at.desc())
+            .first()
+        )
+        if winner is None:
+            # Extraordinarily unlikely — unique-constraint error with no
+            # row. Fall through and raise so the client retries.
+            raise HTTPException(status_code=500, detail="Analyze race resolution failed.")
+        return _cached_job_response(
+            db, winner, file_record, compiled_term_lists, spell_checker,
+        )
 
     total_findings_count = 0
     term_match_count = 0
@@ -854,7 +1021,36 @@ def start_language_edit_analysis(
         abbr_state_by_para = None
         abbr_state = _build_state_for(enriched_paragraphs)
 
+    # Paragraph-level exclusion: five document regions must bypass ALL
+    # language-editing analysis — headings, references, tables, figures,
+    # abstracts, epigraphs, and source-code blocks. Two of the five user-
+    # named tags (``ref``, ``heading``) are already dropped at extraction
+    # time by ``docx_io.read_paragraphs``; the remaining three
+    # (``table``, ``epigraph``, ``src``) carry through as body paragraphs
+    # with a role flag and need skipping here. Centralising the gate in
+    # the single analyze loop covers every rule family (grammar,
+    # spelling, abbreviations, medical_terms, hyphenation, lww_ne,
+    # workbook rules, custom rules, spell_check, term_matcher) in one
+    # place — no per-rule changes needed.
+    _EXCLUDED_ROLES = {"heading", "title", "reference", "caption"}
+    _EXCLUDED_REGION_FLAGS = (
+        "in_table", "in_figure", "in_abstract", "in_epigraph", "in_src",
+    )
+
+    def _is_excluded_paragraph(idx: int) -> bool:
+        roles = (para_roles or {}).get(idx) or {}
+        if roles.get("role") in _EXCLUDED_ROLES:
+            return True
+        return any(roles.get(flag) for flag in _EXCLUDED_REGION_FLAGS)
+
     for para_idx, text in paragraphs:
+        if _is_excluded_paragraph(para_idx):
+            # Paragraph lives inside an excluded region (table, figure,
+            # abstract, epigraph, src block) or carries an excluded role
+            # (heading, title, reference, caption). Skip all finding
+            # emission — original text and tag structure stay intact
+            # because we never write back to it.
+            continue
         sents = segmenter.sentences(text)
         # Compute protected spans ONCE per paragraph and feed to both
         # analyze() and spell_check so a protected shape (COVID-19, DOI,
@@ -918,6 +1114,17 @@ def start_language_edit_analysis(
             exclude_spans=rule_spans,
             protected_spans=protected_spans,
         ):
+            # Defensive: pyspellchecker can occasionally propose the same
+            # surface back (dictionary misconfiguration, custom whitelist
+            # loop). Identity suggestions have nothing for the reviewer
+            # to accept — drop them at the source, mirroring the engine
+            # filter so the two sources behave uniformly.
+            if engine.is_identity_suggestion(ty.original, ty.suggestion):
+                logger.debug(
+                    "dropping identity typo finding rule_id=%s surface=%r suggestion=%r",
+                    ty.rule_id, ty.original, ty.suggestion,
+                )
+                continue
             total_findings_count += 1
             typo_count += 1
             findings_to_insert.append(LanguageEditFinding(
@@ -957,6 +1164,11 @@ def start_language_edit_analysis(
             # finding covers the exact same (start, end) span.
             if (tm["start"], tm["end"]) in lww_ne_spans_in_para:
                 continue
+            # Term-matcher highlights are advisory by category: no
+            # replacement proposed, the finding IS the list-membership
+            # signal. The GET /findings serializer surfaces advisory=True
+            # for category='term' so the frontend hides Accept/Edit and
+            # the diff view (reviewer still has Highlight / Ignore).
             term_match_count += 1
             total_findings_count += 1
             if tm.get("also_in_list_names"):
@@ -990,6 +1202,7 @@ def start_language_edit_analysis(
 
     return {
         "ok": True,
+        "cached": False,
         "job_id": job_uuid,
         "total_findings": total_findings_count,
         "rule_findings": total_findings_count - term_match_count - typo_count,
@@ -1054,6 +1267,15 @@ def get_job_findings(
                 "decided_at": f.decided_at.isoformat() if f.decided_at else None,
                 "source": getattr(f, "source", "rule"),
                 "term_list_id": getattr(f, "term_list_id", None),
+                # Advisory findings carry no actionable replacement —
+                # original equals suggestion on purpose. Two sources:
+                #   * rule-level: passive_voice, max_sentence_length
+                #   * category-level: term (term-matcher highlights)
+                # The frontend hides Accept/Edit and the diff view for
+                # these so the card presents as a "consider this" nudge.
+                # Derived server-side from the rule_id/category whitelist;
+                # the DB intentionally does not store this flag.
+                "advisory": engine.is_advisory_finding(f.rule_id, f.category),
                 "decided_at": (f.decided_at.replace(tzinfo=datetime.timezone.utc).isoformat() if f.decided_at.tzinfo is None else f.decided_at.isoformat()) if f.decided_at else None,
             }
             for f in findings

@@ -177,6 +177,35 @@ def _default_document_variant_for(profile_keys: list[str] | None) -> str:
     return "en-GB"
 
 
+def _reconcile_document_variant(
+    requested: Any, profile_keys: list[str] | None
+) -> str:
+    """Pin ``document_variant`` to whichever style the project currently
+    uses, so a stale saved value can never cause the spelling engine to
+    flag words in the wrong direction.
+
+    Policy:
+      * ``en-GB-oxendict`` is preserved ONLY when the primary style is
+        UK-adjacent (profile_keys[0] derives to ``en-GB``). This is the
+        one explicit opt-in that profile_keys alone cannot express —
+        a UK project may choose Oxford -ize spellings.
+      * Every other case auto-derives from ``profile_keys[0]`` and
+        ignores the requested value. So a project whose Styles choice
+        moves from UK → US gets ``en-US`` even if the client payload
+        still carries ``en-GB`` from a stale React state.
+      * Invalid requested values fall through to the derived variant
+        rather than raising, so a bad client payload degrades
+        gracefully.
+    """
+    derived = _default_document_variant_for(profile_keys)
+    if requested is None:
+        return derived
+    requested_s = str(requested).strip()
+    if requested_s == "en-GB-oxendict" and derived == "en-GB":
+        return "en-GB-oxendict"
+    return derived
+
+
 def _validate_document_variant(raw: Any) -> str:
     if raw is None:
         return DEFAULT_DOCUMENT_VARIANT
@@ -576,11 +605,12 @@ def save_project_language_rules(
         # opts in via the Rules Picker.
         "medical_style_profile": _validate_medical_style_profile(medical_style_profile),
         # UK/US Spelling workbook (S-C): per-project document variant.
-        # When caller omits it we infer from profile_keys[0].
-        "document_variant": _validate_document_variant(
-            document_variant if document_variant is not None
-            else _default_document_variant_for(pkeys)
-        ),
+        # Always reconciled against ``profile_keys[0]`` so a stale saved
+        # value (or a client sending the previous UI state) can never
+        # drive the spelling engine in the wrong direction. The one
+        # explicit opt-in that survives reconciliation is
+        # ``en-GB-oxendict`` on UK-adjacent projects.
+        "document_variant": _reconcile_document_variant(document_variant, pkeys),
     }
 
     file_path = get_project_language_rules_path(project.project_code)
@@ -755,17 +785,13 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
                     )
                 except ValueError:
                     data["medical_style_profile"] = DEFAULT_MEDICAL_STYLE_PROFILE
-                # UK/US Spelling workbook (S-C): default + validate.
-                try:
-                    data["document_variant"] = _validate_document_variant(
-                        data.get("document_variant")
-                        if data.get("document_variant") is not None
-                        else _default_document_variant_for(data.get("profile_keys"))
-                    )
-                except ValueError:
-                    data["document_variant"] = _default_document_variant_for(
-                        data.get("profile_keys")
-                    )
+                # UK/US Spelling workbook (S-C): reconcile against the
+                # current profile_keys on read so projects that drifted
+                # before this fix get the right variant on the very next
+                # call, without waiting for an explicit save.
+                data["document_variant"] = _reconcile_document_variant(
+                    data.get("document_variant"), data.get("profile_keys"),
+                )
                 return data
             except Exception as exc:
                 logger.warning("Error reading language rules JSON at %s: %s", file_path, exc)

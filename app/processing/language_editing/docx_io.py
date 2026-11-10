@@ -138,6 +138,11 @@ def classify_paragraphs(doc) -> dict[int, dict]:
       * ``in_table``          — True inside ``<table>…</table>`` or Table-
                                 styled runs
       * ``in_figure``         — True inside ``<figure>`` / ``<fig>`` …
+      * ``in_epigraph``       — True inside ``<epigraph>…</epigraph>`` or
+                                Epigraph-styled paragraphs
+      * ``in_src``            — True inside ``<src>…</src>`` (code /
+                                source blocks) or Code/Source-styled
+                                paragraphs
 
     The role / in_* flags carry through adjacent paragraphs until the
     closing tag is seen. The paragraphs between those tags all share the
@@ -147,19 +152,30 @@ def classify_paragraphs(doc) -> dict[int, dict]:
     in_abstract = False
     in_table = False
     in_figure = False
+    in_epigraph = False
+    in_src = False
     for i, p in enumerate(doc.paragraphs):
         text = (p.text or "").strip()
         style = (p.style.name if p.style else "") or ""
         tl = text.lower()
+        style_lc_boundary = style.strip().lower()
 
         # Boundary tags (open BEFORE classifying this paragraph; close
         # AFTER so a tag paragraph itself is still inside its region).
-        if "<abstract>" in tl or style.strip().lower() == "abstract":
+        if "<abstract>" in tl or style_lc_boundary == "abstract":
             in_abstract = True
         if "<table>" in tl:
             in_table = True
         if "<figure>" in tl or "<fig>" in tl:
             in_figure = True
+        # Epigraph: author quote block at chapter start. Boundary tag OR
+        # the Word paragraph style literally named "Epigraph".
+        if "<epigraph>" in tl or style_lc_boundary == "epigraph":
+            in_epigraph = True
+        # Source / code block. Boundary tag OR Code / Source / SourceCode /
+        # CodeBlock paragraph styles (common conventions across templates).
+        if "<src>" in tl or style_lc_boundary in {"code", "source", "sourcecode", "codeblock", "src"}:
+            in_src = True
 
         role = "body"
         level: int | None = None
@@ -199,6 +215,8 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             "in_abstract": in_abstract,
             "in_table": in_table,
             "in_figure": in_figure,
+            "in_epigraph": in_epigraph,
+            "in_src": in_src,
             "text": p.text or "",
         }
 
@@ -209,6 +227,10 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             in_table = False
         if "</figure>" in tl or "</fig>" in tl:
             in_figure = False
+        if "</epigraph>" in tl:
+            in_epigraph = False
+        if "</src>" in tl:
+            in_src = False
     return out
 
 

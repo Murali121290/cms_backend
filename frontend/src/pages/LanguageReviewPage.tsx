@@ -76,6 +76,12 @@ interface Finding {
   decided_at?: string
   source?: 'rule' | 'term'
   term_list_id?: number | null
+  // Advisory findings (passive_voice, max_sentence_length) highlight a
+  // passage for reviewer attention without proposing a specific rewrite
+  // — original == suggestion by design. The card hides the diff and
+  // Accept/Edit actions when this is true so the finding presents as a
+  // "consider revising" nudge; Highlight and Ignore stay available.
+  advisory?: boolean
 }
 
 // "Term from list: <name>" or "Term from list: <name> (also in: <names>)"
@@ -313,11 +319,40 @@ export function LanguageReviewPage() {
     }
   }, [parsedFileId])
 
+  // Dedup guard: React StrictMode double-fires useEffect in dev, and a
+  // fast re-navigation can trigger initJob twice before the first POST
+  // completes. Both would hit the backend cache (which dedupes
+  // correctly via the UNIQUE constraint on language_edit_jobs), but
+  // collapsing to one network round-trip avoids spurious loading
+  // flicker and backend work. Keyed by fileId so navigating to a
+  // different file still re-analyzes.
+  const initJobInFlightFor = useRef<number | null>(null)
+
   // Initialize analysis job
   const initJob = useCallback(async () => {
     if (!parsedFileId) return
+    if (initJobInFlightFor.current === parsedFileId) return
+    initJobInFlightFor.current = parsedFileId
     setLoading(true)
     try {
+      // If the editor has unsaved changes, persist them before analyze
+      // runs — the backend cache keys on the DOCX bytes on disk, so an
+      // unsaved edit would otherwise produce stale cached findings.
+      // On save failure, abort analyze entirely and surface the error
+      // so the reviewer doesn't look at pre-edit findings while believing
+      // their new edits are reflected. (Normal F5 refresh wipes editor
+      // state before mount, so this branch only fires on in-SPA
+      // re-navigation where the editor instance survives.)
+      if (editorRef.current?.getDirty?.()) {
+        try {
+          await editorRef.current.save()
+        } catch (err: any) {
+          console.error('Save failed before analyze:', err)
+          toast.error('Failed to save editor changes. Analysis aborted — please save manually and retry.')
+          return
+        }
+      }
+
       const res = await apiClient.post(`/files/${parsedFileId}/language-edit/analyze`)
       const jobId = res.data.job_id
       if (res.data.file_name) setFileName(res.data.file_name)
@@ -340,6 +375,9 @@ export function LanguageReviewPage() {
       toast.error(err?.response?.data?.detail || 'Failed to run Language Edit analysis.')
     } finally {
       setLoading(false)
+      // Clear the in-flight sentinel so a legitimate re-trigger (e.g.
+      // user navigates away and back) can run again.
+      initJobInFlightFor.current = null
     }
   }, [parsedFileId])
 
@@ -441,7 +479,10 @@ export function LanguageReviewPage() {
 
   // Batch Accept All
   const handleAcceptAll = async () => {
-    const pending = findings.filter(f => f.status === 'pending')
+    // Skip advisory findings — they have no replacement to apply, so
+    // "Accept" is meaningless. They remain pending until the reviewer
+    // explicitly Highlights or Ignores them.
+    const pending = findings.filter(f => f.status === 'pending' && !f.advisory)
     if (pending.length === 0) {
       toast.info('No pending findings to accept.')
       return
@@ -631,10 +672,33 @@ export function LanguageReviewPage() {
     // reads `edited_text` as the new decoration surface so the highlight
     // tracks onto the replacement, preserving navigation + status while
     // leaving unrelated findings' decorations untouched.
+    //
+    // Side-effect of status becoming 'edited': the finding drops out of
+    // ``pendingFindings`` and therefore disappears from the sidebar
+    // panel + chip counts in the same render. The DOM write above has
+    // already succeeded (we returned early on falsy ``ok``) so the
+    // card is only removed after a confirmed document replacement.
+    const prevStatus = target.status
     setFindings(prev => prev.map(f => f.id === target.id
       ? { ...f, status: 'edited', edited_text: newText }
       : f
     ))
+
+    // Mirror handleDecide's counter update so the header's "N of M
+    // resolved" progress moves immediately. Decrement the old bucket
+    // first (in case this finding was already resolved and is being
+    // re-edited), then increment edited.
+    setJob(prev => {
+      if (!prev) return prev
+      let accepted = prev.accepted_count
+      let edited = prev.edited_count
+      let rejected = prev.rejected_count
+      if (prevStatus === 'accepted') accepted = Math.max(0, accepted - 1)
+      if (prevStatus === 'edited') edited = Math.max(0, edited - 1)
+      if (prevStatus === 'rejected') rejected = Math.max(0, rejected - 1)
+      edited += 1
+      return { ...prev, accepted_count: accepted, edited_count: edited, rejected_count: rejected }
+    })
 
     toast.success('Replaced')
     closeInlinePopover()
@@ -655,6 +719,12 @@ export function LanguageReviewPage() {
     if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'bias', 'term', 'typo', 'hyphenation', 'abbreviations', 'medical_terms'].includes(resolvedCat)) {
       setActiveRightTab(resolvedCat as any)
     }
+
+    // Advisory findings have no replacement to propose — skip the
+    // inline "Edit occurrence" popover (it would show original ==
+    // replacement, which is confusing). The card in the sidebar is
+    // still selected so the reviewer can Highlight or Ignore.
+    if (target.advisory) return
 
     // Anchor the popover to the clicked span's rect. Two RAFs so ProseMirror
     // has finished its decoration render before we read the DOM.
@@ -696,39 +766,50 @@ export function LanguageReviewPage() {
   }, [inlinePopover, closeInlinePopover])
 
   // Category counts & filtered findings
-  const grammarFindings = useMemo(() => findings.filter(f => f.category === 'grammar'), [findings])
-  const spellingFindings = useMemo(() => findings.filter(f => f.category === 'spelling'), [findings])
-  const sentenceFindings = useMemo(() => findings.filter(f => f.category === 'sentence'), [findings])
-  const biasFindings = useMemo(() => findings.filter(f => f.category === 'bias' || f.category === 'article'), [findings])
-  const termFindings = useMemo(() => findings.filter(f => f.category === 'term' || f.source === 'term'), [findings])
-  const typoFindings = useMemo(() => findings.filter(f => f.category === 'typo'), [findings])
+  //
+  // Resolved findings (status ∈ {accepted, edited, rejected}) drop out
+  // of the display + chip counts the moment the status updates, so
+  // clicking Accept / Edit / Replace / Ignore makes the card vanish
+  // from the panel and the chip count decrements. Highlighted findings
+  // stay visible — Highlight is not a resolution (matches the header's
+  // "resolved" semantics which exclude highlighted).
+  const pendingFindings = useMemo(
+    () => findings.filter(f => f.status !== 'accepted' && f.status !== 'edited' && f.status !== 'rejected'),
+    [findings],
+  )
+  const grammarFindings = useMemo(() => pendingFindings.filter(f => f.category === 'grammar'), [pendingFindings])
+  const spellingFindings = useMemo(() => pendingFindings.filter(f => f.category === 'spelling'), [pendingFindings])
+  const sentenceFindings = useMemo(() => pendingFindings.filter(f => f.category === 'sentence'), [pendingFindings])
+  const biasFindings = useMemo(() => pendingFindings.filter(f => f.category === 'bias' || f.category === 'article'), [pendingFindings])
+  const termFindings = useMemo(() => pendingFindings.filter(f => f.category === 'term' || f.source === 'term'), [pendingFindings])
+  const typoFindings = useMemo(() => pendingFindings.filter(f => f.category === 'typo'), [pendingFindings])
   // Hyphenation absorbs the old Compounds category (single tab per the
   // Option B merge). Legacy jobs persisted with category='compounds' /
   // 'compound' still show up here so previously-analysed documents keep
   // rendering their MC_COMPOUNDS findings without re-analyze.
   const hyphenationFindings = useMemo(
-    () => findings.filter(f => f.category === 'hyphenation' || f.category === 'compounds' || f.category === 'compound'),
-    [findings],
+    () => pendingFindings.filter(f => f.category === 'hyphenation' || f.category === 'compounds' || f.category === 'compound'),
+    [pendingFindings],
   )
   // Abbreviations workbook findings (abbreviations.py + LWW-NE rows
   // routed to 'abbreviations'). Distinct from Terms (term_matcher) and
   // Spell Check (typo) — these are workbook-driven expansions and
   // first-use enforcement.
   const abbreviationFindings = useMemo(
-    () => findings.filter(f => f.category === 'abbreviations'),
-    [findings],
+    () => pendingFindings.filter(f => f.category === 'abbreviations'),
+    [pendingFindings],
   )
   // Medical Terminology workbook findings (medical_terms.py). Kept
   // separate from Terms so reviewers can triage medical vocabulary
   // independently of project-defined term lists.
   const medicalTermsFindings = useMemo(
-    () => findings.filter(f => f.category === 'medical_terms'),
-    [findings],
+    () => pendingFindings.filter(f => f.category === 'medical_terms'),
+    [pendingFindings],
   )
 
   const activeCategoryFindings = useMemo(() => {
     let list: Finding[] = []
-    if (activeRightTab === 'all') list = findings
+    if (activeRightTab === 'all') list = pendingFindings
     else if (activeRightTab === 'grammar') list = grammarFindings
     else if (activeRightTab === 'spelling') list = spellingFindings
     else if (activeRightTab === 'sentence') list = sentenceFindings
@@ -747,7 +828,7 @@ export function LanguageReviewPage() {
         f.message.toLowerCase().includes(q) ||
         f.rule_id.toLowerCase().includes(q),
     )
-  }, [activeRightTab, findings, grammarFindings, spellingFindings, sentenceFindings, biasFindings, termFindings, typoFindings, hyphenationFindings, abbreviationFindings, medicalTermsFindings, searchQuery])
+  }, [activeRightTab, pendingFindings, grammarFindings, spellingFindings, sentenceFindings, biasFindings, termFindings, typoFindings, hyphenationFindings, abbreviationFindings, medicalTermsFindings, searchQuery])
 
   // Realtime progress statistics
   const totalFindingsCount = job?.total_findings || findings.length || 0
@@ -1069,7 +1150,7 @@ export function LanguageReviewPage() {
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  All {findings.length}
+                  All {pendingFindings.length}
                 </button>
 
                 <button
@@ -1510,6 +1591,14 @@ export function LanguageReviewPage() {
                                 {hyphSource}
                               </span>
                             )}
+                            {f.advisory && (
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
+                                title="Advisory finding — highlights a passage for your judgement without proposing a specific rewrite. Use Highlight to flag it or Ignore to dismiss."
+                              >
+                                Advisory
+                              </span>
+                            )}
                           </div>
                           <span className="text-[11px] text-slate-400">
                             Para {f.para_index + 1}
@@ -1521,45 +1610,63 @@ export function LanguageReviewPage() {
                           {f.message}
                         </p>
 
-                        {/* Visual Diff Box */}
-                        <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
-                          <span className="diff-old px-2 py-1 rounded-lg">
-                            {f.original_text}
-                          </span>
-                          <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
-                          <span className="diff-new px-2 py-1 rounded-lg">
-                            {f.edited_text || f.suggestion}
-                          </span>
-                        </div>
+                        {/* Visual Diff Box — hidden for advisory findings
+                            (passive_voice, max_sentence_length) where
+                            original == suggestion by design. For those
+                            we show just the original span as a passage
+                            reference. */}
+                        {f.advisory ? (
+                          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
+                            <span className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 italic">
+                              {f.original_text}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
+                            <span className="diff-old px-2 py-1 rounded-lg">
+                              {f.original_text}
+                            </span>
+                            <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
+                            <span className="diff-new px-2 py-1 rounded-lg">
+                              {f.edited_text || f.suggestion}
+                            </span>
+                          </div>
+                        )}
 
-                        {/* Action Buttons */}
+                        {/* Action Buttons — advisory findings drop
+                            Accept + Edit (nothing to apply / replace)
+                            and keep Highlight + Ignore. */}
                         <div className="mt-3 flex items-center gap-2 flex-wrap">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDecide(f.id, 'accepted')
-                            }}
-                            className="flex-1 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm"
-                          >
-                            <Check size={13} /> Accept
-                          </button>
+                          {!f.advisory && (
+                            <>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDecide(f.id, 'accepted')
+                                }}
+                                className="flex-1 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm"
+                              >
+                                <Check size={13} /> Accept
+                              </button>
 
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setEditingFindingId(prev => prev === f.id ? null : f.id)
-                            }}
-                            className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 transition-colors"
-                          >
-                            Edit
-                          </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setEditingFindingId(prev => prev === f.id ? null : f.id)
+                                }}
+                                className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 transition-colors"
+                              >
+                                Edit
+                              </button>
+                            </>
+                          )}
 
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
                               handleDecide(f.id, 'highlighted')
                             }}
-                            className="px-3 py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors"
+                            className={`${f.advisory ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
                           >
                             Highlight
                           </button>
@@ -1575,8 +1682,10 @@ export function LanguageReviewPage() {
                           </button>
                         </div>
 
-                        {/* Inline Custom Edit Row */}
-                        {editingFindingId === f.id && (
+                        {/* Inline Custom Edit Row — advisory findings
+                            never open the Edit input (Edit button is
+                            hidden above). */}
+                        {!f.advisory && editingFindingId === f.id && (
                           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="text"
