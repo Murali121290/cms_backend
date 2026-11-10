@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 
 from ..engine.registry import rule
+from ._common import find_opf
 
 
 def _find_cover(epub_folder: str) -> str | None:
@@ -540,6 +541,121 @@ def validate_cover_alt_tag(file_details, rule_config=None):
             "line_number": line_num,
             "href": src,
         })
+    else:
+        # 3. Check language-based default content
+        # Determine book title and language from OPF
+        epub_root = file_details.get("epub_root") or file_details.get("epub_path")
+        if not epub_root and full_path:
+            # Fallback: search upward for epub root containing OPF or OEBPS
+            curr = os.path.dirname(os.path.abspath(full_path))
+            while curr and curr != "/":
+                if glob.glob(os.path.join(curr, "*.opf")) or os.path.exists(os.path.join(curr, "mimetype")):
+                    epub_root = curr
+                    break
+                curr = os.path.dirname(curr)
+
+        book_title = ""
+        lang_code = ""
+
+        if epub_root:
+            opf_file = find_opf(epub_root)
+            if opf_file and os.path.exists(opf_file):
+                try:
+                    with open(opf_file, "r", encoding="utf-8") as opf_f:
+                        opf_soup = BeautifulSoup(opf_f.read(), "xml")
+                        title_tag = opf_soup.find("dc:title")
+                        if title_tag:
+                            book_title = title_tag.get_text(strip=True)
+                        lang_tag = opf_soup.find("dc:language")
+                        if lang_tag:
+                            lang_code = lang_tag.get_text(strip=True).lower()
+                except Exception:
+                    pass
+
+        # If language wasn't in OPF, fallback to html xml:lang or lang attribute
+        if not lang_code:
+            html_tag = soup.find("html")
+            if html_tag:
+                lang_code = (html_tag.get("xml:lang") or html_tag.get("lang") or "").lower()
+
+        # Normalize language prefix (e.g. 'de-DE' -> 'de', 'en-US' -> 'en')
+        lang_key = lang_code.strip().lower()
+        if "-" in lang_key:
+            lang_key = lang_key.split("-")[0]
+        if "_" in lang_key:
+            lang_key = lang_key.split("_")[0]
+
+        lang_map = {
+            "german": "de", "danish": "da", "finnish": "fi", "french": "fr",
+            "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
+            "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
+            "valencian": "va"
+        }
+        if lang_key in lang_map:
+            lang_key = lang_map[lang_key]
+        if not lang_key:
+            lang_key = "en"
+
+        # Read configuration similar to COM-META-009
+        config_dict = (rule_config or {}).get("rule_config", {})
+        expected_by_lang = config_dict.get("expected_alt_by_language", {})
+
+        lang_entry = expected_by_lang.get(lang_key) or expected_by_lang.get(lang_code)
+        if not lang_entry and "en" in expected_by_lang:
+            lang_entry = expected_by_lang["en"]
+
+        template = None
+        if lang_entry:
+            if isinstance(lang_entry, dict):
+                template = lang_entry.get("template") or lang_entry.get("alt")
+            elif isinstance(lang_entry, str):
+                template = lang_entry
+
+        # Fallback templates if not defined in config
+        if not template:
+            if lang_key == "de":
+                template = "Coverabbildung des Buches “{title}”"
+            else:
+                template = "Cover image of the book “{title}”"
+
+        if book_title:
+            # If the actual alt text includes a subtitle after ':' (e.g. "Schattensaga: Between Worlds"),
+            # keep the actual alt untouched and incorporate the subtitle into expected_alt
+            import re
+            m = re.search(r"([“\"„«])(.*?)([”\"“»])", alt)
+            title_to_use = book_title
+            if m:
+                inner = m.group(2)
+                if ":" in inner:
+                    parts = inner.split(":", 1)
+                    main_in_alt = parts[0].strip()
+                    sub_in_alt = parts[1].strip()
+                    clean_main_book = book_title.split(":")[0].strip()
+                    if clean_main_book.lower() in main_in_alt.lower() or main_in_alt.lower() in clean_main_book.lower():
+                        title_to_use = f"{clean_main_book}: {sub_in_alt}"
+
+            expected_alt = template.replace("{title}", title_to_use)
+
+            # Normalize quotes and whitespace for comparison
+            # (allowing standard straight quotes, curly quotes: “”, „“, «»)
+            def normalize_quotes_and_ws(s: str) -> str:
+                cleaned = s.replace("“", '"').replace("”", '"').replace("„", '"').replace("«", '"').replace("»", '"')
+                return " ".join(cleaned.split())
+
+            actual_norm = normalize_quotes_and_ws(alt)
+            expected_norm = normalize_quotes_and_ws(expected_alt)
+
+            if actual_norm != expected_norm:
+                issues.append({
+                    "type": "cover_alt_mismatch",
+                    "message": f"Cover image alt text does not match expected format based on language ('{lang_key}'). Expected: '{expected_alt}'. Found: '{alt}'.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_num,
+                    "href": src,
+                    "expected_text": expected_alt,
+                    "actual_text": alt,
+                })
 
     return {"issues_count": len(issues), "issues": issues}
 

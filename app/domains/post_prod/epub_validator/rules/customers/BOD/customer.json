@@ -156,6 +156,23 @@
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*cover*.xhtml",
       "enabled": true,
+      "rule_config": {
+        "expected_alt_by_language": {
+          "de": "Coverabbildung des Buches “{title}”",
+          "en": "Cover image of the book “{title}”",
+          "da": "Forsidebillede af bogen “{title}”",
+          "fi": "Kirjan “{title}”",
+          "fr": "Image de couverture du livre “{title}”",
+          "sv": "Omslagsbild av boken “{title}”",
+          "no": "Forsidebilde av boken “{title}”",
+          "es": "Imagen de portada del libro “{title}”",
+          "it": "Immagine di copertina del libro “{title}”",
+          "pt": "Imagem da capa do livro “{title}”",
+          "nl": "Coverafbeelding van het boek “{title}”",
+          "ca": "Imatge de la coberta del llibre “{title}”",
+          "va": "Imatge de la coberta del llibre “{title}”"
+        }
+      },
       "category": "Image Check"
     },
     {
