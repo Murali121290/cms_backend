@@ -830,12 +830,28 @@ import zipfile
 
 def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_by: str = "System") -> tuple[bool, str | None]:
     """
-    Packages EPUB and QC reports into a ZIP, uploads to FTP, and ONLY transitions
+    Validates all 4 required delivery files:
+      1. ePub file OR ePDF (job.epub_filepath or job.pdf_filepath)
+      2. history.csv (without line breaks in data row)
+      3. ACE report (job.ace_report_filepath)
+      4. Epub Checker Log (job.epubcheck_report_filepath)
+    Packages them into a ZIP, uploads to FTP, and ONLY transitions
     the job to Archive / Completed status after the FTP upload succeeds.
     Returns (success: bool, error_message: str | None).
     """
-    if not job.epub_filepath or not os.path.exists(job.epub_filepath):
-        return False, "Cannot dispatch: EPUB file is missing"
+    # 1. Check ePub file OR ePDF
+    has_epub = bool(job.epub_filepath and os.path.exists(job.epub_filepath))
+    has_pdf = bool(job.pdf_filepath and os.path.exists(job.pdf_filepath))
+    if not (has_epub or has_pdf):
+        return False, "Cannot dispatch: ePub file or ePDF is missing."
+
+    # 2. Check ACE report
+    if not (job.ace_report_filepath and os.path.exists(job.ace_report_filepath)):
+        return False, "Cannot dispatch: ACE report is missing. Please upload the ACE report before dispatching."
+
+    # 3. Check Epub Checker Log
+    if not (job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath)):
+        return False, "Cannot dispatch: Epub Checker Log is missing. Please upload the Epubcheck log before dispatching."
 
     if not settings.BOD_FTP_HOST:
         return False, "BOD FTP host is not configured in settings."
@@ -851,21 +867,89 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
         else:
             zip_filename = (job.epub_filename or f"deliverable_{job.id}").replace('.epub', '.zip')
             
-        if job.epub_filepath:
+        if job.epub_filepath and os.path.exists(job.epub_filepath):
             local_dir = os.path.dirname(job.epub_filepath)
+        elif job.pdf_filepath and os.path.exists(job.pdf_filepath):
+            local_dir = os.path.dirname(job.pdf_filepath)
         else:
             upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
             local_dir = os.path.join(upload_dir, "bod")
         os.makedirs(local_dir, exist_ok=True)
         zip_filepath = os.path.join(local_dir, zip_filename)
 
+        # Determine eisbn base:
+        # First priority: find 10 to 13 digits (ISBN) in pdf_filename, epub_filename, or project_name
+        eisbn = ""
+        for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
+            if candidate:
+                m_isbn = re.search(r'(\d{10,13})', candidate)
+                if m_isbn:
+                    eisbn = m_isbn.group(1)
+                    break
+
+        # Fallback if no numeric ISBN found (e.g. non-standard or test names)
+        if not eisbn:
+            if job.pdf_filename:
+                eisbn = job.pdf_filename.rsplit('.', 1)[0].strip()
+            elif job.project_name:
+                eisbn = str(job.project_name).strip()
+            elif job.epub_filename:
+                eisbn = job.epub_filename.rsplit('.', 1)[0].strip()
+
+        # Target entry names inside the deliverable ZIP:
+        # 1. {eisbn}_1_ePub_all.epub (or ePDF if only PDF exists)
+        # 2. history.csv (single-line comma-separated record without line breaks)
+        # 3. ACE_report.zip
+        # 4. EPUB-checker_log.txt
+        target_epub_entry_name = f"{eisbn}_1_ePub_all.epub" if eisbn else (os.path.basename(job.epub_filepath) if has_epub else os.path.basename(job.pdf_filepath))
+        target_ace_entry_name = "ACE_report.zip"
+        target_epubcheck_entry_name = "EPUB-checker_log.txt"
+
+        # Determine file size for history.csv
+        file_size = 0
+        if has_epub:
+            try:
+                file_size = os.path.getsize(job.epub_filepath)
+            except Exception:
+                file_size = 0
+        elif has_pdf:
+            try:
+                file_size = os.path.getsize(job.pdf_filepath)
+            except Exception:
+                file_size = 0
+
+        file_size_str = str(file_size) if file_size > 0 else "1111"
+
+        # Generate history.csv (Must NOT contain any line break in the data row)
+        history_header = "Project,Status,Format,Layout,User,Correction Type,Correction Request,File Size,Conformity level WCAG,Level of Complexity,Non-Accessible Elements,Primary Content Type,Content Type"
+        history_row = f"{eisbn},y,ePub all,Reflowable,,,,{file_size_str},A,simple,n,textual,textual visual"
+        # Ensure pure single-line data row without internal linebreaks
+        history_row_clean = history_row.replace("\r", " ").replace("\n", " ").strip()
+        history_csv_content = f"{history_header}\n{history_row_clean}\n"
+
+        history_csv_filepath = os.path.join(local_dir, "history.csv")
+        with open(history_csv_filepath, "w", encoding="utf-8") as f_hist:
+            f_hist.write(history_csv_content)
+
+        # Validate that history.csv was generated
+        if not os.path.exists(history_csv_filepath):
+            return False, "Cannot dispatch: Failed to generate history.csv."
+
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            if os.path.exists(job.epub_filepath):
-                zipf.write(job.epub_filepath, os.path.basename(job.epub_filepath))
-            if job.ace_report_filepath and os.path.exists(job.ace_report_filepath):
-                zipf.write(job.ace_report_filepath, os.path.basename(job.ace_report_filepath))
-            if job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath):
-                zipf.write(job.epubcheck_report_filepath, os.path.basename(job.epubcheck_report_filepath))
+            # 1. ePub file OR ePDF
+            if has_epub:
+                zipf.write(job.epub_filepath, target_epub_entry_name)
+            elif has_pdf:
+                zipf.write(job.pdf_filepath, target_epub_entry_name)
+
+            # 2. ACE report
+            zipf.write(job.ace_report_filepath, target_ace_entry_name)
+
+            # 3. Epub Checker Log
+            zipf.write(job.epubcheck_report_filepath, target_epubcheck_entry_name)
+
+            # 4. history.csv (without line breaks in data row)
+            zipf.write(history_csv_filepath, "history.csv")
 
         # Upload to FTP server
         with BodFtpService(
@@ -1038,16 +1122,18 @@ def upload_qc_reports(
     os.makedirs(project_dir, exist_ok=True)
     
     if ace_report:
-        if not ace_report.filename.endswith("_ace_report.zip"):
-            raise HTTPException(status_code=400, detail="ACE validation report must end with '_ace_report.zip'")
+        ace_name_lower = (ace_report.filename or "").lower()
+        if not (ace_name_lower.endswith("_ace_report.zip") or ace_name_lower.endswith("ace_report.zip") or ace_name_lower.endswith(".zip")):
+            raise HTTPException(status_code=400, detail="ACE validation report must be a .zip file (e.g. 'ACE_report.zip' or ending with '_ace_report.zip')")
         ace_path = os.path.join(project_dir, ace_report.filename)
         with open(ace_path, "wb") as buffer:
             shutil.copyfileobj(ace_report.file, buffer)
         job.ace_report_filepath = ace_path
         
     if epubcheck_report:
-        if not epubcheck_report.filename.endswith("_log.txt"):
-            raise HTTPException(status_code=400, detail="Epubcheck validation report must end with '_log.txt'")
+        epubcheck_name_lower = (epubcheck_report.filename or "").lower()
+        if not (epubcheck_name_lower.endswith("_log.txt") or epubcheck_name_lower.endswith("epub-checker_log.txt") or epubcheck_name_lower.endswith(".txt")):
+            raise HTTPException(status_code=400, detail="Epubcheck validation report must be a .txt file (e.g. 'EPUB-checker_log.txt' or ending with '_log.txt')")
         epubcheck_path = os.path.join(project_dir, epubcheck_report.filename)
         with open(epubcheck_path, "wb") as buffer:
             shutil.copyfileobj(epubcheck_report.file, buffer)

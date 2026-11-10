@@ -43,6 +43,7 @@ export function BodInternalPage() {
   // Fastrack modal state
   const [fastrackModalJob, setFastrackModalJob] = useState<any | null>(null)
   const [fastrackExpectedDate, setFastrackExpectedDate] = useState('')
+  const [fastrackReason, setFastrackReason] = useState('')
   const [savingFastrack, setSavingFastrack] = useState(false)
 
   // Date Filter states
@@ -52,7 +53,7 @@ export function BodInternalPage() {
 
   // History Drawer state
   const [historyJob, setHistoryJob] = useState<any | null>(null)
-  const [historyActiveTab, setHistoryActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'files'>('stage')
+  const [historyActiveTab, setHistoryActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files'>('stage')
 
   // Table heading filters & sorting
   const [colFilters, setColFilters] = useState({
@@ -184,25 +185,39 @@ export function BodInternalPage() {
 
   const handleFastrackClick = (e: React.MouseEvent, job: any) => {
     e.stopPropagation()
-    if (job.is_fastrack) {
-      toggleFastrackOff(job.id)
+    setFastrackModalJob(job)
+    setFastrackReason('')
+    if (job.is_fastrack && job.fastrack_requested_date) {
+      const raw = String(job.fastrack_requested_date).split('T')[0]
+      setFastrackExpectedDate(raw)
     } else {
-      setFastrackModalJob(job)
       const now = new Date()
       setFastrackExpectedDate(now.toISOString().slice(0, 10))
     }
   }
 
-  const toggleFastrackOff = async (jobId: number) => {
-    setTogglingFastrackId(jobId)
+  const handleTurnOffFastrack = async () => {
+    if (!fastrackModalJob) return
+    const jobId = fastrackModalJob.id
+    setSavingFastrack(true)
     try {
-      await api.put(`/bod/jobs/${jobId}/fastrack`, { is_fastrack: false })
-      toast.success("Job set to Normal")
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, is_fastrack: false, fastrack_requested_date: null } : j))
+      const { data } = await api.put(`/bod/jobs/${jobId}/fastrack`, {
+        is_fastrack: false,
+        reason: fastrackReason.trim() || undefined
+      })
+      toast.success("Fastrack turned off")
+      setJobs(prev => prev.map(j => j.id === jobId ? {
+        ...j,
+        is_fastrack: false,
+        fastrack_requested_date: null,
+        due_date_history: data.due_date_history || j.due_date_history
+      } : j))
+      setFastrackModalJob(null)
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to update Fastrack status")
+      console.error(err)
+      toast.error(err.response?.data?.detail || "Failed to turn off Fastrack")
     } finally {
-      setTogglingFastrackId(null)
+      setSavingFastrack(false)
     }
   }
 
@@ -225,17 +240,20 @@ export function BodInternalPage() {
     try {
       const { data } = await api.put(`/bod/jobs/${fastrackModalJob.id}/fastrack`, {
         is_fastrack: true,
-        fastrack_requested_date: finalDateStr
+        fastrack_requested_date: finalDateStr,
+        reason: fastrackReason.trim() || undefined
       })
-      toast.success("Job marked as Fastrack with expected completion date")
+      toast.success(fastrackModalJob.is_fastrack ? "Fastrack expected date updated" : "Fastrack enabled with expected completion date")
       setJobs(prev => prev.map(j => j.id === fastrackModalJob.id ? {
         ...j,
         is_fastrack: true,
-        fastrack_requested_date: data.fastrack_requested_date || finalDateStr
+        fastrack_requested_date: data.fastrack_requested_date || finalDateStr,
+        due_date_history: data.due_date_history || j.due_date_history
       } : j))
       setFastrackModalJob(null)
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to enable Fastrack")
+      console.error(err)
+      toast.error(err.response?.data?.detail || "Failed to update Fastrack")
     } finally {
       setSavingFastrack(false)
     }
@@ -2673,65 +2691,111 @@ export function BodInternalPage() {
         )
       }
 
-      {/* Fastrack Expected Date Modal */}
-      {
-        fastrackModalJob && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-            <div className="bg-card w-full max-w-sm rounded-xl shadow-2xl border border-border flex flex-col p-5 gap-4">
-              <div className="flex items-center justify-between border-b border-border/60 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                    <Zap size={16} className="fill-amber-500 text-amber-500" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-text text-sm m-0">Enable Fastrack</h3>
-                    <p className="text-[10px] text-muted m-0 truncate max-w-[200px]" title={fastrackModalJob.pdf_filename}>
-                      {fastrackModalJob.pdf_filename}
-                    </p>
-                  </div>
+      {/* Fastrack Management Modal */}
+      {fastrackModalJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-card w-full max-w-sm rounded-xl shadow-2xl border border-border flex flex-col p-5 gap-4">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                  <Zap size={16} className="fill-amber-500 text-amber-500" />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setFastrackModalJob(null)}
-                  className="text-muted hover:text-text transition-colors p-1 rounded-md"
-                >
-                  <XCircle size={16} />
-                </button>
-              </div>
-
-              <form onSubmit={submitFastrackEnable} className="flex flex-col gap-4">
-                <div className="bg-muted/30 border border-border/60 rounded-lg p-2.5 text-xs text-muted flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-text">Current Due Date:</span>
-                    <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
-                      {fastrackModalJob.due_date ? formatDate(fastrackModalJob.due_date) : 'No due date set'}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground m-0">
-                    Set the target date this Fastrack job should be completed by (on or before current due date).
+                <div>
+                  <h3 className="font-bold text-text text-sm m-0">
+                    {fastrackModalJob.is_fastrack ? 'Manage Fastrack' : 'Enable Fastrack'}
+                  </h3>
+                  <p className="text-[10px] text-muted m-0 truncate max-w-[200px]" title={fastrackModalJob.pdf_filename}>
+                    {fastrackModalJob.pdf_filename}
                   </p>
                 </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFastrackModalJob(null)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={16} />
+              </button>
+            </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-text flex items-center gap-1">
-                    <Calendar size={12} className="text-amber-500" />
-                    Expected Completion Date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={fastrackExpectedDate}
-                    max={(() => {
-                      const parsed = parseUtcDate(fastrackModalJob.due_date)
-                      return parsed ? parsed.toISOString().slice(0, 10) : undefined
-                    })()}
-                    onChange={(e) => setFastrackExpectedDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-text focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all shadow-xs"
-                    style={{ colorScheme: 'light dark' }}
-                  />
+            <form onSubmit={submitFastrackEnable} className="flex flex-col gap-4">
+              <div className="bg-muted/30 border border-border/60 rounded-lg p-2.5 text-xs text-muted flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-text">Current Status:</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    fastrackModalJob.is_fastrack 
+                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40' 
+                      : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {fastrackModalJob.is_fastrack ? 'Fastrack Active' : 'Normal Priority'}
+                  </span>
                 </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-text">Current Due Date:</span>
+                  <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
+                    {fastrackModalJob.due_date ? formatDate(fastrackModalJob.due_date) : 'No due date set'}
+                  </span>
+                </div>
+                {fastrackModalJob.is_fastrack && fastrackModalJob.fastrack_requested_date && (
+                  <div className="flex items-center justify-between border-t border-border/40 pt-1">
+                    <span className="font-semibold text-text">Expected Date:</span>
+                    <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                      {formatDate(fastrackModalJob.fastrack_requested_date)}
+                    </span>
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground m-0">
+                  {fastrackModalJob.is_fastrack
+                    ? "Update the expected completion date or turn off Fastrack to return to standard priority."
+                    : "Specify when you need this job completed by (must be on or before the current due date)."}
+                </p>
+              </div>
 
-                <div className="pt-2 flex justify-end gap-2 border-t border-border/60">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-text flex items-center gap-1">
+                  <Calendar size={12} className="text-amber-500" />
+                  Expected Completion Date
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={fastrackExpectedDate}
+                  max={(() => {
+                    const parsed = parseUtcDate(fastrackModalJob.due_date)
+                    return parsed ? parsed.toISOString().slice(0, 10) : undefined
+                  })()}
+                  onChange={(e) => setFastrackExpectedDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-text focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all shadow-xs"
+                  style={{ colorScheme: 'light dark' }}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-text flex items-center justify-between">
+                  <span>Reason / Note <span className="text-[10px] text-muted font-normal">(optional)</span></span>
+                </label>
+                <input
+                  type="text"
+                  placeholder={fastrackModalJob.is_fastrack ? "e.g., Client requested deadline adjustment" : "e.g., Priority customer request"}
+                  value={fastrackReason}
+                  onChange={(e) => setFastrackReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-text placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all shadow-xs"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-2 border-t border-border/60">
+                {fastrackModalJob.is_fastrack ? (
+                  <button
+                    type="button"
+                    onClick={handleTurnOffFastrack}
+                    disabled={savingFastrack}
+                    className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-semibold rounded-lg transition-colors text-xs flex items-center gap-1 shadow-xs disabled:opacity-50"
+                    title="Turn off Fastrack and return job to normal priority"
+                  >
+                    {savingFastrack && <Loader2 size={11} className="animate-spin" />}
+                    Turn Off Fastrack
+                  </button>
+                ) : (
                   <button
                     type="button"
                     onClick={() => setFastrackModalJob(null)}
@@ -2740,20 +2804,33 @@ export function BodInternalPage() {
                   >
                     Cancel
                   </button>
+                )}
+
+                <div className="flex items-center gap-2 ml-auto">
+                  {fastrackModalJob.is_fastrack && (
+                    <button
+                      type="button"
+                      onClick={() => setFastrackModalJob(null)}
+                      disabled={savingFastrack}
+                      className="px-2.5 py-1.5 bg-background border border-border hover:bg-muted/50 text-text font-semibold rounded-lg transition-colors text-xs"
+                    >
+                      Cancel
+                    </button>
+                  )}
                   <button
                     type="submit"
                     disabled={savingFastrack || !fastrackExpectedDate}
                     className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg transition-colors flex items-center gap-1.5 text-xs shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {savingFastrack && <Loader2 size={12} className="animate-spin" />}
-                    Confirm & Enable Fastrack
+                    {fastrackModalJob.is_fastrack ? "Update Date" : "Confirm & Enable Fastrack"}
                   </button>
                 </div>
-              </form>
-            </div>
+              </div>
+            </form>
           </div>
-        )
-      }
+        </div>
+      )}
 
       {/* History Slide-over Drawer */}
       {historyJob && (
@@ -2804,13 +2881,26 @@ export function BodInternalPage() {
                   Assignment History
                 </button>
               )}
-              {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.length > 0 && (
+              {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
+                (!h.changes || h.changes.length === 0) || h.changes.some((c: any) => c.field === 'Due Date')
+              ) && (
                 <button
                   onClick={() => setHistoryActiveTab('duedate')}
                   className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
                     }`}
                 >
-                  Update History
+                  Due Date History
+                </button>
+              )}
+              {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
+                h.changes && h.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
+              ) && (
+                <button
+                  onClick={() => setHistoryActiveTab('priority')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Priority History
                 </button>
               )}
               {historyJob.file_history && Array.isArray(historyJob.file_history) && historyJob.file_history.length > 0 && (
@@ -2913,17 +3003,79 @@ export function BodInternalPage() {
 
               {historyActiveTab === 'duedate' && historyJob.due_date_history && (
                 <div className="space-y-3">
-                  {[...historyJob.due_date_history].reverse().map((historyItem: any, idx: number) => {
-                    const hasChanges = Array.isArray(historyItem.changes) && historyItem.changes.length > 0;
-                    return (
+                  {[...historyJob.due_date_history]
+                    .filter((historyItem: any) =>
+                      (!historyItem.changes || historyItem.changes.length === 0) ||
+                      historyItem.changes.some((c: any) => c.field === 'Due Date')
+                    )
+                    .reverse().map((historyItem: any, idx: number) => {
+                      const hasChanges = Array.isArray(historyItem.changes) && historyItem.changes.length > 0;
+                      return (
+                        <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md">
+                                <Calendar size={13} />
+                              </div>
+                              <span className="text-xs font-bold text-text">
+                                {historyItem.date ? formatDate(historyItem.date) : 'Due Date Update'}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-muted font-medium">
+                              {formatDateTime(historyItem.timestamp)}
+                            </span>
+                          </div>
+
+                          {hasChanges && (
+                            <div className="space-y-1 pt-1 border-t border-border/50">
+                              {historyItem.changes.filter((c: any) => c.field === 'Due Date').map((change: any, cIdx: number) => (
+                                <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                  <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded text-[10px]">
+                                    {change.field}
+                                  </span>
+                                  {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                    <>
+                                      <span className="text-muted line-through text-[11px]">{String(change.old)}</span>
+                                      <span className="text-muted text-[10px]">→</span>
+                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">{String(change.new)}</span>
+                                    </>
+                                  ) : (
+                                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">set to {String(change.new)}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {historyItem.reason && (
+                            <p className="text-xs text-text/80 m-0 break-words bg-muted/20 p-2 rounded-lg">
+                              <span className="text-muted font-medium">Reason:</span> {historyItem.reason}
+                            </p>
+                          )}
+                          <p className="text-[10px] text-muted m-0">
+                            Changed By: <span className="font-medium text-text">{historyItem.changed_by || 'Unknown'}</span>
+                          </p>
+                        </div>
+                      )
+                    })}
+                </div>
+              )}
+
+              {historyActiveTab === 'priority' && historyJob.due_date_history && (
+                <div className="space-y-3">
+                  {[...historyJob.due_date_history]
+                    .filter((historyItem: any) =>
+                      historyItem.changes && historyItem.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
+                    )
+                    .reverse().map((historyItem: any, idx: number) => (
                       <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-2">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md">
-                              <Calendar size={13} />
+                              <Zap size={13} className="fill-amber-500 text-amber-500" />
                             </div>
                             <span className="text-xs font-bold text-text">
-                              {historyItem.date ? formatDate(historyItem.date) : 'Update Entry'}
+                              Fastrack / Priority Update
                             </span>
                           </div>
                           <span className="text-[11px] text-muted font-medium">
@@ -2931,38 +3083,35 @@ export function BodInternalPage() {
                           </span>
                         </div>
 
-                        {hasChanges && (
-                          <div className="space-y-1 pt-1 border-t border-border/50">
-                            {historyItem.changes.map((change: any, cIdx: number) => (
-                              <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
-                                <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded text-[10px]">
-                                  {change.field}
-                                </span>
-                                {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
-                                  <>
-                                    <span className="text-muted line-through text-[11px]">{String(change.old)}</span>
-                                    <span className="text-muted text-[10px]">→</span>
-                                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">{String(change.new)}</span>
-                                  </>
-                                ) : (
-                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">set to {String(change.new)}</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className="space-y-1 pt-1 border-t border-border/50">
+                          {historyItem.changes.filter((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date').map((change: any, cIdx: number) => (
+                            <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                              <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded text-[10px]">
+                                {change.field}
+                              </span>
+                              {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                <>
+                                  <span className="text-muted line-through text-[11px]">{String(change.old)}</span>
+                                  <span className="text-muted text-[10px]">→</span>
+                                  <span className="font-semibold text-amber-600 dark:text-amber-400 text-[11px]">{String(change.new)}</span>
+                                </>
+                              ) : (
+                                <span className="font-semibold text-amber-600 dark:text-amber-400 text-[11px]">set to {String(change.new)}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
 
                         {historyItem.reason && (
                           <p className="text-xs text-text/80 m-0 break-words bg-muted/20 p-2 rounded-lg">
-                            <span className="text-muted font-medium">Reason:</span> {historyItem.reason}
+                            <span className="text-muted font-medium">Reason / Note:</span> {historyItem.reason}
                           </p>
                         )}
                         <p className="text-[10px] text-muted m-0">
                           Changed By: <span className="font-medium text-text">{historyItem.changed_by || 'Unknown'}</span>
                         </p>
                       </div>
-                    )
-                  })}
+                    ))}
                 </div>
               )}
 
