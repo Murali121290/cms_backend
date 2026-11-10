@@ -48,6 +48,28 @@ def validate_epub(
 
     asset_index = _build_asset_to_chapters_index(_bundle.get_epub_bundle(folder_name))
 
+    # Load project db file_mappings and language if available
+    db_chapter_files: set[str] = set()
+    db_language: str | None = None
+    try:
+        from app.core.database import SessionLocal
+        from app.domains.post_prod.epub_validator.models import EvProject
+        db = SessionLocal()
+        try:
+            proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+            if proj:
+                if proj.language:
+                    db_language = proj.language.strip()
+                if proj.file_mappings and isinstance(proj.file_mappings, dict):
+                    for fname, cat in proj.file_mappings.items():
+                        if (cat or "").strip().lower() == "chapters":
+                            db_chapter_files.add(fname.lower())
+                            db_chapter_files.add(os.path.basename(fname).lower())
+        finally:
+            db.close()
+    except Exception:
+        pass
+
     def _count_active(rules: list[dict]) -> int:
         return len([r for r in rules if r.get("enabled", True) and registry.get(r["id"])])
 
@@ -120,6 +142,7 @@ def validate_epub(
             "folder_name": folder_name,
             "epub_path": epub_folder,
             "chapter_filter": target_file,  # Pass chapter filter if validating single chapter
+            "language": db_language,
         }
         try:
             import inspect
@@ -185,11 +208,19 @@ def validate_epub(
         if not os.path.exists(search_folder):
             return
 
+        rule_config_dict = rule.get("rule_config") if isinstance(rule.get("rule_config"), dict) else {}
+        check_db_chapters = (
+            rule.get("include_mapped_chapters") is True
+            or rule_config_dict.get("include_mapped_chapters") is True
+        )
+
         for root, _dirs, files in os.walk(search_folder):
             for file in files:
                 if target_file and file != target_file:
                     continue
-                if not any(fnmatch.fnmatch(file, p) for p in file_patterns):
+                matches_pattern = any(fnmatch.fnmatch(file, p) for p in file_patterns)
+                matches_db_chapter = check_db_chapters and (file.lower() in db_chapter_files or os.path.basename(file).lower() in db_chapter_files)
+                if not (matches_pattern or matches_db_chapter):
                     continue
 
                 full_path = os.path.join(root, file)

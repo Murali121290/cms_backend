@@ -557,6 +557,22 @@ def validate_cover_alt_tag(file_details, rule_config=None):
         book_title = ""
         lang_code = ""
 
+        # 1. First check DB language (EvProject.language)
+        folder_name = file_details.get("folder_name", "")
+        if folder_name:
+            try:
+                from app.core.database import SessionLocal
+                from app.domains.post_prod.epub_validator.models import EvProject
+                db = SessionLocal()
+                try:
+                    proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+                    if proj and proj.language:
+                        lang_code = proj.language.strip().lower()
+                finally:
+                    db.close()
+            except Exception:
+                pass
+
         if epub_root:
             opf_file = find_opf(epub_root)
             if opf_file and os.path.exists(opf_file):
@@ -566,13 +582,14 @@ def validate_cover_alt_tag(file_details, rule_config=None):
                         title_tag = opf_soup.find("dc:title")
                         if title_tag:
                             book_title = title_tag.get_text(strip=True)
-                        lang_tag = opf_soup.find("dc:language")
-                        if lang_tag:
-                            lang_code = lang_tag.get_text(strip=True).lower()
+                        if not lang_code:
+                            lang_tag = opf_soup.find("dc:language")
+                            if lang_tag:
+                                lang_code = lang_tag.get_text(strip=True).lower()
                 except Exception:
                     pass
 
-        # If language wasn't in OPF, fallback to html xml:lang or lang attribute
+        # If language wasn't in DB or OPF, fallback to html xml:lang or lang attribute
         if not lang_code:
             html_tag = soup.find("html")
             if html_tag:
