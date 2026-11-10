@@ -123,6 +123,46 @@ _HEADING_TAG_RE = re.compile(r"^<\s*h(\d+)\b", re.IGNORECASE)
 _CAPTION_TEXT_RE = re.compile(r"^(table|figure|fig\.)\s+\d", re.IGNORECASE)
 _TITLE_TAG_RE = re.compile(r"^<\s*(title|ct|pt)\b", re.IGNORECASE)
 
+# Characters that terminate a sentence. A paragraph whose last non-
+# whitespace character is one of these is sentence-terminated; one that
+# isn't may be an informal title (see ``_is_informal_title`` below).
+_TERMINAL_PUNCTUATION_CHARS = frozenset('.!?:;"\')]')
+
+
+def _is_informal_title(p) -> bool:
+    """Detect section titles that the DOCX author formatted as bolded
+    runs inside a plain ``Normal`` paragraph instead of applying a
+    Heading / Title style. Classic pattern in copy-edited manuscripts:
+    ``THE STUDY`` or ``Impact of ... quality of life`` sit as 100%-
+    bold ``Normal`` paragraphs with no terminal punctuation, directly
+    above the running prose.
+
+    Signal: every non-empty run in the paragraph is bold AND the
+    paragraph has no sentence-terminating punctuation. The combination
+    is distinctive — a body paragraph with emphasis-bolding has
+    mixed-bold runs, and a legitimate sentence ends in a terminator.
+
+    Returns False on empty paragraphs so the caller can fall through
+    to its existing body-vs-caption logic.
+    """
+    text = (p.text or "").strip()
+    if not text:
+        return False
+    if text[-1] in _TERMINAL_PUNCTUATION_CHARS:
+        return False
+    # Inspect all runs that carry visible text. If every one is bold
+    # (``run.bold is True`` — explicitly set, not inherited-as-None),
+    # treat the paragraph as an informal title. A single non-bold run
+    # anywhere drops it back to body.
+    has_run = False
+    for r in p.runs:
+        if not (r.text or "").strip():
+            continue
+        has_run = True
+        if r.bold is not True:
+            return False
+    return has_run
+
 
 def classify_paragraphs(doc) -> dict[int, dict]:
     """Return per-paragraph role metadata keyed by python-docx index.
@@ -206,6 +246,13 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             role = "reference"
         elif style_lc.startswith("caption") or _CAPTION_TEXT_RE.match(text):
             role = "caption"
+        elif _is_informal_title(p):
+            # Fallback — paragraph is styled ``Normal`` but every run is
+            # bold and there's no terminal punctuation. Treat as a
+            # heading so the router's paragraph-exclusion gate skips it
+            # for every rule category (no spurious terminal_punctuation
+            # or passive_voice findings on titles).
+            role = "heading"
 
         out[i] = {
             "style": style,
