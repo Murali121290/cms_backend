@@ -1181,3 +1181,117 @@ def validate_html_file_size(file_details, rule_config=None):
 
     return {"issues_count": 0, "issues": []}
 
+
+@rule("BOD-ENC-001")
+def validate_utf8_and_entities(file_details, rule_config=None):
+    """File must be UTF-8 encoded and use Unicode characters directly rather than HTML/XML entities.
+    Allowed entities:
+      - &amp; (ampersand)
+      - &lt; (less-than sign)
+    Disallowed:
+      - Decimal entities (e.g. &#2011;)
+      - Hexadecimal entities (e.g. &#x201C;)
+      - Named character entities (e.g. &auml;, &ouml;)
+    """
+    import html as html_lib
+    import re
+
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+    rel_path = file_details.get("relative_path") or file_path
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    filename = os.path.basename(full_path)
+
+    # 1. Verify valid UTF-8 encoding
+    try:
+        with open(full_path, "rb") as f:
+            raw_bytes = f.read()
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "file_read_error",
+            "message": f"Could not read '{filename}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "invalid_utf8_encoding",
+            "message": f"File '{filename}' is not valid UTF-8: {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    # 2. Check XML declaration encoding attribute if present (e.g. <?xml version="1.0" encoding="UTF-8"?>)
+    xml_decl_match = re.search(r'<\?xml\b[^>]*\bencoding\s*=\s*["\']([^"\']+)["\']', text, re.IGNORECASE)
+    if xml_decl_match:
+        declared_enc = xml_decl_match.group(1).strip().lower()
+        if declared_enc not in ("utf-8", "utf8"):
+            return {"issues_count": 1, "issues": [{
+                "type": "invalid_xml_encoding_declaration",
+                "message": f"File '{filename}' declares encoding '{xml_decl_match.group(1)}', but must be 'utf-8'.",
+                "category": "Error",
+                "file_path": rel_path,
+                "extract": xml_decl_match.group(0),
+                "line_number": 1,
+            }]}
+
+    # 3. Check for disallowed entities: decimal, hexadecimal, named entities
+    # Allowed: &amp; and &lt;
+    entity_pattern = re.compile(r'&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z0-9]+);')
+    allowed_entities = {"&amp;", "&lt;"}
+
+    issues = []
+    lines = text.splitlines()
+
+    for line_idx, line in enumerate(lines, 1):
+        for m in entity_pattern.finditer(line):
+            entity = m.group(0)
+            body = m.group(1)
+
+            if entity.lower() in allowed_entities:
+                continue
+
+            # Determine kind of entity
+            if body.startswith("#x") or body.startswith("#X"):
+                kind = "Hexadecimal entity"
+            elif body.startswith("#"):
+                kind = "Decimal entity"
+            else:
+                kind = "Named character entity"
+
+            char_equiv = html_lib.unescape(entity)
+            if char_equiv != entity:
+                suggestion = f" Write the character directly as '{char_equiv}'."
+            else:
+                suggestion = ""
+
+            snippet_start = max(0, m.start() - 25)
+            snippet_end = min(len(line), m.end() + 25)
+            snippet = line[snippet_start:snippet_end].strip()
+
+            issues.append({
+                "type": "disallowed_character_entity",
+                "message": (
+                    f"{kind} '{entity}' is not allowed in '{filename}'.{suggestion} "
+                    f"Only &amp; and &lt; are permitted."
+                ),
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_idx,
+                "extract": entity,
+                "snippet": snippet,
+            })
+
+            if len(issues) >= 100:
+                break
+        if len(issues) >= 100:
+            break
+
+    return {"issues_count": len(issues), "issues": issues}
+

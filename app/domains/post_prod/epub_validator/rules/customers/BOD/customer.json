@@ -57,6 +57,17 @@
       "category": "XHTML Check"
     },
     {
+      "id": "BOD-ENC-001",
+      "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp; and &lt; allowed)",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.xhtml",
+        "*.ncx"
+      ],
+      "enabled": true,
+      "category": "Encoding Check"
+    },
+    {
       "id": "CSS002",
       "name": "CSS File Validation",
       "target_path": "OEBPS/css",
