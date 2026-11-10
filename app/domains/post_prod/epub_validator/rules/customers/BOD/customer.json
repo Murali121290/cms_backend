@@ -184,6 +184,43 @@
       "category": "Image Check"
     },
     {
+      "id": "BOD-AUT-001",
+      "name": "Author photo must have a default alt attribute",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*about*author*.xhtml",
+        "*About*Author*.xhtml",
+        "*uber*die*autor*.xhtml",
+        "*ber*die*autor*.xhtml",
+        "*ber*den*autor*.xhtml",
+        "*Die*Autoren*.xhtml",
+        "*die*autoren*.xhtml",
+        "*author*.xhtml",
+        "*Author*.xhtml",
+        "*autor*.xhtml",
+        "*Autor*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_alt_by_language": {
+          "de": "Portraitfoto von “{author}”",
+          "da": "Portrætbillede af “{author}”",
+          "fi": "kansikuva Kirjailijakuva “{author}”",
+          "fr": "Photo de l‘auteur “{author}”",
+          "sv": "Porträttfoto av “{author}”",
+          "no": "Portrettbilde av “{author}”",
+          "es": "Foto del autor “{author}”",
+          "en": "Portrait photo of “{author}”",
+          "it": "Foto ritratto di “{author}”",
+          "pt": "Fotografia de retrato de “{author}”",
+          "nl": "Portretfoto van “{author}”",
+          "ca": "Fotografia de retrat de “{author}”",
+          "va": "Fotografia de retrat de “{author}”"
+        }
+      },
+      "category": "Image Check"
+    },
+    {
       "id": "BOD-IMG-001",
       "name": "All body images must be exactly 300 DPI",
       "target_path": "OEBPS/images",
@@ -214,6 +251,14 @@
     {
       "id": "BOD-IMG-003",
       "name": "<img> alt attribute must not be empty",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-IMG-004",
+      "name": "Images and captions have to be contained inside a <figure> element",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true,

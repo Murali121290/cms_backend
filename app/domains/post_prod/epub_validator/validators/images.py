@@ -734,3 +734,306 @@ def validate_image_width(file_details, rule_config=None):
 
     return {"issues_count": len(issues), "issues": issues}
 
+
+@rule("BOD-AUT-001")
+def validate_author_alt_tag(file_details, rule_config=None):
+    """Author image(s) in About the Author / Über die Autorin files must have the default alt attribute."""
+    import html as html_lib
+    import itertools
+
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+    rel_path = file_details.get("relative_path") or file_path
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    filename = os.path.basename(full_path)
+    filename_lower = filename.lower()
+
+    # Skip files that are Table of Authorities
+    if "authority" in filename_lower or "authorities" in filename_lower:
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "read_error",
+            "message": f"Could not read file '{filename}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
+
+    # Find author images inside this file
+    images = soup.find_all("img")
+    if not images:
+        return {"issues_count": 0, "issues": []}
+
+    # Determine language
+    detected_lang = ""
+
+    # 1. First check DB language (EvProject.language)
+    folder_name = file_details.get("folder_name", "")
+    if folder_name:
+        try:
+            from app.core.database import SessionLocal
+            from app.domains.post_prod.epub_validator.models import EvProject
+            db = SessionLocal()
+            try:
+                proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+                if proj and proj.language:
+                    detected_lang = proj.language.strip().lower()
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    # 2. Find OPF to extract dc:creator and dc:language
+    epub_root = file_details.get("epub_root") or file_details.get("epub_path")
+    if not epub_root and full_path:
+        curr = os.path.dirname(os.path.abspath(full_path))
+        while curr and curr != "/":
+            if glob.glob(os.path.join(curr, "*.opf")) or os.path.exists(os.path.join(curr, "mimetype")):
+                epub_root = curr
+                break
+            curr = os.path.dirname(curr)
+
+    author_creators = []
+    if epub_root:
+        opf_file = find_opf(epub_root)
+        if opf_file and os.path.exists(opf_file):
+            try:
+                with open(opf_file, "r", encoding="utf-8") as opf_f:
+                    opf_soup = BeautifulSoup(opf_f.read(), "xml")
+                    for c_tag in opf_soup.find_all(["dc:creator", "creator"]):
+                        c_text = c_tag.get_text(strip=True)
+                        if c_text and c_text not in author_creators:
+                            author_creators.append(c_text)
+                    if not detected_lang:
+                        lang_tag = opf_soup.find(["dc:language", "language"])
+                        if lang_tag:
+                            detected_lang = lang_tag.get_text(strip=True).lower()
+            except Exception:
+                pass
+
+    # 3. Fallback language to HTML lang / xml:lang
+    if not detected_lang:
+        html_tag = soup.find("html")
+        if html_tag:
+            detected_lang = (html_tag.get("xml:lang") or html_tag.get("lang") or "").lower()
+
+    # Normalize language code
+    lang_key = detected_lang.strip().lower()
+    if "-" in lang_key:
+        lang_key = lang_key.split("-")[0]
+    if "_" in lang_key:
+        lang_key = lang_key.split("_")[0]
+
+    lang_map = {
+        "german": "de", "danish": "da", "finnish": "fi", "french": "fr",
+        "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
+        "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
+        "valencian": "va"
+    }
+    if lang_key in lang_map:
+        lang_key = lang_map[lang_key]
+    if not lang_key:
+        lang_key = "en"
+
+    # Read configuration from customer.json
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_by_lang = config_dict.get("expected_alt_by_language", {})
+
+    lang_entry = expected_by_lang.get(lang_key) or expected_by_lang.get(detected_lang)
+    if not lang_entry and "en" in expected_by_lang:
+        lang_entry = expected_by_lang["en"]
+
+    template = None
+    if lang_entry:
+        if isinstance(lang_entry, dict):
+            template = lang_entry.get("template") or lang_entry.get("alt")
+        elif isinstance(lang_entry, str):
+            template = lang_entry
+
+    if not template:
+        return {"issues_count": 0, "issues": []}
+
+    # Primary author string for error message
+    primary_author = " & ".join(author_creators) if author_creators else ""
+    default_expected_alt = template.replace("{author}", primary_author) if primary_author else template
+
+    def normalize_str(s: str) -> str:
+        s = html_lib.unescape(s or "")
+        s = s.replace("“", '"').replace("”", '"').replace("„", '"').replace("«", '"').replace("»", '"')
+        return " ".join(s.split()).strip()
+
+    # Build allowed expected alt forms (support single creator, multiple creators, with or without quotes)
+    base_creators = []
+    for c in author_creators:
+        if "&" in c:
+            for sub in c.split("&"):
+                sub_clean = sub.strip()
+                if sub_clean and sub_clean not in base_creators:
+                    base_creators.append(sub_clean)
+        elif " and " in c.lower():
+            for sub in re.split(r'\band\b', c, flags=re.IGNORECASE):
+                sub_clean = sub.strip()
+                if sub_clean and sub_clean not in base_creators:
+                    base_creators.append(sub_clean)
+        else:
+            c_clean = c.strip()
+            if c_clean and c_clean not in base_creators:
+                base_creators.append(c_clean)
+
+    candidates = list(author_creators) + list(base_creators)
+    if len(base_creators) > 1:
+        for perm in itertools.permutations(base_creators):
+            for sep in [" & ", " and ", ", "]:
+                candidates.append(sep.join(perm))
+
+    issues = []
+
+    for img in images:
+        # Skip pure decorative images (role="presentation" or aria-hidden="true" with empty alt)
+        role = img.get("role", "")
+        if isinstance(role, list):
+            role = " ".join(role)
+        is_decorative = role.lower() in ("presentation", "none") or img.get("aria-hidden", "").lower() == "true"
+        alt = img.get("alt")
+        if is_decorative and alt == "":
+            continue
+
+        src = img.get("src", "")
+        line_num = getattr(img, "sourceline", None)
+        if not line_num:
+            for idx, line in enumerate(lines, 1):
+                if src and src in line:
+                    line_num = idx
+                    break
+
+        # 1. Missing alt attribute
+        if alt is None:
+            issues.append({
+                "type": "author_missing_alt",
+                "message": f"Author image (<img src='{src}'>) is missing the 'alt' attribute.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "href": src,
+                "expected_text": default_expected_alt,
+            })
+            continue
+
+        # 2. Empty alt attribute
+        if not alt.strip():
+            issues.append({
+                "type": "author_empty_alt",
+                "message": f"Author image (<img src='{src}'>) has an empty alt attribute (alt=\"\").",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "href": src,
+                "expected_text": default_expected_alt,
+            })
+            continue
+
+        # 3. Match against expected author templates
+        actual_norm = normalize_str(alt)
+        matched = False
+
+        if candidates:
+            for cand in candidates:
+                exp_cand = template.replace("{author}", cand)
+                # Exact match with quotes required (typographical “”, „“, «», or straight quotes)
+                if actual_norm == normalize_str(exp_cand):
+                    matched = True
+                    break
+
+        if not matched:
+            issues.append({
+                "type": "author_alt_mismatch",
+                "message": f"Author image alt text does not match expected format based on language ('{lang_key}'). Expected: '{default_expected_alt}'. Found: '{alt}'.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "href": src,
+                "expected_text": default_expected_alt,
+                "actual_text": alt,
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-IMG-004")
+def validate_figure_container(file_details, rule_config=None):
+    """Images and captions have to be contained inside a <figure> element."""
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+    rel_path = file_details.get("relative_path") or file_path
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "read_error",
+            "message": f"Could not read file '{os.path.basename(full_path)}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
+    issues = []
+
+    def get_line_num(tag, tag_name, identifier):
+        line = getattr(tag, "sourceline", None)
+        if not line:
+            for idx, l in enumerate(lines, 1):
+                if f"<{tag_name}" in l and identifier in l:
+                    return idx
+        return line
+
+    # 1. Check all <img> tags are contained inside a <figure>
+    for img in soup.find_all("img"):
+        figure_parent = img.find_parent("figure")
+        if not figure_parent:
+            src = img.get("src", "")
+            line_num = get_line_num(img, "img", src) if src else getattr(img, "sourceline", None)
+            issues.append({
+                "type": "image_not_in_figure",
+                "message": f"Image (<img src='{src}'>) is not contained inside a <figure> element.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "href": src,
+                "extract": str(img)[:150],
+            })
+
+    # 2. Check all <figcaption> tags are direct children or descendants of a <figure>
+    for figcap in soup.find_all("figcaption"):
+        figure_parent = figcap.find_parent("figure")
+        if not figure_parent:
+            figcap_text = figcap.get_text(strip=True)[:30]
+            line_num = get_line_num(figcap, "figcaption", figcap_text) if figcap_text else getattr(figcap, "sourceline", None)
+            issues.append({
+                "type": "figcaption_not_in_figure",
+                "message": f"Caption (<figcaption>) is not contained inside a <figure> element.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "extract": str(figcap)[:150],
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+
