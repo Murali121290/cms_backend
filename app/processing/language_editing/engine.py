@@ -446,7 +446,7 @@ def analyze(
 # ``app/processing/language_editing/`` in a way that changes finding
 # output. Not bumping means stale results linger until the file bytes
 # or user-visible configuration happens to change.
-CACHE_VERSION: str = "v1"
+CACHE_VERSION: str = "v2"  # bumped for AB02 abbr-occurrence guard
 
 
 # Rule IDs that emit findings with ``original == suggestion`` on

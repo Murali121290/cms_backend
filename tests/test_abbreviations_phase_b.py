@@ -226,6 +226,116 @@ def test_min_uses_threshold_blocks_ab01():
     assert not any(f.rule_id == "AB01" for f in findings)
 
 
+# ─── AB02 guard (mirrors AB01 fix) ────────────────────────────────────
+
+def test_ab02_silent_when_only_expansion_present_treatment():
+    """``treatment`` × N with no ``Tx`` anywhere → AB02 must not fire.
+    Prose that happens to use a common English word which the workbook
+    lists as an expansion of an informal shorthand (treatment→Tx) is
+    not an opportunity to abbreviate — there is nothing to compress to
+    because the author never introduced ``Tx``."""
+    # Multiple expansion occurrences, no abbreviation in sight.
+    paragraphs = [
+        (0, "The patient received treatment during the admission."),
+        (1, "A second round of treatment was later administered."),
+        (2, "Routine treatment continued after discharge."),
+    ]
+    state = ab.build_document_state(paragraphs, audience="general", min_uses=2)
+    for pi, text in paragraphs:
+        findings = ab.analyze_abbreviations(
+            text, para_idx=pi, audience="general", min_uses=2, document_state=state,
+        )
+        assert not any(f.rule_id == "AB02" for f in findings), (
+            f"AB02 wrongly fired on para {pi} with expansion-only state"
+        )
+
+
+def test_ab02_silent_when_only_expansion_present_symptoms():
+    """``symptoms`` × N with no ``Sx`` anywhere → AB02 silent."""
+    paragraphs = [
+        (0, "Reported symptoms included fever and headache."),
+        (1, "Later symptoms worsened overnight."),
+    ]
+    state = ab.build_document_state(paragraphs, audience="general", min_uses=2)
+    for pi, text in paragraphs:
+        findings = ab.analyze_abbreviations(
+            text, para_idx=pi, audience="general", min_uses=2, document_state=state,
+        )
+        assert not any(f.rule_id == "AB02" for f in findings)
+
+
+def test_ab02_silent_when_only_expansion_present_history():
+    """``history`` × N with no ``Hx`` anywhere → AB02 silent."""
+    paragraphs = [
+        (0, "A relevant history of the condition was recorded."),
+        (1, "The history also noted earlier interventions."),
+    ]
+    state = ab.build_document_state(paragraphs, audience="general", min_uses=2)
+    for pi, text in paragraphs:
+        findings = ab.analyze_abbreviations(
+            text, para_idx=pi, audience="general", min_uses=2, document_state=state,
+        )
+        assert not any(f.rule_id == "AB02" for f in findings)
+
+
+def test_ab02_fires_when_expansion_and_abbreviation_coexist():
+    """Legitimate AB02: the document mixes expansion and abbreviation.
+    The guard preserves AB02 for every case where the author actually
+    introduced the abbreviation at least once — later expansion
+    mentions still compress toward it."""
+    text = (
+        "The intensive care unit was busy. "
+        "The ICU staff worked overnight. "
+        "The intensive care unit reopened the next morning."
+    )
+    state = ab.build_document_state([(0, text)], audience="general", min_uses=2)
+    findings = ab.analyze_abbreviations(
+        text, para_idx=0, audience="general", min_uses=2, document_state=state,
+    )
+    ab02 = [f for f in findings if f.rule_id == "AB02"]
+    assert ab02, "AB02 should fire on the later 'intensive care unit' expansion"
+    assert ab02[0].original.lower() == "intensive care unit"
+    assert ab02[0].suggestion == "ICU"
+
+
+def test_ab02_fires_on_rule_g_entry_when_abbreviation_present():
+    """Consistency with the AB01 behaviour (test_audience_professional_
+    skips_general_only_entries): when the Rule-G entry's abbreviation
+    appears in the document, AB02 compresses the later expansion to
+    BP, the same way AB01 introduces it."""
+    text = "Blood pressure was measured twice. BP was normal. Blood pressure stayed stable."
+    state = ab.build_document_state([(0, text)], audience="general", min_uses=2)
+    findings = ab.analyze_abbreviations(
+        text, para_idx=0, audience="general", min_uses=2, document_state=state,
+    )
+    # AB02 should compress the final 'Blood pressure' toward BP.
+    assert any(
+        f.rule_id == "AB02" and f.original.lower() == "blood pressure" and f.suggestion == "BP"
+        for f in findings
+    )
+
+
+def test_ab02_silent_when_abbreviation_matches_expansion_prose_only():
+    """Document-scope regression: multiple paragraphs with only the
+    expansion should not trigger AB02 anywhere, even though
+    ``total_uses >= min_uses`` across paragraphs. Mirrors the live
+    reproduction from the user's document (Para 21/25/31)."""
+    # Three paragraphs, each contributing another occurrence of
+    # 'treatment' with no 'Tx' anywhere.
+    paragraphs = [
+        (0, "The patient was admitted for routine treatment."),
+        (1, "The following week treatment continued without incident."),
+        (2, "A final course of treatment was administered before discharge."),
+    ]
+    state = ab.build_document_state(paragraphs, audience="general", min_uses=2)
+    for pi, text in paragraphs:
+        findings = ab.analyze_abbreviations(
+            text, para_idx=pi, audience="general", min_uses=2, document_state=state,
+        )
+        bogus = [f for f in findings if f.rule_id == "AB02" and f.original.lower() == "treatment"]
+        assert not bogus, f"AB02 fired on para {pi}: {bogus}"
+
+
 # ─── Engine integration ──────────────────────────────────────────────
 
 def test_engine_analyze_threads_abbr_state_from_router():
