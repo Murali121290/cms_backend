@@ -46,6 +46,17 @@
       "category": "XHTML Check"
     },
     {
+      "id": "BOD-XHTML-001",
+      "name": "Individual HTML files within the E-Book must be smaller than 30 MB",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "max_file_size_mb": 30
+      },
+      "category": "XHTML Check"
+    },
+    {
       "id": "CSS002",
       "name": "CSS File Validation",
       "target_path": "OEBPS/css",
@@ -236,12 +247,13 @@
     },
     {
       "id": "BOD-IMG-002",
-      "name": "Images inside the E-Book must have a minimum of 850 pixels in width or height",
+      "name": "Images inside the E-Book must have a minimum of 850 pixels in width or height, and max 5.6M pixels",
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.jpg",
       "enabled": true,
       "rule_config": {
         "min_dimension": 850,
+        "max_pixels": 5600000,
         "exclude_files": [
           "cover.jpg"
         ]

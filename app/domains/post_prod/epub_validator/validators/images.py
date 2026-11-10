@@ -281,7 +281,7 @@ def validate_image_dimensions(file_details, rule_config=None):
                     "message": (
                         f"Image is {w}x{h} = {w*h:,} pixels; max allowed is {max_pixels:,} pixels."
                     ),
-                    "category": "Warning",
+                    "category": "Error",
                     "file_path": file_path,
                 })
 

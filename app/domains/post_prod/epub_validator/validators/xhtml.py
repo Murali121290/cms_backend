@@ -1143,3 +1143,41 @@ def validate_heading_first_paragraph_class(file_details, rule_config=None):
                 issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-XHTML-001")
+def validate_html_file_size(file_details, rule_config=None):
+    """Individual HTML files within the E-Book must be smaller than 30 MB."""
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+    rel_path = file_details.get("relative_path") or file_path
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    cfg = (rule_config or {}).get("rule_config", {})
+    max_mb = cfg.get("max_file_size_mb", 30)
+
+    try:
+        size_bytes = os.path.getsize(full_path)
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "file_read_error",
+            "message": f"Could not check file size for '{os.path.basename(full_path)}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    max_bytes = max_mb * 1024 * 1024
+    if size_bytes >= max_bytes:
+        actual_mb = size_bytes / (1024 * 1024)
+        return {"issues_count": 1, "issues": [{
+            "type": "html_file_size_exceeded",
+            "message": f"HTML file size is {actual_mb:.2f} MB, which exceeds the maximum allowed limit of {max_mb} MB.",
+            "category": "Error",
+            "file_path": rel_path,
+            "extract": f"{actual_mb:.2f} MB",
+        }]}
+
+    return {"issues_count": 0, "issues": []}
+
