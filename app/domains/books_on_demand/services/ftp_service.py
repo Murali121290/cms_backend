@@ -117,3 +117,27 @@ class BodFtpService:
         except Exception as e:
             logger.error(f"Failed to ensure directory {remote_dir}: {e}")
             raise
+
+    def rename_or_move(self, from_path: str, to_path: str, overwrite: bool = True):
+        """Move or rename a remote file/directory on the FTP server. If target exists and overwrite is True, delete target first."""
+        try:
+            if overwrite:
+                try:
+                    self.ftp.delete(to_path)
+                    logger.info(f"Target '{to_path}' already existed on FTP; deleted before moving.")
+                except Exception:
+                    pass  # Target didn't exist or wasn't a file, proceed with rename
+            self.ftp.rename(from_path, to_path)
+            logger.info(f"Moved remote file from '{from_path}' to '{to_path}'")
+        except Exception as e:
+            # If standard rename failed due to existing file (e.g. 553), attempt delete and rename once more
+            if overwrite and "553" in str(e):
+                try:
+                    self.ftp.delete(to_path)
+                    self.ftp.rename(from_path, to_path)
+                    logger.info(f"Replaced remote file '{to_path}' with '{from_path}' after clearing existing file.")
+                    return
+                except Exception as retry_err:
+                    logger.error(f"Failed retry replace '{from_path}' to '{to_path}': {retry_err}")
+            logger.error(f"Failed to move remote file '{from_path}' to '{to_path}': {e}")
+            raise

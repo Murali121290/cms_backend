@@ -454,10 +454,61 @@ def validate_page_citation_links(file_details, rule_config=None):
 
     config_dict = (rule_config or {}).get("rule_config", {})
     custom_regex = config_dict.get("citation_regex")
+    is_lang_regex_active = False
+
+    # Support language-wise regex: citation_regex_by_language (e.g. "de", "en")
+    regex_by_lang = config_dict.get("citation_regex_by_language")
+    if regex_by_lang and isinstance(regex_by_lang, dict):
+        detected_lang = ""
+
+        # 1. First, check project language from DB (EvProject.language)
+        folder_name = file_details.get("folder_name", "")
+        if folder_name:
+            try:
+                from app.core.database import SessionLocal
+                from app.domains.post_prod.epub_validator.models import EvProject
+                db = SessionLocal()
+                try:
+                    proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+                    if proj and proj.language:
+                        detected_lang = proj.language.strip().lower()
+                finally:
+                    db.close()
+            except Exception:
+                pass
+
+        # 2. Fallback to OPF dc:language if not found in DB
+        if not detected_lang and epub:
+            try:
+                from ._common import find_opf
+                opf_file = find_opf(epub)
+                if opf_file and os.path.exists(opf_file):
+                    with open(opf_file, "r", encoding="utf-8") as opf_f:
+                        opf_soup = BeautifulSoup(opf_f.read(), "xml")
+                        dc_lang = opf_soup.find(["dc:language", "language"])
+                        if dc_lang:
+                            detected_lang = dc_lang.get_text(strip=True).lower()
+            except Exception:
+                pass
+
+        # 3. Fallback to HTML xml:lang or lang attribute
+        if not detected_lang:
+            html_tag = soup.find("html")
+            if html_tag:
+                detected_lang = (html_tag.get("xml:lang") or html_tag.get("lang") or "").lower()
+
+        lang_key = detected_lang.split("-")[0].split("_")[0] if detected_lang else "en"
+        lang_regex = regex_by_lang.get(lang_key) or regex_by_lang.get(detected_lang) or regex_by_lang.get("en")
+        if lang_regex:
+            custom_regex = lang_regex
+
+        # Flag whether language-wise regex is active
+        is_lang_regex_active = bool(lang_regex)
+
     if not custom_regex:
         issues.append({
             "type": "config_error",
-            "message": "Missing 'citation_regex' in rule config",
+            "message": "Missing 'citation_regex' or 'citation_regex_by_language' in rule config",
             "category": "Error"
         })
         return {"issues_count": len(issues), "issues": issues}
@@ -489,93 +540,95 @@ def validate_page_citation_links(file_details, rule_config=None):
                 if next_tag and next_tag.name in valid_targets:
                     continue
 
-            # If it is a chapter citation, only validate if the base chapter exists in this book
-            if m.group(2) is not None:
-                if summary_labels.get("total_chapters") == 0:
-                    continue
-                if epub:
-                    chapter_num_full = m.group(2).lstrip("0") or "0"
-                    base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', chapter_num_full)
-                    base_chapter = base_match.group(1) if base_match else chapter_num_full
-                    
-                    available_chapters = _epub_chapter_numbers(epub)
-                    if available_chapters:
-                        # Normalize citation: try comparing as-is (lowercase), and also as Arabic equivalent
-                        chapter_lower = base_chapter.lower()
-                        arabic_equiv = _roman_to_int(base_chapter)
-                        arabic_str = str(arabic_equiv) if arabic_equiv else None
-                        word_equiv = _word_to_int(base_chapter)
-                        word_str = str(word_equiv) if word_equiv else None
-                        if chapter_lower not in available_chapters and (arabic_str is None or arabic_str not in available_chapters) and (word_str is None or word_str not in available_chapters):
-                            continue
+            # If using citation_regex_by_language, skip within-book checks so ANY unlinked citation shows an error
+            if not is_lang_regex_active:
+                # If it is a chapter citation, only validate if the base chapter exists in this book
+                if m.group(2) is not None:
+                    if summary_labels.get("total_chapters") == 0:
+                        continue
+                    if epub:
+                        chapter_num_full = m.group(2).lstrip("0") or "0"
+                        base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', chapter_num_full)
+                        base_chapter = base_match.group(1) if base_match else chapter_num_full
+                        
+                        available_chapters = _epub_chapter_numbers(epub)
+                        if available_chapters:
+                            # Normalize citation: try comparing as-is (lowercase), and also as Arabic equivalent
+                            chapter_lower = base_chapter.lower()
+                            arabic_equiv = _roman_to_int(base_chapter)
+                            arabic_str = str(arabic_equiv) if arabic_equiv else None
+                            word_equiv = _word_to_int(base_chapter)
+                            word_str = str(word_equiv) if word_equiv else None
+                            if chapter_lower not in available_chapters and (arabic_str is None or arabic_str not in available_chapters) and (word_str is None or word_str not in available_chapters):
+                                continue
 
-            # If it is a page citation, only validate if the page exists in this book
-            if m.group(1) is not None and epub:
-                page_num = m.group(1).lstrip("0") or "0"
-                if page_ids and _page_id_for_number(page_num, page_ids) is None:
-                    continue
-                    
-            # If it is a Figure citation, only validate if figures exist and match in this book
-            if is_figure:
-                if summary_labels.get("total_figures") == 0:
-                    continue
-                if summary_labels["figures"]:
-                    fig_num = m.group(3)
-                    if fig_num:
-                        word_equiv = _word_to_int(fig_num)
-                        word_str = str(word_equiv) if word_equiv else None
-                        if fig_num not in summary_labels["figures"] and (word_str is None or word_str not in summary_labels["figures"]):
-                            continue
-            
-            # If it is a Table citation, only validate if tables exist and match in this book
-            if is_table:
-                if summary_labels.get("total_tables") == 0:
-                    continue
-                if summary_labels["tables"]:
-                    table_num = m.group(4)
-                    if table_num:
-                        word_equiv = _word_to_int(table_num)
-                        word_str = str(word_equiv) if word_equiv else None
-                        if table_num not in summary_labels["tables"] and (word_str is None or word_str not in summary_labels["tables"]):
-                            continue
+                # If it is a page citation, only validate if the page exists in this book
+                if m.group(1) is not None and epub:
+                    page_num = m.group(1).lstrip("0") or "0"
+                    if page_ids and _page_id_for_number(page_num, page_ids) is None:
+                        continue
+                        
+                # If it is a Figure citation, only validate if figures exist and match in this book
+                if is_figure:
+                    if summary_labels.get("total_figures") == 0:
+                        continue
+                    if summary_labels["figures"]:
+                        fig_num = m.group(3)
+                        if fig_num:
+                            word_equiv = _word_to_int(fig_num)
+                            word_str = str(word_equiv) if word_equiv else None
+                            if fig_num not in summary_labels["figures"] and (word_str is None or word_str not in summary_labels["figures"]):
+                                continue
+                
+                # If it is a Table citation, only validate if tables exist and match in this book
+                if is_table:
+                    if summary_labels.get("total_tables") == 0:
+                        continue
+                    if summary_labels["tables"]:
+                        table_num = m.group(4)
+                        if table_num:
+                            word_equiv = _word_to_int(table_num)
+                            word_str = str(word_equiv) if word_equiv else None
+                            if table_num not in summary_labels["tables"] and (word_str is None or word_str not in summary_labels["tables"]):
+                                continue
 
-            # If it is a Section citation (Group 9), skip if total_sections is 0 or if statutory/external legal reference
-            is_section = m.group(9) is not None if len(m.groups()) >= 9 else False
-            if is_section:
-                # If analysis summary indicates 0 sections in the book, do not flag section citation errors
-                if summary_labels.get("total_sections") == 0:
-                    continue
+                # If it is a Section citation (Group 9), skip if total_sections is 0 or if statutory/external legal reference
+                is_section = m.group(9) is not None if len(m.groups()) >= 9 else False
+                if is_section:
+                    # If analysis summary indicates 0 sections in the book, do not flag section citation errors
+                    if summary_labels.get("total_sections") == 0:
+                        continue
 
-                # Skip statutory / external legal references (e.g. Section 307 of SOX / Code / Act / U.S.C.)
-                remainder = str(text_node)[m.end():m.end() + 50]
-                if re.match(r'^\s+(?:of\s+(?:sox|erisa|title\s+\d+|the\s+(?:code|act|statute|rules?|constitution|dodd|false\s+claims))|codified|§|\(?\d+\s+u\.s\.c|\(?\d+\s+c\.f\.r)', remainder, re.IGNORECASE):
-                    continue
+                    # Skip statutory / external legal references (e.g. Section 307 of SOX / Code / Act / U.S.C.)
+                    remainder = str(text_node)[m.end():m.end() + 50]
+                    if re.match(r'^\s+(?:of\s+(?:sox|erisa|title\s+\d+|the\s+(?:code|act|statute|rules?|constitution|dodd|false\s+claims))|codified|§|\(?\d+\s+u\.s\.c|\(?\d+\s+c\.f\.r)', remainder, re.IGNORECASE):
+                        continue
 
-            # If it is a Part citation (Group 10), only validate if the base part exists in this book
-            is_part = m.group(10) is not None if len(m.groups()) >= 10 else False
-            if is_part:
-                if summary_labels.get("total_parts") == 0:
-                    continue
-                if epub:
-                    part_num_full = m.group(10).lstrip("0") or "0"
-                    base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', part_num_full)
-                    base_part = base_match.group(1) if base_match else part_num_full
-                    
-                    available_parts = _epub_part_numbers(epub)
-                    if available_parts:
-                        part_lower = base_part.lower()
-                        arabic_equiv = _roman_to_int(base_part)
-                        arabic_str = str(arabic_equiv) if arabic_equiv else None
-                        word_equiv = _word_to_int(base_part)
-                        word_str = str(word_equiv) if word_equiv else None
-                        if part_lower not in available_parts and (arabic_str is None or arabic_str not in available_parts) and (word_str is None or word_str not in available_parts):
-                            continue
-            # If it is a Box citation (Group 8), skip P.O. Boxes (which are not cross-references)
-            is_box = m.group(8) is not None if len(m.groups()) >= 8 else False
-            if is_box:
-                preceding = str(text_node)[:m.start()].strip()
-                if re.search(r'\b(?:P\.?\s*O\.?|Post\s+Office)\s*$', preceding, re.IGNORECASE):
-                    continue
+                # If it is a Part citation (Group 10), only validate if the base part exists in this book
+                is_part = m.group(10) is not None if len(m.groups()) >= 10 else False
+                if is_part:
+                    if summary_labels.get("total_parts") == 0:
+                        continue
+                    if epub:
+                        part_num_full = m.group(10).lstrip("0") or "0"
+                        base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', part_num_full)
+                        base_part = base_match.group(1) if base_match else part_num_full
+                        
+                        available_parts = _epub_part_numbers(epub)
+                        if available_parts:
+                            part_lower = base_part.lower()
+                            arabic_equiv = _roman_to_int(base_part)
+                            arabic_str = str(arabic_equiv) if arabic_equiv else None
+                            word_equiv = _word_to_int(base_part)
+                            word_str = str(word_equiv) if word_equiv else None
+                            if part_lower not in available_parts and (arabic_str is None or arabic_str not in available_parts) and (word_str is None or word_str not in available_parts):
+                                continue
+                # If it is a Box citation (Group 8), skip P.O. Boxes (which are not cross-references)
+                is_box = m.group(8) is not None if len(m.groups()) >= 8 else False
+                if is_box:
+                    preceding = str(text_node)[:m.start()].strip()
+                    if re.search(r'\b(?:P\.?\s*O\.?|Post\s+Office)\s*$', preceding, re.IGNORECASE):
+                        continue
 
             msg = f"Citation '{m.group(0)}' is not wrapped in a link."
             rule_name = "Citation Not Linked"

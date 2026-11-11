@@ -307,7 +307,17 @@ async def replace_file_content(
         raise HTTPException(status_code=403, detail="Access denied")
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Original file not found")
-        
+
+    # Validate that the replacement file has the exact same extension as the original file
+    orig_ext = Path(file_path).suffix.lower()
+    upload_ext = Path(file.filename or "").suffix.lower()
+
+    if orig_ext != upload_ext:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Extension mismatch: cannot replace '{orig_ext}' file with '{upload_ext}' file. Only the same file extension is allowed."
+        )
+
     content = await file.read()
     await asyncio.to_thread(target.write_bytes, content)
     
