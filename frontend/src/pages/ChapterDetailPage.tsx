@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { chaptersApi } from '@/api/chapters'
 import { projectsApi } from '@/api/projects'
@@ -11,6 +11,8 @@ import { toast } from '@/store/useToastStore'
 import { useRBAC } from '@/hooks/useRBAC'
 import apiClient from '@/api/client'
 import { TransitionConfirmModal } from '@/components/TransitionConfirmModal'
+import { Modal } from '@/components/ui/Modal'
+import { AlertTriangle } from 'lucide-react'
 
 function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
   const byName = new Map(stages.map(s => [s.stage_name, s]))
@@ -58,6 +60,9 @@ export function ChapterDetailPage() {
   const [loading,        setLoading]        = useState(true)
   const [error,          setError]          = useState<string | null>(null)
   const [proceedLoading, setProceedLoading] = useState(false)
+  const [reverting,      setReverting]      = useState(false)
+  const [revertModalOpen, setRevertModalOpen] = useState(false)
+  const [revertRemarks,   setRevertRemarks]   = useState('')
   const [refreshKey,     setRefreshKey]     = useState(0)
   const [confirmModalOpen, setConfirmModalOpen] = useState(false)
   const [transitionConfig, setTransitionConfig] = useState<{
@@ -184,6 +189,37 @@ export function ChapterDetailPage() {
     }
   }
 
+  const prevStage = useMemo(() => {
+    const currentStage = chapter?.stage_name
+    if (!currentStage || orderedStages.length === 0) return null
+    const stageIdx = orderedStages.findIndex(s => s.stage_name === currentStage)
+    return stageIdx > 0 ? orderedStages[stageIdx - 1].stage_name : null
+  }, [chapter?.stage_name, orderedStages])
+
+  function handleRevert() {
+    if (!chapter || !prevStage) return
+    setRevertRemarks('')
+    setRevertModalOpen(true)
+  }
+
+  async function executeRevert() {
+    if (!chapter || !prevStage) return
+    setReverting(true)
+    try {
+      await apiClient.post(`/chapters/${chapter.id}/revert-stage`, {
+        target_stage: prevStage,
+        remarks: revertRemarks.trim() || `Reverted from ${chapter.stage_name} by admin`
+      })
+      toast.success(`Moved back to ${prevStage}`)
+      setRevertModalOpen(false)
+      setRefreshKey(k => k + 1)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to revert stage')
+    } finally {
+      setReverting(false)
+    }
+  }
+
   // Derive chapter folder data from project.file_details, merging in backup files
   const chapterFolderData: ChapterFolder | null = (() => {
     if (!chapter || !project?.file_details) return null
@@ -247,6 +283,9 @@ export function ChapterDetailPage() {
         isAssigned={chapter.current_assignee_name === viewer?.username}
         onRefresh={() => setRefreshKey(k => k + 1)}
         onProceed={proceedLoading ? undefined : handleProceed}
+        onRevert={prevStage ? handleRevert : undefined}
+        prevStageName={prevStage}
+        isReverting={reverting}
       />
 
       {transitionConfig && transitionParams && (
@@ -261,6 +300,65 @@ export function ChapterDetailPage() {
           dueDate={chapter?.due_date || undefined}
           config={transitionConfig}
         />
+      )}
+
+      {/* Revert Confirmation Popup Modal */}
+      {chapter && prevStage && (
+        <Modal
+          isOpen={revertModalOpen}
+          onClose={() => { if (!reverting) setRevertModalOpen(false) }}
+          title="Revert Stage"
+          size="md"
+          footer={
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setRevertModalOpen(false)}
+                disabled={reverting}
+                className="px-4 py-2 text-xs font-medium text-text bg-background border border-border rounded-lg hover:bg-surface transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={executeRevert}
+                disabled={reverting}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+              >
+                {reverting && <span className="size-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                {reverting ? 'Reverting…' : `Revert to ${prevStage}`}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+              <AlertTriangle className="size-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-text space-y-1">
+                <p className="font-semibold text-amber-700 dark:text-amber-400">
+                  Are you sure you want to revert from &ldquo;{chapter.stage_name}&rdquo; back to &ldquo;{prevStage}&rdquo;?
+                </p>
+                <p className="text-muted leading-relaxed">
+                  This will move the chapter back to the previous workflow stage and reset its current progress. Only administrators can perform this action.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-text mb-1.5">
+                Reason / Remarks <span className="text-muted font-normal">(Optional)</span>
+              </label>
+              <textarea
+                value={revertRemarks}
+                onChange={(e) => setRevertRemarks(e.target.value)}
+                placeholder="e.g. Returned for author corrections, missing files..."
+                rows={3}
+                disabled={reverting}
+                className="w-full text-xs px-3 py-2 border border-border rounded-lg bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary disabled:opacity-50"
+              />
+            </div>
+          </div>
+        </Modal>
       )}
     </>
   )

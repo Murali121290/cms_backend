@@ -23,7 +23,7 @@ import {
   Code2, Download, ExternalLink, Eye, File, FileCode, FileOutput, FilePen, FileText,
   FolderOpen, History, Image, Languages, Layers, Loader2, LogIn, LogOut,
   ScanLine, Search, ShieldCheck, Sparkles, Trash2,
-  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer, BookOpen,
+  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer, BookOpen, RotateCcw,
 } from 'lucide-react'
 import { FOLDER_CONFIG, COLUMN_DEFINITIONS, fileTypeIcon, isProcessingActionVisibleForStage, getFolderConfigForChapter } from '@/config/fileManagerConfig'
 import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
@@ -118,6 +118,9 @@ interface ChapterFilePageProps {
   isAssigned?: boolean
   onRefresh?: () => void
   onProceed?: () => void
+  onRevert?: () => void
+  prevStageName?: string | null
+  isReverting?: boolean
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -725,6 +728,9 @@ export function ChapterFilePage({
   isAssigned: propIsAssigned,
   onRefresh,
   onProceed,
+  onRevert,
+  prevStageName,
+  isReverting,
 }: ChapterFilePageProps) {
   const navigate = useNavigate()
   const { isAdmin: isAdminUser } = useRBAC()
@@ -1634,6 +1640,19 @@ export function ChapterFilePage({
         )}
 
 
+
+        {/* Revert Stage - Admin only */}
+        {isAdminUser && onRevert && prevStageName && (
+          <button
+            onClick={onRevert}
+            disabled={isReverting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title={`Revert to ${prevStageName} (Admin only)`}
+          >
+            {isReverting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+            Revert to {prevStageName}
+          </button>
+        )}
 
         {/* Proceed */}
         {onProceed && (

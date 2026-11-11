@@ -149,7 +149,20 @@ def _require_cookie_user(user):
 
 
 def _has_admin_role(user: models.User):
-    return "Admin" in [role.name for role in user.roles]
+    if not user:
+        return False
+    if getattr(user, "access_level", None) == "Admin":
+        return True
+    if getattr(user, "role", None) and "admin" in str(user.role).lower():
+        return True
+    if getattr(user, "designation", None) and "admin" in str(user.designation).lower():
+        return True
+    if hasattr(user, "roles") and user.roles:
+        return any(
+            getattr(role, "name", "") == "Admin" or "admin" in str(getattr(role, "name", "")).lower()
+            for role in user.roles
+        )
+    return False
 
 
 def _has_admin_or_pm_role(user: models.User):
@@ -9242,6 +9255,10 @@ class TransitionEmailRequest(BaseModel):
     body: str
     shipment_notes: Optional[str] = None
 
+class StageRevertRequest(BaseModel):
+    target_stage: Optional[str] = None
+    remarks: Optional[str] = None
+
 def _get_stage_notification_config(client_name: str, stage_name: str, db=None) -> Optional[dict]:
     import json
     import os
@@ -10209,6 +10226,181 @@ def api_v2_chapter_transition_email(
         "stage_name": chapter.stage_name,
         "status": chapter.status
     }}
+
+
+@router.post("/chapters/{chapter_id}/revert-stage")
+def api_v2_chapter_revert_stage(
+    chapter_id: int,
+    payload: StageRevertRequest = StageRevertRequest(),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    if not _has_admin_role(user):
+        raise HTTPException(status_code=403, detail="Only administrators can revert workflow stages.")
+
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.domains.workflow.models import ChapterInfo, WorkflowMaster, StageDetail
+    from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
+    from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    project = db.execute(select(Project).where(Project.project_code == chapter.project)).scalars().first()
+    project_code = project.code if project else chapter.project
+    if not project_code:
+        raise HTTPException(status_code=400, detail="Project code not found")
+
+    client = None
+    if project and project.client_id:
+        client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
+    client_ident = client.division if (client and client.division) else (project.client_name if project else chapter.client)
+
+    # Resolve workflow and stages
+    chapter_workflow = (chapter.workflow or "").strip() or (project.workflow_name if project else "")
+    wf_stages = []
+    if chapter_workflow:
+        try:
+            wf_stages = db.execute(
+                select(WorkflowMaster)
+                .where(WorkflowMaster.workflow_name == chapter_workflow)
+            ).scalars().all()
+        except Exception:
+            pass
+
+    # Order stages topologically using previous_stage / next_stage
+    ordered_stage_names = []
+    if wf_stages:
+        by_name = {s.stage_name: s for s in wf_stages}
+        first_stage = next((s for s in wf_stages if not s.previous_stage), wf_stages[0] if wf_stages else None)
+        curr = first_stage
+        visited = set()
+        while curr and curr.stage_name not in visited:
+            ordered_stage_names.append(curr.stage_name)
+            visited.add(curr.stage_name)
+            curr = by_name.get(curr.next_stage) if curr.next_stage else None
+        for s in wf_stages:
+            if s.stage_name not in visited:
+                ordered_stage_names.append(s.stage_name)
+                visited.add(s.stage_name)
+
+    current_stage = (chapter.stage_name or "").strip()
+    target_stage = (payload.target_stage or "").strip()
+
+    if not target_stage:
+        if current_stage in ordered_stage_names:
+            curr_idx = ordered_stage_names.index(current_stage)
+            if curr_idx <= 0:
+                raise HTTPException(status_code=400, detail="Already at the first stage; cannot revert.")
+            target_stage = ordered_stage_names[curr_idx - 1]
+        else:
+            raise HTTPException(status_code=400, detail="Target stage not specified and cannot be determined from workflow.")
+
+    if target_stage == current_stage:
+        raise HTTPException(status_code=400, detail="Target stage is the same as current stage.")
+
+    # Find stage details
+    stage_details = db.execute(
+        select(StageDetail).where(
+            StageDetail.project == project_code,
+            StageDetail.chapters == chapter.chapters
+        )
+    ).scalars().all()
+
+    target_idx = ordered_stage_names.index(target_stage) if target_stage in ordered_stage_names else -1
+
+    for sd in stage_details:
+        sd_idx = ordered_stage_names.index(sd.stage_name) if sd.stage_name in ordered_stage_names else -1
+        if sd.stage_name == target_stage:
+            sd.stage_status = "In-progress"
+            sd.actual_end_date = None
+            sd.total_time_taken = None
+            if not sd.actual_start_date:
+                sd.actual_start_date = datetime.now(timezone.utc)
+        elif sd.stage_name == current_stage or (target_idx >= 0 and sd_idx > target_idx):
+            # Reset current and any subsequent stages
+            sd.stage_status = "Pending"
+            sd.actual_end_date = None
+            sd.actual_start_date = None
+            sd.total_time_taken = None
+            sd.delayed = False
+            sd.delay_days = 0
+
+    target_sd = next((sd for sd in stage_details if sd.stage_name == target_stage), None)
+
+    # Build structured JSON revert entry
+    revert_time_iso = datetime.now(timezone.utc).isoformat()
+    revert_user = getattr(user, "username", "admin")
+    revert_entry = {
+        "action": "revert",
+        "from_stage": current_stage,
+        "to_stage": target_stage,
+        "reverted_by": revert_user,
+        "timestamp": revert_time_iso,
+        "reason": (payload.remarks or "").strip()
+    }
+
+    # Update StageDetail history and remarks
+    if target_sd:
+        sd_history = list(target_sd.history) if target_sd.history and isinstance(target_sd.history, list) else []
+        sd_history.append(revert_entry)
+        target_sd.history = sd_history
+        existing_rem = target_sd.remarks or ""
+        revert_human_note = f"[Reverted from {current_stage} by {revert_user} at {revert_time_iso[:19]}]: {payload.remarks or 'No reason provided'}"
+        target_sd.remarks = f"{existing_rem}\n{revert_human_note}".strip() if existing_rem else revert_human_note
+
+    # Update ChapterInfo and append to JSON remarks history
+    chapter.stage_name = target_stage
+    chapter.status = "In-progress"
+
+    remarks_history = []
+    if chapter.remarks:
+        try:
+            parsed = json.loads(chapter.remarks)
+            if isinstance(parsed, list):
+                remarks_history = parsed
+            elif isinstance(parsed, dict):
+                remarks_history = [parsed]
+            else:
+                remarks_history = [{"note": str(chapter.remarks)}]
+        except Exception:
+            remarks_history = [{"note": chapter.remarks}]
+
+    remarks_history.append(revert_entry)
+    import json as _json
+    chapter.remarks = _json.dumps(remarks_history, indent=2)
+
+    owner_user = resolve_stage_owner_by_designation(
+        db, target_stage, project_code=project_code, client_identifier=client_ident
+    )
+    if owner_user:
+        chapter.current_assignee_name = owner_user.username
+    elif target_sd and target_sd.assignee_name:
+        chapter.current_assignee_name = target_sd.assignee_name
+    else:
+        chapter.current_assignee_name = None
+
+    if target_sd and target_sd.planned_end_date:
+        chapter.due_date = target_sd.planned_end_date
+
+    db.commit()
+    db.refresh(chapter)
+
+    return {
+        "message": f"Successfully reverted to {target_stage}",
+        "chapter": {
+            "id": chapter.id,
+            "stage_name": chapter.stage_name,
+            "status": chapter.status,
+            "current_assignee_name": chapter.current_assignee_name,
+            "remarks": chapter.remarks
+        },
+        "revert_entry": revert_entry
+    }
 
 
 @router.post("/chapters/bulk-transition-config", response_model=schemas_v2.BulkTransitionConfigResponse)
