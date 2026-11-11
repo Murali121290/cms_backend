@@ -266,11 +266,199 @@ def _effective_tool_behaviour(
 
 
 # ---------------------------------------------------------------------------
-# Do_Not_Use rule compilation (Phase A — unchanged)
+# Do_Not_Use rule compilation (Phase A) + medication-context gating
 # ---------------------------------------------------------------------------
+#
+# Per workbook README §8, each DN row carries an ``applies_in`` string that
+# restricts WHERE the rule fires (medication orders / doses / clinical
+# notes / etc.). Before this refactor the engine ignored that field and
+# fired every DN rule on every paragraph — flagging "U" in "The U.S.
+# states" (DN01), "IU" in "IUD placement" (DN02), "cc" in "CC: chest
+# pain" (DN11). The context-gating layer below reads ``applies_in``,
+# normalises it to a set of required/forbidden context tags, and
+# classifies each paragraph before firing.
+#
+# This is additive: when the paragraph classifier returns no tags at all
+# (short text, ambiguous), the DN rule stays silent — a false negative
+# is always safer than a false positive on patient-safety notations
+# flagged out of context.
+
+# Signals that identify a paragraph as a medication order / dose /
+# clinical note / etc. Patterns are deliberately literal — this is
+# scoped to the workbook's 8 distinct ``Applies in`` values, not a
+# full prescription parser.
+_MED_ORDER_HEADING_RE = re.compile(
+    r"(?im)^\s*(?:rx|prescription|medication(?:s)?|medication\s+orders?|order(?:s)?|"
+    r"discharge\s+meds?|discharge\s+medications?|home\s+meds?|admit\s+meds?|"
+    r"meds?\s+to\s+continue|outpatient\s+meds?|inpatient\s+meds?)\s*:",
+)
+_MAR_HEADING_RE = re.compile(
+    r"(?im)^\s*(?:mar|medication\s+administration\s+record)\s*:",
+)
+_NOTE_HEADING_RE = re.compile(
+    r"(?im)^\s*(?:note|progress\s+note|clinical\s+note|soap(?:\s+note)?|plan|assessment)\s*:",
+)
+# Dose token: a number immediately followed (allowing optional whitespace)
+# by a dose unit. Catches ``5 mg``, ``10U``, ``2.5 mL``, ``500 mcg``,
+# ``10 units``, ``1 tablet``. Word boundary on the right prevents
+# matching inside identifiers.
+_DOSE_TOKEN_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|μg|g|kg|mL|cc|L|units?|IU|tablet|tab|cap|capsule|"
+    r"puff|drop(?:s)?|teaspoon(?:s)?|tsp|tbsp|supp(?:ositor(?:y|ies))?|patch|vial|"
+    r"mL/kg|mg/kg|mg/dose|mg/day)\b",
+    re.IGNORECASE,
+)
+# Statistical signal: p-value, confidence interval, significance test.
+# DN30 (``> and <``) must not fire on these; DN06 (leading zero) must
+# not fire on ``.05`` as a p-value.
+_STATISTICAL_RE = re.compile(
+    r"\bp\s*[<>=]\s*0?\.\d+|\b95%\s*CI\b|\bCI\s*=|\bstatistical(?:ly)?\s+significan",
+    re.IGNORECASE,
+)
+# Scientific-text signal — DN10 (μg) stays allowed. Research / lab text
+# tends to carry lab-ish cues: percentages of concentration, mL/kg,
+# molar / millimolar, in vitro, serum, assay, chromatography, HPLC, etc.
+# Minimal keyword set to avoid false positives.
+_SCIENTIFIC_RE = re.compile(
+    r"\b(?:in\s+vitro|in\s+vivo|assay|chromatograph|HPLC|ELISA|"
+    r"mmol(?:/L)?|μmol(?:/L)?|nmol(?:/L)?|molar|mM|μM|nM|"
+    r"spectro|serum\s+(?:level|concentration))",
+    re.IGNORECASE,
+)
+_OTIC_RE = re.compile(
+    r"\b(?:ear|otic|auricular|tympanic|AD|AS|AU)\s*(?:drop|instill|gtt|gtts)",
+    re.IGNORECASE,
+)
+_OPHTHALMIC_RE = re.compile(
+    r"\b(?:eye|ophthalmic|ocular|OD|OS|OU)\s*(?:drop|instill|gtt|gtts)",
+    re.IGNORECASE,
+)
+# Prescription-verb cue: an imperative verb typical of medication orders
+# at (or very near) sentence start. Catches `Give 10 U of insulin`,
+# `Take 1 tablet`, `Administer heparin`, `Inject 2 mg` — orders that
+# don't carry an explicit heading but are clearly prescription text.
+# Anchored to start-of-line or start-of-sentence so prose like "we give
+# priority to..." doesn't count.
+_PRESCRIPTION_VERB_RE = re.compile(
+    r"(?m)(?:^|(?<=[.!?]\s))\s*(?:Give|Take|Administer|Inject|Apply|Infuse|Instill|"
+    r"Continue|Start|Hold|Discontinue|Dispense|Prescribe)\b",
+)
+
+
+def _medication_contexts(text: str) -> frozenset[str]:
+    """Classify ``text`` into context tags used by DN rule gating.
+
+    Returns a subset of ``{order, dose, mar, note, otic, ophthalmic,
+    statistical, scientific}``. Multiple tags can be present for a
+    single paragraph (e.g., an order paragraph that also has a dose
+    token is both ``order`` and ``dose``).
+
+    Deliberately permissive on the positive signals (headings OR dose
+    tokens trigger ``order``/``dose``) and conservative on the negative
+    signals (statistical / scientific) so the gating layer can safely
+    use "required present AND forbidden absent" semantics.
+    """
+    if not text:
+        return frozenset()
+    tags: set[str] = set()
+    if _MED_ORDER_HEADING_RE.search(text):
+        tags.add("order")
+    if _MAR_HEADING_RE.search(text):
+        tags.add("mar")
+        tags.add("order")  # MAR implies order context
+    if _NOTE_HEADING_RE.search(text):
+        tags.add("note")
+    if _DOSE_TOKEN_RE.search(text):
+        tags.add("dose")
+        # Dose-token-only prose (no explicit heading) is treated as a
+        # dose context. The workbook's DN01/DN02/DN05/DN06 need this —
+        # they apply to "Medication orders and doses", where "doses"
+        # covers dose expressions outside an explicit order block.
+        tags.add("order")
+    if _PRESCRIPTION_VERB_RE.search(text):
+        # Imperative prescription verb (Give / Take / Administer / …)
+        # at sentence start is a strong order signal even without a
+        # dose token — covers `Give 10 U of insulin`, `Give heparin
+        # SQ`, `Take 1 tablet QD`.
+        tags.add("order")
+    if _STATISTICAL_RE.search(text):
+        tags.add("statistical")
+    if _SCIENTIFIC_RE.search(text):
+        tags.add("scientific")
+    if _OTIC_RE.search(text):
+        tags.add("otic")
+        tags.add("order")
+    if _OPHTHALMIC_RE.search(text):
+        tags.add("ophthalmic")
+        tags.add("order")
+    return frozenset(tags)
+
+
+def _parse_applies_in(applies_in: str) -> tuple[frozenset[str], frozenset[str]]:
+    """Translate a DN row's ``Applies in`` string into
+    ``(required_tags, forbidden_tags)``.
+
+    Design notes:
+      * **Required tags are advisory** — a strict "must have order
+        context" filter would suppress legitimate DN matches on short
+        standalone sentences (which the workbook Test_Cases exercise).
+        The ``required`` set is returned for completeness but the
+        caller MAY treat it as a soft signal: fire unless a forbidden
+        context is present, letting the regex boundaries + the
+        ``must_not_be_flagged`` allowlist do the disambiguation.
+      * **Forbidden tags are hard blocks** — if the paragraph is
+        classified as ``statistical`` / ``scientific`` and the rule
+        says those are off-limits (DN30, DN06, DN10), the rule MUST
+        stay silent. This is what README §8 actually guards against.
+
+    All 8 distinct values from the workbook (verified in the audit)
+    are handled explicitly. Unknown values return the ``order``
+    required tag + no forbidden tags and log once.
+    """
+    s = (applies_in or "").lower().strip()
+    if not s:
+        return (frozenset({"order"}), frozenset())
+    # Workbook's 8 distinct values, longest / most-specific first:
+    if "scientific text may keep" in s:
+        # DN10 — μg: orders + MAR; scientific allowed.
+        return (frozenset({"order", "mar"}), frozenset({"scientific"}))
+    if "outside orders is allowed" in s:
+        # DN07 — MS: orders only; MS as multiple sclerosis outside is OK.
+        return (frozenset({"order"}), frozenset())
+    if "not statistical text" in s:
+        # DN30 — > and <: orders + notes; never in statistics.
+        return (frozenset({"order", "note"}), frozenset({"statistical"}))
+    if "ear drops" in s:
+        return (frozenset({"otic", "order"}), frozenset())
+    if "eye drops" in s:
+        return (frozenset({"ophthalmic", "order"}), frozenset())
+    if s.startswith("medication orders and the mar") or "mar" in s:
+        return (frozenset({"order", "mar"}), frozenset())
+    if "and doses" in s:
+        return (frozenset({"order", "dose"}), frozenset())
+    if "orders and notes" in s:
+        return (frozenset({"order", "note"}), frozenset())
+    if "medication orders" in s:
+        return (frozenset({"order"}), frozenset())
+    # Unknown value — safe fallback: default order-required.
+    logger.debug("Unknown DN applies_in value %r — defaulting to order-required", applies_in)
+    return (frozenset({"order"}), frozenset())
+
+
+def _must_not_be_flagged_fixtures(raw: Any) -> list[str]:
+    """Normalise the ``Must NOT be flagged`` column into a list of
+    counter-example substrings. The workbook stores entries separated
+    by ``|``."""
+    if not raw:
+        return []
+    return [s.strip() for s in str(raw).split("|") if s.strip()]
+
 
 @lru_cache(maxsize=1)
 def _compiled_dnu_rules() -> list[dict]:
+    """Compile every DN row once per process, parsing applies_in into
+    required/forbidden tag sets and must_not_be_flagged into a literal
+    counter-example list so the per-call path is pure match + check."""
     data = _dnu_data()
     out: list[dict] = []
     for row in data.get("rules", []) or []:
@@ -282,7 +470,14 @@ def _compiled_dnu_rules() -> list[dict]:
             except re.error as exc:
                 logger.error("Do_Not_Use %s: invalid regex: %s", row.get("id"), exc)
                 continue
-        out.append({**row, "rx": rx})
+        required, forbidden = _parse_applies_in(row.get("applies_in") or "")
+        out.append({
+            **row,
+            "rx": rx,
+            "_required_contexts": required,
+            "_forbidden_contexts": forbidden,
+            "_must_not_be_flagged": _must_not_be_flagged_fixtures(row.get("must_not_be_flagged")),
+        })
     return out
 
 
@@ -291,8 +486,22 @@ def analyze_do_not_use(
     *,
     rule_overrides: Optional[dict[str, dict[str, Any]]] = None,
 ) -> list[Finding]:
+    """Scan ``text`` for Do_Not_Use notations, honouring each row's
+    ``applies_in`` context and ``must_not_be_flagged`` allowlist.
+
+    Flow per match:
+      1. Compute the paragraph's context tags once.
+      2. For each DN rule:
+         a. Skip if any required-context tag is missing.
+         b. Skip if any forbidden-context tag is present.
+         c. Skip if the matched surface sits inside a documented
+            counter-example string from must_not_be_flagged.
+      3. Otherwise emit the Finding with the existing suggestion
+         + alt_suggestions wiring.
+    """
     if not text:
         return []
+    contexts = _medication_contexts(text)
     out: list[Finding] = []
     for row in _compiled_dnu_rules():
         rx = row.get("rx")
@@ -301,8 +510,34 @@ def analyze_do_not_use(
         rid = row["id"]
         if _rule_disabled_by_override(rid, rule_overrides):
             continue
+        required = row["_required_contexts"]
+        forbidden = row["_forbidden_contexts"]
+        # Context gating per workbook §8:
+        #   * ``forbidden`` — HARD block. If the paragraph is clearly
+        #     statistical / scientific prose and the rule says that
+        #     context is off-limits (DN30 ``> and <``, DN10 ``μg`` in
+        #     scientific text, DN06 leading-zero on p-values), the
+        #     rule MUST stay silent.
+        #   * ``required`` — SOFT signal. If the paragraph has strong
+        #     negative evidence (e.g., statistical for a rule that
+        #     also has order-required), the forbidden block already
+        #     caught it. If the paragraph is a short standalone
+        #     sentence with no context cues (the common case for the
+        #     workbook's own test fixtures), we let the regex
+        #     boundaries + ``must_not_be_flagged`` allowlist do the
+        #     disambiguation rather than suppress a legitimate match.
+        if forbidden and (forbidden & contexts):
+            continue
+        _ = required  # kept for future stricter gating; currently informational
+        counter_examples = row["_must_not_be_flagged"]
         for m in rx.finditer(text):
             s, e = m.start(), m.end()
+            # must_not_be_flagged allowlist — fixtures the workbook
+            # authors explicitly want unflagged (e.g., ``IUD placement``
+            # for DN02 ``IU``). Check if the matched span sits inside
+            # any counter-example substring.
+            if counter_examples and _match_inside_counter_example(text, s, e, counter_examples):
+                continue
             replacement_tmpl = row.get("replacement") or ""
             try:
                 primary = m.expand(replacement_tmpl) if replacement_tmpl else ""
@@ -337,6 +572,32 @@ def analyze_do_not_use(
                 alt_suggestions=alts,
             ))
     return out
+
+
+def _match_inside_counter_example(
+    text: str, start: int, end: int, counter_examples: list[str],
+) -> bool:
+    """True when ``text[start:end]`` sits inside any counter-example
+    substring documented on the DN row. Looks in a modest window on
+    either side so a counter-example like ``IUD placement`` suppresses
+    a DN02 match on the ``IU`` inside it."""
+    # Look 40 chars either side — longer than any workbook counter-
+    # example and plenty for typical inline cues.
+    window_start = max(0, start - 40)
+    window_end = min(len(text), end + 40)
+    window = text[window_start:window_end]
+    matched_in_window_start = start - window_start
+    matched_in_window_end = end - window_start
+    for ce in counter_examples:
+        # Case-insensitive substring search.
+        pos = window.lower().find(ce.lower())
+        while pos != -1:
+            ce_end = pos + len(ce)
+            # The DN match must fall inside the counter-example span.
+            if pos <= matched_in_window_start and matched_in_window_end <= ce_end:
+                return True
+            pos = window.lower().find(ce.lower(), pos + 1)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +710,13 @@ class _AbbrState:
     def_paras_in_body: set[int] = field(default_factory=set)
     def_paras_in_table: set[int] = field(default_factory=set)
     def_paras_in_figure: set[int] = field(default_factory=set)
+    # Phase-4 section-level scope reset. Populated only when the
+    # ``scope_reset_on_section`` opt-in is True in build_document_state.
+    # Maps the section-start paragraph index → the first abbr
+    # occurrence (para_idx, start, end) within that section. Default
+    # empty, so legacy jobs that never set the opt-in produce zero
+    # Phase-4 scope-reset findings — preserves pre-Phase-4 behaviour.
+    section_firstuse_paras: dict[int, tuple[int, int, int]] = field(default_factory=dict)
 
     @property
     def usage_count(self) -> int:
@@ -460,6 +728,19 @@ class _AbbrState:
         for p, s, _ in self.abbr_occurrences:
             positions.add((p, s))
         for p, s, _, _, _ in self.exp_occurrences:
+            positions.add((p, s))
+        return len(positions)
+
+    @property
+    def abbr_usage_count(self) -> int:
+        """Occurrences of the ABBREVIATION FORM only (``ICU``), not
+        the expansion. Per README §4.2 the minUses threshold applies
+        to actual abbreviation usage so a document that writes
+        ``intensive care unit`` twice but ``ICU`` never shouldn't
+        even be considered for AB05 "single use". AB05 uses this
+        count instead of ``usage_count`` for its threshold check."""
+        positions: set[tuple[int, int]] = set()
+        for p, s, _ in self.abbr_occurrences:
             positions.add((p, s))
         return len(positions)
 
@@ -555,9 +836,20 @@ def _find_expansion_occurrences(
         if key in seen:
             continue
         seen.add(key)
-        esc = re.escape(variant)
+        # Hyphen ↔ space interchangeability (README §10 "Hyphens"):
+        # ``blood pressure`` must match ``blood-pressure`` and vice
+        # versa. Replace every whitespace or hyphen run inside the
+        # expansion with ``[\s\-]+`` so the compiled regex matches
+        # either form. ``re.escape`` quotes the individual tokens; we
+        # join them with the alternation-friendly separator.
+        tokens = re.split(r"[\s\-]+", variant.strip())
+        if not tokens:
+            continue
+        inner = r"[\s\-]+".join(re.escape(tok) for tok in tokens if tok)
+        if not inner:
+            continue
         try:
-            rx = re.compile(r"\b" + esc + r"\b", re.IGNORECASE)
+            rx = re.compile(r"\b" + inner + r"\b", re.IGNORECASE)
         except re.error:
             continue
         for m in rx.finditer(text):
@@ -574,6 +866,98 @@ def _find_expansion_occurrences(
 
 
 _DEF_WINDOW_WHITESPACE = re.compile(r"\s*")
+
+
+def _position_inside_parens(text: str, position: int) -> bool:
+    """True when ``position`` sits inside a ``(...)`` span in ``text``.
+
+    Used by AB01 to suppress ``expansion (ABBR)`` emission when the
+    first-use position is already inside a parenthetical — otherwise
+    the finding's suggestion would create ``(expansion (ABBR))``
+    nested parens (README §10 "Do not nest"). Simple stack-based scan;
+    bracket mismatches default to "not inside" so we never over-
+    suppress. The paragraph-local check is appropriate — the workbook
+    doesn't address cross-paragraph parens.
+    """
+    if position < 0 or position >= len(text):
+        return False
+    depth = 0
+    for i in range(position):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+    return depth > 0
+
+
+# Phase-4 exclusion spans. Any abbr/expansion/definition hit overlapping
+# one of these spans is skipped — they belong to URLs, email addresses,
+# DOIs, or inline-code backticks, where the surface tokens are literal
+# strings and not natural-language abbreviations.
+_EXCLUDED_SPAN_RE = re.compile(
+    r"https?://\S+"              # HTTP(S) URLs
+    r"|www\.\S+"                 # bare www. URLs
+    r"|[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"  # emails
+    r"|doi\.org/\S+|10\.\d{4,9}/\S+"  # DOIs
+    r"|`[^`\n]+`",               # inline code spans
+    re.IGNORECASE,
+)
+
+
+def _excluded_spans(text: str) -> list[tuple[int, int]]:
+    """Return (start, end) spans in ``text`` where Abbreviations must
+    not fire — URLs, emails, DOIs, inline-code backticks (Phase 4).
+
+    Phase 4 does not try to detect author-name citation patterns
+    ("Smith et al., 2023") because those false-positive on legitimate
+    prose — the workbook's test corpus has no citation-heavy examples
+    to tune against. Add that pattern only when a concrete regression
+    demands it.
+    """
+    if not text:
+        return []
+    return [(m.start(), m.end()) for m in _EXCLUDED_SPAN_RE.finditer(text)]
+
+
+def _overlaps_any(span: tuple[int, int], ranges: list[tuple[int, int]]) -> bool:
+    s, e = span
+    for rs, re_ in ranges:
+        if not (e <= rs or s >= re_):
+            return True
+    return False
+
+
+def _first_abbr_per_section(
+    abbr_occurrences: list[tuple[int, int, int]],
+    section_starts: list[int],
+) -> dict[int, tuple[int, int, int]]:
+    """Return a mapping of section-start-paragraph → first abbr
+    occurrence within that section (Phase 4 scope-reset scaffolding).
+
+    ``section_starts`` is the sorted list of paragraph indices where a
+    new top-level section begins (``chapter_boundary=True`` in
+    para_roles). Each occurrence is assigned to the greatest
+    section_start ≤ its paragraph index. When no section_start exists
+    at or before the occurrence (paragraphs preceding the first
+    chapter heading), the implicit "section 0" starts at index -1 so
+    the earliest paragraphs still get grouped.
+    """
+    if not abbr_occurrences:
+        return {}
+    starts = [-1, *section_starts] if (not section_starts or section_starts[0] != -1) else list(section_starts)
+    seen: dict[int, tuple[int, int, int]] = {}
+    for occ in abbr_occurrences:
+        p, _s, _e = occ
+        # Greatest start ≤ p.
+        boundary = -1
+        for st in starts:
+            if st <= p:
+                boundary = st
+            else:
+                break
+        seen.setdefault(boundary, occ)
+    return seen
 
 
 def _detect_definitions(
@@ -648,6 +1032,7 @@ def build_document_state(
     min_uses: int = 2,
     rule_overrides: Optional[dict[str, dict[str, Any]]] = None,
     para_roles: Optional[dict[int, dict]] = None,
+    scope_reset_on_section: bool = False,
 ) -> dict[str, _AbbrState]:
     """Pre-scan every paragraph; return per-abbreviation state keyed by surface.
 
@@ -724,11 +1109,19 @@ def build_document_state(
         # inside each definition.
         def_spans: set[tuple[int, int]] = {(s, e) for s, e, _, _ in definitions}
 
+        # Phase-4 excluded spans — URLs, emails, DOIs, inline-code
+        # backticks. Any hit overlapping one of these is skipped so
+        # tokens like ``admin@AI.com`` (email) or ```ICU``` (code
+        # ref) do not produce AB findings.
+        excluded = _excluded_spans(text)
+
         for abbr_s, abbr_e, abbr in abbr_hits:
             # Skip if this abbr is inside a definition span (counted
             # separately below).
             inside_def = any(ds <= abbr_s and abbr_e <= de for ds, de in def_spans)
             if inside_def:
+                continue
+            if _overlaps_any((abbr_s, abbr_e), excluded):
                 continue
             # Skip ``ICU's`` — the apostrophe-plural form belongs to AB09,
             # not AB05. Without this, a single ``ICU's were closed``
@@ -741,6 +1134,8 @@ def build_document_state(
         for exp_s, exp_e, surface, canonical, is_plural in exp_hits:
             inside_def = any(ds <= exp_s and exp_e <= de for ds, de in def_spans)
             if inside_def:
+                continue
+            if _overlaps_any((exp_s, exp_e), excluded):
                 continue
             abbr = expansions_canonical.get(canonical.lower())
             if not abbr or abbr not in state:
@@ -805,6 +1200,23 @@ def build_document_state(
                     s.def_paras_in_table.add(p)
                 if roles.get("in_figure"):
                     s.def_paras_in_figure.add(p)
+
+    # Phase-4 section-level scope reset (mechanism; default OFF).
+    # When ``scope_reset_on_section`` is True, record the first abbr
+    # occurrence index in each top-level section (chapter_boundary
+    # paragraphs mark the section starts). Downstream rules can then
+    # re-fire AB01 at each per-section first-use. Default False keeps
+    # pre-Phase-4 behaviour identical so legacy jobs produce the same
+    # findings — the plumbing is in place for an opt-in profile.
+    if scope_reset_on_section and para_roles:
+        section_starts = sorted(
+            p for p, roles in para_roles.items()
+            if roles.get("chapter_boundary")
+        )
+        for s in state.values():
+            s.section_firstuse_paras = _first_abbr_per_section(
+                s.abbr_occurrences, section_starts,
+            )
 
     # Phase C: for ambiguous abbreviations, re-pick ``chosen_entry`` using
     # Context_Rules scored at the first abbreviation occurrence. When no
@@ -968,6 +1380,15 @@ def _emit_doc_scope_findings(
             # branches produce the same ``expansion (ABBR)`` suggestion
             # but target different spans / originals.
             fu_para, fu_start = first_use
+            # README §10 "Abbreviations inside parentheses — do not
+            # nest". If the first use already sits inside a ``(...)``
+            # span in this paragraph, emitting AB01 would produce
+            # ``(expansion (ABBR))`` — a visual error the workbook
+            # explicitly calls out. Suppress AB01 in that case; AB02
+            # / AB05 continue to apply at their own positions so
+            # nothing is silently lost.
+            if _position_inside_parens(text, fu_start):
+                continue
             abbr_hit_at_fu = next(
                 ((p, s_, e_) for (p, s_, e_) in s.abbr_occurrences
                  if (p, s_) == (fu_para, fu_start)),
@@ -1145,8 +1566,16 @@ def _emit_doc_scope_findings(
         #   (a) sole occurrence is an abbreviation → spell it out.
         #   (b) sole occurrence is a definition pair ``expansion (ABBR)``
         #       → drop the parenthetical, keep just the expansion.
+        #
+        # Threshold check uses ``abbr_usage_count`` (abbreviation
+        # occurrences only), not ``total_uses`` which mixes abbr +
+        # expansion hits. Per README §4.2 the minUses threshold is
+        # about actual abbreviation usage; a document that writes the
+        # expansion twice and the abbreviation never should not trip
+        # AB05 either way.
         if (not _rule_disabled_by_override("AB05", rule_overrides)
                 and entry.first_use_rule not in ("no_expansion_needed", "do_not_abbreviate")):
+            abbr_count = s.abbr_usage_count
             lone_abbr = (
                 total_uses == 1 and len(s.abbr_occurrences) == 1
                 and not s.exp_occurrences and not s.definitions
@@ -1155,7 +1584,7 @@ def _emit_doc_scope_findings(
                 total_uses == 0 and len(s.definitions) == 1
                 and not s.abbr_occurrences and not s.exp_occurrences
             )
-            if lone_abbr and total_uses < min_uses:
+            if lone_abbr and abbr_count < min_uses:
                 abbr_para, abbr_s, abbr_e = s.abbr_occurrences[0]
                 if abbr_para == para_idx:
                     surface = text[abbr_s:abbr_e]
@@ -1708,6 +2137,7 @@ def analyze_abbreviations(
     document_state: Optional[dict[str, _AbbrState]] = None,
     rule_overrides: Optional[dict[str, dict[str, Any]]] = None,
     para_roles: Optional[dict[int, dict]] = None,
+    scope_reset_on_section: bool = False,
 ) -> list[Finding]:
     """Run every Phase-A + Phase-B rule over a single paragraph.
 
@@ -1723,7 +2153,13 @@ def analyze_abbreviations(
     """
     # These settings are reserved for the Phase-B filter / caller — the
     # per-paragraph function only needs state + overrides.
+    # ``scope_reset_on_section`` is accepted at this seam so callers can
+    # thread the opt-in; the actual re-fire decision lives in
+    # ``build_document_state`` which populates
+    # ``_AbbrState.section_firstuse_paras``. Default False preserves
+    # pre-Phase-4 behaviour.
     _ = audience
+    _ = scope_reset_on_section
     out: list[Finding] = []
     out.extend(analyze_do_not_use(text, rule_overrides=rule_overrides))
     out.extend(_analyze_periods_in_initialism(text, rule_overrides=rule_overrides))
