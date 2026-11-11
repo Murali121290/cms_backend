@@ -23,7 +23,15 @@ from app.domains.processing.language_edit_models import LanguageEditJob, Languag
 from app.domains.processing.service import check_permission
 from app.models import User
 
-from app.processing.language_editing import custom_dict, docx_io, engine, segmenter, spell_check
+from app.processing.language_editing import (
+    abbreviations_metadata,
+    basic_grammar,
+    custom_dict,
+    docx_io,
+    engine,
+    segmenter,
+    spell_check,
+)
 from app.processing.language_editing.rules import load_rules_from_dict, load_house_style_from_dict
 from app.services.language_rule_service import (
     get_available_style_profiles,
@@ -204,6 +212,14 @@ def get_project_rules(
         logger.warning("Failed to surface LWW-NE workbook rules: %s", exc)
         lww_ne_rules = []
         lww_ne_summary = {"total": 0, "enabled": 0, "flag": 0, "auto_replace": 0}
+    try:
+        basic_grammar_rules = _ws.list_basic_grammar_rules(overrides)
+        basic_grammar_summary = _ws.basic_grammar_rule_summary(overrides)
+    except Exception as exc:
+        logger.warning("Failed to surface Basic Grammar workbook rules: %s", exc)
+        basic_grammar_rules = []
+        basic_grammar_summary = {"total": 0, "enabled": 0, "reused": 0, "disabled": 0,
+                                 "manual_review": 0, "flag": 0, "auto_replace": 0}
 
     # Scope D: user-authored custom regex rules. Each entry is normalised
     # by the service at save time; here we only apply the per-rule
@@ -241,6 +257,7 @@ def get_project_rules(
             "medical_terms": medical_rules,
             "uk_us_spelling": uk_us_rules,
             "lww_ne": lww_ne_rules,
+            "basic_grammar": basic_grammar_rules,
             "custom": custom_rules,
         },
         "workbook_summary": {
@@ -249,6 +266,7 @@ def get_project_rules(
             "medical_terms": medical_summary,
             "uk_us_spelling": uk_us_summary,
             "lww_ne": lww_ne_summary,
+            "basic_grammar": basic_grammar_summary,
             "custom": custom_summary,
         },
     }
@@ -1021,20 +1039,95 @@ def start_language_edit_analysis(
         abbr_state_by_para = None
         abbr_state = _build_state_for(enriched_paragraphs)
 
-    # Paragraph-level exclusion: five document regions must bypass ALL
-    # language-editing analysis — headings, references, tables, figures,
-    # abstracts, epigraphs, and source-code blocks. Two of the five user-
-    # named tags (``ref``, ``heading``) are already dropped at extraction
-    # time by ``docx_io.read_paragraphs``; the remaining three
-    # (``table``, ``epigraph``, ``src``) carry through as body paragraphs
-    # with a role flag and need skipping here. Centralising the gate in
-    # the single analyze loop covers every rule family (grammar,
-    # spelling, abbreviations, medical_terms, hyphenation, lww_ne,
-    # workbook rules, custom rules, spell_check, term_matcher) in one
-    # place — no per-rule changes needed.
-    _EXCLUDED_ROLES = {"heading", "title", "reference", "caption"}
+    # Basic Grammar workbook (420 rules): document-scope detectors
+    # GK-001/002/003 need counters over the whole manuscript (``-ise``
+    # vs ``-ize`` majority, straight vs curly quote majority, serial
+    # comma mix) so the per-paragraph analyzer can flag the minority
+    # side. One pre-pass per analyze job keeps the per-paragraph call
+    # path O(1) for this workbook.
+    #
+    # Critical: the state must be built from body paragraphs ONLY.
+    # ``enriched_paragraphs`` (used by the abbreviation module) adds
+    # heading / caption / table / figure / abstract paragraphs back in
+    # for AB11 / AB12 / AB15 — feeding those to basic_grammar would
+    # count ``-ise`` / ``-ize`` and quote-style usage inside excluded
+    # regions and pollute document-wide consistency decisions. We
+    # therefore filter against the same exclusion predicate the per-
+    # paragraph analyze loop uses below.
+    def _basic_grammar_input_paragraphs() -> list[tuple[int, str]]:
+        """Body-only paragraph list for the doc-scope detectors.
+
+        Mirrors the router's main-loop exclusion predicate exactly
+        (see ``_EXCLUDED_ROLES`` / ``_EXCLUDED_REGION_FLAGS`` below).
+        A drift would let GK-002 count quote characters that live
+        inside a table / extract / references region, polluting the
+        majority / minority decision."""
+        out: list[tuple[int, str]] = []
+        for pi, txt in paragraphs:
+            roles = (para_roles or {}).get(pi) or {}
+            if roles.get("role") in (
+                "heading", "title", "reference", "caption", "extract",
+            ):
+                continue
+            if any(roles.get(flag) for flag in (
+                "in_table", "in_figure", "in_abstract", "in_epigraph",
+                "in_src", "in_extract", "in_references",
+            )):
+                continue
+            out.append((pi, txt))
+        return out
+
+    try:
+        from app.processing.language_editing import basic_grammar as _basic_grammar
+
+        def _strip_quoted_runs(txt: str) -> str:
+            """Replace every ``"..."`` / ``“...”`` / ``«...»`` with
+            space of equal length so GK-002's quote-character counter
+            does not count content INSIDE quoted passages. Preserves
+            paragraph length (offsets stay valid) while blanking the
+            chars that would otherwise feed the majority/minority
+            vote for the whole document."""
+            spans = engine.build_quoted_text_spans(txt)
+            if not spans:
+                return txt
+            chars = list(txt)
+            for s, e in spans:
+                for i in range(s, min(e, len(chars))):
+                    chars[i] = " "
+            return "".join(chars)
+
+        body_for_state = [
+            (pi, _strip_quoted_runs(t)) for pi, t in _basic_grammar_input_paragraphs()
+        ]
+        basic_grammar_state = _basic_grammar.build_document_state(body_for_state)
+    except Exception:
+        logger.exception(
+            "Failed to build basic_grammar document state; doc-scope rules "
+            "(GK-001/002/003) will stay silent for this analyze",
+        )
+        basic_grammar_state = {}
+
+    # Paragraph-level exclusion: six document regions must bypass ALL
+    # language-editing analysis — ``ref`` / ``epigraph`` / ``heading`` /
+    # ``src`` / ``table`` / ``extract`` from the user's spec, plus
+    # ``figure`` / ``abstract`` that were already in scope. Two of the
+    # six user-named tags (``ref``, ``heading``) are also partially
+    # dropped at extraction time by ``docx_io.read_paragraphs``; the
+    # remaining four (``table``, ``epigraph``, ``src``, ``extract``)
+    # carry through as body paragraphs with a role flag and are
+    # skipped here. ``references`` is a new region tag for bibliography
+    # sections typeset in Normal paragraphs with only a
+    # ``<references>…</references>`` wrapper (common in non-templated
+    # manuscripts).
+    #
+    # Centralising the gate in the single analyze loop covers every
+    # rule family (grammar, spelling, abbreviations, medical_terms,
+    # hyphenation, lww_ne, workbook rules, custom rules, spell_check,
+    # term_matcher) in one place — no per-rule changes needed.
+    _EXCLUDED_ROLES = {"heading", "title", "reference", "caption", "extract"}
     _EXCLUDED_REGION_FLAGS = (
         "in_table", "in_figure", "in_abstract", "in_epigraph", "in_src",
+        "in_extract", "in_references",
     )
 
     def _is_excluded_paragraph(idx: int) -> bool:
@@ -1061,6 +1154,29 @@ def start_language_edit_analysis(
             )
         except Exception:
             protected_spans = []
+        # Additionally mask every ``"..."`` / ``“...”`` / ``«...»`` run
+        # so Language Editing findings do not fire inside quoted text
+        # (per spec: "exclude text inside double quotation marks").
+        # Merged into the same protected_spans list — every downstream
+        # consumer (engine, hyphen_dash, spell_check, term_matcher,
+        # basic_grammar) already honours this list.
+        try:
+            quoted_spans = engine.build_quoted_text_spans(text)
+            if quoted_spans:
+                merged = sorted(list(protected_spans) + quoted_spans)
+                dedup: list[tuple[int, int]] = []
+                for s, e in merged:
+                    if dedup and s <= dedup[-1][1]:
+                        dedup[-1] = (dedup[-1][0], max(dedup[-1][1], e))
+                    else:
+                        dedup.append((s, e))
+                protected_spans = dedup
+        except Exception:
+            logger.exception(
+                "Failed to compute quoted-text spans for para %s; "
+                "quoted text will NOT be excluded for this paragraph",
+                para_idx,
+            )
         found = engine.analyze(
             text, rules, dictionary, sents,
             dash_profile=dash_profile,
@@ -1077,6 +1193,7 @@ def start_language_edit_analysis(
             document_variant=document_variant,
             project_profile_keys=project_profile_keys,
             is_lww_ne_project=is_lww_ne_project,
+            basic_grammar_state=basic_grammar_state,
         )
         # Build exact-span dedup set: only (start, end) pairs from word-level
         # rules — so a Sentence finding covering a whole clause doesn't
@@ -1163,6 +1280,12 @@ def start_language_edit_analysis(
             # D1 suppression: skip DB term highlight if a workbook LWW-NE
             # finding covers the exact same (start, end) span.
             if (tm["start"], tm["end"]) in lww_ne_spans_in_para:
+                continue
+            # Also skip when the term match falls inside a protected
+            # span (URL, DOI, gene symbol, OR a ``"..."`` / ``“...”``
+            # quoted passage). term_matcher doesn't honour
+            # protected_spans natively, so we filter here.
+            if any(tm["start"] < pe and tm["end"] > ps for ps, pe in protected_spans):
                 continue
             # Term-matcher highlights are advisory by category: no
             # replacement proposed, the finding IS the list-membership
@@ -1267,6 +1390,19 @@ def get_job_findings(
                 "decided_at": f.decided_at.isoformat() if f.decided_at else None,
                 "source": getattr(f, "source", "rule"),
                 "term_list_id": getattr(f, "term_list_id", None),
+                # Phase 2 — Abbreviations metadata propagation. Pulls per-row
+                # workbook fields (problem_label, note, MW lookup, confidence,
+                # tool_behaviour, applies_in) from the loaded JSON profiles
+                # and, for AB07, surfaces the ambiguous meanings sorted by
+                # cue score. Keys are always present (null when not
+                # applicable) so the frontend sees a consistent shape and
+                # legacy jobs (pre-workbook rows) still serialise fine.
+                **abbreviations_metadata.enrich_finding(
+                    f.rule_id,
+                    f.original_text,
+                    f.suggestion,
+                    f.alt_suggestions or [],
+                ),
                 # Advisory findings carry no actionable replacement —
                 # original equals suggestion on purpose. Two sources:
                 #   * rule-level: passive_voice, max_sentence_length
@@ -1276,6 +1412,30 @@ def get_job_findings(
                 # Derived server-side from the rule_id/category whitelist;
                 # the DB intentionally does not store this flag.
                 "advisory": engine.is_advisory_finding(f.rule_id, f.category),
+                # Provenance badge used by the frontend to decide
+                # whether to show the finding's description. The LWW-NE
+                # workbook engine stamps ``rule_id`` with an ``LWW-NE-``
+                # prefix on every row it emits (see lww_ne.py), which
+                # makes the prefix the stable identity marker — not
+                # free-text match on the message. Serialise it as a
+                # clean semantic field so the UI doesn't have to know
+                # the prefix convention.
+                "source_badge": (
+                    "LWW-NE"
+                    if isinstance(f.rule_id, str) and f.rule_id.startswith("LWW-NE-")
+                    else None
+                ),
+                # Fine-grained source label for the finding card header.
+                # Workbook rules get their originating sheet name
+                # (``Article Usage``, ``Subject-Verb Agreement``,
+                # ``Common Misuse``, ``Word/Phrase Choice``,
+                # ``Sentence Structure``, ``Basic Grammar``,
+                # ``Punctuation and Capitalization``). Non-workbook
+                # findings return None and the frontend falls back to
+                # its existing ``displayCategory`` derivation. Derived
+                # server-side from the rule_id → sheet lookup so no DB
+                # column is needed and legacy jobs keep working.
+                "subcategory": basic_grammar.subcategory_for(f.rule_id),
                 "decided_at": (f.decided_at.replace(tzinfo=datetime.timezone.utc).isoformat() if f.decided_at.tzinfo is None else f.decided_at.isoformat()) if f.decided_at else None,
             }
             for f in findings
@@ -1325,7 +1485,41 @@ def decide_finding(
             job.rejected_count += 1
 
     db.commit()
-    return {"ok": True, "finding_id": finding.id, "status": finding.status}
+    # Phase 5 — return a small re-analyze bundle so the frontend can
+    # refresh counters + authoritative finding state without an extra
+    # GET /findings round-trip after every decision. Additive: legacy
+    # callers that only read ``ok`` / ``status`` keep working. The
+    # ``finding`` block is already re-enriched via Phase-2 metadata so
+    # the UI sees the same shape it got on the initial load.
+    return {
+        "ok": True,
+        "finding_id": finding.id,
+        "status": finding.status,
+        "finding": {
+            "id": finding.id,
+            "status": finding.status,
+            "edited_text": finding.edited_text,
+            "reviewer": finding.reviewer,
+            "decided_at": (
+                finding.decided_at.replace(tzinfo=datetime.timezone.utc).isoformat()
+                if finding.decided_at and finding.decided_at.tzinfo is None
+                else (finding.decided_at.isoformat() if finding.decided_at else None)
+            ),
+            **abbreviations_metadata.enrich_finding(
+                finding.rule_id,
+                finding.original_text,
+                finding.suggestion,
+                finding.alt_suggestions or [],
+            ),
+        },
+        "job": {
+            "job_id": job.job_id,
+            "total_findings": job.total_findings,
+            "accepted_count": job.accepted_count,
+            "edited_count": job.edited_count,
+            "rejected_count": job.rejected_count,
+        } if job else None,
+    }
 
 
 @router.post("/language-edit/jobs/{job_id}/export")

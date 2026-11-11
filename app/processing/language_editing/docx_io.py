@@ -177,12 +177,33 @@ def classify_paragraphs(doc) -> dict[int, dict]:
                                 ``<ABS>`` / Abstract style
       * ``in_table``          — True inside ``<table>…</table>`` or Table-
                                 styled runs
+      * ``in_table_note``     — True when ``in_table`` AND role=="caption";
+                                marks the table's notes/caption line
+                                where it IS legitimate for authors to
+                                define an abbreviation (Phase 4).
       * ``in_figure``         — True inside ``<figure>`` / ``<fig>`` …
+      * ``in_figure_legend``  — True when ``in_figure`` AND role=="caption";
+                                the figure's legend text where
+                                abbreviation definitions are expected
+                                (Phase 4).
       * ``in_epigraph``       — True inside ``<epigraph>…</epigraph>`` or
                                 Epigraph-styled paragraphs
       * ``in_src``            — True inside ``<src>…</src>`` (code /
                                 source blocks) or Code/Source-styled
                                 paragraphs
+      * ``in_extract``        — True inside ``<extract>…</extract>`` or
+                                Extract/BlockQuote-styled paragraphs
+                                (long quoted passages; ref/epi/src/
+                                extract are the four boundary-tag
+                                regions required for Language Editing
+                                exclusion).
+      * ``in_references``     — True inside ``<references>…</references>``
+                                or ``<REF>…</REF>`` boundary tags.
+                                Reference entries typeset in Normal
+                                paragraph style (common bibliography
+                                pattern) cannot be detected without
+                                such a boundary tag — they'd pass as
+                                body text otherwise. See Issue 2.
 
     The role / in_* flags carry through adjacent paragraphs until the
     closing tag is seen. The paragraphs between those tags all share the
@@ -194,6 +215,8 @@ def classify_paragraphs(doc) -> dict[int, dict]:
     in_figure = False
     in_epigraph = False
     in_src = False
+    in_extract = False
+    in_references = False
     for i, p in enumerate(doc.paragraphs):
         text = (p.text or "").strip()
         style = (p.style.name if p.style else "") or ""
@@ -216,6 +239,24 @@ def classify_paragraphs(doc) -> dict[int, dict]:
         # CodeBlock paragraph styles (common conventions across templates).
         if "<src>" in tl or style_lc_boundary in {"code", "source", "sourcecode", "codeblock", "src"}:
             in_src = True
+        # Extract: long quoted passage set off from body. Boundary tag
+        # OR Extract / BlockQuote / BlockQuotation / Quotation paragraph
+        # styles (common conventions).
+        if "<extract>" in tl or style_lc_boundary in {
+            "extract", "blockquote", "blockquotation", "quotation", "quote",
+        }:
+            in_extract = True
+        # References section. Many templates typeset references in
+        # Normal paragraphs with no distinguishing style — only a
+        # boundary tag can mark them reliably. ``<references>`` and
+        # ``<REF>`` both open the region; ``is_reference_style`` still
+        # catches explicit Reference / Bibliography / BibEntry styles
+        # at the per-paragraph level below.
+        if "<references>" in tl or "<ref>" in tl or style_lc_boundary in {
+            "references", "bibliography", "bibliographyentry", "bibentry",
+            "referenceslist", "reflist",
+        }:
+            in_references = True
 
         role = "body"
         level: int | None = None
@@ -254,6 +295,16 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             # or passive_voice findings on titles).
             role = "heading"
 
+        # Positive subroles for Phase-4 abbreviations rules.
+        # ``in_table_note`` and ``in_figure_legend`` combine the region
+        # flag with the paragraph's caption role so Abbreviations can
+        # treat a definition inside a table's notes line or a figure's
+        # legend as a legitimate local definition (AB15 should NOT flag
+        # the abbreviation as undefined when its expansion appears in
+        # the caption line attached to the same table / figure).
+        in_table_note = bool(in_table and role == "caption")
+        in_figure_legend = bool(in_figure and role == "caption")
+
         out[i] = {
             "style": style,
             "role": role,
@@ -261,9 +312,13 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             "chapter_boundary": chapter_boundary,
             "in_abstract": in_abstract,
             "in_table": in_table,
+            "in_table_note": in_table_note,
             "in_figure": in_figure,
+            "in_figure_legend": in_figure_legend,
             "in_epigraph": in_epigraph,
             "in_src": in_src,
+            "in_extract": in_extract,
+            "in_references": in_references,
             "text": p.text or "",
         }
 
@@ -278,6 +333,10 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             in_epigraph = False
         if "</src>" in tl:
             in_src = False
+        if "</extract>" in tl:
+            in_extract = False
+        if "</references>" in tl or "</ref>" in tl:
+            in_references = False
     return out
 
 

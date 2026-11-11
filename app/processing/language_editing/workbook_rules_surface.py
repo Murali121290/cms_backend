@@ -62,6 +62,7 @@ from . import hyphen_dash
 from . import medical_terms as _mt
 from . import uk_us_spelling as _uus
 from . import lww_ne as _lww_ne
+from . import basic_grammar as _basic_grammar
 
 
 _WORKBOOK_CATEGORY = "hyphenation"
@@ -832,6 +833,244 @@ def lww_ne_rule_summary(
     return {"total": total, "enabled": enabled, "flag": flag, "auto_replace": auto_replace}
 
 
+# ---------------------------------------------------------------------------
+# Basic Grammar workbook surface (420 rules across 7 sheets)
+# ---------------------------------------------------------------------------
+#
+# The workbook is imported into one JSON (basic_grammar_rules.json) with
+# every rule's full metadata. The surface normalises those rows into the
+# shared Rules Picker wire shape AND adds three per-row status fields:
+#
+#   * ``runtime_status``       enabled | reused | disabled
+#   * ``runtime_status_reason`` short explanation shown in the card
+#   * ``reused_by``            engine rule ID when runtime_status=reused
+#
+# These three fields let the frontend render the Rules Picker without
+# duplicating the reuse / disable logic that lives in ``basic_grammar.py``.
+
+# Four workbook rules are implemented by existing engine code; the
+# executor filters them out and we flag them here for rule-viewer
+# honesty.
+_REUSED_BY: dict[str, str] = {
+    "GK-004": "SL001",   # max_sentence_length
+    "AR-001": "GP006",   # a/an before vowel
+    "PU-007": "GP005",   # doubled-word detector
+    "CA-001": "SL003",   # start_capital
+}
+
+# Three workbook rules ship disabled because required data isn't available.
+_SHIP_DISABLED_REASONS: dict[str, str] = {
+    "PU-011": "Comma-splice detection needs clause boundaries; requires parser.",
+    "CA-011": "Binomial case needs a genus/species lexicon; no data shipped.",
+    "GK-001": "Consistency-pairs dictionary (email/e-mail, website/web site, …) not shipped by the workbook.",
+}
+
+
+def _basic_grammar_runtime_status(row: dict[str, Any]) -> tuple[str, str, Optional[str]]:
+    """Classify a workbook rule for the Rules Picker. Returns
+    ``(status, reason, reused_by)`` where status ∈
+    {enabled, reused, disabled, manual_review}."""
+    rid = row.get("rule_id") or ""
+    status_meta = row.get("implementation_status") or ""
+
+    if rid in _REUSED_BY:
+        return (
+            "reused",
+            f"Already implemented by existing engine rule {_REUSED_BY[rid]}; "
+            "the workbook executor skips this to avoid double-firing.",
+            _REUSED_BY[rid],
+        )
+
+    if rid in _SHIP_DISABLED_REASONS:
+        return ("disabled", _SHIP_DISABLED_REASONS[rid], None)
+
+    if status_meta in ("READY_REGEX", "READY_RULE_BASED"):
+        # Readily-executable, but we still have to check that the
+        # rule's style_dependency doesn't gate it off by default
+        # ("House style" is off unless a project opts in).
+        style_dep = (row.get("style_dependency") or "").lower()
+        if style_dep.startswith("house style"):
+            return (
+                "disabled",
+                "House-style rule: inactive unless a project explicitly opts in.",
+                None,
+            )
+        return ("enabled", "", None)
+
+    if status_meta == "REQUIRES_POS_TAGGING":
+        return ("disabled", "Requires part-of-speech tagging; not currently available.", None)
+    if status_meta == "REQUIRES_PARSING":
+        return ("disabled", "Requires dependency parsing; not currently available.", None)
+    if status_meta == "REQUIRES_CONTEXT":
+        return ("disabled", "Requires contextual analysis; not currently available.", None)
+    if status_meta == "MANUAL_REVIEW":
+        return ("manual_review", "Manual-review-only rule; no automatic detector.", None)
+    return ("disabled", f"Unknown implementation_status={status_meta!r}.", None)
+
+
+def _normalise_basic_grammar_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Convert a basic_grammar_rules.json row into the shared Rules
+    Picker wire shape. Fields match the frontend LanguageRule type:
+    id / category / type / enabled / tool_behaviour / severity /
+    message / source_of / source_badge / … plus workbook-specific
+    display fields readable by the RuleDetails side panel.
+
+    ``runtime_status`` reflects the actual executable state (reused
+    rules and ship-disabled rules are flagged), which the frontend
+    uses to decide whether the enable/disable toggle is active."""
+    rid = row.get("rule_id") or ""
+    sheet = row.get("worksheet") or ""
+    category = _basic_grammar._SHEET_TO_CATEGORY.get(sheet, "grammar")
+    subcategory = _basic_grammar._SHEET_TO_LABEL.get(sheet, "Basic Grammar")
+    runtime_status, runtime_reason, reused_by = _basic_grammar_runtime_status(row)
+
+    # Severity mapping — same translation the runtime executor uses.
+    sev = (row.get("severity") or "").lower()
+    if sev in ("high", "error"):
+        severity = "error"
+    elif sev in ("medium", "warning"):
+        severity = "warning"
+    elif sev in ("low", "suggestion"):
+        severity = "suggestion"
+    else:
+        severity = "warning"
+
+    # Every workbook row ships ``autocorrect_safe=N`` OR, for 7 PU rules,
+    # ``autocorrect_safe=Y`` but validation_status=needs_review. Per
+    # the safety policy, no workbook rule is AUTO_FIX at runtime.
+    tool_behaviour = "flag"
+
+    # Default enabled: reflects runtime availability. Reused /
+    # disabled / manual_review rules show as disabled in the Rules
+    # Picker so the toggle state tells the truth. Project overrides
+    # (applied by the caller via ``_apply_override``) still win.
+    enabled_default = runtime_status == "enabled"
+
+    return {
+        "id": rid,
+        "category": category,
+        "subcategory": subcategory,
+        "type": "basic_grammar",
+        "enabled": enabled_default,
+        "tool_behaviour": tool_behaviour,
+        "severity": severity,
+        "message": row.get("editor_message") or row.get("rule_name") or "",
+        "rule_name": row.get("rule_name") or rid,
+        "rule_description": row.get("rule_description") or "",
+        "explanation": row.get("explanation") or "",
+        "incorrect_example": row.get("incorrect_example") or "",
+        "corrected_example": row.get("corrected_example") or "",
+        "detection_method": row.get("detection_method") or "",
+        "detection_pattern": row.get("detection_pattern") or "",
+        "trigger_condition": row.get("trigger_condition") or "",
+        "exception_conditions": row.get("exception_conditions") or "",
+        "suggested_correction": row.get("suggested_correction") or "",
+        "replacement": row.get("replacement") or "",
+        "confidence_level": row.get("confidence_level") or "",
+        "style_dependency": row.get("style_dependency") or "",
+        "validation_status": row.get("validation_status") or "needs_review",
+        "recommended_action": row.get("recommended_action") or "",
+        "false_positive_risks": row.get("false_positive_risks") or "",
+        "implementation_status": row.get("implementation_status") or "",
+        "detector_id": row.get("detector_id") or "",
+        "worksheet": sheet,
+        "source_of": "workbook",
+        "source_badge": "Basic Grammar",
+        "source_raw": "Basic Grammar & Punctuation workbook",
+        # Runtime availability — used by the Rules Picker to decide
+        # whether the enable-toggle is active and to render the
+        # disabled-reason tooltip.
+        "runtime_status": runtime_status,
+        "runtime_status_reason": runtime_reason,
+        "reused_by": reused_by,
+    }
+
+
+@lru_cache(maxsize=1)
+def _base_basic_grammar_rules() -> list[dict[str, Any]]:
+    """All 420 workbook rules in Rules-Picker-ready shape. Includes
+    reused / ship-disabled / needs-linguistic / manual-review rules so
+    the rule viewer surfaces them with their status; the runtime
+    executor independently decides which actually fire."""
+    out: list[dict[str, Any]] = []
+    for row in _basic_grammar.all_rules():
+        out.append(_normalise_basic_grammar_row(row))
+    return out
+
+
+def list_basic_grammar_rules(
+    overrides: Optional[dict[str, dict[str, Any]]] = None,
+) -> list[dict[str, Any]]:
+    """Return the full normalised Basic Grammar workbook rule list.
+    Overrides are merged on top for enabled flag + tool_behaviour,
+    identical to the other workbook surfaces."""
+    overrides = overrides or {}
+    base = _base_basic_grammar_rules()
+    if not overrides:
+        return [dict(r) for r in base]
+    out: list[dict[str, Any]] = []
+    for r in base:
+        o = overrides.get(r["id"])
+        if o:
+            out.append(_apply_override(r, o))
+        else:
+            out.append(dict(r))
+    return out
+
+
+def basic_grammar_rule_summary(
+    overrides: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, int]:
+    """Aggregate counts for the Rules Picker header.
+
+    ``total``        — every registered workbook rule (420).
+    ``enabled``      — rules currently active at runtime (taking
+                       project overrides into account).
+    ``reused``       — rules whose executor skips in favour of an
+                       existing engine detector.
+    ``disabled``     — rules ship-disabled for missing data / parser
+                       / POS / context / manual-review.
+    ``flag`` /
+    ``auto_replace`` — tool_behaviour split across enabled rules (per
+                       spec all workbook rules ship as ``flag``).
+    """
+    overrides = overrides or {}
+    total = enabled = reused = disabled = manual = flag = auto_replace = 0
+    for r in _base_basic_grammar_rules():
+        total += 1
+        status = r.get("runtime_status") or ""
+        if status == "reused":
+            reused += 1
+            continue
+        if status == "manual_review":
+            manual += 1
+            continue
+        if status == "disabled":
+            disabled += 1
+            continue
+        # enabled bucket — honour per-project override.
+        o = overrides.get(r["id"]) or {}
+        eff_enabled = bool(o["enabled"]) if "enabled" in o else bool(r.get("enabled", True))
+        eff_tb = o.get("tool_behaviour") or r.get("tool_behaviour") or "flag"
+        if eff_enabled:
+            enabled += 1
+            if eff_tb == "auto_replace":
+                auto_replace += 1
+            else:
+                flag += 1
+        else:
+            disabled += 1
+    return {
+        "total": total,
+        "enabled": enabled,
+        "reused": reused,
+        "disabled": disabled,
+        "manual_review": manual,
+        "flag": flag,
+        "auto_replace": auto_replace,
+    }
+
+
 # Allow tests to force a reload after regenerating JSON.
 _original_clear_cache = clear_cache
 
@@ -842,7 +1081,9 @@ def clear_cache() -> None:  # noqa: F811  (deliberate override to extend)
     _base_medical_rules.cache_clear()
     _base_uk_us_rules.cache_clear()
     _base_lww_ne_rules.cache_clear()
+    _base_basic_grammar_rules.cache_clear()
     _ab.clear_cache()
     _mt.clear_cache()
     _uus.clear_cache()
     _lww_ne.clear_cache()
+    _basic_grammar.clear_cache()

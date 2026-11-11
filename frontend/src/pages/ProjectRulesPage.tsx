@@ -75,7 +75,7 @@ const CATEGORY_META: Record<CategoryKey, CategoryMeta> = {
     tileBg: 'from-sky-50 to-blue-50/40',
   },
   sentence: {
-    label: 'Sentence', Icon: AlignLeft,
+    label: 'Punctuation and Capitalization', Icon: AlignLeft,
     grad: 'from-violet-500 to-purple-500',
     dot: 'bg-violet-500', accent: 'border-l-violet-500', ring: 'text-violet-500',
     chipActive: 'bg-violet-500 text-white border-violet-500',
@@ -419,6 +419,7 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
           .concat((wbBuckets.medical_terms ?? []) as LanguageRule[])
           .concat((wbBuckets.uk_us_spelling ?? []) as LanguageRule[])
           .concat((wbBuckets.lww_ne ?? []) as LanguageRule[])
+          .concat((wbBuckets.basic_grammar ?? []) as LanguageRule[])
           .concat((wbBuckets.custom ?? []) as LanguageRule[])
         setWorkbookRules(wb)
         const overrides = (data.active_rules?.rule_overrides ?? {}) as RuleOverrides
@@ -1415,21 +1416,68 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
                     </div>
                   </div>
 
-                  {/* Rules list */}
+                  {/* Rules list — grouped by ``subcategory`` when
+                      present (Basic Grammar workbook surfaces this
+                      as "Article Usage" / "Subject-Verb Agreement" /
+                      etc.). Rules without a subcategory (existing
+                      profile rules, LWW-NE, custom) collapse into a
+                      single "Other rules" group at the end so the
+                      pre-workbook UX stays intact. */}
                   {list.length > 0 ? (
                     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                      <ul className="divide-y divide-slate-100">
-                        {list.map((rule) => (
-                          <RuleDetails
-                            key={rule.id}
-                            rule={rule}
-                            canEdit={canEdit}
-                            onToggle={() => toggleRule(rule.id)}
-                            onBehaviourChange={(next) => changeBehaviour(rule.id, next)}
-                            onDelete={catOf(rule) === 'custom' ? () => deleteCustomRule(rule.id) : undefined}
-                          />
-                        ))}
-                      </ul>
+                      {(() => {
+                        // Group rules by subcategory; preserve the
+                        // workbook's natural sub-section order.
+                        const groups = new Map<string, LanguageRule[]>()
+                        const subOrder: string[] = []
+                        for (const r of list) {
+                          const key = (typeof r.subcategory === 'string' && r.subcategory.trim())
+                            ? r.subcategory
+                            : 'Other rules'
+                          if (!groups.has(key)) {
+                            groups.set(key, [])
+                            subOrder.push(key)
+                          }
+                          groups.get(key)!.push(r)
+                        }
+                        // Stable order: workbook sections first (in
+                        // the order they appeared), 'Other rules' last.
+                        subOrder.sort((a, b) => {
+                          if (a === 'Other rules') return 1
+                          if (b === 'Other rules') return -1
+                          return 0
+                        })
+                        return subOrder.map((sub) => {
+                          const subRules = groups.get(sub) || []
+                          const subEnabled = subRules.filter((r) => r.enabled !== false).length
+                          return (
+                            <div key={sub} className="border-b border-slate-100 last:border-b-0">
+                              {(groups.size > 1) && (
+                                <div className="px-4 py-2 bg-slate-50/80 flex items-center justify-between sticky top-0 z-10">
+                                  <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                                    {sub}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500">
+                                    {subEnabled} of {subRules.length} enabled
+                                  </span>
+                                </div>
+                              )}
+                              <ul className="divide-y divide-slate-100">
+                                {subRules.map((rule) => (
+                                  <RuleDetails
+                                    key={rule.id}
+                                    rule={rule}
+                                    canEdit={canEdit}
+                                    onToggle={() => toggleRule(rule.id)}
+                                    onBehaviourChange={(next) => changeBehaviour(rule.id, next)}
+                                    onDelete={catOf(rule) === 'custom' ? () => deleteCustomRule(rule.id) : undefined}
+                                  />
+                                ))}
+                              </ul>
+                            </div>
+                          )
+                        })
+                      })()}
                     </div>
                   ) : (
                     <EmptyState
