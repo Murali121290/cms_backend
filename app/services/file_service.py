@@ -23,23 +23,33 @@ def extract_chapter_number_from_filename(name: str) -> str | None:
     """Parse a zero-padded chapter number out of a filename or folder name.
 
     Matches "chapter"/"chap"/"ch" followed by digits (e.g. "Chapter_05.docx"),
-    else falls back to a leading or trailing run of digits in the stem
-    (e.g. "05_intro.docx" or "intro_05.docx").
+    "figure"/"fig" followed by chapter.figure (e.g. "Figure_2.1 BDC.eps" -> "02"),
+    else falls back to a 1 to 3 digit run in the stem (ignoring large job numbers like 190442).
     """
     name_lower = name.lower()
-    m = re.search(r'(?:chapter|chap|ch)[_\s-]*(\d+)', name_lower)
+
+    # 1. Standard chapter prefix (e.g. ch01, chapter_02, chap 3)
+    m = re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', name_lower)
     if m:
         return f"{int(m.group(1)):02d}"
+
+    # 2. Figure naming convention (e.g. Figure_2.1, Fig 02.1, Figure 2-1)
+    m = re.search(r'(?:figure|fig)[_\s-]*(\d{1,3})[._-]\d+', name_lower)
+    if m:
+        return f"{int(m.group(1)):02d}"
+
     base = os.path.splitext(os.path.basename(name))[0]
-    m = re.match(r'^(\d+)', base)
+
+    # 3. Leading digits (1 to 3 digits only, so job codes like 190442 are not treated as chapter numbers)
+    m = re.match(r'^(\d{1,3})(?:[^\d]|$)', base)
     if m:
         return f"{int(m.group(1)):02d}"
-    m = re.search(r'(\d+)$', base)
+
+    # 4. Trailing digits (1 to 3 digits only)
+    m = re.search(r'(?:[^\d]|^)(\d{1,3})$', base)
     if m:
         return f"{int(m.group(1)):02d}"
-    m = re.search(r'(\d+)', base)
-    if m:
-        return f"{int(m.group(1)):02d}"
+
     return None
 
 

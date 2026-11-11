@@ -8561,6 +8561,7 @@ def api_v2_create_chapter_with_art(
         )
 
     import re as _re
+    from sqlalchemy import or_ as _or
     existing_art_chapters = [
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
         if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
@@ -8861,13 +8862,26 @@ def api_v2_create_chapters_with_art_zip(
         )
 
     import re as _re
+    from sqlalchemy import or_ as _or
+
+    # Check if project has a book manuscript (e.g. 00 or title contains Book)
+    has_book_manuscript = db.query(ChapterInfo).filter(
+        ChapterInfo.project == project.project_code,
+        _or(ChapterInfo.chapters == "00", ChapterInfo.chapter_title.ilike("%Book%"))
+    ).first() is not None
+
     existing_art_chapters = [
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
-        if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+        if ci.chapters and (_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters) or ci.chapters == "Book 00 - Art")
     ]
-    existing_art_by_num: dict[int, ChapterInfo] = {
-        int(_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters).group(1)): ci for ci in existing_art_chapters
-    }
+    existing_art_by_key: dict[str, ChapterInfo] = {}
+    for ci in existing_art_chapters:
+        m = _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+        if m:
+            existing_art_by_key[f"ch_{int(m.group(1)):02d}"] = ci
+        elif ci.chapters == "Book 00 - Art":
+            existing_art_by_key["book_00"] = ci
+
     existing_art_workflow = next((ci.workflow for ci in existing_art_chapters if ci.workflow), None)
 
     created: list = []
@@ -8882,8 +8896,9 @@ def api_v2_create_chapters_with_art_zip(
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(temp_dir)
 
-        # Map to hold temporary files grouped by chapter number
-        ch_files: dict[int, list[tuple[str, str]]] = {}
+        # Map to hold temporary files grouped by chapter key ("book_00" or "ch_01", etc.)
+        # and display info: (chapter_number, chapter_title, files_list)
+        ch_files: dict[str, dict] = {}
 
         for root, _dirs, filenames in os.walk(temp_dir):
             for fname in filenames:
@@ -8892,29 +8907,82 @@ def api_v2_create_chapters_with_art_zip(
 
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, temp_dir)
-                
-                # Determine chapter number
-                number_padded = None
+                rel_lower = rel_path.replace("\\", "/").lower()
                 path_parts = rel_path.replace("\\", "/").split("/")
-                for part in reversed(path_parts[:-1]):
-                    number_padded = file_service.extract_chapter_number_from_filename(part)
-                    if number_padded:
-                        break
-                if not number_padded:
-                    number_padded = file_service.extract_chapter_number_from_filename(fname)
 
-                if not number_padded:
-                    skipped.append({"filename": fname, "reason": "Could not determine a chapter number from the file name or path."})
+        # Determine whole-book vs chapter based ONLY on folder names or zip filename (not individual file names)
+        zip_stem = os.path.splitext(file.filename)[0].strip().lower()
+
+        for root, _dirs, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
                     continue
 
-                new_num = int(number_padded)
-                if new_num not in ch_files:
-                    ch_files[new_num] = []
-                ch_files[new_num].append((fname, full_path))
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, temp_dir)
+                path_parts = rel_path.replace("\\", "/").split("/")
+                dir_parts = path_parts[:-1]  # parent folders only
 
-        for new_num, files_list in sorted(ch_files.items()):
-            art_chapter_name = f"Ch {new_num:02d} - Art"
-            existing_ch = existing_art_by_num.get(new_num)
+                matched_chapter = None
+                matched_book = False
+
+                # 1. Check parent folder names first (from closest folder upwards)
+                for part in reversed(dir_parts):
+                    p_clean = part.strip().lower()
+                    if p_clean in ("art files", "art_files", "artfiles", "art file", "art-files", "book", "book art", "book_art", "common art", "common_art") or "art files" in p_clean:
+                        matched_book = True
+                        break
+                    m = _re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', p_clean)
+                    if m:
+                        matched_chapter = int(m.group(1))
+                        break
+                    m = _re.match(r'^(\d{1,3})$', p_clean)
+                    if m:
+                        matched_chapter = int(m.group(1))
+                        break
+
+                # 2. If not determined by folder name, check zip filename
+                if not matched_book and matched_chapter is None:
+                    if zip_stem in ("art files", "art_files", "artfiles", "art file", "art-files", "book", "book art", "book_art") or "art files" in zip_stem:
+                        matched_book = True
+                    else:
+                        m = _re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', zip_stem)
+                        if m:
+                            matched_chapter = int(m.group(1))
+                        else:
+                            m = _re.match(r'^(\d{1,3})$', zip_stem)
+                            if m:
+                                matched_chapter = int(m.group(1))
+
+                # 3. Assign chapter vs book
+                if matched_chapter is not None and matched_chapter > 0:
+                    key = f"ch_{matched_chapter:02d}"
+                    ch_number = f"Ch {matched_chapter:02d} - Art"
+                    ch_title = f"Chapter {matched_chapter:02d} Art"
+                elif matched_book or has_book_manuscript or not dir_parts:
+                    # e.g. "Art Files.zip" or folder named "Art Files" -> Book 00 - Art
+                    key = "book_00"
+                    ch_number = "Book 00 - Art"
+                    ch_title = "Book 00 Art"
+                else:
+                    key = "book_00"
+                    ch_number = "Book 00 - Art"
+                    ch_title = "Book 00 Art"
+
+                if key not in ch_files:
+                    ch_files[key] = {
+                        "ch_number": ch_number,
+                        "ch_title": ch_title,
+                        "files": []
+                    }
+                ch_files[key]["files"].append((fname, full_path))
+
+        for key, info in sorted(ch_files.items()):
+            art_chapter_name = info["ch_number"]
+            art_chapter_title = info["ch_title"]
+            files_list = info["files"]
+
+            existing_ch = existing_art_by_key.get(key)
             if existing_ch and not allow_revision:
                 for fname, _ in files_list:
                     skipped.append({"filename": fname, "reason": f"Art chapter {art_chapter_name} already exists."})
@@ -8926,7 +8994,7 @@ def api_v2_create_chapters_with_art_zip(
                     project_id=project_id,
                     chapter_id=existing_ch.id,
                     upload_dir=file_service.UPLOAD_DIR,
-                    title=f"Chapter {new_num:02d} Art",
+                    title=art_chapter_title,
                     workflow_name=workflow_name,
                 )
             else:
@@ -8934,7 +9002,7 @@ def api_v2_create_chapters_with_art_zip(
                     db,
                     project_id=project_id,
                     number=art_chapter_name,
-                    title=f"Chapter {new_num:02d} Art",
+                    title=art_chapter_title,
                     upload_dir=file_service.UPLOAD_DIR,
                     status="Received",
                     workflow_name=workflow_name,
@@ -8969,7 +9037,7 @@ def api_v2_create_chapters_with_art_zip(
                     uploaded_by_id=viewer.id,
                 ))
 
-            existing_art_by_num[new_num] = new_chapter
+            existing_art_by_key[key] = new_chapter
             db.commit()
             db.refresh(new_chapter)
             created.append(new_chapter)
