@@ -25,8 +25,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0064_langedit_job_cache'
-down_revision: Union[str, Sequence[str], None] = '0063_add_project_type_to_projects'
+revision: str = '0065_langedit_job_cache'
+down_revision: Union[str, Sequence[str], None] = '0064_add_bod_cover_and_file_history'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

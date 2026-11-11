@@ -83,6 +83,8 @@ PROCESS_PERMISSIONS = {
     "technical": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing", "Editorial Manager"],
     "macro_processing": PRE_EDITOR_ROLES,
     "ppd": ["Manuscript Analysis Operator", "ProjectManager", "Admin"],
+    "manuscript_analysis": ["Manuscript Analysis Operator", "ProjectManager", "Admin"],
+    "manuscript_analysis_qa": ["Manuscript Analysis Operator", "ProjectManager", "Admin"],
     "permissions": ["PermissionsManager", "ProjectManager", "Admin"],
     "reference_validation": PRE_EDITOR_ROLES,
     "reference_number_validation": PRE_EDITOR_ROLES,
@@ -91,6 +93,7 @@ PROCESS_PERMISSIONS = {
     "reference_structuring": PRE_EDITOR_ROLES,
     "structuring": ["ProjectManager", "XML Manager", "XML Operator", "Senior XML Operator"] + PRE_EDITOR_ROLES,
     "structuring_qa": ["ProjectManager", "XML Manager", "XML Operator", "Senior XML Operator"] + PRE_EDITOR_ROLES,
+    "preediting_qa": ["ProjectManager", "XML Manager", "XML Operator", "Senior XML Operator"] + PRE_EDITOR_ROLES,
     "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin", "Language Editor", "Team Lead - Language Editing", "Editorial Manager"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
@@ -279,8 +282,8 @@ def background_processing_task(
                 generated_files = permissions_engine_cls().process_document(file_path)
                 success_msg = "Permissions Log generated successfully"
 
-            elif process_type == "ppd":
-                update_job_status(db, job_id, "processing", "Running PPD analysis...", 30)
+            elif process_type in ("ppd", "manuscript_analysis", "manuscript_analysis_qa"):
+                update_job_status(db, job_id, "processing", "Running Manuscript Analysis & QA...", 30)
                 if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
                     book_title = os.path.splitext(os.path.basename(file_path))[0]
                     generated_files = _run_via_pph(
@@ -291,7 +294,7 @@ def background_processing_task(
                     success_msg = "PPD processing completed via PPH"
                 else:
                     generated_files = ppd_engine_cls().process_document(file_path, user_username)
-                    success_msg = "PPD processing completed"
+                    success_msg = "Manuscript Analysis & QA processing completed"
 
             elif process_type == "technical":
                 update_job_status(db, job_id, "processing", "Scanning technical style errors...", 30)
@@ -469,20 +472,11 @@ def background_processing_task(
                 except Exception as qae:
                     logger.warning(f"Could not auto-generate Structuring QA Report: {qae}")
 
-            elif process_type == "structuring_qa":
-                update_job_status(db, job_id, "processing", "Running Structuring QA Analysis...", 50)
-                from app.processing.structuring_qa_analyzer import generate_qa_report_html
-                dir_name = os.path.dirname(file_path)
-                base_name = os.path.basename(file_path)
-                name_stem = os.path.splitext(base_name)[0]
-                if name_stem.endswith("_Processed"):
-                    name_stem = name_stem[:-10]
+            elif process_type in ("structuring_qa", "preediting_qa"):
+                update_job_status(db, job_id, "processing", "Running Pre-Editing & Structuring QA Analysis...", 50)
+                from app.processing.preediting_qa_engine import PreEditingQAEngine
                 
-                target_docx = file_path
-                processed_candidate = os.path.join(dir_name, f"{name_stem}_Processed.docx")
-                if os.path.exists(processed_candidate):
-                    target_docx = processed_candidate
-
+                dir_name = os.path.dirname(file_path)
                 manuscript_dir = dir_name
                 if "xml" in dir_name.lower() or "xhtml" in dir_name.lower():
                     parent_dir = os.path.dirname(dir_name)
@@ -490,11 +484,15 @@ def background_processing_task(
                     if os.path.exists(man_candidate):
                         manuscript_dir = man_candidate
 
-                qa_report_filename = f"{name_stem}_QA_Report.html"
-                qa_report_path = os.path.join(manuscript_dir, qa_report_filename)
-                generate_qa_report_html(target_docx, qa_report_path, document_title=f"{name_stem}.docx")
-                generated_files = [qa_report_path]
-                success_msg = "Structuring QA Report generated successfully"
+                qa_engine = PreEditingQAEngine()
+                generated_files = qa_engine.process_document(
+                    file_path=file_path,
+                    db=db,
+                    file_record=file_record,
+                    user_username=user_username,
+                    output_dir=manuscript_dir,
+                )
+                success_msg = "Pre-Editing QA Report generated successfully"
 
             elif process_type == "bias_scan":
                 generated_files = bias_engine_cls().process_document(file_path)
@@ -1136,7 +1134,7 @@ def background_processing_task(
                         )
 
                         new_category = (
-                            "Manuscript" if (process_type == "structuring_qa" or processed_filename.lower().endswith(("_qa_report.html", "qa_report.html")))
+                            "Manuscript" if (process_type in ("structuring_qa", "preediting_qa", "manuscript_analysis", "manuscript_analysis_qa", "ppd") or processed_filename.lower().endswith(("_qa_report.html", "qa_report.html", "_dashboard.html", "_analysis_dashboard.html")))
                             else ("Proof" if processed_filename.lower().endswith((".pdf", ".xhtml", ".css")) else "Misc")
                             if process_type == "indesign_to_xml"
                             else "Misc" if (process_type == "extract_design_css" or is_misc_delivery_file)

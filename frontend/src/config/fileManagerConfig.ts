@@ -161,9 +161,9 @@ export function getProcessingActions(stageName: string): string[] {
 // reference that key via `isProcessingActionVisibleForStage(key, stageName)` when rendering
 // the corresponding <DropdownMenu.Item> in ChapterFilePage.tsx — no other code changes needed.
 export type ProcessingActionKey =
-  | 'structuring' | 'structuringQa' | 'referenceValidation' | 'referenceReview'
+  | 'structuring' | 'structuringQa' | 'preEditingQa' | 'referenceValidation' | 'referenceReview'
   | 'languageEdit' | 'technicalEdit' | 'unifiedReview'
-  | 'manuscriptAnalysis'
+  | 'manuscriptAnalysis' | 'manuscriptAnalysisQa'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml' | 'wordToIndesign'
   | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'inddToProof' | 'styleValidation' | 'artValidation'
 
@@ -186,6 +186,7 @@ const WORD_TO_INDESIGN_STAGES = [
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
   structuring:          ['Pre-editing','Pre-editing QA'],
   structuringQa:        ['Pre-editing','Pre-editing QA'],
+  preEditingQa:         ['Pre-editing','Pre-editing QA'],
   referenceValidation:  ['Pre-editing','Pre-editing QA'],
   referenceReview:      ['Pre-editing','Pre-editing QA'],
   styleValidation:      ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Word 2 Indesign Converstion', 'Word 2 Indesign Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
@@ -193,7 +194,8 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   languageEdit:         ['Pre-editing', 'Copyediting', 'Language Editing', 'Language Editing QA'],
   technicalEdit:        ['Language Editing','Language Editing QA'],
   unifiedReview:        ['Pre-editing','Pre-editing QA','Language Editing','Language Editing QA'],
-  manuscriptAnalysis:   ['Manuscript Analysis'],
+  manuscriptAnalysis:   ['Manuscript Analysis', 'Job Initiation', 'Manuscript Analysis / Job Initiation'],
+  manuscriptAnalysisQa: ['Manuscript Analysis', 'Job Initiation', 'Manuscript Analysis / Job Initiation'],
   permissionsCheck:     ['Digital Processing'],
   aiCreditExtraction:   ['Digital Processing'],
   biasScan:             ['Digital Processing'],

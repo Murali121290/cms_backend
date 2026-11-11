@@ -41,7 +41,7 @@ import {
   startProcessingJob,
   startStructuring,
   startLanguageEdit,
-  startPpdGeneration, startPermissionsCheck, startCreditExtraction,
+  startPpdGeneration, startManuscriptAnalysisQa, startPreEditingQa, startPermissionsCheck, startCreditExtraction,
   startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof, startInddToProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
@@ -406,23 +406,18 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {(showAction('structuring') || showAction('structuringQa')) && (
+        {(showAction('structuring') || showAction('structuringQa') || showAction('preEditingQa')) && (
           <button
             disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
-            onClick={async () => {
-              if (!fid || !fname.endsWith('.docx')) return
-              try {
-                toast.info('Running QA Report...')
-                await startProcessingJob(fid, 'structuring_qa', 'style')
-                toast.success('QA Report generated successfully')
-                void invalidateFiles()
-              } catch (e: any) {
-                toast.error(`QA Report failed: ${e.message || 'Error running QA'}`)
-              }
-            }}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Pre-Editing QA',
+              jobFn: () => startPreEditingQa(fid),
+              pollFileId: fid,
+              pollProcessType: 'preediting_qa'
+            })}
           >
-            <ShieldCheck size={12} className="text-emerald-600" /> Run QA Report
+            <ShieldCheck size={12} className="text-emerald-600" /> Run Pre-Editing QA
           </button>
         )}
 
@@ -487,13 +482,18 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('manuscriptAnalysis') && (
+        {(showAction('manuscriptAnalysis') || showAction('manuscriptAnalysisQa')) && (
           <button
             disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
-            onClick={() => fid && setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid), pollFileId: fid, pollProcessType: 'ppd' })}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Manuscript Analysis QA',
+              jobFn: () => startManuscriptAnalysisQa(fid),
+              pollFileId: fid,
+              pollProcessType: 'manuscript_analysis_qa'
+            })}
           >
-            <FileOutput size={12} /> Manuscript Analysis
+            <FileOutput size={12} className="text-sky-600" /> Run Manuscript Analysis QA
           </button>
         )}
 
@@ -1092,6 +1092,7 @@ export function ChapterFilePage({
         const isExpanded = fid != null && !!expandedSources[fid]
         const isImageRow = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(name)
         const isDocxRow = /\.docx?$/i.test(name)
+        const isHtmlRow = /\.html?$/i.test(name)
         const openTarget = isImageRow
           ? `/projects/${pid}/image-review?fileId=${fid}&chapterId=${cid}&folder=${activeFolder}`
           : isDocxRow
@@ -1121,14 +1122,19 @@ export function ChapterFilePage({
                 disabled={!resolvedIsAssigned}
                 onClick={e => {
                   e.stopPropagation()
+                  if (isHtmlRow) {
+                    window.open(`/api/v2/files/${fid}/download?inline=true`, '_blank')
+                    return
+                  }
                   navigate(openTarget)
                 }}
-                title={name}
+                title={isHtmlRow ? `${name} (Click to open QA report in new tab)` : name}
                 className={resolvedIsAssigned
-                  ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+                  ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer flex items-center gap-1.5"
                   : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
               >
-                {name}
+                <span>{name}</span>
+                {isHtmlRow && <ExternalLink size={11} className="text-muted shrink-0" />}
               </button>
             ) : (
               <span className="font-medium text-text truncate max-w-[2000px]" title={name}>{name}</span>

@@ -37,7 +37,9 @@ class Settings(BaseSettings):
     PEOPLEHUB_DATABASE_URL: str = "postgresql://postgres:password@localhost:5435/peoplehub_db"
     UPLOAD_FOLDER: str = str(UPLOADS_DIR)
     REDIS_URL: str = "redis://localhost:6379/0"
-    INDESIGN_SERVER_URL: str = "http://10.1.6.108:5555"
+    INDESIGN_SERVER_URL: str = "http://10.1.6.24:5555"
+    WORD_TO_XML_SERVER_URL: str = ""
+    WORD_TO_XML_TIMEOUT_SECONDS: int = 3600
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:8085",
         "http://localhost:8080",

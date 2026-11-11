@@ -3036,7 +3036,7 @@ def api_v2_analyze_files_for_stylesheet(
 
 
 
-def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResponse:
+def _serve_docx_finalized(path: str, filename: str, media_type: str, inline: bool = False) -> FileResponse:
     """Serve `path` after stripping editor round-trip artefacts.
 
     For DOCX files, copies to a temp location and runs
@@ -3052,7 +3052,8 @@ def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResp
         path = resolve_physical_file_path(path, UPLOAD_DIR)
 
     if not filename.lower().endswith(".docx"):
-        return FileResponse(path=path, filename=filename, media_type=media_type)
+        disp = "inline" if (inline or filename.lower().endswith((".html", ".htm", ".pdf"))) else "attachment"
+        return FileResponse(path=path, filename=filename, media_type=media_type, content_disposition_type=disp)
 
     from starlette.background import BackgroundTask
     from app.processing.citation_link_finalizer import finalize_docx_for_export
@@ -3086,6 +3087,7 @@ def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResp
 @router.get("/files/{file_id}/download")
 def api_v2_download_file(
     file_id: int,
+    inline: bool = Query(False),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3117,6 +3119,7 @@ def api_v2_download_file(
         path=physical_path,
         filename=file_record.filename,
         media_type=mime or "application/octet-stream",
+        inline=inline,
     )
 
 

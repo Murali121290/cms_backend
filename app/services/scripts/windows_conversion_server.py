@@ -2143,6 +2143,116 @@ def journal_docx_to_xml(file: UploadFile = File(...), xslt: str = None):
         raise HTTPException(status_code=500, detail=str(err))
 
 
+# Process 1B (Book Word to XML): Convert DOCX manuscript to BITS Book XML
+@app.post("/convert-book-to-xml")
+@app.post("/book/docx-to-xml")
+def convert_book_to_xml(file: UploadFile = File(...)):
+    """
+    Book Word-to-XML Pipeline:
+    Converts a DOCX book manuscript into BITS Book XML using the
+    Word2XML_Books.pl pipeline at C:\\Users\\muraliba\\Documents\\wordtoxml.
+    Returns a ZIP containing the generated XML and log files.
+    """
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+    temp_dir = os.path.join(workflow_base_dir, f"book_word2xml_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    logger.info(f"[{session_id}] Received Book Word-to-XML request for: {file.filename}")
+    uploaded_docx = os.path.join(temp_dir, file.filename)
+    converter_dir = r"C:\Users\muraliba\Documents\wordtoxml"
+    perl_script = os.path.join(converter_dir, "Word2XML_Books.pl")
+
+    try:
+        with open(uploaded_docx, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        if not os.path.exists(perl_script):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Word2XML_Books.pl script not found at {perl_script}"
+            )
+
+        import subprocess
+        import io
+        import zipfile
+
+        # Ensure converter dependencies can find Java, Python, and Perl in environment
+        env = os.environ.copy()
+        env["PYTHON_BIN"] = sys.executable
+        python_dir = os.path.dirname(sys.executable)
+        env["PATH"] = python_dir + os.path.pathsep + os.path.join(python_dir, "Scripts") + os.path.pathsep + env.get("PATH", "")
+        if "JAVA_HOME" in env and os.path.join(env["JAVA_HOME"], "bin") not in env.get("PATH", ""):
+            env["PATH"] = os.path.join(env["JAVA_HOME"], "bin") + os.path.pathsep + env.get("PATH", "")
+
+        cmd = ["perl", perl_script, temp_dir]
+        logger.info(f"[{session_id}] Executing: {' '.join(cmd)} (cwd={converter_dir})")
+        res = subprocess.run(
+            cmd,
+            cwd=converter_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=600,
+            env=env
+        )
+
+        base_name = os.path.splitext(file.filename)[0]
+        html_output_dir = os.path.join(temp_dir, "html")
+        expected_xml = os.path.join(html_output_dir, f"{base_name}.xml")
+        expected_log = os.path.join(html_output_dir, f"{base_name}.log")
+
+        # Fallback check if output was named without comments suffix or variant
+        if not os.path.exists(expected_xml):
+            if os.path.exists(html_output_dir):
+                candidate_xmls = [
+                    os.path.join(html_output_dir, f)
+                    for f in os.listdir(html_output_dir)
+                    if f.endswith(".xml") and not f.endswith("_class.xml")
+                ]
+                if candidate_xmls:
+                    expected_xml = candidate_xmls[0]
+
+        if not os.path.exists(expected_xml) or os.path.getsize(expected_xml) == 0:
+            error_details = (
+                f"Word2XML failed to generate XML output.\n"
+                f"Stdout: {res.stdout[-1500:]}\nStderr: {res.stderr[-1500:]}"
+            )
+            logger.error(f"[{session_id}] {error_details}")
+            raise HTTPException(status_code=500, detail=error_details)
+
+        # Package output XML and log into an in-memory ZIP response
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(expected_xml, arcname=f"{base_name}.xml")
+            if os.path.exists(expected_log):
+                zf.write(expected_log, arcname=f"{base_name}.log")
+            else:
+                zf.writestr(f"{base_name}.log", f"Word to XML conversion succeeded in {time.time() - start_time:.2f}s\n")
+
+        zip_bytes = zip_buf.getvalue()
+        logger.info(f"[{session_id}] Book Word-to-XML conversion completed successfully in {time.time() - start_time:.2f}s")
+
+        from starlette.responses import Response
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{base_name}_xml.zip"'}
+        )
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"[{session_id}] Word2XML process timed out after 600s")
+        raise HTTPException(status_code=504, detail="Word to XML conversion timed out.")
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"[{session_id}] Book Word-to-XML conversion failed: {str(err)}")
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        logger.info(f"[{session_id}] Conversion folder retained on Windows Server at: {temp_dir}")
+
+
 def normalize_artwork_filenames(art_dir):
     """Normalizes artwork filenames by creating unversioned copies (e.g., mededu_v12i1e95904_fig01_v1.png -> mededu_v12i1e95904_fig01.png)."""
     if not os.path.exists(art_dir):

@@ -70,6 +70,12 @@ export const startReferenceCheck = (fileId: number) =>
 export const startPpdGeneration = (fileId: number) =>
   startProcessingJob(fileId, "ppd", "style");
 
+export const startManuscriptAnalysisQa = (fileId: number) =>
+  startProcessingJob(fileId, "manuscript_analysis_qa", "style");
+
+export const startPreEditingQa = (fileId: number) =>
+  startProcessingJob(fileId, "preediting_qa", "style");
+
 // Permissions has no PPH endpoint — stays on v1 local
 export const startPermissionsCheck = (fileId: number) =>
   startV1ProcessingJob(fileId, "permissions");

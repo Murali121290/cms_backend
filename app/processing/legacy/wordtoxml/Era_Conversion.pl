@@ -171,7 +171,7 @@ my ($HtmName, $HtmDir, $FileSuffix) = fileparse($HtmFile, "\.[a-z]+");
 	# &WriteFile("$HtmFile.tmp", "$cont", "HTML");
 	# system "pause";
 	#----------------------- Post Clean ----------------------#
-	$cont=~s#</strong><strong>##gsi;
+	$cont=~s#</strong><strong>##gs;
 	$cont=~s#<p [^<>]*class=\"Book-Title\"[^<>]*>((?:(?!</p>|<p |<p>).)*)</p>#<h1 class=\"book-title\">$1<\/h1>#gsi;
 	$cont=~s#<p [^<>]*class=\"book-subtitle\"[^<>]*>((?:(?!</p>|<p |<p>).)*)</p>#<h2 class=\"book-subtitle\">$1<\/h2>#gsi;
 	$cont=~s#<p [^<>]*class=\"book-author\"[^<>]*>((?:(?!</p>|<p |<p>).)*)</p>#<h2 class=\"book-author\">$1<\/h2>#gsi;
@@ -249,7 +249,6 @@ my ($HtmName, $HtmDir, $FileSuffix) = fileparse($HtmFile, "\.[a-z]+");
 	$cont=~s#<ul-bull>#<ul class=\"unordered-list\">#gsi;
 	$cont=~s#<\/ul-bull>#<\/ul>#gsi;
 	
-	
 	#Formatting
 	$cont=~s#<(strong|Bold|underline|Strikethrough|Superscript|Subscript|SmallCaps|monospace|sans-?serif|Italic|u)/>##isg;
 	$cont=~s#<(Bold|underline|Strikethrough|Superscript|Subscript|SmallCaps|monospace|sans-?serif)Italic>#<$1><italic>#isg;
@@ -288,9 +287,22 @@ my ($HtmName, $HtmDir, $FileSuffix) = fileparse($HtmFile, "\.[a-z]+");
                 $cont=~s{<CommentQuery>(\s*)\[QUERY: AQ:(\s*)((?:(?!</CommentQuery>).)*?)</CommentQuery>}{\@q$querycount\@}s;
                 $querycount++;
         }
+        #query process
+        while ($cont=~m{<CommentQuery>(\s*)\[QUERY: AU:(\s*)((?:(?!</CommentQuery>).)*?)</CommentQuery>}s)
+        {
+                my $query = $&;
+                $query=~s{<CommentQuery>}{<query$querycount>}g;
+                $query=~s{</CommentQuery>}{</query$querycount>}g;
+                $query=~s{\[QUERY: AU:}{AQ:}g;
+                push(@comquery,$query);
+                $cont=~s{<CommentQuery>(\s*)\[QUERY: AU:(\s*)((?:(?!</CommentQuery>).)*?)</CommentQuery>}{\@q$querycount\@}s;
+                $querycount++;
+        }
+        
 	$cont=~s{<CommentQuery>((?:(?!</CommentQuery>).)*?)</CommentQuery>}{}g;
         $cont=~s{<\/CommentHighlight><CommentHighlight>}{}g;
         $cont=~s#<CommentHighlight>\s*HYPERLINK\s+"[^"]*"\s*</CommentHighlight>##gsi;
+        $cont=~s#\s*HYPERLINK\s+"[^"]*"\s*##gsi;
         $cont=~s{<CommentHighlight>}{\@hi\@}g;
         $cont=~s{</CommentHighlight>}{\@\/hi\@}g;
 
