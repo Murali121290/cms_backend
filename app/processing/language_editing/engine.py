@@ -431,4 +431,112 @@ def analyze(
     findings = _filter_protected(findings, protected_spans)
 
     resolved = resolve_overlaps(findings)
-    return filter_markup_tag_findings(text, resolved)
+    resolved = filter_markup_tag_findings(text, resolved)
+    return _drop_identity_findings(resolved)
+
+
+# Analysis-cache version. Bump this constant whenever a semantic change
+# to the engine, any workbook JSON, or any rule module invalidates
+# previously-cached findings. Included verbatim in the ``rules_hash``
+# computation at the router layer so a bump instantly invalidates every
+# existing ``language_edit_jobs`` cache row — the next analyze on each
+# file re-runs the engine and backfills the cache with fresh results.
+#
+# Developer discipline: bump this when editing any file under
+# ``app/processing/language_editing/`` in a way that changes finding
+# output. Not bumping means stale results linger until the file bytes
+# or user-visible configuration happens to change.
+CACHE_VERSION: str = "v3"  # bumped for informal-title heading classification
+
+
+# Rule IDs that emit findings with ``original == suggestion`` on
+# purpose. They highlight a passage for reviewer attention rather than
+# proposing a rewrite, so the identity filter preserves them and the
+# serializer surfaces an ``advisory`` flag to the client. The frontend
+# uses this flag to drop the diff view + Accept/Edit actions (no
+# suggestion to apply) while keeping Highlight / Ignore.
+#
+# Two kinds of IDs sit here:
+#   * The raw function names (``max_sentence_length`` / ``passive_voice``)
+#     — safe default if a profile authored a rule without an explicit id.
+#   * Profile-assigned IDs. Every shipped style profile (uk / us / apa
+#     / ama / chicago / canadian / medical_pharmaceutical) uses
+#     ``SL001`` for ``max_sentence_length`` and ``SL005`` for
+#     ``passive_voice``. These are the IDs that land in ``rule_id`` on
+#     every persisted Finding row, so the GET /findings serializer
+#     must recognise them to derive ``advisory=True``.
+#
+# If a new profile ever binds a different id to one of the advisory
+# functions, add that id here too — otherwise findings from that
+# profile will render in the frontend as Case 1 (diff + Accept) even
+# though they ship original == suggestion by design.
+ADVISORY_RULE_IDS: frozenset[str] = frozenset({
+    "max_sentence_length", "passive_voice",
+    "SL001", "SL005",
+})
+
+# Entire finding categories that are advisory. Term-matcher highlights
+# ("Term from list: …") have no replacement by design — the finding IS
+# the list membership, not a rewrite — so they're treated the same as
+# the rule-level advisories above.
+ADVISORY_CATEGORIES: frozenset[str] = frozenset({"term"})
+
+
+def is_advisory_finding(rule_id: str, category: str) -> bool:
+    """True when the finding is informational — ``original`` equals
+    ``suggestion`` on purpose, with nothing for the reviewer to accept.
+    Covers two groups:
+      * rule-level — max_sentence_length, passive_voice
+      * category-level — term (term_matcher view-only highlights)
+
+    Called by the engine identity filter (preserve advisory findings),
+    the router term/typo aggregation loops (skip the identity check
+    for category=='term'), and the GET /findings serializer (surface
+    the ``advisory`` flag so the frontend hides Accept/Edit and the
+    diff view).
+    """
+    return rule_id in ADVISORY_RULE_IDS or category in ADVISORY_CATEGORIES
+
+
+# Backwards-compatible alias — callers that only know the rule_id can
+# still use this. Prefer ``is_advisory_finding(rule_id, category)`` in
+# new code.
+def is_advisory_rule(rule_id: str) -> bool:
+    return rule_id in ADVISORY_RULE_IDS
+
+
+def is_identity_suggestion(original: str, suggestion: str) -> bool:
+    """Whitespace-normalised identity check used by the engine filter
+    and by the router pipeline for non-engine finding sources
+    (``spell_check``, ``term_matcher``).
+
+    Case-sensitive — case-only differences (``icu`` → ``ICU``,
+    ``Covid`` → ``COVID``) are legitimate corrections and must pass
+    through. Comparison uses ``str.strip()`` so a bare leading/trailing
+    whitespace delta is treated as a no-op; meaningful internal
+    whitespace changes still differ.
+    """
+    return original.strip() == suggestion.strip()
+
+
+def _drop_identity_findings(findings: list[Finding]) -> list[Finding]:
+    """Remove findings whose suggestion is identical to the original
+    text after whitespace trimming. Nothing to apply, nothing to
+    review — these are workbook data-quality artefacts or regex
+    patterns that matched without substituting. Advisory findings
+    (``max_sentence_length`` / ``passive_voice``) intentionally emit
+    identical text as highlights; they are preserved.
+    """
+    out: list[Finding] = []
+    for f in findings:
+        if f.advisory or is_advisory_finding(f.rule_id, f.category):
+            out.append(f)
+            continue
+        if is_identity_suggestion(f.original, f.suggestion):
+            logger.debug(
+                "dropping identity finding rule_id=%s surface=%r suggestion=%r",
+                f.rule_id, f.original, f.suggestion,
+            )
+            continue
+        out.append(f)
+    return out

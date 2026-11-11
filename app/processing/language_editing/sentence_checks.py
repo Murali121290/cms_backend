@@ -32,7 +32,8 @@ def max_sentence_length(sent: str, off: int, rule: Rule, params: dict[str, Any])
             suggestion=t,
             message=f"Long sentence ({n} words > {limit}). Consider splitting.",
             severity=rule.severity or "suggestion",
-            autofixable=False
+            autofixable=False,
+            advisory=True,
         )]
     return []
 
@@ -133,6 +134,7 @@ def passive_voice(sent: str, off: int, rule: Rule, params: dict[str, Any]) -> li
             suggestion=m.group(0),
             message="Possible passive voice; consider an active construction.",
             severity=rule.severity or "suggestion",
-            autofixable=False
+            autofixable=False,
+            advisory=True,
         ))
     return out

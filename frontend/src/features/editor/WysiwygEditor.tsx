@@ -539,6 +539,20 @@ export interface WysiwygEditorHandle {
     replacementText: string,
     options?: { asTrackChanges?: boolean; highlightOnly?: boolean }
   ) => boolean;
+  // Dirty-state introspection used by the Language Review page to
+  // auto-save editor changes before the analyze endpoint is called
+  // (the backend cache keys on the DOCX bytes on disk, so unsaved
+  // edits would otherwise return stale cached findings).
+  getDirty: () => boolean;
+  // Current HTML — same form that ``handleSave`` sends to onSave.
+  // Callers that just want to persist should prefer ``save()`` below;
+  // this is here for callers that need the string for other purposes.
+  getHTML: () => string;
+  // Programmatic save — wraps the internal handleSave so callers can
+  // persist edits without synthesising a toolbar click. Resolves on
+  // completion; rejects / swallows errors in the same way the
+  // toolbar Save button does.
+  save: () => Promise<void>;
 }
 
 export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>(
@@ -1272,8 +1286,22 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         addCommentToSelection,
         scrollToComment,
         replaceOccurrence,
+        getDirty: () => isDirty,
+        getHTML: () => {
+          try {
+            return editor?.getHTML?.() ?? "";
+          } catch (err) {
+            console.error("[WysiwygEditor.getHTML] failed:", err);
+            return "";
+          }
+        },
+        save: async () => {
+          // Delegate to the live handleSave ref so the latest closure
+          // runs (otherwise we'd capture the first render's onSave).
+          await handleSaveRef.current();
+        },
       }),
-      [editor, openCommentDialog, addCommentToSelection, scrollToComment, replaceOccurrence],
+      [editor, openCommentDialog, addCommentToSelection, scrollToComment, replaceOccurrence, isDirty],
     );
 
     // ── Keyboard shortcuts ───────────────────────────────────────────────────

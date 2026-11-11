@@ -123,6 +123,46 @@ _HEADING_TAG_RE = re.compile(r"^<\s*h(\d+)\b", re.IGNORECASE)
 _CAPTION_TEXT_RE = re.compile(r"^(table|figure|fig\.)\s+\d", re.IGNORECASE)
 _TITLE_TAG_RE = re.compile(r"^<\s*(title|ct|pt)\b", re.IGNORECASE)
 
+# Characters that terminate a sentence. A paragraph whose last non-
+# whitespace character is one of these is sentence-terminated; one that
+# isn't may be an informal title (see ``_is_informal_title`` below).
+_TERMINAL_PUNCTUATION_CHARS = frozenset('.!?:;"\')]')
+
+
+def _is_informal_title(p) -> bool:
+    """Detect section titles that the DOCX author formatted as bolded
+    runs inside a plain ``Normal`` paragraph instead of applying a
+    Heading / Title style. Classic pattern in copy-edited manuscripts:
+    ``THE STUDY`` or ``Impact of ... quality of life`` sit as 100%-
+    bold ``Normal`` paragraphs with no terminal punctuation, directly
+    above the running prose.
+
+    Signal: every non-empty run in the paragraph is bold AND the
+    paragraph has no sentence-terminating punctuation. The combination
+    is distinctive — a body paragraph with emphasis-bolding has
+    mixed-bold runs, and a legitimate sentence ends in a terminator.
+
+    Returns False on empty paragraphs so the caller can fall through
+    to its existing body-vs-caption logic.
+    """
+    text = (p.text or "").strip()
+    if not text:
+        return False
+    if text[-1] in _TERMINAL_PUNCTUATION_CHARS:
+        return False
+    # Inspect all runs that carry visible text. If every one is bold
+    # (``run.bold is True`` — explicitly set, not inherited-as-None),
+    # treat the paragraph as an informal title. A single non-bold run
+    # anywhere drops it back to body.
+    has_run = False
+    for r in p.runs:
+        if not (r.text or "").strip():
+            continue
+        has_run = True
+        if r.bold is not True:
+            return False
+    return has_run
+
 
 def classify_paragraphs(doc) -> dict[int, dict]:
     """Return per-paragraph role metadata keyed by python-docx index.
@@ -138,6 +178,11 @@ def classify_paragraphs(doc) -> dict[int, dict]:
       * ``in_table``          — True inside ``<table>…</table>`` or Table-
                                 styled runs
       * ``in_figure``         — True inside ``<figure>`` / ``<fig>`` …
+      * ``in_epigraph``       — True inside ``<epigraph>…</epigraph>`` or
+                                Epigraph-styled paragraphs
+      * ``in_src``            — True inside ``<src>…</src>`` (code /
+                                source blocks) or Code/Source-styled
+                                paragraphs
 
     The role / in_* flags carry through adjacent paragraphs until the
     closing tag is seen. The paragraphs between those tags all share the
@@ -147,19 +192,30 @@ def classify_paragraphs(doc) -> dict[int, dict]:
     in_abstract = False
     in_table = False
     in_figure = False
+    in_epigraph = False
+    in_src = False
     for i, p in enumerate(doc.paragraphs):
         text = (p.text or "").strip()
         style = (p.style.name if p.style else "") or ""
         tl = text.lower()
+        style_lc_boundary = style.strip().lower()
 
         # Boundary tags (open BEFORE classifying this paragraph; close
         # AFTER so a tag paragraph itself is still inside its region).
-        if "<abstract>" in tl or style.strip().lower() == "abstract":
+        if "<abstract>" in tl or style_lc_boundary == "abstract":
             in_abstract = True
         if "<table>" in tl:
             in_table = True
         if "<figure>" in tl or "<fig>" in tl:
             in_figure = True
+        # Epigraph: author quote block at chapter start. Boundary tag OR
+        # the Word paragraph style literally named "Epigraph".
+        if "<epigraph>" in tl or style_lc_boundary == "epigraph":
+            in_epigraph = True
+        # Source / code block. Boundary tag OR Code / Source / SourceCode /
+        # CodeBlock paragraph styles (common conventions across templates).
+        if "<src>" in tl or style_lc_boundary in {"code", "source", "sourcecode", "codeblock", "src"}:
+            in_src = True
 
         role = "body"
         level: int | None = None
@@ -190,6 +246,13 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             role = "reference"
         elif style_lc.startswith("caption") or _CAPTION_TEXT_RE.match(text):
             role = "caption"
+        elif _is_informal_title(p):
+            # Fallback — paragraph is styled ``Normal`` but every run is
+            # bold and there's no terminal punctuation. Treat as a
+            # heading so the router's paragraph-exclusion gate skips it
+            # for every rule category (no spurious terminal_punctuation
+            # or passive_voice findings on titles).
+            role = "heading"
 
         out[i] = {
             "style": style,
@@ -199,6 +262,8 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             "in_abstract": in_abstract,
             "in_table": in_table,
             "in_figure": in_figure,
+            "in_epigraph": in_epigraph,
+            "in_src": in_src,
             "text": p.text or "",
         }
 
@@ -209,6 +274,10 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             in_table = False
         if "</figure>" in tl or "</fig>" in tl:
             in_figure = False
+        if "</epigraph>" in tl:
+            in_epigraph = False
+        if "</src>" in tl:
+            in_src = False
     return out
 
 

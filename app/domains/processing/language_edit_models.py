@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -18,8 +18,29 @@ class LanguageEditJob(Base):
     accepted_count = Column(Integer, default=0)
     edited_count = Column(Integer, default=0)
     rejected_count = Column(Integer, default=0)
+    # Cache key — populated at analyze time. ``content_hash`` is sha256
+    # of the DOCX bytes on disk; ``rules_hash`` is sha256 of a canonical
+    # JSON blob covering every analysis-affecting input (profile_keys,
+    # custom_rules, rule_overrides, document_variant, assigned term-list
+    # IDs, CACHE_VERSION, …). A repeat analyze on an unchanged file with
+    # unchanged configuration matches this (file_id, content_hash,
+    # rules_hash) triple and returns the existing job instead of
+    # re-running the engine. The UNIQUE constraint on the triple also
+    # provides race-safe singleton insertion — concurrent analyze calls
+    # that both miss the cache hit IntegrityError on the second insert
+    # and re-query to converge on the first row's job_id. Both columns
+    # are nullable so legacy rows load cleanly; they never satisfy a
+    # cache lookup (NULL-distinct on both SQLite and Postgres) so they
+    # trigger one fresh analyze and then populate the cache.
+    content_hash = Column(String(64), nullable=True)
+    rules_hash = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("file_id", "content_hash", "rules_hash", name="uq_language_edit_jobs_cache_key"),
+        Index("ix_language_edit_jobs_cache_lookup", "file_id", "content_hash", "rules_hash"),
+    )
 
     file = relationship("File", foreign_keys=[file_id])
     project = relationship("Project", foreign_keys=[project_id])

@@ -1079,7 +1079,18 @@ def _emit_doc_scope_findings(
         # expansion mention should be compressed to the abbreviation.
         # Also fires when the author DEFINED the term explicitly — later
         # expansions compress against the explicit definition's position.
+        #
+        # Guard (mirrors AB01, see commit e7cdd62): the abbreviation form
+        # itself must appear somewhere in the document. Without this
+        # check, prose that uses common English words that happen to be
+        # workbook expansions of informal shorthands (history→Hx,
+        # symptoms→Sx, treatment→Tx, blood pressure→BP, …) misfires
+        # whenever the expansion appears ≥ min_uses times. AB02's job
+        # is "compress the expansion to the abbreviation" — if the
+        # abbreviation isn't being used at all, there's nothing to
+        # compress toward.
         if (total_uses >= min_uses
+                and s.abbr_occurrences
                 and not _rule_disabled_by_override("AB02", rule_overrides)):
             # Compute the "anchor" position after which later expansions
             # compress. If a definition exists, use the FIRST definition's
