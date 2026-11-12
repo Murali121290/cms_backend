@@ -24,6 +24,7 @@ from app.domains.processing.service import check_permission
 from app.models import User
 
 from app.processing.language_editing import (
+    abbreviations,
     abbreviations_metadata,
     basic_grammar,
     custom_dict,
@@ -1387,80 +1388,278 @@ def get_job_findings(
             "edited_count": job.edited_count,
             "rejected_count": job.rejected_count,
         },
-        "findings": [
-            {
-                "id": f.id,
-                "para_index": f.para_index,
-                "start_offset": f.start_offset,
-                "end_offset": f.end_offset,
-                "rule_id": f.rule_id,
-                "category": f.category,
-                "severity": f.severity,
-                "original_text": f.original_text,
-                "suggestion": f.suggestion,
-                # Workbook rules can offer 2–3 replacements; the Phase-3 UI
-                # dropdown reads this list. Empty / null for rows that have
-                # no alternates — identical shape to the pre-workbook behaviour.
-                "alt_suggestions": f.alt_suggestions or [],
-                "message": f.message,
-                "autofixable": f.autofixable,
-                "status": f.status,
-                "edited_text": f.edited_text,
-                "reviewer": f.reviewer,
-                "decided_at": f.decided_at.isoformat() if f.decided_at else None,
-                "source": getattr(f, "source", "rule"),
-                "term_list_id": getattr(f, "term_list_id", None),
-                # Phase 2 — Abbreviations metadata propagation. Pulls per-row
-                # workbook fields (problem_label, note, MW lookup, confidence,
-                # tool_behaviour, applies_in) from the loaded JSON profiles
-                # and, for AB07, surfaces the ambiguous meanings sorted by
-                # cue score. Keys are always present (null when not
-                # applicable) so the frontend sees a consistent shape and
-                # legacy jobs (pre-workbook rows) still serialise fine.
-                **abbreviations_metadata.enrich_finding(
-                    f.rule_id,
-                    f.original_text,
-                    f.suggestion,
-                    f.alt_suggestions or [],
-                ),
-                # Advisory findings carry no actionable replacement —
-                # original equals suggestion on purpose. Two sources:
-                #   * rule-level: passive_voice, max_sentence_length
-                #   * category-level: term (term-matcher highlights)
-                # The frontend hides Accept/Edit and the diff view for
-                # these so the card presents as a "consider this" nudge.
-                # Derived server-side from the rule_id/category whitelist;
-                # the DB intentionally does not store this flag.
-                "advisory": engine.is_advisory_finding(f.rule_id, f.category),
-                # Provenance badge used by the frontend to decide
-                # whether to show the finding's description. The LWW-NE
-                # workbook engine stamps ``rule_id`` with an ``LWW-NE-``
-                # prefix on every row it emits (see lww_ne.py), which
-                # makes the prefix the stable identity marker — not
-                # free-text match on the message. Serialise it as a
-                # clean semantic field so the UI doesn't have to know
-                # the prefix convention.
-                "source_badge": (
-                    "LWW-NE"
-                    if isinstance(f.rule_id, str) and f.rule_id.startswith("LWW-NE-")
-                    else None
-                ),
-                # Fine-grained source label for the finding card header.
-                # Workbook rules get their originating sheet name
-                # (``Article Usage``, ``Subject-Verb Agreement``,
-                # ``Common Misuse``, ``Word/Phrase Choice``,
-                # ``Sentence Structure``, ``Basic Grammar``,
-                # ``Punctuation and Capitalization``). Non-workbook
-                # findings return None and the frontend falls back to
-                # its existing ``displayCategory`` derivation. Derived
-                # server-side from the rule_id → sheet lookup so no DB
-                # column is needed and legacy jobs keep working.
-                "subcategory": basic_grammar.subcategory_for(f.rule_id),
-                "decided_at": (f.decided_at.replace(tzinfo=datetime.timezone.utc).isoformat() if f.decided_at.tzinfo is None else f.decided_at.isoformat()) if f.decided_at else None,
-            }
-            for f in findings
-        ]
+        "findings": [_serialize_finding_row(f) for f in findings],
     }
+
+
+def _serialize_finding_row(f: LanguageEditFinding) -> dict:
+    """Row-shape helper for the GET /findings serializer AND the
+    decide endpoint's refreshed-findings bundle. Keeps the two paths
+    emitting IDENTICAL shape so the frontend has a single model for
+    a finding whether it arrives via list or decision response."""
+    return {
+        "id": f.id,
+        "para_index": f.para_index,
+        "start_offset": f.start_offset,
+        "end_offset": f.end_offset,
+        "rule_id": f.rule_id,
+        "category": f.category,
+        "severity": f.severity,
+        "original_text": f.original_text,
+        "suggestion": f.suggestion,
+        "alt_suggestions": f.alt_suggestions or [],
+        "message": f.message,
+        "autofixable": f.autofixable,
+        "status": f.status,
+        "edited_text": f.edited_text,
+        "reviewer": f.reviewer,
+        "source": getattr(f, "source", "rule"),
+        "term_list_id": getattr(f, "term_list_id", None),
+        **abbreviations_metadata.enrich_finding(
+            f.rule_id,
+            f.original_text,
+            f.suggestion,
+            f.alt_suggestions or [],
+        ),
+        **abbreviations_metadata.grouping_fields_for(
+            f.rule_id,
+            f.original_text,
+            f.suggestion,
+        ),
+        "advisory": engine.is_advisory_finding(f.rule_id, f.category),
+        "source_badge": (
+            "LWW-NE"
+            if isinstance(f.rule_id, str) and f.rule_id.startswith("LWW-NE-")
+            else None
+        ),
+        "subcategory": basic_grammar.subcategory_for(f.rule_id),
+        "decided_at": (
+            f.decided_at.replace(tzinfo=datetime.timezone.utc).isoformat()
+            if f.decided_at and f.decided_at.tzinfo is None
+            else (f.decided_at.isoformat() if f.decided_at else None)
+        ),
+    }
+
+
+def _apply_patches_to_text(text: str, patches: list[tuple[int, int, str]]) -> str:
+    """Apply (start, end, replacement) patches to ``text`` right-to-
+    left so earlier offsets stay valid as we go. Patches whose spans
+    fall outside ``text`` are skipped — defensive since the DOCX
+    file on disk never changes between analyze and re-analyze, but a
+    future edit elsewhere could invalidate offsets."""
+    out = text
+    for start, end, replacement in sorted(patches, key=lambda p: p[0], reverse=True):
+        if 0 <= start <= end <= len(out):
+            out = out[:start] + (replacement or "") + out[end:]
+    return out
+
+
+def _reanalyze_abbreviations_for_job(
+    job: LanguageEditJob, db: Session
+) -> Optional[list[LanguageEditFinding]]:
+    """Rebuild the AB finding set for ``job`` after an Accept/Edit.
+
+    Why: the review workflow lets a reviewer accept a first-use AB01
+    (``intensive care unit`` → ``intensive care unit (ICU)``) and
+    expects the panel to reflect the post-edit state — notably that
+    subsequent AB01 findings on the same paragraph pattern are gone
+    and that AB02 "repeated expansion" or other downstream AB rules
+    are recomputed against the patched text. Running this on the
+    live DOCX would overwrite the user's file; instead we apply
+    accepted/edited AB patches to an in-memory virtual paragraph
+    buffer and re-run the AB analyzer against that buffer.
+
+    Guarantees:
+      * Only AB01-AB17 findings are rewritten. DN01-32, LWW-NE,
+        grammar, spelling, hyphenation, medical terms, term-matcher,
+        and typo rows stay untouched.
+      * Only PENDING AB findings are deleted. Decided rows (accepted,
+        edited, rejected, highlighted) survive so the reviewer's
+        decision history isn't wiped.
+      * Prior Reject / Highlight decisions survive re-analysis — if
+        a re-analysis would re-emit the same (para_index, rule_id,
+        original_text) as an already-decided rejected/highlighted
+        row, the new finding is suppressed. This prevents an ignored
+        finding from silently coming back.
+      * New pending AB findings are inserted with virtual-text
+        offsets (post-patch). The frontend's WysiwygEditor already
+        applied each accepted replacement via ``replaceOccurrence()``,
+        so its content IS the virtual text and the highlights
+        line up.
+
+    Returns the full list of findings for the job after rewrite, or
+    ``None`` when the re-analysis can't run (missing file, I/O
+    error) — in which case the caller falls back to leaving the
+    pending set alone and the reviewer can trigger a full
+    re-analysis via a new POST /analyze if they want the refresh.
+    """
+    file_record = db.query(models.File).filter(models.File.id == job.file_id).first()
+    if not file_record or not file_record.path:
+        return None
+
+    all_findings = (
+        db.query(LanguageEditFinding)
+        .filter(LanguageEditFinding.job_id == job.job_id)
+        .all()
+    )
+
+    def _is_ab(f: LanguageEditFinding) -> bool:
+        return bool(f.rule_id) and f.rule_id.startswith("AB")
+
+    ab_accepted_or_edited = [
+        f for f in all_findings if _is_ab(f) and f.status in ("accepted", "edited")
+    ]
+    ab_rejected_or_highlighted = [
+        f for f in all_findings if _is_ab(f) and f.status in ("rejected", "highlighted")
+    ]
+
+    # Build patch map keyed by paragraph. ``edited`` findings use the
+    # reviewer's custom text; ``accepted`` findings use the rule's
+    # suggestion. Both become (start, end, replacement) tuples.
+    patches_by_para: dict[int, list[tuple[int, int, str]]] = {}
+    for f in ab_accepted_or_edited:
+        replacement = (
+            f.edited_text if (f.status == "edited" and f.edited_text is not None)
+            else (f.suggestion or "")
+        )
+        patches_by_para.setdefault(f.para_index, []).append(
+            (f.start_offset, f.end_offset, replacement)
+        )
+
+    try:
+        doc_obj, paragraphs = docx_io.read_paragraphs(file_record.path)
+    except Exception as exc:
+        logger.warning("reanalyze_ab: failed to read DOCX at %s: %s", file_record.path, exc)
+        return None
+    try:
+        para_roles = docx_io.classify_paragraphs(doc_obj)
+    except Exception as exc:
+        logger.warning("reanalyze_ab: classify failed: %s", exc)
+        para_roles = {}
+
+    _EXCLUDED_ROLES = {"heading", "title", "reference", "caption", "extract"}
+    _EXCLUDED_REGION_FLAGS = (
+        "in_table", "in_figure", "in_abstract", "in_epigraph", "in_src",
+        "in_extract", "in_references",
+    )
+
+    def _is_excluded(pi: int) -> bool:
+        roles = (para_roles or {}).get(pi) or {}
+        if roles.get("role") in _EXCLUDED_ROLES:
+            return True
+        return any(roles.get(flag) for flag in _EXCLUDED_REGION_FLAGS)
+
+    # Build virtual paragraphs (original + patches) once.
+    virtual_paragraphs: list[tuple[int, str]] = [
+        (pi, _apply_patches_to_text(text, patches_by_para.get(pi, [])))
+        for pi, text in paragraphs
+    ]
+
+    # Rebuild the AB document state over the virtual text so AB10
+    # article-agreement, AB01/02 first-use tracking, and AB04/05
+    # single-use counters reflect the post-edit document. Use
+    # safe defaults — project-config-driven audience / min_uses
+    # drifted could change results slightly, but the Accept/Edit
+    # refresh is primarily a "did this accept remove the following
+    # findings" check; exact min_uses alignment isn't load-bearing.
+    try:
+        abbr_state = abbreviations.build_document_state(
+            virtual_paragraphs, audience="general", min_uses=2,
+            para_roles=para_roles,
+        )
+    except Exception as exc:
+        logger.warning("reanalyze_ab: failed to build doc state: %s", exc)
+        abbr_state = {}
+
+    # Suppression index: (para_index, rule_id, original_text) of the
+    # reviewer's past Reject / Highlight decisions. Re-analysis must
+    # not resurrect a finding the reviewer explicitly ignored.
+    suppressed_keys: set[tuple[int, str, str]] = {
+        (f.para_index, f.rule_id, f.original_text)
+        for f in ab_rejected_or_highlighted
+    }
+
+    # Produce new AB findings against the virtual document.
+    new_findings_rows: list[LanguageEditFinding] = []
+    for pi, v_text in virtual_paragraphs:
+        if _is_excluded(pi):
+            continue
+        if not v_text:
+            continue
+        try:
+            found = abbreviations.analyze_abbreviations(
+                v_text, para_idx=pi,
+                document_state=abbr_state, para_roles=para_roles,
+            )
+        except Exception as exc:
+            logger.warning("reanalyze_ab: analyze failed at para %s: %s", pi, exc)
+            continue
+        for fd in found:
+            if not fd.rule_id or not fd.rule_id.startswith("AB"):
+                continue  # only AB rules in this re-analysis
+            key = (pi, fd.rule_id, fd.original)
+            if key in suppressed_keys:
+                continue
+            new_findings_rows.append(LanguageEditFinding(
+                job_id=job.job_id,
+                file_id=job.file_id,
+                para_index=pi,
+                start_offset=fd.start,
+                end_offset=fd.end,
+                rule_id=fd.rule_id,
+                category=fd.category,
+                severity=fd.severity,
+                original_text=fd.original,
+                suggestion=fd.suggestion,
+                message=fd.message,
+                autofixable=fd.autofixable,
+                status="pending",
+                source="rule",
+                alt_suggestions=list(getattr(fd, "alt_suggestions", []) or []) or None,
+            ))
+
+    # Dedup within the newly-produced set so an AB rule emitting the
+    # same (para, start, end, rule_id, original) twice doesn't double
+    # up in the DB. Keys are exact-span + rule — different rules on
+    # the same span legitimately coexist.
+    seen_spans: set[tuple[int, int, int, str, str]] = set()
+    deduped_new_rows: list[LanguageEditFinding] = []
+    for row in new_findings_rows:
+        k = (row.para_index, row.start_offset, row.end_offset, row.rule_id, row.original_text)
+        if k in seen_spans:
+            continue
+        seen_spans.add(k)
+        deduped_new_rows.append(row)
+
+    # Delete the stale pending AB rows and bulk-insert the fresh set
+    # in a single transaction so GET /findings never observes a
+    # half-rewritten view.
+    (
+        db.query(LanguageEditFinding)
+        .filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.status == "pending",
+            LanguageEditFinding.rule_id.like("AB%"),
+        )
+        .delete(synchronize_session=False)
+    )
+    if deduped_new_rows:
+        db.bulk_save_objects(deduped_new_rows)
+
+    # Keep job.total_findings consistent with the new row count.
+    job.total_findings = (
+        db.query(LanguageEditFinding)
+        .filter(LanguageEditFinding.job_id == job.job_id)
+        .count()
+    )
+    db.commit()
+
+    return (
+        db.query(LanguageEditFinding)
+        .filter(LanguageEditFinding.job_id == job.job_id)
+        .order_by(LanguageEditFinding.para_index, LanguageEditFinding.start_offset)
+        .all()
+    )
 
 
 @router.post("/language-edit/findings/{finding_id}/decide")
@@ -1505,13 +1704,37 @@ def decide_finding(
             job.rejected_count += 1
 
     db.commit()
+
+    # AB Accept / Edit triggers an in-place re-analysis so grouped
+    # occurrences reflect the post-edit document (requirement:
+    # subsequent-use findings must update after the first-use
+    # expansion is accepted). We only re-run AB rules — DN rules
+    # and every other category stay as-is per scope. Re-analysis
+    # replaces pending AB rows, preserves decided rows, suppresses
+    # re-emission on previously rejected/highlighted spans, and
+    # dedups within the new row set. See ``_reanalyze_abbreviations_for_job``.
+    refreshed_rows: Optional[list[LanguageEditFinding]] = None
+    if (
+        job is not None
+        and finding.rule_id
+        and finding.rule_id.startswith("AB")
+        and finding.status in ("accepted", "edited")
+    ):
+        try:
+            refreshed_rows = _reanalyze_abbreviations_for_job(job, db)
+        except Exception as exc:
+            logger.exception("AB re-analysis after decide failed: %s", exc)
+            refreshed_rows = None
+
     # Phase 5 — return a small re-analyze bundle so the frontend can
     # refresh counters + authoritative finding state without an extra
     # GET /findings round-trip after every decision. Additive: legacy
-    # callers that only read ``ok`` / ``status`` keep working. The
-    # ``finding`` block is already re-enriched via Phase-2 metadata so
-    # the UI sees the same shape it got on the initial load.
-    return {
+    # callers that only read ``ok`` / ``status`` keep working. When
+    # re-analysis ran, the full refreshed findings list rides along
+    # under ``findings`` so the grouped UI can replace its local
+    # state without a second fetch (prevents stale cards and
+    # duplicate occurrences).
+    response: dict = {
         "ok": True,
         "finding_id": finding.id,
         "status": finding.status,
@@ -1540,6 +1763,10 @@ def decide_finding(
             "rejected_count": job.rejected_count,
         } if job else None,
     }
+    if refreshed_rows is not None:
+        response["findings"] = [_serialize_finding_row(f) for f in refreshed_rows]
+        response["reanalyzed"] = True
+    return response
 
 
 @router.post("/language-edit/jobs/{job_id}/export")

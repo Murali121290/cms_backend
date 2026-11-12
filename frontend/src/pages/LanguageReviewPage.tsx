@@ -55,6 +55,8 @@ import { replaceOptionsFor } from '@/features/language_edit/replaceOptions'
 import { isAdvisoryIdentity, isSentenceAdvisory } from '@/features/language_edit/advisoryFinding'
 import { displayCategoryFor } from '@/features/language_edit/findingLabel'
 import { SaveRegexAsRuleDialog, type RegexDraft } from '@/features/language_edit/SaveRegexAsRuleDialog'
+import { buildAbbreviationGroups, isDisplayableGroup, type AbbreviationGroup } from '@/features/language_edit/abbreviationGroups'
+import { AbbreviationGroupCard } from '@/features/language_edit/AbbreviationGroupCard'
 
 interface Finding {
   id: number
@@ -124,6 +126,17 @@ interface Finding {
   first_use_rule?: string | null
   ambiguity?: string | null
   meanings?: Array<{ meaning: string; is_best_match: boolean }> | null
+  // Grouping fields — populated only for AB rules by the backend's
+  // abbreviations_metadata.grouping_fields_for helper. Non-AB findings
+  // get all three set to null and the Abbreviations tab falls back to
+  // rendering them individually. The frontend groups solely by the
+  // opaque ``group_key`` string — mismatches in rule_id / abbreviation
+  // / canonical expansion make the key differ and the reducer buckets
+  // them separately (requirement: different rules or different
+  // expansions ⇒ different groups).
+  abbreviation?: string | null
+  expansion?: string | null
+  group_key?: string | null
 }
 
 // "Term from list: <name>" or "Term from list: <name> (also in: <names>)"
@@ -500,7 +513,7 @@ export function LanguageReviewPage() {
     const editedText = editedInputs[findingId] ?? finding?.suggestion ?? ''
 
     try {
-      await apiClient.post(`/language-edit/findings/${findingId}/decide`, {
+      const resp = await apiClient.post(`/language-edit/findings/${findingId}/decide`, {
         status,
         edited_text: status === 'edited' ? editedText : undefined,
         reviewer: 'editor'
@@ -530,12 +543,42 @@ export function LanguageReviewPage() {
         }
       }
 
-      setFindings(prev =>
-        prev.map(f => (f.id === findingId ? { ...f, status, edited_text: editedText } : f))
-      )
+      // AB Accept / Edit may trigger a server-side re-analysis of
+      // the abbreviation finding set (see backend
+      // ``_reanalyze_abbreviations_for_job``). When it does, the
+      // response carries ``reanalyzed: true`` and a refreshed
+      // ``findings`` list. Replace local state atomically so group
+      // cards reflect the post-edit document — no stale occurrences,
+      // no duplicate rows. Collapse state keyed by
+      // ``abbreviation|expansion`` survives the swap because the
+      // backend produces stable group keys.
+      const refreshed = (resp?.data && Array.isArray((resp.data as any).findings))
+        ? ((resp.data as any).findings as Finding[])
+        : null
+      if (refreshed) {
+        setFindings(refreshed)
+      } else {
+        setFindings(prev =>
+          prev.map(f => (f.id === findingId ? { ...f, status, edited_text: editedText } : f))
+        )
+      }
 
+      // Job counters: when the backend re-analyzed, trust its totals
+      // (they reflect the post-rewrite row count). Otherwise fall
+      // back to the optimistic delta so the dashboard updates
+      // instantly for non-AB decides.
+      const refreshedJob = (resp?.data && (resp.data as any).job) || null
       setJob(prev => {
         if (!prev) return prev
+        if (refreshedJob) {
+          return {
+            ...prev,
+            total_findings: refreshedJob.total_findings ?? prev.total_findings,
+            accepted_count: refreshedJob.accepted_count ?? prev.accepted_count,
+            edited_count: refreshedJob.edited_count ?? prev.edited_count,
+            rejected_count: refreshedJob.rejected_count ?? prev.rejected_count,
+          }
+        }
         const oldStatus = findings.find(f => f.id === findingId)?.status
         let accepted = prev.accepted_count
         let edited = prev.edited_count
@@ -938,11 +981,528 @@ export function LanguageReviewPage() {
     )
   }, [activeRightTab, pendingFindings, grammarFindings, spellingFindings, sentenceFindings, inclusiveFindings, typoFindings, hyphenationFindings, abbreviationFindings, medicalTermsFindings, searchQuery])
 
+  // Abbreviation grouping — AB-tab only. Coalesces occurrences that
+  // share (rule_id, abbreviation, canonical expansion) into a single
+  // visual card. The backend sets ``group_key`` on AB findings only;
+  // anything without a group_key (non-AB rows that slip into the
+  // panel, or AB findings whose abbreviation couldn't be extracted)
+  // falls back to its own singleton group and renders as today.
+  //
+  // Single-occurrence groups also render flat (no header, no
+  // collapse) — a group header for a lone finding is noise.
+  //
+  // The result is a document-order-sorted array of groups; within
+  // each group, members are also in document order. The sort key is
+  // the paragraph index of the earliest member.
+  const abbreviationGroups = useMemo(() => {
+    if (activeRightTab !== 'abbreviations') return []
+    return buildAbbreviationGroups(activeCategoryFindings)
+  }, [activeRightTab, activeCategoryFindings])
+
+  // Collapse state for AB groups. Empty by default — groups start
+  // expanded so the reviewer sees every occurrence; clicking the
+  // header toggles. Keyed by group_key.
+  const [collapsedAbbrGroups, setCollapsedAbbrGroups] = useState<Set<string>>(new Set())
+  const toggleAbbrGroup = useCallback((key: string) => {
+    setCollapsedAbbrGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
   // Realtime progress statistics
   const totalFindingsCount = job?.total_findings || findings.length || 0
   const resolvedCount = (job?.accepted_count || 0) + (job?.edited_count || 0) + (job?.rejected_count || 0)
   const remainingCount = Math.max(0, totalFindingsCount - resolvedCount)
   const progressPercentage = totalFindingsCount > 0 ? Math.min(100, Math.round((resolvedCount / totalFindingsCount) * 100)) : 0
+
+  // Thin wrapper: renders the presentational AbbreviationGroupCard
+  // with the page's handlers wired in. Kept as a function so the
+  // JSX render path can call it as ``renderAbbreviationGroupCard(group)``
+  // uniformly with ``renderFlatFindingCard(f)``.
+  const renderAbbreviationGroupCard = (group: AbbreviationGroup<Finding>) => (
+    <AbbreviationGroupCard
+      key={group.key}
+      group={group}
+      collapsed={collapsedAbbrGroups.has(group.key)}
+      onToggleCollapse={toggleAbbrGroup}
+      selectedFindingId={selectedFindingId}
+      editingFindingId={editingFindingId}
+      editedInputs={editedInputs}
+      onSelectFinding={(id) => {
+        setSelectedFindingId(id)
+        focusOccurrenceInEditor(id)
+      }}
+      onDecide={handleDecide}
+      onToggleEdit={(id) => setEditingFindingId(prev => prev === id ? null : id)}
+      onEditInputChange={(id, value) => setEditedInputs({ ...editedInputs, [id]: value })}
+      onRowMount={(id, el) => { cardRefs.current[id] = el as any }}
+    />
+  )
+
+
+  // Extracted from the former inline ``activeCategoryFindings.map(f => {...})``
+  // body. Rendering logic for a single flat finding card — used by
+  // every non-Abbreviations tab AND by the Abbreviations tab for
+  // singleton AB groups / findings without a group_key (DN rules,
+  // findings whose abbreviation couldn't be extracted). The AB tab's
+  // multi-occurrence groups render via ``renderAbbreviationGroupCard``
+  // above — a single outer card containing compact occurrence rows,
+  // not the flat per-card layout.
+  const renderFlatFindingCard = (f: Finding) => {
+    const isSelected = f.id === selectedFindingId
+    const isAccepted = f.status === 'accepted'
+    const isEdited = f.status === 'edited'
+    const isRejected = f.status === 'rejected'
+    const isTerm = f.category === 'term' || f.source === 'term'
+
+    const catColorMap: Record<string, { border: string; text: string; bg: string }> = {
+      grammar: { border: 'border-l-orange-400', text: 'text-orange-600', bg: 'bg-orange-50' },
+      spelling: { border: 'border-l-sky-400', text: 'text-sky-600', bg: 'bg-sky-50' },
+      sentence: { border: 'border-l-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
+      // Hyphenation absorbs the old Compounds category. Legacy
+      // category values stay in the map (teal) so pre-merge
+      // jobs render consistently alongside new findings.
+      hyphenation: { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
+      compounds:   { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
+      compound:    { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
+      bias: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
+      article: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
+      term: { border: 'border-l-violet-400', text: 'text-violet-700', bg: 'bg-violet-50' },
+      typo: { border: 'border-l-red-400', text: 'text-red-600', bg: 'bg-red-50' },
+      medical_terms: { border: 'border-l-green-500', text: 'text-green-700', bg: 'bg-green-50' },
+      abbreviations: { border: 'border-l-indigo-400', text: 'text-indigo-600', bg: 'bg-indigo-50' },
+    }
+
+    const catStyle = catColorMap[f.category] || { border: 'border-l-violet-400', text: 'text-violet-600', bg: 'bg-violet-50' }
+    // Card header label — delegates to the shared helper
+    // so the logic is unit-tested in isolation. Sidebar
+    // grouping is driven by ``f.category`` upstream,
+    // not by this label.
+    const displayCategory = displayCategoryFor(f)
+    // Provenance badge: distinguishes rule sources without
+    // needing separate filter tabs. Hyphenation findings
+    // get "Workbook" (hyphen/dash workbook) vs "LWW list"
+    // (hardcoded compound_* rules). All categories gain
+    // an "LWW-NE" badge when the finding came from the
+    // LWW-NE workbook — identified via the structured
+    // ``source_badge`` field set server-side in the GET
+    // /findings serializer, not by prefix-matching on
+    // the rule name here.
+    const isLwwNe = f.source_badge === 'LWW-NE'
+    const hyphSource = isLwwNe
+      ? 'LWW-NE'
+      : displayCategory === 'hyphenation'
+        ? (f.rule_id?.startsWith('compound_') ? 'LWW list' : 'Workbook')
+        : null
+
+    // Phase-3 Abbreviations UI flags. DN rules are
+    // patient-safety notations (DN01-DN32) — rendered
+    // with a red stripe + "Do not use" banner so they
+    // stand out from style/grammar findings. AB07 is
+    // the ambiguous-abbreviation rule and gets a
+    // meaning picker instead of a single-suggestion
+    // diff.
+    const isDnRule = !!f.rule_id && f.rule_id.startsWith('DN')
+    const isAb07 = f.rule_id === 'AB07'
+    const meanings = Array.isArray(f.meanings) ? f.meanings : []
+    const hasAb07Meanings = isAb07 && meanings.length > 0
+
+    if (isTerm) {
+      const { listName, alsoIn } = parseTermMeta(f.message)
+      return (
+        <div
+          key={f.id}
+          ref={(el) => (cardRefs.current[f.id] = el)}
+          onClick={() => {
+            setSelectedFindingId(f.id)
+            focusOccurrenceInEditor(f.id)
+          }}
+          className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${catStyle.border} ${
+            isSelected ? 'ring-2 ring-violet-400 border-violet-400 shadow-md' : ''
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
+              Term
+            </span>
+            <span className="text-[11px] text-slate-400">
+              Para {f.para_index + 1}
+            </span>
+          </div>
+
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center px-2 py-1 rounded-lg bg-violet-100 text-violet-800 text-sm font-semibold">
+              {f.original_text}
+            </span>
+            {listName && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-violet-200 bg-white text-violet-700 text-[11px] font-medium">
+                {listName}
+              </span>
+            )}
+          </div>
+
+          {alsoIn.length > 0 && (
+            <p className="text-[11px] text-slate-500 mt-2">
+              Also in: {alsoIn.join(', ')}
+            </p>
+          )}
+
+          {/* Description (``f.message``) is shown only
+              for LWW-NE findings across every category.
+              Other sources (term_matcher, workbook,
+              profile rules, …) suppress the description
+              so the card stays focused on the surface
+              + replacement. */}
+          {!listName && isLwwNe && (
+            <p className="text-xs text-slate-500 mt-2 leading-snug">{f.message}</p>
+          )}
+        </div>
+      )
+    }
+
+    return (
+      <div
+        key={f.id}
+        ref={(el) => (cardRefs.current[f.id] = el)}
+        onClick={() => {
+          setSelectedFindingId(f.id)
+          focusOccurrenceInEditor(f.id)
+        }}
+        className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${isDnRule ? 'border-l-rose-500 bg-rose-50/30' : catStyle.border} ${
+          isSelected
+            ? 'ring-2 ring-violet-400 border-violet-400 shadow-md'
+            : isAccepted
+            ? 'bg-emerald-50/40 opacity-70 border-emerald-200'
+            : isEdited
+            ? 'bg-amber-50/40 opacity-80 border-amber-200'
+            : isRejected
+            ? 'bg-slate-100/60 opacity-40'
+            : ''
+        }`}
+      >
+        {/* Card Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`text-[11px] font-bold uppercase tracking-wide ${isDnRule ? 'text-rose-700' : catStyle.text}`}>
+              {displayCategory}
+            </span>
+            {/* Phase 3 — README §9 problem label chip
+                (First use / Do not use / Ambiguous / …).
+                Falls back silently for non-Abbreviations
+                findings whose problem_label is null. DN
+                rows get a red chip so patient-safety
+                flags remain visually distinct even when
+                scanning the sidebar. */}
+            {f.problem_label && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border ${
+                  isDnRule
+                    ? 'bg-rose-100 text-rose-700 border-rose-300'
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                }`}
+                title={
+                  isDnRule
+                    ? 'Do-not-use notation — patient-safety flag from the Abbreviations workbook'
+                    : 'Abbreviations rule category (README §9)'
+                }
+              >
+                {f.problem_label}
+              </span>
+            )}
+            {hyphSource && (
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
+                title={
+                  hyphSource === 'Workbook'
+                    ? 'Rule from the hyphen & en-dash workbook'
+                    : hyphSource === 'LWW list'
+                      ? 'Rule from the LWW curated compound list'
+                      : hyphSource === 'LWW-NE'
+                        ? 'Rule from the LWW-NE language-tool workbook'
+                        : ''
+                }
+              >
+                {hyphSource}
+              </span>
+            )}
+            {isAdvisoryIdentity(f) && (
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
+                title="Advisory finding — highlights a passage for your judgement without proposing a specific rewrite. Use Highlight to flag it or Ignore to dismiss."
+              >
+                Advisory
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Rule ID — muted monospace label so QC
+                reviewers can reference a specific rule
+                when discussing findings. */}
+            {f.rule_id && (
+              <span
+                className="text-[10px] font-mono text-slate-400"
+                title={`Rule ID: ${f.rule_id}`}
+              >
+                {f.rule_id}
+              </span>
+            )}
+            <span className="text-[11px] text-slate-400">
+              Para {f.para_index + 1}
+            </span>
+          </div>
+        </div>
+
+        {/* Finding description — displayed ONLY for
+            LWW-NE findings (identified via the
+            ``source_badge`` provenance field). Every
+            other source suppresses the description so
+            the diff + actions stay the primary focus.
+            Scope is category-agnostic: a LWW-NE rule in
+            Hyphenation, Grammar, Spelling, Inclusive,
+            Abbreviations, Medical Terms, Punctuation
+            etc. all surface their description; a
+            non-LWW-NE finding in any category hides it. */}
+        {isLwwNe && (
+          <p className="text-sm text-slate-700 mt-1.5 font-medium leading-snug">
+            {f.message}
+          </p>
+        )}
+
+        {/* DN notation banner — the workbook's
+            intended-meaning + applies_in context are
+            the key patient-safety signals. Shown only
+            for DN rows so style/grammar findings stay
+            visually quiet. */}
+        {isDnRule && (f.applies_in || f.tool_behaviour) && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-rose-700">
+            {f.applies_in && (
+              <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-200">
+                Applies in: {f.applies_in}
+              </span>
+            )}
+            {f.tool_behaviour && (
+              <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-200">
+                {f.tool_behaviour}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Visual Diff Box.
+            Case 1 — AB07 (ambiguous abbreviation):
+              render a meaning picker instead of a
+              fixed diff. Reviewer must choose which
+              meaning the author intended; Accept
+              applies the chosen meaning. Best-cue
+              match is badged but NEVER pre-selected
+              (per README §7 — defaulting a meaning
+              would mask reviewer judgement).
+            Case 2 — advisory identity: show the
+              referenced phrase once, muted italic.
+            Case 3 — replacement: standard red→green diff. */}
+        {hasAb07Meanings ? (
+          <div data-testid="ab07-meanings" className="mt-3">
+            <div className="flex items-center gap-2 text-sm font-medium flex-wrap">
+              <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
+                {f.original_text}
+              </span>
+              <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
+              <span className="text-[11px] text-slate-500 italic">choose a meaning</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {meanings.map((m, idx) => {
+                const isChosen = editedInputs[f.id] === m.meaning
+                return (
+                  <button
+                    key={`${f.id}-meaning-${idx}`}
+                    data-testid="ab07-meaning"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditedInputs({ ...editedInputs, [f.id]: m.meaning })
+                    }}
+                    className={`px-2 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                      isChosen
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:border-indigo-300'
+                    }`}
+                    title={m.is_best_match ? 'Best contextual match from cue words nearby' : undefined}
+                  >
+                    {m.meaning}
+                    {m.is_best_match && (
+                      <span className={`ml-1 text-[9px] font-semibold uppercase ${isChosen ? 'text-indigo-100' : 'text-indigo-500'}`}>
+                        best match
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : isAdvisoryIdentity(f) ? (
+          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
+            <span
+              data-testid="advisory-phrase"
+              className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 italic"
+            >
+              {f.original_text}
+            </span>
+          </div>
+        ) : (
+          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
+            <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
+              {f.original_text}
+            </span>
+            <ArrowRight size={14} className="text-slate-300 flex-shrink-0" data-testid="diff-arrow" />
+            <span data-testid="diff-new" className="diff-new px-2 py-1 rounded-lg">
+              {f.edited_text || f.suggestion}
+            </span>
+          </div>
+        )}
+
+        {/* Phase-3 — workbook note + Merriam-Webster
+            lookup + confidence pill. All three are
+            optional: keys are null for non-Abbreviations
+            findings. Rendered as one soft row below the
+            diff so the reviewer sees the "why" without
+            opening a tooltip. */}
+        {(f.note || f.mw_lookup || f.confidence) && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+            {f.note && (
+              <span data-testid="finding-note" className="text-slate-600 italic leading-snug">
+                {f.note}
+              </span>
+            )}
+            {f.mw_lookup && (
+              <a
+                data-testid="mw-lookup"
+                href={f.mw_lookup}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="underline decoration-dotted text-indigo-600 hover:text-indigo-800"
+              >
+                Merriam-Webster
+              </a>
+            )}
+            {f.confidence && (
+              <span
+                data-testid="confidence-pill"
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                  /verify/i.test(f.confidence)
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}
+                title="Workbook confidence level"
+              >
+                {f.confidence}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Action Buttons — Case 2 (advisory identity)
+            drops Accept + Edit (nothing to apply /
+            replace) and keeps Highlight + Ignore only. */}
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          {!isAdvisoryIdentity(f) && (() => {
+            // AB07 accepts the reviewer's chosen meaning
+            // (stored in editedInputs on click) by routing
+            // through the 'edited' decision so the server
+            // records the specific meaning the editor
+            // picked. Disabled until a meaning is picked
+            // — never pre-select, per README §7.
+            const ab07NeedsChoice = hasAb07Meanings && !editedInputs[f.id]
+            const acceptStatus: 'accepted' | 'edited' = hasAb07Meanings ? 'edited' : 'accepted'
+            return (
+              <>
+                <button
+                  data-testid="action-accept"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDecide(f.id, acceptStatus)
+                  }}
+                  disabled={ab07NeedsChoice}
+                  title={ab07NeedsChoice ? 'Pick a meaning above to continue' : undefined}
+                  className={`flex-1 py-1.5 rounded-full text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm ${
+                    ab07NeedsChoice
+                      ? 'bg-slate-300 cursor-not-allowed'
+                      : 'bg-emerald-600 hover:bg-emerald-500'
+                  }`}
+                >
+                  <Check size={13} /> Accept
+                </button>
+
+                <button
+                  data-testid="action-edit"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditingFindingId(prev => prev === f.id ? null : f.id)
+                  }}
+                  className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 transition-colors"
+                >
+                  Edit
+                </button>
+              </>
+            )
+          })()}
+
+          {/* Highlight — hidden for sentence
+              advisories (passive_voice,
+              max_sentence_length, SL001, SL005).
+              Those findings have no meaningful
+              "highlight in document" action; Ignore
+              is the only action the reviewer takes. */}
+          {!isSentenceAdvisory(f) && (
+            <button
+              data-testid="action-highlight"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleDecide(f.id, 'highlighted')
+              }}
+              className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
+            >
+              Highlight
+            </button>
+          )}
+
+          <button
+            data-testid="action-ignore"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleDecide(f.id, 'rejected')
+            }}
+            className={`${isSentenceAdvisory(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-400 transition-colors`}
+          >
+            Ignore
+          </button>
+        </div>
+
+        {/* Inline Custom Edit Row — Case 2 findings
+            never open the Edit input (Edit button is
+            hidden above). */}
+        {!isAdvisoryIdentity(f) && editingFindingId === f.id && (
+          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="text"
+              value={editedInputs[f.id] ?? f.suggestion}
+              onChange={(e) => setEditedInputs({ ...editedInputs, [f.id]: e.target.value })}
+              className="flex-1 text-sm border border-violet-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-200 bg-slate-50"
+              placeholder="Type custom text..."
+            />
+            <button
+              onClick={() => handleDecide(f.id, 'edited')}
+              className="px-3.5 py-1.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-colors"
+            >
+              Save Edit
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="h-screen flex flex-col bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
@@ -1575,459 +2135,23 @@ export function LanguageReviewPage() {
                   <div className="py-12 text-center text-slate-400 text-xs">
                     No suggestions found in this category.
                   </div>
+                ) : activeRightTab === 'abbreviations' ? (
+                  // Grouped-card render path — multi-occurrence AB
+                  // groups render as ONE outer card containing a
+                  // header and compact occurrence rows (see
+                  // ``renderAbbreviationGroupCard`` just above the
+                  // return). Singleton AB groups and findings
+                  // without a group_key (ungrouped) fall through
+                  // to the flat ``renderFlatFindingCard`` renderer
+                  // so DN rules and lone abbreviations keep their
+                  // existing look.
+                  abbreviationGroups.flatMap(group =>
+                    isDisplayableGroup(group)
+                      ? [renderAbbreviationGroupCard(group)]
+                      : group.items.map(renderFlatFindingCard)
+                  )
                 ) : (
-                  activeCategoryFindings.map(f => {
-                    const isSelected = f.id === selectedFindingId
-                    const isAccepted = f.status === 'accepted'
-                    const isEdited = f.status === 'edited'
-                    const isRejected = f.status === 'rejected'
-                    const isTerm = f.category === 'term' || f.source === 'term'
-
-                    const catColorMap: Record<string, { border: string; text: string; bg: string }> = {
-                      grammar: { border: 'border-l-orange-400', text: 'text-orange-600', bg: 'bg-orange-50' },
-                      spelling: { border: 'border-l-sky-400', text: 'text-sky-600', bg: 'bg-sky-50' },
-                      sentence: { border: 'border-l-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
-                      // Hyphenation absorbs the old Compounds category. Legacy
-                      // category values stay in the map (teal) so pre-merge
-                      // jobs render consistently alongside new findings.
-                      hyphenation: { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
-                      compounds:   { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
-                      compound:    { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
-                      bias: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
-                      article: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
-                      term: { border: 'border-l-violet-400', text: 'text-violet-700', bg: 'bg-violet-50' },
-                      typo: { border: 'border-l-red-400', text: 'text-red-600', bg: 'bg-red-50' },
-                      medical_terms: { border: 'border-l-green-500', text: 'text-green-700', bg: 'bg-green-50' },
-                      abbreviations: { border: 'border-l-indigo-400', text: 'text-indigo-600', bg: 'bg-indigo-50' },
-                    }
-
-                    const catStyle = catColorMap[f.category] || { border: 'border-l-violet-400', text: 'text-violet-600', bg: 'bg-violet-50' }
-                    // Card header label — delegates to the shared helper
-                    // so the logic is unit-tested in isolation. Sidebar
-                    // grouping is driven by ``f.category`` upstream,
-                    // not by this label.
-                    const displayCategory = displayCategoryFor(f)
-                    // Provenance badge: distinguishes rule sources without
-                    // needing separate filter tabs. Hyphenation findings
-                    // get "Workbook" (hyphen/dash workbook) vs "LWW list"
-                    // (hardcoded compound_* rules). All categories gain
-                    // an "LWW-NE" badge when the finding came from the
-                    // LWW-NE workbook — identified via the structured
-                    // ``source_badge`` field set server-side in the GET
-                    // /findings serializer, not by prefix-matching on
-                    // the rule name here.
-                    const isLwwNe = f.source_badge === 'LWW-NE'
-                    const hyphSource = isLwwNe
-                      ? 'LWW-NE'
-                      : displayCategory === 'hyphenation'
-                        ? (f.rule_id?.startsWith('compound_') ? 'LWW list' : 'Workbook')
-                        : null
-
-                    // Phase-3 Abbreviations UI flags. DN rules are
-                    // patient-safety notations (DN01-DN32) — rendered
-                    // with a red stripe + "Do not use" banner so they
-                    // stand out from style/grammar findings. AB07 is
-                    // the ambiguous-abbreviation rule and gets a
-                    // meaning picker instead of a single-suggestion
-                    // diff.
-                    const isDnRule = !!f.rule_id && f.rule_id.startsWith('DN')
-                    const isAb07 = f.rule_id === 'AB07'
-                    const meanings = Array.isArray(f.meanings) ? f.meanings : []
-                    const hasAb07Meanings = isAb07 && meanings.length > 0
-
-                    if (isTerm) {
-                      const { listName, alsoIn } = parseTermMeta(f.message)
-                      return (
-                        <div
-                          key={f.id}
-                          ref={(el) => (cardRefs.current[f.id] = el)}
-                          onClick={() => {
-                            setSelectedFindingId(f.id)
-                            focusOccurrenceInEditor(f.id)
-                          }}
-                          className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${catStyle.border} ${
-                            isSelected ? 'ring-2 ring-violet-400 border-violet-400 shadow-md' : ''
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
-                              Term
-                            </span>
-                            <span className="text-[11px] text-slate-400">
-                              Para {f.para_index + 1}
-                            </span>
-                          </div>
-
-                          <div className="mt-2 flex items-center gap-2 flex-wrap">
-                            <span className="inline-flex items-center px-2 py-1 rounded-lg bg-violet-100 text-violet-800 text-sm font-semibold">
-                              {f.original_text}
-                            </span>
-                            {listName && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-violet-200 bg-white text-violet-700 text-[11px] font-medium">
-                                {listName}
-                              </span>
-                            )}
-                          </div>
-
-                          {alsoIn.length > 0 && (
-                            <p className="text-[11px] text-slate-500 mt-2">
-                              Also in: {alsoIn.join(', ')}
-                            </p>
-                          )}
-
-                          {/* Description (``f.message``) is shown only
-                              for LWW-NE findings across every category.
-                              Other sources (term_matcher, workbook,
-                              profile rules, …) suppress the description
-                              so the card stays focused on the surface
-                              + replacement. */}
-                          {!listName && isLwwNe && (
-                            <p className="text-xs text-slate-500 mt-2 leading-snug">{f.message}</p>
-                          )}
-                        </div>
-                      )
-                    }
-
-                    return (
-                      <div
-                        key={f.id}
-                        ref={(el) => (cardRefs.current[f.id] = el)}
-                        onClick={() => {
-                          setSelectedFindingId(f.id)
-                          focusOccurrenceInEditor(f.id)
-                        }}
-                        className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${isDnRule ? 'border-l-rose-500 bg-rose-50/30' : catStyle.border} ${
-                          isSelected
-                            ? 'ring-2 ring-violet-400 border-violet-400 shadow-md'
-                            : isAccepted
-                            ? 'bg-emerald-50/40 opacity-70 border-emerald-200'
-                            : isEdited
-                            ? 'bg-amber-50/40 opacity-80 border-amber-200'
-                            : isRejected
-                            ? 'bg-slate-100/60 opacity-40'
-                            : ''
-                        }`}
-                      >
-                        {/* Card Header */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={`text-[11px] font-bold uppercase tracking-wide ${isDnRule ? 'text-rose-700' : catStyle.text}`}>
-                              {displayCategory}
-                            </span>
-                            {/* Phase 3 — README §9 problem label chip
-                                (First use / Do not use / Ambiguous / …).
-                                Falls back silently for non-Abbreviations
-                                findings whose problem_label is null. DN
-                                rows get a red chip so patient-safety
-                                flags remain visually distinct even when
-                                scanning the sidebar. */}
-                            {f.problem_label && (
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border ${
-                                  isDnRule
-                                    ? 'bg-rose-100 text-rose-700 border-rose-300'
-                                    : 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                }`}
-                                title={
-                                  isDnRule
-                                    ? 'Do-not-use notation — patient-safety flag from the Abbreviations workbook'
-                                    : 'Abbreviations rule category (README §9)'
-                                }
-                              >
-                                {f.problem_label}
-                              </span>
-                            )}
-                            {hyphSource && (
-                              <span
-                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
-                                title={
-                                  hyphSource === 'Workbook'
-                                    ? 'Rule from the hyphen & en-dash workbook'
-                                    : hyphSource === 'LWW list'
-                                      ? 'Rule from the LWW curated compound list'
-                                      : hyphSource === 'LWW-NE'
-                                        ? 'Rule from the LWW-NE language-tool workbook'
-                                        : ''
-                                }
-                              >
-                                {hyphSource}
-                              </span>
-                            )}
-                            {isAdvisoryIdentity(f) && (
-                              <span
-                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
-                                title="Advisory finding — highlights a passage for your judgement without proposing a specific rewrite. Use Highlight to flag it or Ignore to dismiss."
-                              >
-                                Advisory
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            {/* Rule ID — muted monospace label so QC
-                                reviewers can reference a specific rule
-                                when discussing findings. */}
-                            {f.rule_id && (
-                              <span
-                                className="text-[10px] font-mono text-slate-400"
-                                title={`Rule ID: ${f.rule_id}`}
-                              >
-                                {f.rule_id}
-                              </span>
-                            )}
-                            <span className="text-[11px] text-slate-400">
-                              Para {f.para_index + 1}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Finding description — displayed ONLY for
-                            LWW-NE findings (identified via the
-                            ``source_badge`` provenance field). Every
-                            other source suppresses the description so
-                            the diff + actions stay the primary focus.
-                            Scope is category-agnostic: a LWW-NE rule in
-                            Hyphenation, Grammar, Spelling, Inclusive,
-                            Abbreviations, Medical Terms, Punctuation
-                            etc. all surface their description; a
-                            non-LWW-NE finding in any category hides it. */}
-                        {isLwwNe && (
-                          <p className="text-sm text-slate-700 mt-1.5 font-medium leading-snug">
-                            {f.message}
-                          </p>
-                        )}
-
-                        {/* DN notation banner — the workbook's
-                            intended-meaning + applies_in context are
-                            the key patient-safety signals. Shown only
-                            for DN rows so style/grammar findings stay
-                            visually quiet. */}
-                        {isDnRule && (f.applies_in || f.tool_behaviour) && (
-                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-rose-700">
-                            {f.applies_in && (
-                              <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-200">
-                                Applies in: {f.applies_in}
-                              </span>
-                            )}
-                            {f.tool_behaviour && (
-                              <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-200">
-                                {f.tool_behaviour}
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Visual Diff Box.
-                            Case 1 — AB07 (ambiguous abbreviation):
-                              render a meaning picker instead of a
-                              fixed diff. Reviewer must choose which
-                              meaning the author intended; Accept
-                              applies the chosen meaning. Best-cue
-                              match is badged but NEVER pre-selected
-                              (per README §7 — defaulting a meaning
-                              would mask reviewer judgement).
-                            Case 2 — advisory identity: show the
-                              referenced phrase once, muted italic.
-                            Case 3 — replacement: standard red→green diff. */}
-                        {hasAb07Meanings ? (
-                          <div data-testid="ab07-meanings" className="mt-3">
-                            <div className="flex items-center gap-2 text-sm font-medium flex-wrap">
-                              <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
-                                {f.original_text}
-                              </span>
-                              <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
-                              <span className="text-[11px] text-slate-500 italic">choose a meaning</span>
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {meanings.map((m, idx) => {
-                                const isChosen = editedInputs[f.id] === m.meaning
-                                return (
-                                  <button
-                                    key={`${f.id}-meaning-${idx}`}
-                                    data-testid="ab07-meaning"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      setEditedInputs({ ...editedInputs, [f.id]: m.meaning })
-                                    }}
-                                    className={`px-2 py-1 rounded-full text-[11px] font-medium border transition-colors ${
-                                      isChosen
-                                        ? 'bg-indigo-600 text-white border-indigo-600'
-                                        : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:border-indigo-300'
-                                    }`}
-                                    title={m.is_best_match ? 'Best contextual match from cue words nearby' : undefined}
-                                  >
-                                    {m.meaning}
-                                    {m.is_best_match && (
-                                      <span className={`ml-1 text-[9px] font-semibold uppercase ${isChosen ? 'text-indigo-100' : 'text-indigo-500'}`}>
-                                        best match
-                                      </span>
-                                    )}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ) : isAdvisoryIdentity(f) ? (
-                          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
-                            <span
-                              data-testid="advisory-phrase"
-                              className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 italic"
-                            >
-                              {f.original_text}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
-                            <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
-                              {f.original_text}
-                            </span>
-                            <ArrowRight size={14} className="text-slate-300 flex-shrink-0" data-testid="diff-arrow" />
-                            <span data-testid="diff-new" className="diff-new px-2 py-1 rounded-lg">
-                              {f.edited_text || f.suggestion}
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Phase-3 — workbook note + Merriam-Webster
-                            lookup + confidence pill. All three are
-                            optional: keys are null for non-Abbreviations
-                            findings. Rendered as one soft row below the
-                            diff so the reviewer sees the "why" without
-                            opening a tooltip. */}
-                        {(f.note || f.mw_lookup || f.confidence) && (
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                            {f.note && (
-                              <span data-testid="finding-note" className="text-slate-600 italic leading-snug">
-                                {f.note}
-                              </span>
-                            )}
-                            {f.mw_lookup && (
-                              <a
-                                data-testid="mw-lookup"
-                                href={f.mw_lookup}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="underline decoration-dotted text-indigo-600 hover:text-indigo-800"
-                              >
-                                Merriam-Webster
-                              </a>
-                            )}
-                            {f.confidence && (
-                              <span
-                                data-testid="confidence-pill"
-                                className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
-                                  /verify/i.test(f.confidence)
-                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                }`}
-                                title="Workbook confidence level"
-                              >
-                                {f.confidence}
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Action Buttons — Case 2 (advisory identity)
-                            drops Accept + Edit (nothing to apply /
-                            replace) and keeps Highlight + Ignore only. */}
-                        <div className="mt-3 flex items-center gap-2 flex-wrap">
-                          {!isAdvisoryIdentity(f) && (() => {
-                            // AB07 accepts the reviewer's chosen meaning
-                            // (stored in editedInputs on click) by routing
-                            // through the 'edited' decision so the server
-                            // records the specific meaning the editor
-                            // picked. Disabled until a meaning is picked
-                            // — never pre-select, per README §7.
-                            const ab07NeedsChoice = hasAb07Meanings && !editedInputs[f.id]
-                            const acceptStatus: 'accepted' | 'edited' = hasAb07Meanings ? 'edited' : 'accepted'
-                            return (
-                              <>
-                                <button
-                                  data-testid="action-accept"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleDecide(f.id, acceptStatus)
-                                  }}
-                                  disabled={ab07NeedsChoice}
-                                  title={ab07NeedsChoice ? 'Pick a meaning above to continue' : undefined}
-                                  className={`flex-1 py-1.5 rounded-full text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm ${
-                                    ab07NeedsChoice
-                                      ? 'bg-slate-300 cursor-not-allowed'
-                                      : 'bg-emerald-600 hover:bg-emerald-500'
-                                  }`}
-                                >
-                                  <Check size={13} /> Accept
-                                </button>
-
-                                <button
-                                  data-testid="action-edit"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setEditingFindingId(prev => prev === f.id ? null : f.id)
-                                  }}
-                                  className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 transition-colors"
-                                >
-                                  Edit
-                                </button>
-                              </>
-                            )
-                          })()}
-
-                          {/* Highlight — hidden for sentence
-                              advisories (passive_voice,
-                              max_sentence_length, SL001, SL005).
-                              Those findings have no meaningful
-                              "highlight in document" action; Ignore
-                              is the only action the reviewer takes. */}
-                          {!isSentenceAdvisory(f) && (
-                            <button
-                              data-testid="action-highlight"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDecide(f.id, 'highlighted')
-                              }}
-                              className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
-                            >
-                              Highlight
-                            </button>
-                          )}
-
-                          <button
-                            data-testid="action-ignore"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDecide(f.id, 'rejected')
-                            }}
-                            className={`${isSentenceAdvisory(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-400 transition-colors`}
-                          >
-                            Ignore
-                          </button>
-                        </div>
-
-                        {/* Inline Custom Edit Row — Case 2 findings
-                            never open the Edit input (Edit button is
-                            hidden above). */}
-                        {!isAdvisoryIdentity(f) && editingFindingId === f.id && (
-                          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="text"
-                              value={editedInputs[f.id] ?? f.suggestion}
-                              onChange={(e) => setEditedInputs({ ...editedInputs, [f.id]: e.target.value })}
-                              className="flex-1 text-sm border border-violet-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-200 bg-slate-50"
-                              placeholder="Type custom text..."
-                            />
-                            <button
-                              onClick={() => handleDecide(f.id, 'edited')}
-                              className="px-3.5 py-1.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-colors"
-                            >
-                              Save Edit
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })
+                  activeCategoryFindings.map(renderFlatFindingCard)
                 )
               ) : (
                 /* ── CE SUPPORT RULES MANAGER TAB ── */

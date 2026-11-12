@@ -221,6 +221,88 @@ def abbreviation_metadata_for(abbreviation: Optional[str]) -> dict[str, Any]:
     return out
 
 
+def _canonical_expansion_for(abbreviation: Optional[str]) -> Optional[str]:
+    """First workbook row's ``expansion`` for an abbreviation token,
+    or None when the token isn't in the list. Used by the grouping
+    serializer below."""
+    if not abbreviation:
+        return None
+    rows = _abbr_index_by_token().get(abbreviation)
+    if not rows:
+        return None
+    exp = (rows[0].get("expansion") or "").strip()
+    return exp or None
+
+
+def grouping_fields_for(
+    rule_id: Optional[str],
+    original: str,
+    suggestion: str,
+) -> dict[str, Optional[str]]:
+    """Derive the three fields the frontend needs to coalesce multiple
+    AB occurrences of the same abbreviation into a single card:
+
+      * ``abbreviation`` — the short form (e.g. ``ICU``)
+      * ``expansion``    — the long form the card header displays
+      * ``group_key``    — stable identity used by the frontend's
+                           ``Map<groupKey, Finding[]>`` reducer
+
+    Rules:
+      * Populated only for AB rules (``rule_id`` starts with ``AB``).
+        Non-AB findings (DN01-32, LWW-NE, grammar, spelling, …) get
+        all three keys set to ``None`` so the UI falls through to the
+        existing one-card-per-finding render path. DN rules in
+        particular are excluded by requirement: each patient-safety
+        notation stays as its own card.
+      * Key does NOT include ``rule_id``: AB01 (first use), AB02
+        (repeated expansion) and AB13 (periods in initialism) on the
+        same ``ICU`` abbreviation MUST land in the same group so the
+        reviewer sees the full first-use / subsequent-use picture
+        inside one card. Each occurrence keeps its own ``rule_id``
+        and ``id`` fields untouched — grouping is purely a UI concern.
+      * AB07 (ambiguous) uses the finding's ``suggestion`` as the
+        expansion — different reviewer-visible meanings on the same
+        abbreviation (``AMA`` → "American Medical Association" vs
+        "Against Medical Advice") must stay in DIFFERENT groups
+        ("different expansions → separate groups").
+      * Other AB rules use the canonical workbook expansion so every
+        finding on ``ICU`` for ``intensive care unit`` coalesces
+        regardless of each occurrence's local ``suggestion`` text.
+      * When the abbreviation cannot be extracted (unlikely but
+        possible for an unusually-shaped suggestion), we return
+        ``group_key=None`` and the card renders ungrouped.
+
+    Keys are always present in the output dict so the serializer's
+    row shape stays consistent across rules.
+    """
+    out: dict[str, Optional[str]] = {
+        "abbreviation": None,
+        "expansion": None,
+        "group_key": None,
+    }
+    if not rule_id or not rule_id.startswith("AB"):
+        return out
+
+    abbr = extract_abbreviation(rule_id, original, suggestion)
+    if not abbr:
+        return out
+
+    if rule_id == "AB07":
+        # Different candidate meanings must stay in separate groups.
+        expansion = (suggestion or "").strip() or None
+    else:
+        expansion = _canonical_expansion_for(abbr)
+
+    out["abbreviation"] = abbr
+    out["expansion"] = expansion
+    # group_key covers only (abbreviation, expansion). Mixed rule_ids
+    # (AB01 + AB02 + AB13) on the same abbreviation all land in the
+    # same bucket; per-occurrence ``problem_label`` differentiates
+    # first-use from subsequent-use inside the card.
+    out["group_key"] = f"{abbr}|{expansion or ''}"
+    return out
+
+
 def clear_cache() -> None:
     """Drop LRU caches — test fixtures call this when they monkey-
     patch the backing JSON files."""
