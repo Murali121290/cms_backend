@@ -57,6 +57,7 @@ import { displayCategoryFor } from '@/features/language_edit/findingLabel'
 import { SaveRegexAsRuleDialog, type RegexDraft } from '@/features/language_edit/SaveRegexAsRuleDialog'
 import { buildAbbreviationGroups, isDisplayableGroup, type AbbreviationGroup } from '@/features/language_edit/abbreviationGroups'
 import { AbbreviationGroupCard } from '@/features/language_edit/AbbreviationGroupCard'
+import { computeCategoryWorkflow, type UnlockCategory } from '@/features/language_edit/categoryWorkflow'
 
 interface Finding {
   id: number
@@ -1018,6 +1019,37 @@ export function LanguageReviewPage() {
   const remainingCount = Math.max(0, totalFindingsCount - resolvedCount)
   const progressPercentage = totalFindingsCount > 0 ? Math.min(100, Math.round((resolvedCount / totalFindingsCount) * 100)) : 0
 
+  // Sequential category-unlock workflow. Only the current "next"
+  // category chip is visible; previously-completed ones stay visible
+  // so the reviewer can return to them. "All", "Comments", and
+  // "Rules" are not part of the chain and stay always visible.
+  //
+  // Derived live from ``findings`` — no separate workflow state is
+  // persisted. That means refresh / reopen / re-analysis naturally
+  // restore the correct unlocked set: the same statuses that drove
+  // the previous session yield the same workflow on reload, and a
+  // re-analysis that resurrects a pending finding automatically
+  // re-locks subsequent categories.
+  const categoryWorkflow = useMemo(() => computeCategoryWorkflow(findings), [findings])
+
+  // Rule 7 cleanup: if the user was viewing a category chip that
+  // just locked (e.g. a re-analysis resurrected an earlier pending
+  // finding), snap them back to the always-accessible "All" view.
+  // Without this, the chip would disappear from the row while its
+  // filtered content panel kept rendering — effectively letting
+  // the user remain on a locked category.
+  useEffect(() => {
+    const t = activeRightTab
+    if (t === 'all' || t === 'comments' || t === 'rules') return
+    if (!categoryWorkflow.visible.has(t as UnlockCategory)) {
+      setActiveRightTab('all')
+    }
+  }, [categoryWorkflow, activeRightTab])
+
+  // Chip-visibility predicate used by the JSX below. Non-finding
+  // chips ("comments", "rules") are always visible.
+  const isChipVisible = (cat: UnlockCategory): boolean => categoryWorkflow.visible.has(cat)
+
   // Thin wrapper: renders the presentational AbbreviationGroupCard
   // with the page's handlers wired in. Kept as a function so the
   // JSX render path can call it as ``renderAbbreviationGroupCard(group)``
@@ -1825,6 +1857,7 @@ export function LanguageReviewPage() {
                       ? 'bg-violet-600 text-white shadow-sm'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
+                  data-testid="chip-all"
                 >
                   All {pendingFindings.length}
                 </button>
@@ -1843,6 +1876,7 @@ export function LanguageReviewPage() {
                     identifiers unchanged — this is a presentation-only
                     reshuffle so finding IDs / status / actions all
                     continue to work. */}
+                {isChipVisible('abbreviations') && (
                 <button
                   onClick={() => setActiveRightTab('abbreviations')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1851,10 +1885,13 @@ export function LanguageReviewPage() {
                       : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                   }`}
                   title="Abbreviation expansion and first-use rules (workbook-driven)"
+                  data-testid="chip-abbreviations"
                 >
                   Abbreviations {abbreviationFindings.length}
                 </button>
+                )}
 
+                {isChipVisible('medical_terms') && (
                 <button
                   onClick={() => setActiveRightTab('medical_terms')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1863,10 +1900,13 @@ export function LanguageReviewPage() {
                       : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                   }`}
                   title="Medical Terminology workbook rules"
+                  data-testid="chip-medical_terms"
                 >
                   Medical Terms {medicalTermsFindings.length}
                 </button>
+                )}
 
+                {isChipVisible('hyphenation') && (
                 <button
                   onClick={() => setActiveRightTab('hyphenation')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1875,10 +1915,13 @@ export function LanguageReviewPage() {
                       : 'bg-teal-50 text-teal-700 hover:bg-teal-100'
                   }`}
                   title="Hyphen and en-dash workbook rules"
+                  data-testid="chip-hyphenation"
                 >
                   Hyphenated Words {hyphenationFindings.length}
                 </button>
+                )}
 
+                {isChipVisible('bias') && (
                 <button
                   onClick={() => setActiveRightTab('bias')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1887,10 +1930,13 @@ export function LanguageReviewPage() {
                       : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
                   }`}
                   title="Inclusive language findings + term-list highlights"
+                  data-testid="chip-bias"
                 >
                   Inclusive {inclusiveFindings.length}
                 </button>
+                )}
 
+                {isChipVisible('grammar') && (
                 <button
                   onClick={() => setActiveRightTab('grammar')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1898,10 +1944,13 @@ export function LanguageReviewPage() {
                       ? 'bg-orange-500 text-white shadow-sm'
                       : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
                   }`}
+                  data-testid="chip-grammar"
                 >
                   Grammar {grammarFindings.length}
                 </button>
+                )}
 
+                {isChipVisible('sentence') && (
                 <button
                   onClick={() => setActiveRightTab('sentence')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1910,10 +1959,13 @@ export function LanguageReviewPage() {
                       : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
                   }`}
                   title="Punctuation and capitalization (long sentences, passive voice, terminal punctuation, start capital, …)"
+                  data-testid="chip-sentence"
                 >
                   Punctuation and Capitalization {sentenceFindings.length}
                 </button>
+                )}
 
+                {isChipVisible('spelling') && (
                 <button
                   onClick={() => setActiveRightTab('spelling')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1921,9 +1973,11 @@ export function LanguageReviewPage() {
                       ? 'bg-sky-500 text-white shadow-sm'
                       : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
                   }`}
+                  data-testid="chip-spelling"
                 >
                   Spelling {spellingFindings.length}
                 </button>
+                )}
 
                 <button
                   onClick={() => setActiveRightTab('comments')}
@@ -1937,6 +1991,7 @@ export function LanguageReviewPage() {
                   Comments {comments.length}
                 </button>
 
+                {isChipVisible('typo') && (
                 <button
                   onClick={() => setActiveRightTab('typo')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1945,9 +2000,11 @@ export function LanguageReviewPage() {
                       : 'bg-red-50 text-red-700 hover:bg-red-100'
                   }`}
                   title="Likely typos detected by the spell checker"
+                  data-testid="chip-typo"
                 >
                   Spell Check {typoFindings.length}
                 </button>
+                )}
 
                 <button
                   onClick={() => setActiveRightTab('rules')}
