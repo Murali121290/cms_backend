@@ -983,10 +983,30 @@ def start_language_edit_analysis(
     # loop still iterates only ``paragraphs`` — rules anchored to
     # heading/table paragraphs fire via Phase D's role-aware emitters
     # when the router passes those paragraphs separately below.
+    #
+    # References MUST be filtered out of the state build. The
+    # per-paragraph gate below already blocks finding emission on
+    # them, but the document-scope AB state (AB01 / AB02 / AB04 / AB05
+    # / AB10) would otherwise count abbreviations inside reference
+    # entries toward first-use / article-agreement tracking — the
+    # exact pollution that leaks AB10 "aan" findings into body
+    # paragraphs. ``read_paragraphs`` already drops entries carrying
+    # REF-* styles and entries inside ``<ref-open>``/``<ref-close>``;
+    # the filter here is a belt-and-braces catch for conventions it
+    # can't detect (plain ``References`` heading followed by
+    # Normal-styled entries — see ``classify_paragraphs``).
+    def _roles_mark_as_reference(roles: dict) -> bool:
+        return bool(roles.get("in_references") or roles.get("role") == "reference")
+
     body_para_set = {pi for pi, _ in paragraphs}
-    enriched_paragraphs = list(paragraphs)
+    enriched_paragraphs = [
+        (pi, txt) for pi, txt in paragraphs
+        if not _roles_mark_as_reference((para_roles or {}).get(pi) or {})
+    ]
     for pi, roles in (para_roles or {}).items():
         if pi in body_para_set:
+            continue
+        if _roles_mark_as_reference(roles):
             continue
         if roles.get("role") in ("heading", "title", "caption") or roles.get("in_table") or roles.get("in_figure") or roles.get("in_abstract"):
             txt = (roles.get("text") or "").strip()
