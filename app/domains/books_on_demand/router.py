@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from app.database import get_db, SessionLocal
 from app.domains.books_on_demand.models import BodJob
 from app.domains.books_on_demand.services.ftp_service import BodFtpService
-from app.domains.books_on_demand.utils import calculate_bod_due_date
+from app.domains.books_on_demand.utils import calculate_bod_due_date, generate_bod_history_csv
 from app.domains.notifications.email_service import (
     send_bod_qc_ready_email,
     send_bod_new_job_email,
@@ -87,6 +87,13 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         
     prod_info = (job.stage_history or {}).get("Production", {})
     pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
+
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_proj_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name) if job.project_name else None
+    history_csv_path = os.path.join(bod_proj_dir, "history.csv") if bod_proj_dir else None
+    has_history_csv = bool(history_csv_path and os.path.exists(history_csv_path))
+
     return {
         "id": job.id,
         "project_name": job.project_name,
@@ -120,7 +127,9 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "fastrack_requested_date": job.fastrack_requested_date,
         "file_history": job.file_history or [],
         "epubcheck_report_filepath": job.epubcheck_report_filepath,
-        "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
+        "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None,
+        "has_history_csv": has_history_csv,
+        "history_csv_filename": "history.csv" if has_history_csv else None
     }
 
 @router.get("/jobs/{job_id}/download-pdf")
@@ -200,6 +209,57 @@ def download_epubcheck(job_id: int, db: Session = Depends(get_db)):
     if not job or not job.epubcheck_report_filepath or not os.path.exists(job.epubcheck_report_filepath):
         raise HTTPException(status_code=404, detail="Epubcheck report not found")
     return FileResponse(path=job.epubcheck_report_filepath, filename=os.path.basename(job.epubcheck_report_filepath), media_type='text/plain')
+
+
+@router.get("/jobs/{job_id}/download-history-csv")
+def download_history_csv(job_id: int, db: Session = Depends(get_db)):
+    """Download history.csv for a job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_proj_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name) if job.project_name else None
+    history_csv_path = os.path.join(bod_proj_dir, "history.csv") if bod_proj_dir else None
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        if job.epub_filepath and os.path.exists(job.epub_filepath):
+            history_csv_path = os.path.join(os.path.dirname(job.epub_filepath), "history.csv")
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        target_dir = bod_proj_dir or (os.path.dirname(job.epub_filepath) if job.epub_filepath and os.path.exists(job.epub_filepath) else (os.path.dirname(job.pdf_filepath) if job.pdf_filepath and os.path.exists(job.pdf_filepath) else os.path.join(upload_dir, "bod", "BOD", f"bod_job_{job.id}")))
+        try:
+            history_csv_path = generate_bod_history_csv(job, target_dir)
+        except Exception as e:
+            logger.error(f"Error generating history.csv for job {job_id}: {e}")
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        raise HTTPException(status_code=404, detail="history.csv could not be located or generated")
+    return FileResponse(path=history_csv_path, filename="history.csv", media_type="text/csv")
+
+
+@router.get("/jobs/{job_id}/view-history-csv")
+def view_history_csv(job_id: int, db: Session = Depends(get_db)):
+    """View content of history.csv for a job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_proj_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name) if job.project_name else None
+    history_csv_path = os.path.join(bod_proj_dir, "history.csv") if bod_proj_dir else None
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        if job.epub_filepath and os.path.exists(job.epub_filepath):
+            history_csv_path = os.path.join(os.path.dirname(job.epub_filepath), "history.csv")
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        target_dir = bod_proj_dir or (os.path.dirname(job.epub_filepath) if job.epub_filepath and os.path.exists(job.epub_filepath) else (os.path.dirname(job.pdf_filepath) if job.pdf_filepath and os.path.exists(job.pdf_filepath) else os.path.join(upload_dir, "bod", "BOD", f"bod_job_{job.id}")))
+        try:
+            history_csv_path = generate_bod_history_csv(job, target_dir)
+        except Exception as e:
+            logger.error(f"Error generating history.csv for job {job_id}: {e}")
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        raise HTTPException(status_code=404, detail="history.csv could not be located or generated")
+    with open(history_csv_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return {"content": content, "filename": "history.csv"}
+
 
 
 @router.get("/report")
@@ -897,39 +957,18 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
                 eisbn = job.epub_filename.rsplit('.', 1)[0].strip()
 
         # Target entry names inside the deliverable ZIP:
-        # 1. {eisbn}_1_ePub_all.epub (or ePDF if only PDF exists)
+        # 1. {eisbn}_ePub_all.epub (or ePDF if only PDF exists)
         # 2. history.csv (single-line comma-separated record without line breaks)
         # 3. ACE_report.zip
         # 4. EPUB-checker_log.txt
-        target_epub_entry_name = f"{eisbn}_1_ePub_all.epub" if eisbn else (os.path.basename(job.epub_filepath) if has_epub else os.path.basename(job.pdf_filepath))
+        target_epub_entry_name = f"{eisbn}_ePub_all.epub" if eisbn else (os.path.basename(job.epub_filepath) if has_epub else os.path.basename(job.pdf_filepath))
         target_ace_entry_name = "ACE_report.zip"
         target_epubcheck_entry_name = "EPUB-checker_log.txt"
 
-        # Determine file size for history.csv
-        file_size = 0
-        if has_epub:
-            try:
-                file_size = os.path.getsize(job.epub_filepath)
-            except Exception:
-                file_size = 0
-        elif has_pdf:
-            try:
-                file_size = os.path.getsize(job.pdf_filepath)
-            except Exception:
-                file_size = 0
-
-        file_size_str = str(file_size) if file_size > 0 else "1111"
-
-        # Generate history.csv (Must NOT contain any line break in the data row)
-        history_header = "Project,Status,Format,Layout,User,Correction Type,Correction Request,File Size,Conformity level WCAG,Level of Complexity,Non-Accessible Elements,Primary Content Type,Content Type"
-        history_row = f"{eisbn},y,ePub all,Reflowable,,,,{file_size_str},A,simple,n,textual,textual visual"
-        # Ensure pure single-line data row without internal linebreaks
-        history_row_clean = history_row.replace("\r", " ").replace("\n", " ").strip()
-        history_csv_content = f"{history_header}\n{history_row_clean}\n"
-
+        # Ensure history.csv exists (or generate it)
         history_csv_filepath = os.path.join(local_dir, "history.csv")
-        with open(history_csv_filepath, "w", encoding="utf-8") as f_hist:
-            f_hist.write(history_csv_content)
+        if not os.path.exists(history_csv_filepath):
+            history_csv_filepath = generate_bod_history_csv(job, local_dir)
 
         # Validate that history.csv was generated
         if not os.path.exists(history_csv_filepath):
@@ -1614,10 +1653,17 @@ def sync_qc_reports_and_complete(
     except Exception as e:
         logger.warning(f"EPUBCheck report sync skipped: {e}")
 
+    # 5. Generate history.csv for the job
+    try:
+        generate_bod_history_csv(job, bod_project_dir)
+        logger.info(f"Generated history.csv for job {job.id} ({job.project_name})")
+    except Exception as e:
+        logger.warning(f"Could not generate history.csv during QC complete: {e}")
+
     db.commit()
     db.refresh(job)
 
-    # 5. Advance stage to Ready to Dispatch if in QC & unassign
+    # 6. Advance stage to Ready to Dispatch if in QC & unassign
     if job.current_stage_name == "QC":
         _advance_job_logic(job, background_tasks, db)
     else:

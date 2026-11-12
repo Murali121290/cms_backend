@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -349,6 +349,38 @@ export function BodInternalJobPage() {
     }
   }
 
+  const [historyCsvContent, setHistoryCsvContent] = useState<string | null>(null)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+
+  const downloadHistoryCsv = async () => {
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-history-csv`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', 'history.csv')
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+    } catch (err) {
+      toast.error("Failed to download history.csv")
+    }
+  }
+
+  const viewHistoryCsv = async () => {
+    setLoadingHistory(true)
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/view-history-csv`)
+      setHistoryCsvContent(response.data?.content || '')
+      setShowHistoryModal(true)
+    } catch (err) {
+      toast.error("Failed to load history.csv content")
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-6 text-muted">Loading...</div>
   }
@@ -527,7 +559,7 @@ export function BodInternalJobPage() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-4">
             <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
               <div className="min-w-0 pr-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">Processed EPUB</span>
@@ -566,6 +598,36 @@ export function BodInternalJobPage() {
                   <Download size={13} />
                 </Button>
               )}
+            </div>
+
+            <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
+              <div className="min-w-0 pr-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">History CSV</span>
+                <p className="text-xs font-semibold text-text truncate m-0">
+                  {job.has_history_csv || job.history_csv_filename ? 'history.csv' : 'Generated on QC'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={viewHistoryCsv}
+                  disabled={loadingHistory}
+                  className="h-7 px-2 text-xs text-primary"
+                  title="View history.csv"
+                >
+                  {loadingHistory ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={downloadHistoryCsv}
+                  className="h-7 px-2 text-xs text-emerald-600"
+                  title="Download history.csv"
+                >
+                  <Download size={13} />
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -806,6 +868,23 @@ export function BodInternalJobPage() {
                 <Button size="sm" variant="outline" onClick={downloadEpubcheck} leftIcon={<Download size={14} />}>
                   Download
                 </Button>
+              </div>
+            )}
+
+            {(job.has_history_csv || job.history_csv_filename) && (
+              <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">BOD History CSV</p>
+                  <p className="text-sm font-semibold truncate">{job.history_csv_filename || 'history.csv'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={viewHistoryCsv} leftIcon={<Eye size={14} />}>
+                    View
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={downloadHistoryCsv} leftIcon={<Download size={14} />}>
+                    Download
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -1194,6 +1273,101 @@ export function BodInternalJobPage() {
                   <span className="flex items-center gap-2"><CheckCircle size={16} /> Complete & Move to Dispatch</span>
                 )}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* History CSV Preview Modal */}
+      {showHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-muted/10">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                  <FileSpreadsheet size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-text m-0">history.csv Preview</h3>
+                  <p className="text-xs text-muted m-0">Generated deliverable metadata record for BOD dispatch</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="p-1 rounded-lg hover:bg-accent text-muted hover:text-text transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4">
+              {historyCsvContent ? (
+                (() => {
+                  const lines = historyCsvContent.trim().split('\n')
+                  const headers = lines[0] ? lines[0].split(',') : []
+                  const values = lines[1] ? lines[1].split(',') : []
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="border border-border/80 rounded-xl overflow-hidden shadow-xs">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-muted/40 text-[10px] uppercase font-bold tracking-wider text-muted border-b border-border/70">
+                              <tr>
+                                {headers.map((h, idx) => (
+                                  <th key={idx} className="px-3 py-2.5 whitespace-nowrap">
+                                    {h.trim()}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/60 bg-background/50 font-mono text-xs">
+                              <tr>
+                                {values.map((v, idx) => (
+                                  <td key={idx} className="px-3 py-2.5 whitespace-nowrap text-text font-medium">
+                                    {v.trim() || <span className="text-muted/50 italic">—</span>}
+                                  </td>
+                                ))}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-1">
+                          Raw CSV Content
+                        </span>
+                        <pre className="p-3 bg-muted/20 border border-border/60 rounded-lg text-xs font-mono text-text whitespace-pre-wrap break-all">
+                          {historyCsvContent}
+                        </pre>
+                      </div>
+                    </div>
+                  )
+                })()
+              ) : (
+                <div className="p-8 text-center text-muted text-sm">
+                  No content found in history.csv
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 border-t border-border flex items-center justify-between bg-muted/5">
+              <span className="text-xs text-muted">Ready for delivery verification</span>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setShowHistoryModal(false)}>
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={downloadHistoryCsv}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                  leftIcon={<Download size={14} />}
+                >
+                  Download CSV
+                </Button>
+              </div>
             </div>
           </div>
         </div>

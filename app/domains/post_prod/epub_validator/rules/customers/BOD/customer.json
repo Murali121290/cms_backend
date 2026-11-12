@@ -523,10 +523,10 @@
     }
   ],
   "export": {
-    "filename_format": "{eisbn}_1_ePub_all.ePub"
+    "filename_format": "{eisbn}_ePub_all.ePub"
   },
   "upload": {
-    "filename_format": "{eisbn}_1_ePub_all.ePub"
+    "filename_format": "{eisbn}_ePub_all.ePub"
   },
   "category_order": [
     "STRUCTURE CHECK",
