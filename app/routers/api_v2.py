@@ -149,7 +149,20 @@ def _require_cookie_user(user):
 
 
 def _has_admin_role(user: models.User):
-    return "Admin" in [role.name for role in user.roles]
+    if not user:
+        return False
+    if getattr(user, "access_level", None) == "Admin":
+        return True
+    if getattr(user, "role", None) and "admin" in str(user.role).lower():
+        return True
+    if getattr(user, "designation", None) and "admin" in str(user.designation).lower():
+        return True
+    if hasattr(user, "roles") and user.roles:
+        return any(
+            getattr(role, "name", "") == "Admin" or "admin" in str(getattr(role, "name", "")).lower()
+            for role in user.roles
+        )
+    return False
 
 
 def _has_admin_or_pm_role(user: models.User):
@@ -8585,6 +8598,7 @@ def api_v2_create_chapter_with_art(
         )
 
     import re as _re
+    from sqlalchemy import or_ as _or
     existing_art_chapters = [
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
         if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
@@ -8885,13 +8899,26 @@ def api_v2_create_chapters_with_art_zip(
         )
 
     import re as _re
+    from sqlalchemy import or_ as _or
+
+    # Check if project has a book manuscript (e.g. 00 or title contains Book)
+    has_book_manuscript = db.query(ChapterInfo).filter(
+        ChapterInfo.project == project.project_code,
+        _or(ChapterInfo.chapters == "00", ChapterInfo.chapter_title.ilike("%Book%"))
+    ).first() is not None
+
     existing_art_chapters = [
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
-        if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+        if ci.chapters and (_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters) or ci.chapters == "Book 00 - Art")
     ]
-    existing_art_by_num: dict[int, ChapterInfo] = {
-        int(_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters).group(1)): ci for ci in existing_art_chapters
-    }
+    existing_art_by_key: dict[str, ChapterInfo] = {}
+    for ci in existing_art_chapters:
+        m = _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+        if m:
+            existing_art_by_key[f"ch_{int(m.group(1)):02d}"] = ci
+        elif ci.chapters == "Book 00 - Art":
+            existing_art_by_key["book_00"] = ci
+
     existing_art_workflow = next((ci.workflow for ci in existing_art_chapters if ci.workflow), None)
 
     created: list = []
@@ -8906,8 +8933,9 @@ def api_v2_create_chapters_with_art_zip(
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(temp_dir)
 
-        # Map to hold temporary files grouped by chapter number
-        ch_files: dict[int, list[tuple[str, str]]] = {}
+        # Map to hold temporary files grouped by chapter key ("book_00" or "ch_01", etc.)
+        # and display info: (chapter_number, chapter_title, files_list)
+        ch_files: dict[str, dict] = {}
 
         for root, _dirs, filenames in os.walk(temp_dir):
             for fname in filenames:
@@ -8916,29 +8944,82 @@ def api_v2_create_chapters_with_art_zip(
 
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, temp_dir)
-                
-                # Determine chapter number
-                number_padded = None
+                rel_lower = rel_path.replace("\\", "/").lower()
                 path_parts = rel_path.replace("\\", "/").split("/")
-                for part in reversed(path_parts[:-1]):
-                    number_padded = file_service.extract_chapter_number_from_filename(part)
-                    if number_padded:
-                        break
-                if not number_padded:
-                    number_padded = file_service.extract_chapter_number_from_filename(fname)
 
-                if not number_padded:
-                    skipped.append({"filename": fname, "reason": "Could not determine a chapter number from the file name or path."})
+        # Determine whole-book vs chapter based ONLY on folder names or zip filename (not individual file names)
+        zip_stem = os.path.splitext(file.filename)[0].strip().lower()
+
+        for root, _dirs, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
                     continue
 
-                new_num = int(number_padded)
-                if new_num not in ch_files:
-                    ch_files[new_num] = []
-                ch_files[new_num].append((fname, full_path))
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, temp_dir)
+                path_parts = rel_path.replace("\\", "/").split("/")
+                dir_parts = path_parts[:-1]  # parent folders only
 
-        for new_num, files_list in sorted(ch_files.items()):
-            art_chapter_name = f"Ch {new_num:02d} - Art"
-            existing_ch = existing_art_by_num.get(new_num)
+                matched_chapter = None
+                matched_book = False
+
+                # 1. Check parent folder names first (from closest folder upwards)
+                for part in reversed(dir_parts):
+                    p_clean = part.strip().lower()
+                    if p_clean in ("art files", "art_files", "artfiles", "art file", "art-files", "book", "book art", "book_art", "common art", "common_art") or "art files" in p_clean:
+                        matched_book = True
+                        break
+                    m = _re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', p_clean)
+                    if m:
+                        matched_chapter = int(m.group(1))
+                        break
+                    m = _re.match(r'^(\d{1,3})$', p_clean)
+                    if m:
+                        matched_chapter = int(m.group(1))
+                        break
+
+                # 2. If not determined by folder name, check zip filename
+                if not matched_book and matched_chapter is None:
+                    if zip_stem in ("art files", "art_files", "artfiles", "art file", "art-files", "book", "book art", "book_art") or "art files" in zip_stem:
+                        matched_book = True
+                    else:
+                        m = _re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', zip_stem)
+                        if m:
+                            matched_chapter = int(m.group(1))
+                        else:
+                            m = _re.match(r'^(\d{1,3})$', zip_stem)
+                            if m:
+                                matched_chapter = int(m.group(1))
+
+                # 3. Assign chapter vs book
+                if matched_chapter is not None and matched_chapter > 0:
+                    key = f"ch_{matched_chapter:02d}"
+                    ch_number = f"Ch {matched_chapter:02d} - Art"
+                    ch_title = f"Chapter {matched_chapter:02d} Art"
+                elif matched_book or has_book_manuscript or not dir_parts:
+                    # e.g. "Art Files.zip" or folder named "Art Files" -> Book 00 - Art
+                    key = "book_00"
+                    ch_number = "Book 00 - Art"
+                    ch_title = "Book 00 Art"
+                else:
+                    key = "book_00"
+                    ch_number = "Book 00 - Art"
+                    ch_title = "Book 00 Art"
+
+                if key not in ch_files:
+                    ch_files[key] = {
+                        "ch_number": ch_number,
+                        "ch_title": ch_title,
+                        "files": []
+                    }
+                ch_files[key]["files"].append((fname, full_path))
+
+        for key, info in sorted(ch_files.items()):
+            art_chapter_name = info["ch_number"]
+            art_chapter_title = info["ch_title"]
+            files_list = info["files"]
+
+            existing_ch = existing_art_by_key.get(key)
             if existing_ch and not allow_revision:
                 for fname, _ in files_list:
                     skipped.append({"filename": fname, "reason": f"Art chapter {art_chapter_name} already exists."})
@@ -8950,7 +9031,7 @@ def api_v2_create_chapters_with_art_zip(
                     project_id=project_id,
                     chapter_id=existing_ch.id,
                     upload_dir=file_service.UPLOAD_DIR,
-                    title=f"Chapter {new_num:02d} Art",
+                    title=art_chapter_title,
                     workflow_name=workflow_name,
                 )
             else:
@@ -8958,7 +9039,7 @@ def api_v2_create_chapters_with_art_zip(
                     db,
                     project_id=project_id,
                     number=art_chapter_name,
-                    title=f"Chapter {new_num:02d} Art",
+                    title=art_chapter_title,
                     upload_dir=file_service.UPLOAD_DIR,
                     status="Received",
                     workflow_name=workflow_name,
@@ -8993,7 +9074,7 @@ def api_v2_create_chapters_with_art_zip(
                     uploaded_by_id=viewer.id,
                 ))
 
-            existing_art_by_num[new_num] = new_chapter
+            existing_art_by_key[key] = new_chapter
             db.commit()
             db.refresh(new_chapter)
             created.append(new_chapter)
@@ -9278,6 +9359,10 @@ class TransitionEmailRequest(BaseModel):
     subject: str
     body: str
     shipment_notes: Optional[str] = None
+
+class StageRevertRequest(BaseModel):
+    target_stage: Optional[str] = None
+    remarks: Optional[str] = None
 
 def _get_stage_notification_config(client_name: str, stage_name: str, db=None) -> Optional[dict]:
     import json
@@ -10246,6 +10331,181 @@ def api_v2_chapter_transition_email(
         "stage_name": chapter.stage_name,
         "status": chapter.status
     }}
+
+
+@router.post("/chapters/{chapter_id}/revert-stage")
+def api_v2_chapter_revert_stage(
+    chapter_id: int,
+    payload: StageRevertRequest = StageRevertRequest(),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    if not _has_admin_role(user):
+        raise HTTPException(status_code=403, detail="Only administrators can revert workflow stages.")
+
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.domains.workflow.models import ChapterInfo, WorkflowMaster, StageDetail
+    from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
+    from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    project = db.execute(select(Project).where(Project.project_code == chapter.project)).scalars().first()
+    project_code = project.code if project else chapter.project
+    if not project_code:
+        raise HTTPException(status_code=400, detail="Project code not found")
+
+    client = None
+    if project and project.client_id:
+        client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
+    client_ident = client.division if (client and client.division) else (project.client_name if project else chapter.client)
+
+    # Resolve workflow and stages
+    chapter_workflow = (chapter.workflow or "").strip() or (project.workflow_name if project else "")
+    wf_stages = []
+    if chapter_workflow:
+        try:
+            wf_stages = db.execute(
+                select(WorkflowMaster)
+                .where(WorkflowMaster.workflow_name == chapter_workflow)
+            ).scalars().all()
+        except Exception:
+            pass
+
+    # Order stages topologically using previous_stage / next_stage
+    ordered_stage_names = []
+    if wf_stages:
+        by_name = {s.stage_name: s for s in wf_stages}
+        first_stage = next((s for s in wf_stages if not s.previous_stage), wf_stages[0] if wf_stages else None)
+        curr = first_stage
+        visited = set()
+        while curr and curr.stage_name not in visited:
+            ordered_stage_names.append(curr.stage_name)
+            visited.add(curr.stage_name)
+            curr = by_name.get(curr.next_stage) if curr.next_stage else None
+        for s in wf_stages:
+            if s.stage_name not in visited:
+                ordered_stage_names.append(s.stage_name)
+                visited.add(s.stage_name)
+
+    current_stage = (chapter.stage_name or "").strip()
+    target_stage = (payload.target_stage or "").strip()
+
+    if not target_stage:
+        if current_stage in ordered_stage_names:
+            curr_idx = ordered_stage_names.index(current_stage)
+            if curr_idx <= 0:
+                raise HTTPException(status_code=400, detail="Already at the first stage; cannot revert.")
+            target_stage = ordered_stage_names[curr_idx - 1]
+        else:
+            raise HTTPException(status_code=400, detail="Target stage not specified and cannot be determined from workflow.")
+
+    if target_stage == current_stage:
+        raise HTTPException(status_code=400, detail="Target stage is the same as current stage.")
+
+    # Find stage details
+    stage_details = db.execute(
+        select(StageDetail).where(
+            StageDetail.project == project_code,
+            StageDetail.chapters == chapter.chapters
+        )
+    ).scalars().all()
+
+    target_idx = ordered_stage_names.index(target_stage) if target_stage in ordered_stage_names else -1
+
+    for sd in stage_details:
+        sd_idx = ordered_stage_names.index(sd.stage_name) if sd.stage_name in ordered_stage_names else -1
+        if sd.stage_name == target_stage:
+            sd.stage_status = "In-progress"
+            sd.actual_end_date = None
+            sd.total_time_taken = None
+            if not sd.actual_start_date:
+                sd.actual_start_date = datetime.now(timezone.utc)
+        elif sd.stage_name == current_stage or (target_idx >= 0 and sd_idx > target_idx):
+            # Reset current and any subsequent stages
+            sd.stage_status = "Pending"
+            sd.actual_end_date = None
+            sd.actual_start_date = None
+            sd.total_time_taken = None
+            sd.delayed = False
+            sd.delay_days = 0
+
+    target_sd = next((sd for sd in stage_details if sd.stage_name == target_stage), None)
+
+    # Build structured JSON revert entry
+    revert_time_iso = datetime.now(timezone.utc).isoformat()
+    revert_user = getattr(user, "username", "admin")
+    revert_entry = {
+        "action": "revert",
+        "from_stage": current_stage,
+        "to_stage": target_stage,
+        "reverted_by": revert_user,
+        "timestamp": revert_time_iso,
+        "reason": (payload.remarks or "").strip()
+    }
+
+    # Update StageDetail history and remarks
+    if target_sd:
+        sd_history = list(target_sd.history) if target_sd.history and isinstance(target_sd.history, list) else []
+        sd_history.append(revert_entry)
+        target_sd.history = sd_history
+        existing_rem = target_sd.remarks or ""
+        revert_human_note = f"[Reverted from {current_stage} by {revert_user} at {revert_time_iso[:19]}]: {payload.remarks or 'No reason provided'}"
+        target_sd.remarks = f"{existing_rem}\n{revert_human_note}".strip() if existing_rem else revert_human_note
+
+    # Update ChapterInfo and append to JSON remarks history
+    chapter.stage_name = target_stage
+    chapter.status = "In-progress"
+
+    remarks_history = []
+    if chapter.remarks:
+        try:
+            parsed = json.loads(chapter.remarks)
+            if isinstance(parsed, list):
+                remarks_history = parsed
+            elif isinstance(parsed, dict):
+                remarks_history = [parsed]
+            else:
+                remarks_history = [{"note": str(chapter.remarks)}]
+        except Exception:
+            remarks_history = [{"note": chapter.remarks}]
+
+    remarks_history.append(revert_entry)
+    import json as _json
+    chapter.remarks = _json.dumps(remarks_history, indent=2)
+
+    owner_user = resolve_stage_owner_by_designation(
+        db, target_stage, project_code=project_code, client_identifier=client_ident
+    )
+    if owner_user:
+        chapter.current_assignee_name = owner_user.username
+    elif target_sd and target_sd.assignee_name:
+        chapter.current_assignee_name = target_sd.assignee_name
+    else:
+        chapter.current_assignee_name = None
+
+    if target_sd and target_sd.planned_end_date:
+        chapter.due_date = target_sd.planned_end_date
+
+    db.commit()
+    db.refresh(chapter)
+
+    return {
+        "message": f"Successfully reverted to {target_stage}",
+        "chapter": {
+            "id": chapter.id,
+            "stage_name": chapter.stage_name,
+            "status": chapter.status,
+            "current_assignee_name": chapter.current_assignee_name,
+            "remarks": chapter.remarks
+        },
+        "revert_entry": revert_entry
+    }
 
 
 @router.post("/chapters/bulk-transition-config", response_model=schemas_v2.BulkTransitionConfigResponse)

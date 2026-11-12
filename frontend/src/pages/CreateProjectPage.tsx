@@ -32,8 +32,9 @@ function formatBytes(bytes: number): string {
 const PO_TEMPLATE_LABELS: Record<string, string> = {
   wk_lww: 'WK / LWW launch form',
   kendall_hunt: 'Kendall Hunt RFQ',
-  artech_house: 'Artech House transmittal',
+  artech_house: 'Artech House',
   springer: 'Springer Publishing Assignment Memo',
+  bep: 'Business Expert Press',
 }
 
 const PO_VENDOR_HINTS: Record<string, string> = {

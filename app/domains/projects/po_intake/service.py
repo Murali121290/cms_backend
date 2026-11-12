@@ -55,10 +55,21 @@ def extract_po(file_path: str, filename: str) -> dict:
         try:
             wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
             sheet_names = wb.sheetnames
+            # Sample text from first 2 sheets / first 30 rows to detect vendor content
+            sample_words: list[str] = []
+            for sname in sheet_names[:2]:
+                ws = wb[sname]
+                for r_idx, row in enumerate(ws.iter_rows(values_only=True)):
+                    if r_idx > 30:
+                        break
+                    for val in row:
+                        if val is not None:
+                            sample_words.append(str(val))
+            sample_text = " ".join(sample_words)
         except Exception as exc:
             return _empty_result(detect.UNKNOWN, [f"Could not read spreadsheet: {exc}"])
 
-        template = detect.detect_xlsx_template(filename, sheet_names)
+        template = detect.detect_xlsx_template(filename, sheet_names, sample_text=sample_text)
         if template not in (detect.ARTECH_HOUSE, detect.BEP):
             return _empty_result(detect.UNKNOWN)
 

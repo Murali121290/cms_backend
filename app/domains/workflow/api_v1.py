@@ -448,12 +448,19 @@ def _send_planning_approved_email(
             if sd_with_pm:
                 pm_ident = sd_with_pm.project_manager_name
 
+        pm_name = None
         if pm_ident:
             pm_u = db.query(User).filter(
                 or_(User.username == pm_ident, User.email == pm_ident)
             ).first()
-            if pm_u and pm_u.email:
-                pm_email = pm_u.email.strip()
+            if pm_u:
+                if pm_u.email:
+                    pm_email = pm_u.email.strip()
+                full_name = f"{pm_u.first_name or ''} {pm_u.last_name or ''}".strip()
+                if full_name:
+                    pm_name = full_name
+        if not pm_name:
+            pm_name = pm_ident
 
         configured_cc = planning_cfg.get("cc") or ["{project_manager_email}"]
         for item in configured_cc:
@@ -500,27 +507,21 @@ def _send_planning_approved_email(
 
         # Build Project Info HTML & Text tables
         proj_fields_raw = [
-            ("project_code", "Project Code", project.project_code),
-            ("client_name", "Client Name", client_name),
-            ("xml_standard", "XML Standard", project.xml_standard),
-            ("category", "Category", project.category),
-            ("composition", "Composition", _fmt_composition(project.composition)),
-            ("workflow_name", "Workflow Name", wf_name or project.workflow_name),
-            ("project_manager", "Project Manager", project.project_manager),
-            ("priority", "Priority", project.priority),
             ("project_title", "Project Title", project.project_title),
+            ("category", "Category", project.category),
+            ("priority", "Priority", project.priority),
+            ("copyediting_level", "Copyediting Level", project.copyediting_level),
+            ("composition", "Composition", _fmt_composition(project.composition)),
+            ("due_date", "Due Date", _fmt_date(project.due_date, default=None)),
+            ("project_manager", "Project Manager", pm_name or project.project_manager),
             ("edition", "Edition", project.edition),
             ("color", "Color", project.color),
             ("trim_size", "Trim Size", project.trim_size),
             ("copyright_year", "Copyright Year", project.copyright_year),
             ("manuscript_pages", "Manuscript Pages", project.manuscript_pages),
             ("estimated_pages", "Estimated Pages", project.estimated_pages),
-            ("actual_pages", "Actual Pages", project.actual_pages),
             ("chapter_count", "Chapter Count", project.chapter_count),
             ("isbn_no", "ISBN No", project.isbn_no),
-            ("billing_location", "Billing Location", project.billing_location),
-            ("due_date", "Due Date", _fmt_date(project.due_date, default=None)),
-            ("copyediting_level", "Copyediting Level", project.copyediting_level),
             ("billing_type", "Billing Type", project.billing_type),
             ("alt_text", "Alt Text", project.alt_text),
             ("accessibility", "Accessibility", project.accessibility),
@@ -528,8 +529,6 @@ def _send_planning_approved_email(
         ]
         if reason:
             proj_fields_raw.append(("adjustment_reason", "Adjustment Reason", reason))
-        if operator:
-            proj_fields_raw.append(("approved_by", "Approved By", operator))
 
         # Filter out empty/None/blank data so only populated fields are sent
         proj_fields = []
