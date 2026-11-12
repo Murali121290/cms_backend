@@ -232,6 +232,7 @@ def validate_epub(
                     "folder_name": folder_name,
                     "epub_root": epub_folder,
                     "file_path": relative_path,
+                    "language": db_language,
                 }
                 
                 import inspect
