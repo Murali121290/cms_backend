@@ -182,7 +182,8 @@
       "type": "function",
       "function": "wordiness",
       "severity": "suggestion",
-      "enabled": true
+      "enabled": false,
+      "disabled_reason": "Superseded by Basic Grammar workbook WC-001..WC-115 (115 wordy-phrase rules). The hardcoded WORDY_PHRASES dict in sentence_checks.py covered only 6 phrases; the workbook is a strict superset."
     },
     {
       "id": "SL005",

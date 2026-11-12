@@ -2835,14 +2835,19 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           height: 0;
           pointer-events: none;
         }
+        /* Track changes — replacement diff rendered INSIDE the editor
+           canvas. Font-only: green for insertions, red strikethrough
+           for deletions. No background fills (matches the finding-
+           card diff styling). Yellow Highlight (mark / .tc-highlight)
+           is a separate action and keeps its background. */
         ins, .tc-insert {
-          background-color: rgba(34, 197, 94, 0.2) !important;
+          background-color: transparent !important;
           text-decoration: underline !important;
           text-decoration-color: rgb(22, 163, 74) !important;
           color: rgb(21, 128, 61) !important;
         }
         del, .tc-delete {
-          background-color: rgba(239, 68, 68, 0.15) !important;
+          background-color: transparent !important;
           text-decoration: line-through !important;
           text-decoration-color: rgb(220, 38, 38) !important;
           color: rgba(127, 29, 29, 0.8) !important;
@@ -2850,7 +2855,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           border-radius: 2px !important;
         }
         del:hover, .tc-delete:hover {
-          background-color: rgba(239, 68, 68, 0.25) !important;
+          background-color: transparent !important;
         }
         mark, .tc-highlight {
           background-color: #fef08a !important;
@@ -2858,9 +2863,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           padding: 1px 3px !important;
           border-radius: 2px !important;
         }
-        /* ── Review mode (eye toggle) — original vs current diff overlay ───── */
+        /* ── Review mode (eye toggle) — original vs current diff overlay.
+           Same font-only treatment as the track-changes rendering above. */
         .rv-del {
-          background-color: rgba(239, 68, 68, 0.12);
+          background-color: transparent;
           color: rgb(153, 27, 27);
           text-decoration: line-through;
           text-decoration-color: rgb(220, 38, 38);
@@ -2868,7 +2874,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           border-radius: 2px;
         }
         .rv-ins {
-          background-color: rgba(16, 185, 129, 0.16);
+          background-color: transparent;
           color: rgb(6, 95, 70);
           padding: 1px 3px;
           border-radius: 2px;

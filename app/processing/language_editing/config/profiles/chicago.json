@@ -14,6 +14,6 @@
     { "id": "GP008", "category": "grammar", "type": "regex", "pattern": "(?<=[a-z])--(?=[a-z])", "replacement": "—", "message": "Chicago: Em dash without surrounding spaces.", "severity": "suggestion", "enabled": true },
     { "id": "SP000", "category": "spelling", "type": "dictionary", "message": "Chicago Webster's spelling.", "enabled": true },
     { "id": "SL001", "category": "sentence", "type": "function", "function": "max_sentence_length", "params": { "limit": 45 }, "enabled": true },
-    { "id": "SL004", "category": "sentence", "type": "function", "function": "wordiness", "enabled": true }
+    { "id": "SL004", "category": "sentence", "type": "function", "function": "wordiness", "enabled": false, "disabled_reason": "Superseded by Basic Grammar workbook WC-001..WC-115" }
   ]
 }

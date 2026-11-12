@@ -52,7 +52,8 @@ import {
   applyCasePreservingStructure,
 } from '@/features/language_edit/caseTransforms'
 import { replaceOptionsFor } from '@/features/language_edit/replaceOptions'
-import { isAdvisoryIdentity } from '@/features/language_edit/advisoryFinding'
+import { isAdvisoryIdentity, isSentenceAdvisory } from '@/features/language_edit/advisoryFinding'
+import { displayCategoryFor } from '@/features/language_edit/findingLabel'
 import { SaveRegexAsRuleDialog, type RegexDraft } from '@/features/language_edit/SaveRegexAsRuleDialog'
 
 interface Finding {
@@ -83,6 +84,46 @@ interface Finding {
   // Accept/Edit actions when this is true so the finding presents as a
   // "consider revising" nudge; Highlight and Ignore stay available.
   advisory?: boolean
+  // Structured provenance badge set server-side. Currently only
+  // 'LWW-NE' is emitted (workbook-driven). Used by the card renderer
+  // to decide whether to display the finding's description — LWW-NE
+  // findings ship author-curated rationales worth showing; findings
+  // from other sources use the message internally but suppress it in
+  // the card so the diff stays the focus.
+  source_badge?: 'LWW-NE' | null
+  // Fine-grained source label populated by the Basic Grammar workbook
+  // serializer. One of 'Basic Grammar' / 'Article Usage' /
+  // 'Subject-Verb Agreement' / 'Common Misuse' / 'Word/Phrase Choice' /
+  // 'Sentence Structure' / 'Punctuation and Capitalization'. Replaces
+  // the generic engine-category text on the card header so reviewers
+  // can see which workbook section a finding came from. Null for non-
+  // workbook findings; the card then falls back to the existing
+  // displayCategory derivation.
+  subcategory?: string | null
+  // Phase-2 Abbreviations workbook metadata. Backend GET /findings
+  // enriches every row with these keys (nulls for non-Abbreviations
+  // rules) so the card renderer can key off them unconditionally.
+  // problem_label  — short README-§9 label ("First use", "Do not use",
+  //                  "Ambiguous", …) shown as a chip beside the rule_id.
+  // note           — per-row reviewer note from the workbook.
+  // mw_lookup      — Merriam-Webster URL for abbreviation findings.
+  // confidence     — "High" or "Medium - verify".
+  // tool_behaviour — workbook's recommended behaviour (DN rows).
+  // applies_in     — medication-context string (DN rows).
+  // notation       — the raw DN notation glyph ("U", "MS", …).
+  // meanings       — AB07 only; ordered best-match-first.
+  problem_label?: string | null
+  note?: string | null
+  mw_lookup?: string | null
+  confidence?: string | null
+  tool_behaviour?: string | null
+  applies_in?: string | null
+  notation?: string | null
+  source_sheet?: string | null
+  subject_area?: string | null
+  first_use_rule?: string | null
+  ambiguity?: string | null
+  meanings?: Array<{ meaning: string; is_best_match: boolean }> | null
 }
 
 // "Term from list: <name>" or "Term from list: <name> (also in: <names>)"
@@ -124,7 +165,12 @@ export function LanguageReviewPage() {
   // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
   const journal = useJournalReviewMode()
 
-  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'term' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules'>('all')
+  // ``bias`` is the Inclusive tab (it also folds in the former Terms
+  // findings — see the ``inclusiveFindings`` memo). ``sentence`` is the
+  // Punctuation and Capitalization tab. ``hyphenation`` is labelled
+  // "Hyphenated Words" in the UI. Backend finding categories stay the
+  // same — this change is presentation + grouping only.
+  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules'>('all')
   const [loading, setLoading] = useState(false)
   // Three-phase loading message driven by the analyze endpoint's
   // behaviour: the POST both checks the cache and (on miss) runs the
@@ -751,13 +797,19 @@ export function LanguageReviewPage() {
     const target = findings[idx]
     if (!target) return
     setSelectedFindingId(target.id)
-    // Legacy 'compounds' / 'compound' category findings (from pre-merge
-    // analyze runs) share the Hyphenation tab now, so map them to the
-    // right tab on click rather than trying to switch to a tab that no
-    // longer exists.
-    const legacyCompoundCat = target.category === 'compounds' || target.category === 'compound'
-    const resolvedCat = legacyCompoundCat ? 'hyphenation' : target.category
-    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'bias', 'term', 'typo', 'hyphenation', 'abbreviations', 'medical_terms'].includes(resolvedCat)) {
+    // Map finding categories to the tab that now holds them:
+    //   * Legacy 'compounds' / 'compound' (pre-merge analyze runs)
+    //     share the Hyphenated Words tab.
+    //   * 'term' and 'article' were folded into the Inclusive tab
+    //     ('bias'), so a click on a term-list highlight or an article
+    //     finding selects Inclusive instead of a now-removed tab.
+    let resolvedCat = target.category
+    if (resolvedCat === 'compounds' || resolvedCat === 'compound') {
+      resolvedCat = 'hyphenation'
+    } else if (resolvedCat === 'term' || resolvedCat === 'article') {
+      resolvedCat = 'bias'
+    }
+    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'bias', 'typo', 'hyphenation', 'abbreviations', 'medical_terms'].includes(resolvedCat)) {
       setActiveRightTab(resolvedCat as any)
     }
 
@@ -821,9 +873,24 @@ export function LanguageReviewPage() {
   )
   const grammarFindings = useMemo(() => pendingFindings.filter(f => f.category === 'grammar'), [pendingFindings])
   const spellingFindings = useMemo(() => pendingFindings.filter(f => f.category === 'spelling'), [pendingFindings])
+  // "Punctuation and Capitalization" is the display label — the chip
+  // still keys off ``category === 'sentence'`` so the existing engine
+  // and persisted findings stay untouched.
   const sentenceFindings = useMemo(() => pendingFindings.filter(f => f.category === 'sentence'), [pendingFindings])
-  const biasFindings = useMemo(() => pendingFindings.filter(f => f.category === 'bias' || f.category === 'article'), [pendingFindings])
-  const termFindings = useMemo(() => pendingFindings.filter(f => f.category === 'term' || f.source === 'term'), [pendingFindings])
+  // Inclusive now folds in what used to be the standalone Terms chip:
+  // both backend categories ``bias`` / ``article`` AND term-matcher
+  // highlights (``category === 'term'`` or ``source === 'term'``) land
+  // here so reviewers see one combined bucket. Rule IDs, actions and
+  // review status are all preserved on each finding.
+  const inclusiveFindings = useMemo(
+    () => pendingFindings.filter(
+      f => f.category === 'bias'
+        || f.category === 'article'
+        || f.category === 'term'
+        || f.source === 'term',
+    ),
+    [pendingFindings],
+  )
   const typoFindings = useMemo(() => pendingFindings.filter(f => f.category === 'typo'), [pendingFindings])
   // Hyphenation absorbs the old Compounds category (single tab per the
   // Option B merge). Legacy jobs persisted with category='compounds' /
@@ -855,8 +922,7 @@ export function LanguageReviewPage() {
     else if (activeRightTab === 'grammar') list = grammarFindings
     else if (activeRightTab === 'spelling') list = spellingFindings
     else if (activeRightTab === 'sentence') list = sentenceFindings
-    else if (activeRightTab === 'bias') list = biasFindings
-    else if (activeRightTab === 'term') list = termFindings
+    else if (activeRightTab === 'bias') list = inclusiveFindings
     else if (activeRightTab === 'typo') list = typoFindings
     else if (activeRightTab === 'hyphenation') list = hyphenationFindings
     else if (activeRightTab === 'abbreviations') list = abbreviationFindings
@@ -870,7 +936,7 @@ export function LanguageReviewPage() {
         f.message.toLowerCase().includes(q) ||
         f.rule_id.toLowerCase().includes(q),
     )
-  }, [activeRightTab, pendingFindings, grammarFindings, spellingFindings, sentenceFindings, biasFindings, termFindings, typoFindings, hyphenationFindings, abbreviationFindings, medicalTermsFindings, searchQuery])
+  }, [activeRightTab, pendingFindings, grammarFindings, spellingFindings, sentenceFindings, inclusiveFindings, typoFindings, hyphenationFindings, abbreviationFindings, medicalTermsFindings, searchQuery])
 
   // Realtime progress statistics
   const totalFindingsCount = job?.total_findings || findings.length || 0
@@ -883,8 +949,16 @@ export function LanguageReviewPage() {
       
       {/* Dynamic CSS for Clarity design system highlights & diffs */}
       <style>{`
-        .diff-old { text-decoration: line-through; color: #b91c1c; background-color: #fee2e2; }
-        .diff-new { color: #047857; background-color: #d1fae5; }
+        /* Replacement diff styling (finding cards, actual
+           replacements only — advisory findings render as muted
+           italic text without the diff). Red strikethrough for the
+           original, green for the suggestion. No background colors
+           so the diff reads cleanly against the card without visual
+           weight competing with the finding message above. Padding
+           + rounded corners are kept so layout spacing is unchanged;
+           only the fills are removed. */
+        .diff-old { text-decoration: line-through; color: #b91c1c; background-color: transparent; }
+        .diff-new { color: #047857; background-color: transparent; }
         .chip { transition: all 0.15s ease; }
         .card-enter { animation: cardIn 0.25s ease; }
         @keyframes cardIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
@@ -1195,61 +1269,20 @@ export function LanguageReviewPage() {
                   All {pendingFindings.length}
                 </button>
 
-                <button
-                  onClick={() => setActiveRightTab('grammar')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'grammar'
-                      ? 'bg-orange-500 text-white shadow-sm'
-                      : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
-                  }`}
-                >
-                  Grammar {grammarFindings.length}
-                </button>
-
-                <button
-                  onClick={() => setActiveRightTab('spelling')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'spelling'
-                      ? 'bg-sky-500 text-white shadow-sm'
-                      : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
-                  }`}
-                >
-                  Spelling {spellingFindings.length}
-                </button>
-
-                <button
-                  onClick={() => setActiveRightTab('sentence')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'sentence'
-                      ? 'bg-yellow-500 text-white shadow-sm'
-                      : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
-                  }`}
-                >
-                  Sentence {sentenceFindings.length}
-                </button>
-
-                <button
-                  onClick={() => setActiveRightTab('bias')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'bias'
-                      ? 'bg-rose-500 text-white shadow-sm'
-                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-                  }`}
-                >
-                  Inclusive {biasFindings.length}
-                </button>
-
-                <button
-                  onClick={() => setActiveRightTab('term')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'term'
-                      ? 'bg-violet-600 text-white shadow-sm'
-                      : 'bg-violet-50 text-violet-700 hover:bg-violet-100'
-                  }`}
-                >
-                  Terms {termFindings.length}
-                </button>
-
+                {/* Chip order (user spec):
+                      1. Abbreviations
+                      2. Medical Terms
+                      3. Hyphenated Words (was "Hyphenation")
+                      4. Inclusive (now folds in the former Terms chip)
+                      5. Grammar
+                      6. Punctuation and Capitalization (was "Sentence")
+                      7. Spelling
+                      8. Comments
+                      9. Spell Check
+                    Backend ``category`` values and ``activeRightTab``
+                    identifiers unchanged — this is a presentation-only
+                    reshuffle so finding IDs / status / actions all
+                    continue to work. */}
                 <button
                   onClick={() => setActiveRightTab('abbreviations')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1275,18 +1308,6 @@ export function LanguageReviewPage() {
                 </button>
 
                 <button
-                  onClick={() => setActiveRightTab('typo')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'typo'
-                      ? 'bg-red-500 text-white shadow-sm'
-                      : 'bg-red-50 text-red-700 hover:bg-red-100'
-                  }`}
-                  title="Likely typos detected by the spell checker"
-                >
-                  Spell Check {typoFindings.length}
-                </button>
-
-                <button
                   onClick={() => setActiveRightTab('hyphenation')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
                     activeRightTab === 'hyphenation'
@@ -1295,7 +1316,53 @@ export function LanguageReviewPage() {
                   }`}
                   title="Hyphen and en-dash workbook rules"
                 >
-                  Hyphenation {hyphenationFindings.length}
+                  Hyphenated Words {hyphenationFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('bias')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'bias'
+                      ? 'bg-rose-500 text-white shadow-sm'
+                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                  }`}
+                  title="Inclusive language findings + term-list highlights"
+                >
+                  Inclusive {inclusiveFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('grammar')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'grammar'
+                      ? 'bg-orange-500 text-white shadow-sm'
+                      : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
+                  }`}
+                >
+                  Grammar {grammarFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('sentence')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'sentence'
+                      ? 'bg-yellow-500 text-white shadow-sm'
+                      : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
+                  }`}
+                  title="Punctuation and capitalization (long sentences, passive voice, terminal punctuation, start capital, …)"
+                >
+                  Punctuation and Capitalization {sentenceFindings.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('spelling')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'spelling'
+                      ? 'bg-sky-500 text-white shadow-sm'
+                      : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
+                  }`}
+                >
+                  Spelling {spellingFindings.length}
                 </button>
 
                 <button
@@ -1308,6 +1375,18 @@ export function LanguageReviewPage() {
                 >
                   <MessageSquare size={12} />
                   Comments {comments.length}
+                </button>
+
+                <button
+                  onClick={() => setActiveRightTab('typo')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'typo'
+                      ? 'bg-red-500 text-white shadow-sm'
+                      : 'bg-red-50 text-red-700 hover:bg-red-100'
+                  }`}
+                  title="Likely typos detected by the spell checker"
+                >
+                  Spell Check {typoFindings.length}
                 </button>
 
                 <button
@@ -1523,26 +1602,38 @@ export function LanguageReviewPage() {
                     }
 
                     const catStyle = catColorMap[f.category] || { border: 'border-l-violet-400', text: 'text-violet-600', bg: 'bg-violet-50' }
-                    // Rename legacy "compounds"/"compound" labels to "HYPHENATION"
-                    // in the card header so the unified category reads consistently
-                    // regardless of when the job was analysed.
-                    const displayCategory = (f.category === 'compounds' || f.category === 'compound')
-                      ? 'hyphenation'
-                      : f.category === 'medical_terms'
-                        ? 'medical'
-                        : f.category
+                    // Card header label — delegates to the shared helper
+                    // so the logic is unit-tested in isolation. Sidebar
+                    // grouping is driven by ``f.category`` upstream,
+                    // not by this label.
+                    const displayCategory = displayCategoryFor(f)
                     // Provenance badge: distinguishes rule sources without
                     // needing separate filter tabs. Hyphenation findings
                     // get "Workbook" (hyphen/dash workbook) vs "LWW list"
                     // (hardcoded compound_* rules). All categories gain
                     // an "LWW-NE" badge when the finding came from the
-                    // LWW-NE workbook (rule_id prefix 'LWW-NE-').
-                    const isLwwNe = f.rule_id?.startsWith('LWW-NE-')
+                    // LWW-NE workbook — identified via the structured
+                    // ``source_badge`` field set server-side in the GET
+                    // /findings serializer, not by prefix-matching on
+                    // the rule name here.
+                    const isLwwNe = f.source_badge === 'LWW-NE'
                     const hyphSource = isLwwNe
                       ? 'LWW-NE'
                       : displayCategory === 'hyphenation'
                         ? (f.rule_id?.startsWith('compound_') ? 'LWW list' : 'Workbook')
                         : null
+
+                    // Phase-3 Abbreviations UI flags. DN rules are
+                    // patient-safety notations (DN01-DN32) — rendered
+                    // with a red stripe + "Do not use" banner so they
+                    // stand out from style/grammar findings. AB07 is
+                    // the ambiguous-abbreviation rule and gets a
+                    // meaning picker instead of a single-suggestion
+                    // diff.
+                    const isDnRule = !!f.rule_id && f.rule_id.startsWith('DN')
+                    const isAb07 = f.rule_id === 'AB07'
+                    const meanings = Array.isArray(f.meanings) ? f.meanings : []
+                    const hasAb07Meanings = isAb07 && meanings.length > 0
 
                     if (isTerm) {
                       const { listName, alsoIn } = parseTermMeta(f.message)
@@ -1584,7 +1675,13 @@ export function LanguageReviewPage() {
                             </p>
                           )}
 
-                          {!listName && (
+                          {/* Description (``f.message``) is shown only
+                              for LWW-NE findings across every category.
+                              Other sources (term_matcher, workbook,
+                              profile rules, …) suppress the description
+                              so the card stays focused on the surface
+                              + replacement. */}
+                          {!listName && isLwwNe && (
                             <p className="text-xs text-slate-500 mt-2 leading-snug">{f.message}</p>
                           )}
                         </div>
@@ -1599,7 +1696,7 @@ export function LanguageReviewPage() {
                           setSelectedFindingId(f.id)
                           focusOccurrenceInEditor(f.id)
                         }}
-                        className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${catStyle.border} ${
+                        className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${isDnRule ? 'border-l-rose-500 bg-rose-50/30' : catStyle.border} ${
                           isSelected
                             ? 'ring-2 ring-violet-400 border-violet-400 shadow-md'
                             : isAccepted
@@ -1613,10 +1710,33 @@ export function LanguageReviewPage() {
                       >
                         {/* Card Header */}
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[11px] font-bold uppercase tracking-wide ${isDnRule ? 'text-rose-700' : catStyle.text}`}>
                               {displayCategory}
                             </span>
+                            {/* Phase 3 — README §9 problem label chip
+                                (First use / Do not use / Ambiguous / …).
+                                Falls back silently for non-Abbreviations
+                                findings whose problem_label is null. DN
+                                rows get a red chip so patient-safety
+                                flags remain visually distinct even when
+                                scanning the sidebar. */}
+                            {f.problem_label && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border ${
+                                  isDnRule
+                                    ? 'bg-rose-100 text-rose-700 border-rose-300'
+                                    : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                }`}
+                                title={
+                                  isDnRule
+                                    ? 'Do-not-use notation — patient-safety flag from the Abbreviations workbook'
+                                    : 'Abbreviations rule category (README §9)'
+                                }
+                              >
+                                {f.problem_label}
+                              </span>
+                            )}
                             {hyphSource && (
                               <span
                                 className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
@@ -1642,22 +1762,111 @@ export function LanguageReviewPage() {
                               </span>
                             )}
                           </div>
-                          <span className="text-[11px] text-slate-400">
-                            Para {f.para_index + 1}
-                          </span>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {/* Rule ID — muted monospace label so QC
+                                reviewers can reference a specific rule
+                                when discussing findings. */}
+                            {f.rule_id && (
+                              <span
+                                className="text-[10px] font-mono text-slate-400"
+                                title={`Rule ID: ${f.rule_id}`}
+                              >
+                                {f.rule_id}
+                              </span>
+                            )}
+                            <span className="text-[11px] text-slate-400">
+                              Para {f.para_index + 1}
+                            </span>
+                          </div>
                         </div>
 
-                        {/* Finding Message */}
-                        <p className="text-sm text-slate-700 mt-1.5 font-medium leading-snug">
-                          {f.message}
-                        </p>
+                        {/* Finding description — displayed ONLY for
+                            LWW-NE findings (identified via the
+                            ``source_badge`` provenance field). Every
+                            other source suppresses the description so
+                            the diff + actions stay the primary focus.
+                            Scope is category-agnostic: a LWW-NE rule in
+                            Hyphenation, Grammar, Spelling, Inclusive,
+                            Abbreviations, Medical Terms, Punctuation
+                            etc. all surface their description; a
+                            non-LWW-NE finding in any category hides it. */}
+                        {isLwwNe && (
+                          <p className="text-sm text-slate-700 mt-1.5 font-medium leading-snug">
+                            {f.message}
+                          </p>
+                        )}
 
-                        {/* Visual Diff Box — Case 1 (replacement) shows
-                            the red-strikethrough → green diff. Case 2
-                            (advisory finding with original == suggestion)
-                            shows just the referenced phrase once, as
-                            muted italic text, with no arrow. */}
-                        {isAdvisoryIdentity(f) ? (
+                        {/* DN notation banner — the workbook's
+                            intended-meaning + applies_in context are
+                            the key patient-safety signals. Shown only
+                            for DN rows so style/grammar findings stay
+                            visually quiet. */}
+                        {isDnRule && (f.applies_in || f.tool_behaviour) && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-rose-700">
+                            {f.applies_in && (
+                              <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-200">
+                                Applies in: {f.applies_in}
+                              </span>
+                            )}
+                            {f.tool_behaviour && (
+                              <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-200">
+                                {f.tool_behaviour}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Visual Diff Box.
+                            Case 1 — AB07 (ambiguous abbreviation):
+                              render a meaning picker instead of a
+                              fixed diff. Reviewer must choose which
+                              meaning the author intended; Accept
+                              applies the chosen meaning. Best-cue
+                              match is badged but NEVER pre-selected
+                              (per README §7 — defaulting a meaning
+                              would mask reviewer judgement).
+                            Case 2 — advisory identity: show the
+                              referenced phrase once, muted italic.
+                            Case 3 — replacement: standard red→green diff. */}
+                        {hasAb07Meanings ? (
+                          <div data-testid="ab07-meanings" className="mt-3">
+                            <div className="flex items-center gap-2 text-sm font-medium flex-wrap">
+                              <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
+                                {f.original_text}
+                              </span>
+                              <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
+                              <span className="text-[11px] text-slate-500 italic">choose a meaning</span>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {meanings.map((m, idx) => {
+                                const isChosen = editedInputs[f.id] === m.meaning
+                                return (
+                                  <button
+                                    key={`${f.id}-meaning-${idx}`}
+                                    data-testid="ab07-meaning"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setEditedInputs({ ...editedInputs, [f.id]: m.meaning })
+                                    }}
+                                    className={`px-2 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                                      isChosen
+                                        ? 'bg-indigo-600 text-white border-indigo-600'
+                                        : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:border-indigo-300'
+                                    }`}
+                                    title={m.is_best_match ? 'Best contextual match from cue words nearby' : undefined}
+                                  >
+                                    {m.meaning}
+                                    {m.is_best_match && (
+                                      <span className={`ml-1 text-[9px] font-semibold uppercase ${isChosen ? 'text-indigo-100' : 'text-indigo-500'}`}>
+                                        best match
+                                      </span>
+                                    )}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ) : isAdvisoryIdentity(f) ? (
                           <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
                             <span
                               data-testid="advisory-phrase"
@@ -1678,46 +1887,111 @@ export function LanguageReviewPage() {
                           </div>
                         )}
 
+                        {/* Phase-3 — workbook note + Merriam-Webster
+                            lookup + confidence pill. All three are
+                            optional: keys are null for non-Abbreviations
+                            findings. Rendered as one soft row below the
+                            diff so the reviewer sees the "why" without
+                            opening a tooltip. */}
+                        {(f.note || f.mw_lookup || f.confidence) && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                            {f.note && (
+                              <span data-testid="finding-note" className="text-slate-600 italic leading-snug">
+                                {f.note}
+                              </span>
+                            )}
+                            {f.mw_lookup && (
+                              <a
+                                data-testid="mw-lookup"
+                                href={f.mw_lookup}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="underline decoration-dotted text-indigo-600 hover:text-indigo-800"
+                              >
+                                Merriam-Webster
+                              </a>
+                            )}
+                            {f.confidence && (
+                              <span
+                                data-testid="confidence-pill"
+                                className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                                  /verify/i.test(f.confidence)
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                }`}
+                                title="Workbook confidence level"
+                              >
+                                {f.confidence}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
                         {/* Action Buttons — Case 2 (advisory identity)
                             drops Accept + Edit (nothing to apply /
                             replace) and keeps Highlight + Ignore only. */}
                         <div className="mt-3 flex items-center gap-2 flex-wrap">
-                          {!isAdvisoryIdentity(f) && (
-                            <>
-                              <button
-                                data-testid="action-accept"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleDecide(f.id, 'accepted')
-                                }}
-                                className="flex-1 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm"
-                              >
-                                <Check size={13} /> Accept
-                              </button>
+                          {!isAdvisoryIdentity(f) && (() => {
+                            // AB07 accepts the reviewer's chosen meaning
+                            // (stored in editedInputs on click) by routing
+                            // through the 'edited' decision so the server
+                            // records the specific meaning the editor
+                            // picked. Disabled until a meaning is picked
+                            // — never pre-select, per README §7.
+                            const ab07NeedsChoice = hasAb07Meanings && !editedInputs[f.id]
+                            const acceptStatus: 'accepted' | 'edited' = hasAb07Meanings ? 'edited' : 'accepted'
+                            return (
+                              <>
+                                <button
+                                  data-testid="action-accept"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleDecide(f.id, acceptStatus)
+                                  }}
+                                  disabled={ab07NeedsChoice}
+                                  title={ab07NeedsChoice ? 'Pick a meaning above to continue' : undefined}
+                                  className={`flex-1 py-1.5 rounded-full text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm ${
+                                    ab07NeedsChoice
+                                      ? 'bg-slate-300 cursor-not-allowed'
+                                      : 'bg-emerald-600 hover:bg-emerald-500'
+                                  }`}
+                                >
+                                  <Check size={13} /> Accept
+                                </button>
 
-                              <button
-                                data-testid="action-edit"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setEditingFindingId(prev => prev === f.id ? null : f.id)
-                                }}
-                                className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 transition-colors"
-                              >
-                                Edit
-                              </button>
-                            </>
+                                <button
+                                  data-testid="action-edit"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setEditingFindingId(prev => prev === f.id ? null : f.id)
+                                  }}
+                                  className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 transition-colors"
+                                >
+                                  Edit
+                                </button>
+                              </>
+                            )
+                          })()}
+
+                          {/* Highlight — hidden for sentence
+                              advisories (passive_voice,
+                              max_sentence_length, SL001, SL005).
+                              Those findings have no meaningful
+                              "highlight in document" action; Ignore
+                              is the only action the reviewer takes. */}
+                          {!isSentenceAdvisory(f) && (
+                            <button
+                              data-testid="action-highlight"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDecide(f.id, 'highlighted')
+                              }}
+                              className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
+                            >
+                              Highlight
+                            </button>
                           )}
-
-                          <button
-                            data-testid="action-highlight"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDecide(f.id, 'highlighted')
-                            }}
-                            className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
-                          >
-                            Highlight
-                          </button>
 
                           <button
                             data-testid="action-ignore"
@@ -1725,7 +1999,7 @@ export function LanguageReviewPage() {
                               e.stopPropagation()
                               handleDecide(f.id, 'rejected')
                             }}
-                            className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-400 transition-colors"
+                            className={`${isSentenceAdvisory(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-400 transition-colors`}
                           >
                             Ignore
                           </button>
