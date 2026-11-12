@@ -2740,6 +2740,16 @@ def api_v2_ce_rules(
     return schemas_v2.CERulesResponse(rules=[schemas_v2.CERule(**r) for r in load_catalog()])
 
 
+@router.get("/stylesheets/presets/springer")
+def api_v2_get_springer_preset(
+    user=Depends(get_current_user_from_cookie),
+):
+    """Returns the official Springer Publishing House Style Sheet (July 2026) preset."""
+    from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
+    return get_springer_preset()
+
+
+
 @router.get(
     "/projects/{project_id}/stylesheets",
     response_model=schemas_v2.StylesheetsListResponse,
@@ -3053,7 +3063,8 @@ def _serve_docx_finalized(path: str, filename: str, media_type: str, inline: boo
 
     if not filename.lower().endswith(".docx"):
         disp = "inline" if (inline or filename.lower().endswith((".html", ".htm", ".pdf"))) else "attachment"
-        return FileResponse(path=path, filename=filename, media_type=media_type, content_disposition_type=disp)
+        fn = None if disp == "inline" else filename
+        return FileResponse(path=path, filename=fn, media_type=media_type, content_disposition_type=disp)
 
     from starlette.background import BackgroundTask
     from app.processing.citation_link_finalizer import finalize_docx_for_export
@@ -5309,9 +5320,13 @@ def api_v2_processing_status(
 
     supported_types = (
         "structuring",
+        "structuring_qa",
+        "preediting_qa",
         "reference_validation",
         "reference_structuring",
         "ppd",
+        "manuscript_analysis",
+        "manuscript_analysis_qa",
         "bias_scan",
         "credit_extractor_ai",
         "word_to_xml",
@@ -5841,6 +5856,28 @@ def api_v2_technical_scan(
         )
         if active_ss:
             active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss, db=db)
+        else:
+            proj = file_record.project if hasattr(file_record, "project") and file_record.project else (
+                db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
+                if file_record.project_id else None
+            )
+            c_name = (proj.client_name if proj and proj.client_name else "") or (proj.client.name if proj and proj.client else "")
+            if c_name and ("springer" in c_name.lower() or "spr" in c_name.lower()):
+                from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
+                spr = get_springer_preset()
+                active_stylesheet = schemas_v2.StylesheetSummary(
+                    id=0,
+                    project_id=file_record.project_id,
+                    name=spr["name"],
+                    description=spr["description"],
+                    selected_ia_rows=[schemas_v2.IARow(**r) for r in spr["selected_ia_rows"]],
+                    ce_rules={k: schemas_v2.CERuleSetting(**v) for k, v in spr["ce_rules"].items()},
+                    analyzed_file_ids=[],
+                    source_files=[],
+                    is_active=True,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
 
     # Annotate findings with stylesheet matching if stylesheet_id provided
     findings = raw_scan.get("findings", [])

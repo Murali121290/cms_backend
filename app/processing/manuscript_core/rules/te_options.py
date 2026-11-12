@@ -248,7 +248,7 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         sym, op, val = sm.groups()
         if rule_id == "stat_p_value":
             short = val[1:] if val.startswith("0.") else val
-            return _opts(f"{sym.lower()} {op} {val}", f"{sym.upper()} {op} {short}", QUERY)
+            return _opts(f"{sym.lower()} {op} {short}", f"{sym.upper()} {op} {short}", QUERY, f"{sym.lower()} {op} {val}")
         return _opts(f"{sym} {op} {val}", f"{sym} {op} {val}", QUERY)
 
     # R29 tolerance: 5 ± 0.2

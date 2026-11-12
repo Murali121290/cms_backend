@@ -296,9 +296,29 @@ def background_processing_task(
                     generated_files = ppd_engine_cls().process_document(file_path, user_username)
                     success_msg = "Manuscript Analysis & QA processing completed"
 
+                if process_type == "manuscript_analysis_qa":
+                    try:
+                        from app.processing.manuscript_analysis_qa import generate_manuscript_analysis_qa_report
+                        dir_name = os.path.dirname(file_path)
+                        base_name = os.path.splitext(os.path.basename(file_path))[0]
+                        qa_report_path = os.path.join(dir_name, f"{base_name}_Manuscript_Analysis_QA_Report.html")
+                        if qa_report_path not in generated_files:
+                            generate_manuscript_analysis_qa_report(
+                                docx_path=file_path,
+                                output_html_path=qa_report_path,
+                                analyst_name=user_username,
+                            )
+                            if qa_report_path not in generated_files:
+                                generated_files.append(qa_report_path)
+                            logger.info(f"Generated Manuscript Analysis QA Report: {qa_report_path}")
+                    except Exception as qae:
+                        logger.warning(f"Could not generate Manuscript Analysis QA Report: {qae}")
+
             elif process_type == "technical":
                 update_job_status(db, job_id, "processing", "Scanning technical style errors...", 30)
-                generated_files = technical_engine_cls().process_document(file_path)
+                generated_files = technical_engine_cls().process_document(
+                    file_path, project_id=file_record.project_id if file_record else None, db=db
+                )
                 success_msg = "Technical Editing completed successfully"
 
             elif process_type in [

@@ -10,6 +10,7 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
+  BookMarked,
 } from "lucide-react";
 
 import type {
@@ -23,7 +24,7 @@ import type {
 } from "@/types/api";
 import { CERulesEditor } from "./CERulesEditor";
 import { useCeRulesQuery, useIATemplateQuery } from "./useStylesheetsQuery";
-import { parseDocxStylesheet } from "@/api/stylesheets";
+import { parseDocxStylesheet, getSpringerPreset } from "@/api/stylesheets";
 
 interface StylesheetFormDrawerProps {
   isOpen: boolean;
@@ -64,6 +65,7 @@ export function StylesheetFormDrawer({
   // DOCX Import states
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingDocx, setIsUploadingDocx] = useState(false);
+  const [isLoadingSpringer, setIsLoadingSpringer] = useState(false);
   const [docxImportData, setDocxImportData] = useState<DocxStylesheetParseResponse | null>(null);
   const [showDocxDetails, setShowDocxDetails] = useState(false);
 
@@ -238,6 +240,82 @@ export function StylesheetFormDrawer({
     }
   };
 
+  const handleLoadSpringerPreset = async () => {
+    try {
+      setIsLoadingSpringer(true);
+      const res = await getSpringerPreset();
+      setName(res.name);
+      setDescription(res.description);
+
+      const newCeRules: CERuleSettings = {};
+      for (const [sno, r] of Object.entries(res.ce_rules || {})) {
+        const item = r as any;
+        newCeRules[sno] = {
+          enabled: item.enabled,
+          option: item.option,
+          severity: item.severity as CESeverity,
+        };
+      }
+      setCeRules(newCeRules);
+
+      const newSelectedRows: IATemplateRow[] = [];
+      const newExpanded = new Set<string>(expandedElements);
+      for (const matchedIa of (res.selected_ia_rows || [])) {
+        const found =
+          effectiveIaTemplate.find(
+            (t) =>
+              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
+              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
+                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern)) &&
+              (!matchedIa.subtype || t.subtype.toLowerCase() === matchedIa.subtype.toLowerCase())
+          ) || {
+            element: matchedIa.element,
+            subtype: matchedIa.subtype || "General",
+            pattern: matchedIa.pattern,
+            example: matchedIa.example || null,
+          };
+        newSelectedRows.push(found);
+        newExpanded.add(found.element);
+      }
+      setSelectedRows(newSelectedRows);
+      setExpandedElements(newExpanded);
+
+      const matchedMap: Record<string, any> = {};
+      for (const [sno, r] of Object.entries(res.ce_rules || {})) {
+        const item = r as any;
+        matchedMap[sno] = {
+          sno: Number(sno),
+          rule_name: `Rule ${sno}`,
+          option: item.option,
+          enabled: item.enabled,
+          severity: item.severity,
+          source_label: "Springer Preset",
+          source_value: "Springer Style Sheet (July 2026)",
+          explanation: `Default Springer specification (Option ${item.option})`,
+          notes: `Default Springer specification (Option ${item.option})`,
+        };
+      }
+      setDocxImportData({
+        metadata: { "Customer": "Springer Publishing Company", "Edition": "July 2026 Update" },
+        suggested_name: res.name,
+        suggested_description: res.description,
+        detected_preset_id: "springer",
+        matched_ce_rules: matchedMap,
+        matched_ia_rows: res.selected_ia_rows || [],
+        word_list: res.word_list || [],
+        total_specs_scanned: Object.keys(res.ce_rules || {}).length,
+        matched_rules_count: Object.keys(res.ce_rules || {}).length,
+      });
+
+      setSection("ce");
+    } catch (err: any) {
+      console.error("Failed to load Springer preset:", err);
+      alert("Failed to load Springer Publishing House Style preset.");
+    } finally {
+      setIsLoadingSpringer(false);
+    }
+  };
+
   const handleSubmit = () => {
     if (!name.trim()) {
       return;
@@ -330,7 +408,7 @@ export function StylesheetFormDrawer({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploadingDocx}
+              disabled={isUploadingDocx || isLoadingSpringer}
               title="Upload existing Word style sheet (.docx) to automatically choose rules and options"
               className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs disabled:opacity-50"
             >
@@ -343,6 +421,25 @@ export function StylesheetFormDrawer({
                 <>
                   <FileText className="w-3.5 h-3.5 text-blue-600" />
                   <span>Word Style Sheet</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleLoadSpringerPreset}
+              disabled={isLoadingSpringer || isUploadingDocx}
+              title="Load official Springer Publishing House Style Sheet (July 2026 update)"
+              className="px-2.5 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-md transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs disabled:opacity-50"
+            >
+              {isLoadingSpringer ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                  <span>Loading...</span>
+                </>
+              ) : (
+                <>
+                  <BookMarked className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Springer Preset</span>
                 </>
               )}
             </button>

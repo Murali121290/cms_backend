@@ -81,13 +81,23 @@ def scan_errors(
     # 2. Run manuscript_core Analyzer
     try:
         logger.info(f"Running manuscript_core analyzer on file: {file_path}")
+        # Resolve real client and project names
+        project = file_record.project if hasattr(file_record, "project") and file_record.project else (
+            db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
+            if file_record.project_id else None
+        )
+        resolved_client_name = project.client_name if project and project.client_name else ""
+        if not resolved_client_name and project and project.client:
+            resolved_client_name = project.client.name or ""
+        resolved_project_name = project.title if project and project.title else (project.name if project and hasattr(project, "name") else "DefaultProject")
+
         chapters = [
             {
                 "index": 1,
                 "filename": file_record.filename,
                 "path": file_path,
-                "client_name": "DefaultClient",
-                "project_name": "DefaultProject",
+                "client_name": resolved_client_name or "DefaultClient",
+                "project_name": resolved_project_name,
                 "role": "PM",
                 "ia_mapping_path": ""
             }

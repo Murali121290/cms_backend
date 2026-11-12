@@ -98,3 +98,10 @@ export async function parseDocxStylesheet(
   );
   return response.data;
 }
+
+export async function getSpringerPreset() {
+  const response = await apiClient.get<any>(
+    "/stylesheets/presets/springer",
+  );
+  return response.data;
+}

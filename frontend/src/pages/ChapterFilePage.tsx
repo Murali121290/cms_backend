@@ -482,7 +482,22 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {(showAction('manuscriptAnalysis') || showAction('manuscriptAnalysisQa')) && (
+        {showAction('manuscriptAnalysis') && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Manuscript Analysis',
+              jobFn: () => startPpdGeneration(fid),
+              pollFileId: fid,
+              pollProcessType: 'ppd'
+            })}
+          >
+            <FileOutput size={12} /> Manuscript Analysis
+          </button>
+        )}
+
+        {showAction('manuscriptAnalysisQa') && (
           <button
             disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
@@ -493,7 +508,7 @@ function ProcessingActionsMenu({
               pollProcessType: 'manuscript_analysis_qa'
             })}
           >
-            <FileOutput size={12} className="text-sky-600" /> Run Manuscript Analysis QA
+            <ShieldCheck size={12} className="text-sky-600" /> Manuscript Analysis QA
           </button>
         )}
 
@@ -1117,25 +1132,35 @@ export function ChapterFilePage({
             )}
             <FolderIcon name={icon} size={14} color={color} />
             {fid && activeFolder !== 'backup' ? (
-              <button
-                type="button"
-                disabled={!resolvedIsAssigned}
-                onClick={e => {
-                  e.stopPropagation()
-                  if (isHtmlRow) {
-                    window.open(`/api/v2/files/${fid}/download?inline=true`, '_blank')
-                    return
-                  }
-                  navigate(openTarget)
-                }}
-                title={isHtmlRow ? `${name} (Click to open QA report in new tab)` : name}
-                className={resolvedIsAssigned
-                  ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer flex items-center gap-1.5"
-                  : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
-              >
-                <span>{name}</span>
-                {isHtmlRow && <ExternalLink size={11} className="text-muted shrink-0" />}
-              </button>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <button
+                  type="button"
+                  disabled={!resolvedIsAssigned}
+                  onClick={e => {
+                    e.stopPropagation()
+                    navigate(openTarget)
+                  }}
+                  title={name}
+                  className={resolvedIsAssigned
+                    ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+                    : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
+                >
+                  {name}
+                </button>
+                {isHtmlRow && (
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation()
+                      window.open(`/api/v2/files/${fid}/download?inline=true`, '_blank')
+                    }}
+                    title="Open in new browser tab"
+                    className="p-0.5 text-muted hover:text-primary hover:bg-accent rounded shrink-0"
+                  >
+                    <ExternalLink size={12} />
+                  </button>
+                )}
+              </div>
             ) : (
               <span className="font-medium text-text truncate max-w-[2000px]" title={name}>{name}</span>
             )}

@@ -84,9 +84,41 @@ class DocxStylesheetParser:
         specs = self._extract_specifications(doc)
         word_list = self._extract_word_list(doc)
 
-        preset_id = self._detect_preset(metadata, specs)
+        preset_id = self._detect_preset(metadata, specs, doc)
         matched_ce_rules = self._match_ce_rules(specs, preset_id)
         matched_ia_rows = self._match_ia_rows(specs, preset_id)
+
+        if preset_id == "springer":
+            from app.processing.manuscript_core.rules.presets.springer import (
+                SPRINGER_CE_RULES,
+                SPRINGER_SELECTED_IA_ROWS,
+                SPRINGER_WORD_LIST,
+            )
+            for sno, cfg in SPRINGER_CE_RULES.items():
+                sno_str = str(sno)
+                if sno_str not in matched_ce_rules:
+                    rule_info = self.catalog_rules.get(sno, {})
+                    matched_ce_rules[sno_str] = {
+                        "sno": sno,
+                        "rule_name": rule_info.get("name", f"Rule {sno}"),
+                        "option": cfg["option"],
+                        "enabled": cfg["enabled"],
+                        "severity": cfg.get("severity", rule_info.get("severity", "Major")),
+                        "confidence": 1.0,
+                        "source_label": "Springer House Style Preset",
+                        "source_value": "Springer Publishing House Style Sheet (July 2026)",
+                        "explanation": f"Default Springer House Style specification (Option {cfg['option']})",
+                        "notes": f"Default Springer House Style specification (Option {cfg['option']})",
+                    }
+            existing_ia = {(r.get("element"), r.get("pattern")) for r in matched_ia_rows}
+            for spr_ia in SPRINGER_SELECTED_IA_ROWS:
+                if (spr_ia["element"], spr_ia["pattern"]) not in existing_ia:
+                    matched_ia_rows.append(spr_ia)
+            seen_words = set(word_list)
+            for w in SPRINGER_WORD_LIST:
+                if w not in seen_words:
+                    seen_words.add(w)
+                    word_list.append(w)
 
         # Generate suggested name & description
         book_title = metadata.get("Book Title") or metadata.get("Project") or "Editorial Stylesheet"
@@ -96,7 +128,8 @@ class DocxStylesheetParser:
             "apa": "APA 7th Edition",
             "chicago": "Chicago (CMOS 17th)",
             "oxford": "Oxford / Cambridge (UK)",
-            "nature": "Nature / Springer",
+            "nature": "Nature",
+            "springer": "Springer Publishing House Style (July 2026)",
         }
         preset_label = preset_labels.get(preset_id, "Standard Style")
 
@@ -196,22 +229,34 @@ class DocxStylesheetParser:
 
         return words
 
-    def _detect_preset(self, meta: Dict[str, str], specs: Dict[str, str]) -> str:
+    def _detect_preset(self, meta: Dict[str, str], specs: Dict[str, str], doc: Optional[docx.Document] = None) -> str:
         """Detects the base house style preset based on metadata and manual references."""
-        combined = " ".join([
+        text_snippets = [
             meta.get("Manual/Previous edition to be followed", ""),
+            meta.get("Customer", ""),
+            meta.get("Project", ""),
+            meta.get("Book Title", ""),
             specs.get("Reference books, dictionaries followed, websites (CMS/AMA)", ""),
             specs.get("Reference books, dictionaries followed, websites", ""),
             specs.get("Level of editing", ""),
-        ])
+        ]
+        if doc:
+            for p in doc.paragraphs[:15]:
+                text_snippets.append(p.text)
+            for k in list(specs.keys())[:25]:
+                text_snippets.append(k)
 
+        combined = " ".join(text_snippets)
+
+        if re.search(r"\b(?:Springer|Springer\s+Publishing|Demos\s+Medical)\b", combined, re.IGNORECASE):
+            return "springer"
         if re.search(r"\bAMA\b", combined, re.IGNORECASE):
             return "ama"
         if re.search(r"\bAPA\b", combined, re.IGNORECASE):
             return "apa"
         if re.search(r"\b(?:Oxford|Cambridge|UK)\b", combined, re.IGNORECASE):
             return "oxford"
-        if re.search(r"\b(?:Nature|Springer)\b", combined, re.IGNORECASE):
+        if re.search(r"\bNature\b", combined, re.IGNORECASE):
             return "nature"
         if re.search(r"\b(?:Chicago|CMOS)\b", combined, re.IGNORECASE):
             return "chicago"
@@ -260,7 +305,7 @@ class DocxStylesheetParser:
                 elif "degrees celsius" in val_lower or "spelled" in val_lower:
                     opt = 4  # Spelled out
                 else:
-                    opt = 2 if preset_id == "ama" else 1
+                    opt = 2 if preset_id in ("ama", "springer") else 1
                 record(5, opt, 0.95, lbl, val, f"Matched temperature format (opt {opt}) from '{val}'")
 
             # Rule 6: Percentage Formatting
@@ -396,7 +441,7 @@ class DocxStylesheetParser:
 
             # Rule 36: Scientific Name Formatting (Genus & species)
             elif "genus" in lbl_lower or "species" in lbl_lower:
-                if "not full point" in val_lower or "e coli" in val_lower or preset_id == "ama":
+                if "not full point" in val_lower or "e coli" in val_lower or preset_id in ("ama", "springer"):
                     opt = 1  # Italics without full point after initial e.g., E coli
                 else:
                     opt = 2  # Italics with full point e.g., E. coli
@@ -744,7 +789,7 @@ class DocxStylesheetParser:
             if "genus" in lbl_lower or "species" in lbl_lower:
                 if "italic" in val_lower:
                     add("Genus species", "General", "[Genus species]", lbl, val)
-                    if "not full point" in val_lower or "e coli" in val_lower or preset_id == "ama":
+                    if "not full point" in val_lower or "e coli" in val_lower or preset_id in ("ama", "springer"):
                         add("Genus species", "General", "[G species] (no dot)", lbl, val)
                     else:
                         add("Genus species", "General", "[G. species] (abbreviated)", lbl, val)

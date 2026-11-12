@@ -4,16 +4,17 @@ import io
 import shutil
 import re
 from pathlib import Path
+from typing import Any
 from app.core.config import get_settings
 from app.integrations.pph.client import PPHClient
 from app.processing.manuscript_core.analyzer import analyze_manuscript
 from app.processing.manuscript_core.fixer import apply_fixes_targeted, apply_te_highlights_to_docx
 
 class TechnicalEngine:
-    def process_document(self, file_path: str) -> list[str]:
+    def process_document(self, file_path: str, project_id: int | None = None, db: Any = None) -> list[str]:
         """
-        Runs Technical Editing (Highlighting) on the document.
-        Generates a new file with technical highlights.
+        Runs Technical Editing (Highlighting and Auto-fixes) on the document.
+        Generates a new file with technical highlights and stylesheet-guided fixes.
         Offloads to PPH Server if PPH_ENABLED is configured.
         """
         if not os.path.exists(file_path):
@@ -57,19 +58,48 @@ class TechnicalEngine:
 
         # Local fallback using modern manuscript_core engine
         try:
+            # Resolve real client, project, and active stylesheet
+            active_ss = None
+            client_name = "DefaultClient"
+            project_name = "DefaultProject"
+            if project_id and db:
+                from app import models
+                from app.services import stylesheet_service
+                proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+                if proj:
+                    project_name = proj.title or "DefaultProject"
+                    client_name = proj.client_name or (proj.client.name if proj.client else "") or "DefaultClient"
+                    active_ss = stylesheet_service.get_active_stylesheet_for_project(db, project_id=project_id)
+
             chapters = [
                 {
                     "index": 1,
                     "filename": os.path.basename(file_path),
                     "path": file_path,
-                    "client_name": "DefaultClient",
-                    "project_name": "DefaultProject",
+                    "client_name": client_name,
+                    "project_name": project_name,
                     "role": "PM",
                     "ia_mapping_path": ""
                 }
             ]
             findings_dict = analyze_manuscript(chapters)
             findings = findings_dict.get("findings", [])
+
+            # Apply stylesheet or Springer rules to findings so replacements reflect house style
+            from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
+            if active_ss:
+                import json
+                from app.services import stylesheet_service
+                try:
+                    selected_rows = json.loads(active_ss.selected_ia_rows or "[]")
+                except Exception:
+                    selected_rows = []
+                ce_rules = stylesheet_service.stylesheet_ce_rules(active_ss)
+                annotate_with_stylesheet(findings, selected_rows, findings_dict.get("ia_report", {}).get("rule_id_to_ia"), ce_rules=ce_rules)
+            elif "springer" in client_name.lower() or "spr" in client_name.lower():
+                from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
+                spr = get_springer_preset()
+                annotate_with_stylesheet(findings, spr["selected_ia_rows"], findings_dict.get("ia_report", {}).get("rule_id_to_ia"), ce_rules=spr["ce_rules"])
             
             selected_findings = []
             highlight_findings = []
