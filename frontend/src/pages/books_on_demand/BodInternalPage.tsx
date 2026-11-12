@@ -715,11 +715,11 @@ export function BodInternalPage() {
     if (job.current_stage_name === 'Add job') {
       const addedToday = isCreatedToday(job.created_at)
       return {
-        label: addedToday ? 'Fresh (Today)' : 'Fresh (Previous)',
+        label: addedToday ? 'Fresh (Today)' : 'Fresh (Backlog)',
         badgeClass: addedToday
           ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold'
           : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400',
-        sublabel: addedToday ? 'Added Today' : 'Previous Days',
+        sublabel: addedToday ? 'Added Today' : 'Backlog',
         isOverdue: isOverdueJob,
         isTomorrow: isTomorrowJob,
       }
