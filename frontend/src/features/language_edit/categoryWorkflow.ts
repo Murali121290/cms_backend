@@ -128,8 +128,10 @@ export interface WorkflowState {
    * The set of category chips to render. Always a subset of
    * ``CATEGORY_UNLOCK_ORDER``. Empty categories do NOT appear
    * (per spec rule 3: zero-finding categories are skipped,
-   * not revealed). Previously-completed categories stay visible
-   * so the reviewer can return to them.
+   * not revealed). Completed categories are also HIDDEN — the
+   * sidebar only ever shows the current actionable chip, so as
+   * each category hits zero pending/highlighted findings it
+   * disappears and the next category takes its place.
    */
   visible: Set<UnlockCategory>
   /**
@@ -159,12 +161,18 @@ export interface WorkflowState {
  *         per rule 3 so the next non-empty category becomes
  *         the sequential target).
  *      c. If every finding is in ``RESOLVED_STATUSES`` → add to
- *         completed and visible; continue walking so the next
- *         non-empty category becomes the new target.
- *      d. Otherwise (at least one pending or highlighted) → add
- *         to visible, mark as ``nextUnlocked``, and STOP walking.
- *         Later categories stay hidden until this one completes.
+ *         completed (NOT visible — completed chips are hidden)
+ *         and continue walking so the next non-empty category
+ *         becomes the new target.
+ *      d. Otherwise (at least one pending or highlighted) → this
+ *         is the single actionable chip; add to visible, mark as
+ *         ``nextUnlocked``, and STOP walking. Later categories
+ *         stay hidden until this one completes.
  *   3. Return the accumulated sets.
+ *
+ * Invariant: ``visible`` contains at most one category (the
+ * active unlock target). Empty and completed categories are both
+ * hidden so the sidebar always shows only the current step.
  */
 export function computeCategoryWorkflow(findings: WorkflowFinding[]): WorkflowState {
   const completed = new Set<UnlockCategory>()
@@ -179,12 +187,15 @@ export function computeCategoryWorkflow(findings: WorkflowFinding[]): WorkflowSt
       continue
     }
     if (members.every(f => isResolvedStatus(f.status))) {
+      // Completed: track for ``allActionableCategoriesComplete`` /
+      // telemetry but hide the chip — only the next actionable
+      // category should be visible to the reviewer.
       completed.add(cat)
-      visible.add(cat)
       continue
     }
     // First non-empty category with any unresolved (pending or
-    // highlighted) finding: this is the active unlock target.
+    // highlighted) finding: this is the active unlock target and
+    // the only actionable chip the reviewer sees.
     visible.add(cat)
     nextUnlocked = cat
     break

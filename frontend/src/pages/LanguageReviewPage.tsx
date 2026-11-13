@@ -1412,9 +1412,12 @@ export function LanguageReviewPage() {
   const progressPercentage = totalFindingsCount > 0 ? Math.min(100, Math.round((resolvedCount / totalFindingsCount) * 100)) : 0
 
   // Sequential category-unlock workflow. Only the current "next"
-  // category chip is visible; previously-completed ones stay visible
-  // so the reviewer can return to them. "All", "Comments", and
-  // "Rules" are not part of the chain and stay always visible.
+  // actionable chip is visible — once a category hits zero
+  // pending/highlighted findings it disappears and the next one
+  // in CATEGORY_UNLOCK_ORDER takes its place. "All" and "Rules"
+  // are not part of the chain and stay always visible; "Comments"
+  // + "Inclusive" unlock together once every actionable category
+  // is complete.
   //
   // Derived live from ``findings`` — no separate workflow state is
   // persisted. That means refresh / reopen / re-analysis naturally

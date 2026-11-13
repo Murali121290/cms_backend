@@ -34,6 +34,51 @@ describe('categoryWorkflow / initial visibility', () => {
   })
 })
 
+describe('categoryWorkflow / one-at-a-time invariant', () => {
+  it('visible never contains more than one category — completed chips are hidden as the chain advances', () => {
+    // Walk the chain step by step: at each step, the single
+    // actionable chip should be the only member of ``visible``.
+    const steps: Array<{ findings: WorkflowFinding[]; expected: UnlockCategory }> = [
+      { findings: oneEach('pending'), expected: 'abbreviations' },
+      {
+        findings: oneEach('pending', { abbreviations: 'accepted' }),
+        expected: 'medical_terms',
+      },
+      {
+        findings: oneEach('pending', {
+          abbreviations: 'accepted',
+          medical_terms: 'edited',
+        }),
+        expected: 'hyphenation',
+      },
+      {
+        findings: oneEach('pending', {
+          abbreviations: 'accepted',
+          medical_terms: 'edited',
+          hyphenation: 'rejected',
+        }),
+        expected: 'grammar',
+      },
+      {
+        findings: oneEach('pending', {
+          abbreviations: 'accepted',
+          medical_terms: 'edited',
+          hyphenation: 'rejected',
+          grammar: 'accepted',
+          spelling: 'edited',
+          sentence: 'rejected',
+        }),
+        expected: 'typo',
+      },
+    ]
+    for (const { findings, expected } of steps) {
+      const state = computeCategoryWorkflow(findings)
+      expect(Array.from(state.visible)).toEqual([expected])
+      expect(state.nextUnlocked).toBe(expected)
+    }
+  })
+})
+
 describe('categoryWorkflow / sequential unlock', () => {
   it('keeps Medical Terms hidden while Abbreviations has even one pending finding', () => {
     const findings = [
@@ -55,7 +100,9 @@ describe('categoryWorkflow / sequential unlock', () => {
     ]
     const state = computeCategoryWorkflow(findings)
     expect(state.completed.has('abbreviations')).toBe(true)
-    expect(state.visible.has('abbreviations')).toBe(true) // stays visible for review
+    // Completed categories are now HIDDEN — only the current
+    // actionable chip stays in ``visible``.
+    expect(state.visible.has('abbreviations')).toBe(false)
     expect(state.visible.has('medical_terms')).toBe(true)
     expect(state.nextUnlocked).toBe('medical_terms')
   })
@@ -146,7 +193,7 @@ describe('categoryWorkflow / empty-category auto-skip', () => {
 })
 
 describe('categoryWorkflow / only one next category unlocks at a time', () => {
-  it('after Abbreviations completes with multiple downstream categories pending, ONLY Medical Terms unlocks', () => {
+  it('after Abbreviations completes with multiple downstream categories pending, ONLY Medical Terms is visible', () => {
     const findings = [
       f('abbreviations', 'accepted'),
       f('medical_terms', 'pending'),
@@ -155,17 +202,19 @@ describe('categoryWorkflow / only one next category unlocks at a time', () => {
       f('spelling', 'pending'),
     ]
     const state = computeCategoryWorkflow(findings)
-    expect(state.visible.has('abbreviations')).toBe(true)
+    // Completed Abbreviations is now hidden.
+    expect(state.visible.has('abbreviations')).toBe(false)
     expect(state.visible.has('medical_terms')).toBe(true)
     // None of the downstream chips unlock yet.
     expect(state.visible.has('hyphenation')).toBe(false)
     expect(state.visible.has('grammar')).toBe(false)
     expect(state.visible.has('spelling')).toBe(false)
+    expect(Array.from(state.visible)).toEqual(['medical_terms'])
     expect(state.nextUnlocked).toBe('medical_terms')
   })
 
-  it('cascades one step at a time as each category completes', () => {
-    // Full cascade: abbreviations+medical_terms resolved → hyphenation unlocks.
+  it('cascades one step at a time as each category completes, hiding the finished ones', () => {
+    // Full cascade: abbreviations+medical_terms resolved → hyphenation is the only visible chip.
     const findings = [
       f('abbreviations', 'accepted'),
       f('medical_terms', 'edited'),
@@ -173,21 +222,26 @@ describe('categoryWorkflow / only one next category unlocks at a time', () => {
       f('grammar', 'pending'),
     ]
     const state = computeCategoryWorkflow(findings)
-    expect(state.visible.has('abbreviations')).toBe(true)
-    expect(state.visible.has('medical_terms')).toBe(true)
+    expect(state.visible.has('abbreviations')).toBe(false)
+    expect(state.visible.has('medical_terms')).toBe(false)
     expect(state.visible.has('hyphenation')).toBe(true)
     expect(state.visible.has('grammar')).toBe(false)
+    expect(Array.from(state.visible)).toEqual(['hyphenation'])
     expect(state.nextUnlocked).toBe('hyphenation')
   })
 
-  it('reveals every category when every finding is resolved', () => {
+  it('hides every actionable chip when every finding is resolved (view-only Inclusive + Comments take over)', () => {
     const findings = oneEach('accepted')
     const state = computeCategoryWorkflow(findings)
     for (const cat of CATEGORY_UNLOCK_ORDER) {
-      expect(state.visible.has(cat)).toBe(true)
+      // Every category is completed...
       expect(state.completed.has(cat)).toBe(true)
+      // ...and none remain visible — the actionable chain is done.
+      expect(state.visible.has(cat)).toBe(false)
     }
+    expect(state.visible.size).toBe(0)
     expect(state.nextUnlocked).toBeNull()
+    expect(state.allActionableCategoriesComplete).toBe(true)
   })
 })
 
