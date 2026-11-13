@@ -374,6 +374,22 @@ async def rename_file_content(
          
     target.rename(new_target)
 
+    # Update file_mappings in project DB so the renamed file retains its classification
+    try:
+        from .models import EvProject
+        project = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+        if project and project.file_mappings:
+            old_name = target.name
+            new_name = body.new_name
+            mappings = dict(project.file_mappings)
+            if old_name in mappings:
+                category = mappings.pop(old_name)
+                mappings[new_name] = category
+                project.file_mappings = mappings
+                db.commit()
+    except Exception:
+        pass
+
     # Repack extracted files into .epub zip and save to output directory
     try:
         from .services.repack_service import repack_epub

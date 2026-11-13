@@ -38,10 +38,118 @@
       "category": "Structure Check"
     },
     {
+      "id": "BOD-FN-001",
+      "name": "Do not use unicode in file names",
+      "scope": "book",
+      "enabled": true,
+      "category": "Structure Check"
+    },
+    {
+      "id": "BOD-FM-001",
+      "name": "If half title and title page are part of the source files’ front matter, they must be removed from the E-Book",
+      "scope": "book",
+      "enabled": true,
+      "rule_config": {
+        "forbidden_terms_by_language": {
+          "en": "Half title / Title Page",
+          "de": "Vortitel / Titelseite",
+          "fr": "Faux-titre / Page de titre",
+          "da": "Smudstitel / Titelside",
+          "sv": "Halvtitel / Titelsida",
+          "fi": "Esinimiö / Nimiösivu",
+          "it": "Occhietto / Frontespizio",
+          "es": "Portadilla / Portada",
+          "pt": "Falsa folha de rosto / Frontispício",
+          "no": "Smusstittel / Tittelside",
+          "nl": "Franse pagina / Titelpagina",
+          "ca": "Portadella / Portada",
+          "va": "Portadella / Portada"
+        },
+        "forbidden_terms_pattern": "\\b(half[\\s\\-]?title|title[\\s\\-]?page|vortitel|vor[\\s\\-]?titel|schmutztitel|schmutz[\\s\\-]?titel|titelseite|titel[\\s\\-]?seite|titelblatt|titel[\\s\\-]?blatt|haupttitel|haupt[\\s\\-]?titel|portadilla|portada|faux[\\s\\-]?titre|page[\\s\\-]?de[\\s\\-]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontisp[ií]cio|folha[\\s\\-]?de[\\s\\-]?rosto|franse[\\s\\-]?pagina|titelpagina|nimiösivu|esinimiö)\\b|^title$|^titel$",
+        "forbidden_file_stem_pattern": "(half[\\s\\-_]?title|title[\\s\\-_]?page|vortitel|vor[\\s\\-_]?titel|schmutztitel|schmutz[\\s\\-_]?titel|titelseite|titel[\\s\\-_]?seite|titelblatt|titel[\\s\\-_]?blatt|haupttitel|haupt[\\s\\-_]?titel|portadilla|portada|faux[\\s\\-_]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontispicio|frontispício|rosto|franse[\\s\\-_]?pagina|titelpagina|nimiosivu|nimiösivu|esinymio|esinimiö)|^title$|^titel$"
+      },
+      "category": "Structure Check"
+    },
+    {
+      "id": "BOD-COPY-001",
+      "name": "The copyright page must be placed as last page of the ePub file",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_term_by_language": {
+          "de": "Impressum",
+          "en": "Copyright",
+          "fr": "Page de copyright",
+          "da": "Kolofon",
+          "fi": "Valmistusmerkinnät",
+          "es": "Pie de Imprenta",
+          "pt": "Pé-de-Imprensa",
+          "sv": "Kolofonside",
+          "no": "Kolofonside",
+          "ca": "Drets d’autor",
+          "va": "Drets d’autor",
+          "it": "Colophon",
+          "nl": "Colofon"
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-002",
+      "name": "Alignment of the copyright page should be top aligned (Control in CSS)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "allowed_classes": [
+          "cpytxt",
+          "cpytxt-top-space"
+        ],
+        "required_classes": [
+          "cpytxt-top-space"
+        ],
+        "min_required_count": {
+          "cpytxt-top-space": 1,
+          "cpytxt": 0
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-003",
+      "name": "Copyright should fit on one page",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
+      "id": "XHTML006",
+      "name": "Single <h1> per page and no adjacent headings",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "[0-9]*.xhtml",
       "enabled": true,
       "category": "XHTML Check"
     },
@@ -58,13 +166,21 @@
     },
     {
       "id": "BOD-ENC-001",
-      "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp; and &lt; allowed)",
+      "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp;, &lt;, &gt;, &#8617; allowed)",
       "target_path": "OEBPS",
       "file_name_pattern": [
         "*.xhtml",
         "*.ncx"
       ],
       "enabled": true,
+      "rule_config": {
+        "allowed_entities": [
+          "&amp;",
+          "&lt;",
+          "&gt;",
+          "&#8617;"
+        ]
+      },
       "category": "Encoding Check"
     },
     {
@@ -523,10 +639,10 @@
     }
   ],
   "export": {
-    "filename_format": "{eisbn}_1_ePub_all.ePub"
+    "filename_format": "{eisbn}_ePub_all.ePub"
   },
   "upload": {
-    "filename_format": "{eisbn}_1_ePub_all.ePub"
+    "filename_format": "{eisbn}_ePub_all.ePub"
   },
   "category_order": [
     "STRUCTURE CHECK",

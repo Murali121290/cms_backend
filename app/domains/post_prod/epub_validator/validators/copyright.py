@@ -74,3 +74,180 @@ def validate_eisbn_in_copyright(file_details, rule_config=None):
     return {"issues_count": 0, "issues": []}
 
 
+@rule("BOD-COPY-002")
+def validate_copyright_top_alignment(file_details, rule_config=None):
+    """
+    Alignment of the copyright page should be top aligned (Control in CSS):
+    - Validates that text elements (p, h1-h6) on the copyright page use only
+      the allowed classes (e.g. cpytxt, cpytxt-top-space). Any element without a class
+      or with an unauthorized class raises an error.
+    - Validates that required classes (e.g. cpytxt-top-space) appear at least the specified
+      minimum number of times (e.g. >= 1) on the copyright page as defined in rule_config.
+    - Validates that no inline styles prevent top alignment.
+    """
+    import os
+
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    allowed_classes = set(cfg.get("allowed_classes") or ["cpytxt", "cpytxt-top-space"])
+    required_classes = cfg.get("required_classes") or ["cpytxt-top-space"]
+    min_required_count = cfg.get("min_required_count") or {"cpytxt-top-space": 1}
+
+    full_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(full_path)
+    rel_path = file_details.get("relative_path") or file_name
+
+    issues = []
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        soup = BeautifulSoup(content, "html.parser")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    body = soup.find("body")
+    if not body:
+        return {"issues_count": 0, "issues": []}
+
+    # 1. Check for disallowed inline styles that push or align to bottom
+    for el in body.find_all(True, style=True):
+        style_val = (el.get("style") or "").lower()
+        if "vertical-align: bottom" in style_val or "justify-content: flex-end" in style_val or "position: absolute; bottom" in style_val:
+            line_no = getattr(el, "sourceline", None) or 1
+            issues.append({
+                "type": "invalid_copyright_alignment_style",
+                "message": f"Inline style '{style_val}' on <{el.name}> prevents top alignment. Copyright page must be top aligned.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_no,
+                "snippet": str(el)[:150],
+                "extract": str(el)[:150],
+            })
+
+    # Track occurrences of classes across text elements
+    class_occurrence_counts = {c: 0 for c in required_classes}
+
+    # 2. Check text elements inside body (p, h1-h6) to ensure they use allowed classes
+    text_elements = body.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"])
+    for el in text_elements:
+        classes = el.get("class", [])
+        if isinstance(classes, str):
+            classes = classes.split()
+        classes_set = set(classes)
+
+        # Count occurrences of required classes
+        for rc in required_classes:
+            if rc in classes_set:
+                class_occurrence_counts[rc] = class_occurrence_counts.get(rc, 0) + 1
+
+        # Check if element has no class or has disallowed classes
+        if not classes:
+            # Without class
+            line_no = getattr(el, "sourceline", None) or 1
+            issues.append({
+                "type": "missing_copyright_class",
+                "message": f"Copyright page element <{el.name}> has no class. Elements on copyright page must have an allowed class ({', '.join(sorted(allowed_classes))}).",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_no,
+                "snippet": str(el)[:150],
+                "extract": str(el)[:150],
+            })
+        else:
+            disallowed = classes_set - allowed_classes
+            if disallowed or not (classes_set & allowed_classes):
+                line_no = getattr(el, "sourceline", None) or 1
+                issues.append({
+                    "type": "unauthorized_copyright_class",
+                    "message": f"Copyright page element <{el.name}> has unauthorized class(es) '{' '.join(classes)}'. Allowed classes: {', '.join(sorted(allowed_classes))}.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_no,
+                    "snippet": str(el)[:150],
+                    "extract": str(el)[:150],
+                })
+
+    # 3. Check minimum required counts for classes (e.g. cpytxt-top-space >= 1)
+    for rc in required_classes:
+        min_count = min_required_count.get(rc, 1)
+        actual_count = class_occurrence_counts.get(rc, 0)
+        if actual_count < min_count:
+            issues.append({
+                "type": "missing_required_copyright_class",
+                "message": f"Required class '{rc}' must be present at least {min_count} time(s) on copyright page, but found {actual_count}.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": 10,
+                "snippet": f"Expected at least {min_count} element(s) with class='{rc}', found {actual_count}",
+                "extract": f"class='{rc}' count: {actual_count} (minimum required: {min_count})",
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-COPY-003")
+def validate_copyright_single_page(file_details, rule_config=None):
+    """
+    Copyright should fit on one page:
+    Validates that the pagebreak marker (<span epub:type="pagebreak" role="doc-pagebreak".../>)
+    appears exactly 1 time (not multiple times) in the copyright file.
+    Does not enforce specific id or aria-label attribute values.
+    """
+    import os
+
+    full_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(full_path)
+    rel_path = file_details.get("relative_path") or file_name
+
+    issues = []
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        soup = BeautifulSoup(content, "html.parser")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    # Find all pagebreak spans (checking epub:type="pagebreak" or role="doc-pagebreak")
+    def is_pagebreak_span(tag):
+        if tag.name != "span":
+            return False
+        epub_type = (tag.get("epub:type") or "").lower()
+        role = (tag.get("role") or "").lower()
+        return "pagebreak" in epub_type or role == "doc-pagebreak"
+
+    pagebreak_tags = soup.find_all(is_pagebreak_span)
+    pb_count = len(pagebreak_tags)
+
+    if pb_count == 0:
+        issues.append({
+            "type": "copyright_pagebreak_missing",
+            "message": f"Copyright page '{file_name}' is missing a pagebreak marker (<span epub:type=\"pagebreak\" role=\"doc-pagebreak\"/>). Exactly 1 pagebreak marker is required.",
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": f"File: {file_name}",
+            "extract": f"File: {file_name}",
+        })
+    elif pb_count > 1:
+        # Flag all extra pagebreak tags starting from the 2nd one
+        for extra_pb in pagebreak_tags[1:]:
+            line_no = getattr(extra_pb, "sourceline", None) or 1
+            issues.append({
+                "type": "copyright_multiple_pages",
+                "message": (
+                    f"Copyright page must fit on one page. Found {pb_count} pagebreak markers in '{file_name}'. "
+                    f"Extra pagebreak marker found: {str(extra_pb)[:120]}"
+                ),
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_no,
+                "snippet": str(extra_pb)[:150],
+                "extract": str(extra_pb)[:150],
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+
+

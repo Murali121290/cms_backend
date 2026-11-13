@@ -506,6 +506,16 @@ def validate_h1_count_and_adjacent_headings(file_details, rule_config=None):
     """Ensure exactly 1 <h1> per file and no adjacent heading tags."""
     file_path = file_details["full_path"]
     issues = []
+
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    exclude_files = cfg.get("exclude_files") or ["*cover*.xhtml"]
+
+    import os
+    import fnmatch
+    filename = (file_details.get("file_name") or os.path.basename(file_path)).lower()
+    for pattern in exclude_files:
+        if fnmatch.fnmatch(filename, pattern.lower()):
+            return {"issues_count": 0, "issues": []}
     
     try:
         from bs4 import BeautifulSoup
@@ -556,9 +566,19 @@ def validate_h1_count_and_adjacent_headings(file_details, rule_config=None):
             line = 1
         return line, extract
 
-    # 1) Check for maximum one <h1>
+    # 1) Check for exactly one <h1>
     h1_tags = soup.find_all("h1")
-    if len(h1_tags) > 1:
+    if len(h1_tags) == 0:
+        issues.append({
+            "type": "missing_h1",
+            "rule_name": "Missing <h1> tag",
+            "message": f"Each XHTML file must contain exactly one <h1> tag. None was found in '{os.path.basename(file_path)}'.",
+            "category": "Error",
+            "file_path": file_details.get("relative_path"),
+            "line_number": 1,
+            "extract": "Missing <h1> tag"
+        })
+    elif len(h1_tags) > 1:
         # Skip the first one because 1 is allowed
         for i, h1 in enumerate(h1_tags[1:], start=2):
             line, extract = get_element_info(h1)
@@ -1185,11 +1205,13 @@ def validate_html_file_size(file_details, rule_config=None):
 @rule("BOD-ENC-001")
 def validate_utf8_and_entities(file_details, rule_config=None):
     """File must be UTF-8 encoded and use Unicode characters directly rather than HTML/XML entities.
-    Allowed entities:
+    Allowed entities (configurable via rule_config['allowed_entities']):
       - &amp; (ampersand)
       - &lt; (less-than sign)
+      - &gt; (greater-than sign)
+      - &#8617; (leftwards arrow with hook / return arrow)
     Disallowed:
-      - Decimal entities (e.g. &#2011;)
+      - Other decimal entities (e.g. &#2011;)
       - Hexadecimal entities (e.g. &#x201C;)
       - Named character entities (e.g. &auml;, &ouml;)
     """
@@ -1242,12 +1264,16 @@ def validate_utf8_and_entities(file_details, rule_config=None):
             }]}
 
     # 3. Check for disallowed entities: decimal, hexadecimal, named entities
-    # Allowed: &amp; and &lt;
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    allowed_list = cfg.get("allowed_entities") or ["&amp;", "&lt;", "&gt;", "&#8617;"]
+    allowed_entities = {e.lower() for e in allowed_list}
+
     entity_pattern = re.compile(r'&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z0-9]+);')
-    allowed_entities = {"&amp;", "&lt;"}
 
     issues = []
     lines = text.splitlines()
+
+    allowed_display = ", ".join(allowed_list)
 
     for line_idx, line in enumerate(lines, 1):
         for m in entity_pattern.finditer(line):
@@ -1279,7 +1305,7 @@ def validate_utf8_and_entities(file_details, rule_config=None):
                 "type": "disallowed_character_entity",
                 "message": (
                     f"{kind} '{entity}' is not allowed in '{filename}'.{suggestion} "
-                    f"Only &amp; and &lt; are permitted."
+                    f"Only {allowed_display} are permitted."
                 ),
                 "category": "Error",
                 "file_path": rel_path,

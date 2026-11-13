@@ -157,13 +157,9 @@ def watch_ftp_for_new_pdfs():
                         )
 
                     # Move the processed file(s) from input folder to dedicated project folder under Production on FTP
-                    # Structure: BOD/Production/{year}/{month}/{date}/{project_name}/
+                    # Structure: {prod_folder}/{year}/{month}/{date}/{project_name}/
                     prod_base = getattr(settings, "BOD_FTP_PRODUCTION_PATH", "Production") or "Production"
-                    # If base_path is e.g. "BOD" and prod_base is "Production", resolve to "BOD/Production"
-                    if target_dir and target_dir != "/" and not prod_base.startswith(target_dir):
-                        prod_folder = f"{target_dir.strip('/')}/{prod_base.strip('/')}"
-                    else:
-                        prod_folder = prod_base.strip('/')
+                    prod_folder = prod_base.strip('/')
 
                     # Date-based folder structure: YYYY/MM/DD
                     year_str = now_utc.strftime("%Y")

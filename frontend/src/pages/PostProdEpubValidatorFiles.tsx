@@ -963,6 +963,7 @@ export function PostProdEpubValidatorFiles() {
   const handleExportConfirmed = () => { setExportConfirmMsg(null); doExport(true); };
 
   const [isCompletingBod, setIsCompletingBod] = useState(false);
+  const [showBodCompleteModal, setShowBodCompleteModal] = useState(false);
 
   const completeBodQC = async () => {
     if (!bodJobId) return;
@@ -1167,6 +1168,7 @@ export function PostProdEpubValidatorFiles() {
                 : undefined
             }
             onRenameSuccess={(newName) => {
+              queryClient.invalidateQueries({ queryKey: ['epub-projects'] });
               refetchFiles();
               setSelectedFile(prev => prev ? { ...prev, file_name: newName } : prev);
             }}
@@ -1228,6 +1230,101 @@ export function PostProdEpubValidatorFiles() {
                   Cancel
                 </Button>
                 <Button onClick={handleExportConfirmed}>Proceed</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── BOD Complete QC Confirmation Modal ────────────────────────────── */}
+      <AnimatePresence>
+        {showBodCompleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+            <motion.div
+              className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-lg overflow-hidden"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="p-6">
+                <div className="flex items-center gap-3 pb-4 border-b border-border/60">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground m-0">Quality Control (Books on Demand)</h3>
+                    <p className="text-xs text-muted-foreground m-0 mt-0.5">Final verification before advancing to Ready to Dispatch</p>
+                  </div>
+                </div>
+
+                <div className="my-5">
+                  <p className="text-xs text-foreground font-medium mb-3">
+                    Are you sure you want to complete? Ensure the below steps are done before proceeding:
+                  </p>
+
+                  <div className="space-y-2 bg-background/60 border border-border/60 rounded-xl p-3.5">
+                    <div className="flex items-center gap-2.5 text-xs text-foreground">
+                      <div className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-[10px] shrink-0 border border-emerald-500/30">
+                        1
+                      </div>
+                      <span className="font-semibold">Stage 1:</span>
+                      <span className="text-muted-foreground">ACE Validation</span>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 text-xs text-foreground">
+                      <div className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-[10px] shrink-0 border border-emerald-500/30">
+                        2
+                      </div>
+                      <span className="font-semibold">Stage 2:</span>
+                      <span className="text-muted-foreground">Epub Check Validation</span>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 text-xs text-foreground">
+                      <div className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-[10px] shrink-0 border border-emerald-500/30">
+                        3
+                      </div>
+                      <span className="font-semibold">Stage 3:</span>
+                      <span className="text-muted-foreground">Customised check</span>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 text-xs text-foreground">
+                      <div className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-[10px] shrink-0 border border-emerald-500/30">
+                        4
+                      </div>
+                      <span className="font-semibold">Stage 4:</span>
+                      <span className="text-muted-foreground">Manual Verification</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground mt-3 italic">
+                    Clicking "Yes, Complete QC" will generate <span className="font-semibold text-foreground">history.csv</span>, package latest QC reports, and move the job to <span className="font-semibold text-emerald-600 dark:text-emerald-400">Ready to Dispatch</span>.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border/60">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowBodCompleteModal(false)}
+                    disabled={isCompletingBod}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                    onClick={async () => {
+                      setShowBodCompleteModal(false);
+                      await completeBodQC();
+                    }}
+                    disabled={isCompletingBod}
+                    leftIcon={isCompletingBod ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  >
+                    {isCompletingBod ? 'Completing QC…' : 'Yes, Complete QC'}
+                  </Button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -1442,7 +1539,7 @@ export function PostProdEpubValidatorFiles() {
 
                 {fromSource === 'bod' && bodJobId && (
                   <button
-                    onClick={completeBodQC}
+                    onClick={() => setShowBodCompleteModal(true)}
                     disabled={isCompletingBod || isValidating || isAceRunning || isEpubCheckRunning}
                     className="inline-flex flex-row items-center justify-center gap-2 px-3.5 py-1.5 h-8 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
                     title="Update latest EPUB, ACE report, and EPUBCheck to BOD folder, archive previous files to _before, and move job to Dispatch"
