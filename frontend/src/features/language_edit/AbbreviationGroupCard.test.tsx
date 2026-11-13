@@ -23,12 +23,14 @@ function mkFinding(partial: Partial<GroupCardFinding> & { id: number; abbreviati
     id: rest.id,
     para_index: rest.para_index ?? 0,
     start_offset: rest.start_offset ?? 0,
+    end_offset: rest.end_offset ?? ((rest.start_offset ?? 0) + (rest.original_text ?? 'x').length),
     rule_id: rest.rule_id ?? 'AB01',
     original_text: rest.original_text ?? 'intensive care unit',
     suggestion: rest.suggestion ?? 'ICU',
     edited_text: rest.edited_text,
     status: rest.status ?? 'pending',
     problem_label: rest.problem_label ?? null,
+    first_definition: rest.first_definition ?? null,
     abbreviation,
     expansion,
     group_key: `${abbreviation}|${expansion}`,
@@ -284,6 +286,309 @@ describe('AbbreviationGroupCard — per-occurrence actions', () => {
     // Button was disabled → React fires no click handler → onDecide
     // is never invoked for that row.
     expect(h.onDecide).not.toHaveBeenCalled()
+  })
+})
+
+// ─── Selection checkboxes + Select All / Clear ──────────────────────
+
+describe('AbbreviationGroupCard — selection checkboxes', () => {
+  it('does NOT render per-row checkboxes when onToggleSelect is not provided (back-compat)', () => {
+    const group = buildICUGroup()
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    expect(screen.queryAllByTestId('abbr-row-select')).toHaveLength(0)
+    expect(screen.queryByTestId('abbr-group-selection-bar')).toBeNull()
+  })
+
+  it('renders a checkbox for every pending row when onToggleSelect is provided', () => {
+    const group = buildICUGroup(['pending', 'pending', 'pending'])
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...defaultHandlers()}
+        selectedFindingIds={new Set<number>()}
+        onToggleSelect={vi.fn()}
+      />,
+    )
+    const checkboxes = screen.getAllByTestId('abbr-row-select')
+    expect(checkboxes).toHaveLength(3)
+    for (const cb of checkboxes) {
+      expect((cb as HTMLInputElement).checked).toBe(false)
+    }
+  })
+
+  it('decided rows DO NOT show a checkbox — only pending rows do', () => {
+    const group = buildICUGroup(['accepted', 'pending', 'rejected'])
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...defaultHandlers()}
+        selectedFindingIds={new Set<number>()}
+        onToggleSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getAllByTestId('abbr-row-select')).toHaveLength(1)
+  })
+
+  it('reflects selected ids in the checkbox state', () => {
+    const group = buildICUGroup()
+    const selected = new Set<number>([group.items[1].id])
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...defaultHandlers()}
+        selectedFindingIds={selected}
+        onToggleSelect={vi.fn()}
+      />,
+    )
+    const rowCheckboxes = screen.getAllByTestId('abbr-row-select')
+    expect((rowCheckboxes[0] as HTMLInputElement).checked).toBe(false)
+    expect((rowCheckboxes[1] as HTMLInputElement).checked).toBe(true)
+    expect((rowCheckboxes[2] as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('toggling a row checkbox invokes onToggleSelect with the row finding id — NOT the group key', () => {
+    const group = buildICUGroup()
+    const onToggleSelect = vi.fn()
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...defaultHandlers()}
+        selectedFindingIds={new Set<number>()}
+        onToggleSelect={onToggleSelect}
+      />,
+    )
+    fireEvent.click(screen.getAllByTestId('abbr-row-select')[1])
+    expect(onToggleSelect).toHaveBeenCalledWith(group.items[1].id)
+    // The group's abstract key never leaks into onToggleSelect args.
+    for (const call of onToggleSelect.mock.calls) {
+      expect(typeof call[0]).toBe('number')
+    }
+  })
+
+  it('Select All in the header invokes onSelectAllInGroup with every PENDING id', () => {
+    const group = buildICUGroup(['pending', 'accepted', 'pending'])
+    const onSelectAllInGroup = vi.fn()
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...defaultHandlers()}
+        selectedFindingIds={new Set<number>()}
+        onToggleSelect={vi.fn()}
+        onSelectAllInGroup={onSelectAllInGroup}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('abbr-group-select-all'))
+    // Only the two pending ids make it into the Select All call.
+    expect(onSelectAllInGroup).toHaveBeenCalledTimes(1)
+    const [ids] = onSelectAllInGroup.mock.calls[0]
+    expect((ids as number[]).sort()).toEqual([group.items[0].id, group.items[2].id].sort())
+  })
+
+  it('when all pending rows are selected, Select All toggles to Clear', () => {
+    const group = buildICUGroup()
+    const allIds = new Set<number>(group.items.map(i => i.id))
+    const onClearSelectionInGroup = vi.fn()
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...defaultHandlers()}
+        selectedFindingIds={allIds}
+        onToggleSelect={vi.fn()}
+        onClearSelectionInGroup={onClearSelectionInGroup}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('abbr-group-select-all'))
+    expect(onClearSelectionInGroup).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ─── First-occurrence marker ────────────────────────────────────────
+
+describe('AbbreviationGroupCard — first-occurrence marker', () => {
+  function mkFirstUseGroup() {
+    const findings = [
+      mkFinding({ id: 1, rule_id: 'AB01', para_index: 0, problem_label: 'First use', abbreviation: 'ICU', expansion: 'intensive care unit', suggestion: 'intensive care unit (ICU)' }),
+      mkFinding({ id: 2, rule_id: 'AB02', para_index: 5, problem_label: 'Repeated expansion', abbreviation: 'ICU', expansion: 'intensive care unit' }),
+      mkFinding({ id: 3, rule_id: 'AB02', para_index: 10, problem_label: 'Repeated expansion', abbreviation: 'ICU', expansion: 'intensive care unit' }),
+    ]
+    return buildAbbreviationGroups(findings)[0]
+  }
+
+  it('marks the first occurrence with a visible badge', () => {
+    const group = mkFirstUseGroup()
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    const rows = screen.getAllByTestId('abbr-occurrence-row')
+    // Only the first row carries the first-occurrence badge.
+    expect(within(rows[0]).queryByTestId('abbr-first-occurrence')).not.toBeNull()
+    expect(within(rows[1]).queryByTestId('abbr-first-occurrence')).toBeNull()
+    expect(within(rows[2]).queryByTestId('abbr-first-occurrence')).toBeNull()
+  })
+
+  it('shows the "Valid definition" style when the first occurrence problem_label is "First use"', () => {
+    const group = mkFirstUseGroup()
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    const badge = screen.getByTestId('abbr-first-occurrence')
+    expect(badge.textContent).toContain('Valid definition')
+    expect(badge.className).toContain('emerald')
+  })
+
+  it('shows a cautionary style when the first occurrence is NOT a workbook first-use', () => {
+    // A group where every row is AB02 "Repeated expansion" (no
+    // AB01 was emitted — the engine didn't recognise a first use).
+    const findings = [
+      mkFinding({ id: 1, rule_id: 'AB02', para_index: 0, problem_label: 'Repeated expansion', abbreviation: 'ICU', expansion: 'intensive care unit' }),
+      mkFinding({ id: 2, rule_id: 'AB02', para_index: 5, problem_label: 'Repeated expansion', abbreviation: 'ICU', expansion: 'intensive care unit' }),
+    ]
+    const group = buildAbbreviationGroups(findings)[0]
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    const badge = screen.getByTestId('abbr-first-occurrence')
+    expect(badge.textContent).not.toContain('Valid definition')
+    expect(badge.className).toContain('amber')
+  })
+
+  it('singleton groups (one occurrence) do not show the first-occurrence marker', () => {
+    const findings = [mkFinding({ id: 1, rule_id: 'AB02', para_index: 0, abbreviation: 'ICU', expansion: 'intensive care unit', problem_label: 'Repeated expansion' })]
+    const group = buildAbbreviationGroups(findings)[0]
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    expect(screen.queryByTestId('abbr-first-occurrence')).toBeNull()
+  })
+
+  it('does not render a reference row when no item carries first_definition', () => {
+    const group = mkFirstUseGroup()
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    expect(screen.queryByTestId('abbr-reference-row')).toBeNull()
+  })
+
+  it('renders a non-interactive reference row when an AB04 finding carries first_definition', () => {
+    const findings = [
+      mkFinding({
+        id: 1, rule_id: 'AB04', para_index: 9,
+        original_text: 'chronic kidney disease (CKD)', suggestion: 'CKD',
+        problem_label: 'Repeated definition',
+        abbreviation: 'CKD', expansion: 'chronic kidney disease',
+        first_definition: {
+          para_index: 2, start_offset: 4, end_offset: 32,
+          text: 'chronic kidney disease (CKD)',
+        },
+      }),
+      mkFinding({
+        id: 2, rule_id: 'AB04', para_index: 15,
+        original_text: 'chronic kidney disease (CKD)', suggestion: 'CKD',
+        problem_label: 'Repeated definition',
+        abbreviation: 'CKD', expansion: 'chronic kidney disease',
+        first_definition: {
+          para_index: 2, start_offset: 4, end_offset: 32,
+          text: 'chronic kidney disease (CKD)',
+        },
+      }),
+    ]
+    const group = buildAbbreviationGroups(findings)[0]
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    const ref = screen.getByTestId('abbr-reference-row')
+    expect(ref).toBeTruthy()
+    // Shows Para 3 (para_index 2 + 1) label
+    expect(ref.textContent).toContain('Para 3')
+    // Shows the first-definition surface text
+    expect(screen.getByTestId('abbr-reference-text').textContent).toContain(
+      'chronic kidney disease (CKD)',
+    )
+    // Reference row carries NO interactive controls — no checkbox,
+    // no Accept / Edit / Highlight / Ignore button.
+    expect(within(ref).queryByTestId('abbr-row-select')).toBeNull()
+    expect(within(ref).queryByTestId('action-accept')).toBeNull()
+    expect(within(ref).queryByTestId('action-edit')).toBeNull()
+    expect(within(ref).queryByTestId('action-highlight')).toBeNull()
+    expect(within(ref).queryByTestId('action-ignore')).toBeNull()
+  })
+
+  it('reference row is excluded from Select All (Select All targets only real pending findings)', () => {
+    const findings = [
+      mkFinding({
+        id: 1, rule_id: 'AB04', para_index: 9,
+        original_text: 'chronic kidney disease (CKD)', suggestion: 'CKD',
+        problem_label: 'Repeated definition',
+        abbreviation: 'CKD', expansion: 'chronic kidney disease',
+        first_definition: {
+          para_index: 2, start_offset: 4, end_offset: 32,
+          text: 'chronic kidney disease (CKD)',
+        },
+      }),
+      mkFinding({
+        id: 2, rule_id: 'AB04', para_index: 15,
+        original_text: 'chronic kidney disease (CKD)', suggestion: 'CKD',
+        problem_label: 'Repeated definition',
+        abbreviation: 'CKD', expansion: 'chronic kidney disease',
+      }),
+    ]
+    const group = buildAbbreviationGroups(findings)[0]
+    const onSelectAllInGroup = vi.fn()
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...defaultHandlers()}
+        selectedFindingIds={new Set<number>()}
+        onToggleSelect={vi.fn()}
+        onSelectAllInGroup={onSelectAllInGroup}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('abbr-group-select-all'))
+    const [ids] = onSelectAllInGroup.mock.calls[0]
+    // Only the two AB04 finding ids — the reference pseudo-row has
+    // no id and never enters the selection set.
+    expect((ids as number[]).sort()).toEqual([1, 2])
+  })
+
+  it('suppresses the reference row when an existing group item already covers that span', () => {
+    // An AB04 item whose first_definition's span EQUALS one of the
+    // group's own rows (the engine would normally skip this case,
+    // but the guard protects the UI from double-showing the same
+    // occurrence).
+    const findings = [
+      mkFinding({
+        id: 1, rule_id: 'AB04', para_index: 2, start_offset: 4,
+        end_offset: 32,
+        original_text: 'chronic kidney disease (CKD)', suggestion: 'CKD',
+        problem_label: 'Repeated definition',
+        abbreviation: 'CKD', expansion: 'chronic kidney disease',
+        first_definition: {
+          para_index: 2, start_offset: 4, end_offset: 32,
+          text: 'chronic kidney disease (CKD)',
+        },
+      }),
+      mkFinding({
+        id: 2, rule_id: 'AB04', para_index: 15, start_offset: 0,
+        end_offset: 28,
+        original_text: 'chronic kidney disease (CKD)', suggestion: 'CKD',
+        problem_label: 'Repeated definition',
+        abbreviation: 'CKD', expansion: 'chronic kidney disease',
+      }),
+    ]
+    const group = buildAbbreviationGroups(findings)[0]
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    expect(screen.queryByTestId('abbr-reference-row')).toBeNull()
+  })
+
+  it('first-occurrence badge appears on the DOCUMENT-ORDER first row even when occurrences arrive unsorted', () => {
+    // Unsorted input: para 10 first, para 2 second, para 0 third.
+    const findings = [
+      mkFinding({ id: 10, rule_id: 'AB02', para_index: 10, abbreviation: 'ICU', expansion: 'intensive care unit', problem_label: 'Repeated expansion' }),
+      mkFinding({ id: 20, rule_id: 'AB02', para_index: 2,  abbreviation: 'ICU', expansion: 'intensive care unit', problem_label: 'Repeated expansion' }),
+      mkFinding({ id: 30, rule_id: 'AB01', para_index: 0,  abbreviation: 'ICU', expansion: 'intensive care unit', problem_label: 'First use', suggestion: 'intensive care unit (ICU)' }),
+    ]
+    const group = buildAbbreviationGroups(findings)[0]
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    const rows = screen.getAllByTestId('abbr-occurrence-row')
+    // Row that corresponds to document position para 0 (id=30) gets the badge.
+    expect(within(rows[0]).getByTestId('abbr-first-occurrence')).toBeTruthy()
+    // Its finding id is 30 (lowest para_index).
+    expect(rows[0].getAttribute('data-finding-id')).toBe('30')
   })
 })
 

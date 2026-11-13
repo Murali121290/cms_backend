@@ -42,11 +42,13 @@ export interface AbbreviationGroup<F extends GroupableFinding> {
 }
 
 /**
- * Bucket an ordered list of findings into (abbreviation, expansion)
- * groups. Members within each group are kept in input order; groups
- * themselves are returned sorted by (earliest para_index, earliest
- * start_offset) so the panel scrolls in document order regardless
- * of input interleaving.
+ * Bucket findings into (abbreviation, expansion) groups. Groups are
+ * returned sorted by their earliest member's (para_index,
+ * start_offset), and MEMBERS WITHIN EACH GROUP are also sorted by
+ * document order. The UI's "First occurrence" marker reads
+ * ``items[0]``, so this ordering is load-bearing — the card must
+ * always identify the first-in-document row as the first occurrence
+ * regardless of how the server interleaved the underlying findings.
  */
 export function buildAbbreviationGroups<F extends GroupableFinding>(
   findings: F[],
@@ -60,14 +62,21 @@ export function buildAbbreviationGroups<F extends GroupableFinding>(
   }
   const groups: AbbreviationGroup<F>[] = []
   for (const [key, items] of byKey.entries()) {
+    // Sort members by document position so items[0] is guaranteed to
+    // be the first-in-document occurrence.
+    const sortedItems = [...items].sort(
+      (a, b) =>
+        a.para_index - b.para_index ||
+        a.start_offset - b.start_offset,
+    )
     groups.push({
       key,
-      abbreviation: items[0].abbreviation ?? null,
-      expansion: items[0].expansion ?? null,
-      rule_id: items[0].rule_id,
-      firstParaIndex: items[0].para_index,
-      firstStartOffset: items[0].start_offset,
-      items,
+      abbreviation: sortedItems[0].abbreviation ?? null,
+      expansion: sortedItems[0].expansion ?? null,
+      rule_id: sortedItems[0].rule_id,
+      firstParaIndex: sortedItems[0].para_index,
+      firstStartOffset: sortedItems[0].start_offset,
+      items: sortedItems,
     })
   }
   groups.sort(

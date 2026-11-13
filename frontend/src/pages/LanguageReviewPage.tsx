@@ -138,6 +138,18 @@ interface Finding {
   abbreviation?: string | null
   expansion?: string | null
   group_key?: string | null
+  // AB04 "Repeated Definition" only: the document-first valid
+  // definition for this abbreviation. Populated server-side via
+  // ``_build_first_definition_map`` + ``_first_definition_for``.
+  // The card renderer uses it to prepend a non-interactive
+  // reference block (grouped-card path) or inline a reference
+  // section near the top of the flat card (singleton AB04 path).
+  first_definition?: {
+    para_index: number
+    start_offset: number
+    end_offset: number
+    text: string
+  } | null
 }
 
 // "Term from list: <name>" or "Term from list: <name> (also in: <names>)"
@@ -520,6 +532,38 @@ export function LanguageReviewPage() {
     [savingFindingIds],
   )
 
+  // Bulk-selection state. A single Set is shared across every card so
+  // category-level ``Accept Selected`` / ``Ignore Selected`` can
+  // aggregate choices across multiple group cards (useful when a
+  // reviewer wants to Accept, say, every pending first-use definition
+  // across three different abbreviations). Rows know they are selected
+  // when their ``f.id`` is in the Set; actions dispatch with the
+  // intersection of the Set and the current category's pending IDs.
+  const [selectedFindingIds, setSelectedFindingIds] = useState<Set<number>>(new Set())
+  const toggleFindingSelection = useCallback((id: number) => {
+    setSelectedFindingIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+  const addFindingsToSelection = useCallback((ids: number[]) => {
+    setSelectedFindingIds(prev => {
+      const next = new Set(prev)
+      for (const id of ids) next.add(id)
+      return next
+    })
+  }, [])
+  const removeFindingsFromSelection = useCallback((ids: number[]) => {
+    setSelectedFindingIds(prev => {
+      const next = new Set(prev)
+      for (const id of ids) next.delete(id)
+      return next
+    })
+  }, [])
+  const clearSelection = useCallback(() => setSelectedFindingIds(new Set()), [])
+
   // Handle Finding Decision
   const handleDecide = async (findingId: number, status: 'accepted' | 'edited' | 'rejected' | 'highlighted') => {
     // Duplicate-click guard: if a prior click's POST is still in
@@ -705,6 +749,208 @@ export function LanguageReviewPage() {
     }
   }
 
+  // Category-level bulk decide. Calls the single-shot
+  // ``POST /jobs/{job_id}/batch-decide`` endpoint which wraps every
+  // row in one DB transaction and runs the AB re-analysis AT MOST
+  // once per batch (regardless of how many AB findings are in the
+  // list). The frontend applies the editor replacements optimistically
+  // before the network hop so bulk Accept feels instant for the
+  // reviewer; on partial failure the failed ids are rolled back
+  // individually and reported in a toast.
+  //
+  // ``onlyPending`` is enforced client-side AND server-side: the
+  // helper filters ``ids`` through ``findings`` first, and the
+  // backend additionally skips any row whose status is already
+  // accepted/edited/rejected (``already_resolved`` in the ``failed``
+  // list of the response).
+  const handleBulkDecide = async (
+    ids: number[],
+    status: 'accepted' | 'rejected',
+  ) => {
+    if (!job?.job_id) return
+    // Resolve the ids against current findings — skip anything
+    // already decided, already saving, or absent from state.
+    const targets = findings.filter(
+      (f) =>
+        ids.includes(f.id) &&
+        f.status !== 'accepted' &&
+        f.status !== 'edited' &&
+        f.status !== 'rejected' &&
+        !savingFindingIds.has(f.id),
+    )
+    if (targets.length === 0) {
+      toast.info('No pending findings selected.')
+      return
+    }
+
+    // Mark every target as in-flight so individual cards show the
+    // Saving… spinner for the duration of the batch call.
+    const targetIds = new Set(targets.map((f) => f.id))
+    setSavingFindingIds((prev) => {
+      const next = new Set(prev)
+      for (const id of targetIds) next.add(id)
+      return next
+    })
+
+    // Snapshot for rollback on failure.
+    const prevStatuses = new Map(targets.map((f) => [f.id, f.status]))
+    const prevEdited = new Map(targets.map((f) => [f.id, f.edited_text]))
+    const prevJob = job
+      ? { ...job }
+      : null
+
+    // ── Optimistic updates ─────────────────────────────────────────
+    // Editor replacements for every accepted target, applied in
+    // document order so earlier changes don't shift later ranges.
+    if (status === 'accepted' && editorRef.current) {
+      const sorted = [...targets].sort((a, b) => {
+        if (a.para_index !== b.para_index) return a.para_index - b.para_index
+        return a.start_offset - b.start_offset
+      })
+      // Apply from LAST to FIRST so each replacement's offsets stay
+      // valid: later positions don't get disturbed by earlier text
+      // length changes.
+      for (const f of [...sorted].reverse()) {
+        try {
+          editorRef.current.replaceOccurrence(
+            {
+              para_index: f.para_index,
+              match_start: f.start_offset,
+              match_end: f.end_offset,
+              surface: f.original_text,
+              category: f.category,
+            },
+            f.suggestion || '',
+            replaceOptionsFor('accepted', isTrackChangesEnabled()),
+          )
+        } catch {
+          // Single-replace failures are non-fatal; the backend still
+          // owns the authoritative state and will report any issues
+          // in the ``failed`` list.
+        }
+      }
+    }
+
+    // Finding state: flip every target to the new status.
+    setFindings((prev) =>
+      prev.map((f) => (targetIds.has(f.id) ? { ...f, status } : f)),
+    )
+
+    try {
+      const resp = await apiClient.post(
+        `/language-edit/jobs/${job.job_id}/batch-decide`,
+        {
+          status,
+          decisions: targets.map((f) => ({ finding_id: f.id })),
+        },
+      )
+      const data: any = resp?.data || {}
+      const processed: number[] = Array.isArray(data.processed) ? data.processed : []
+      const failedList: Array<{ finding_id: number; reason: string }> =
+        Array.isArray(data.failed) ? data.failed : []
+      const refreshed: Finding[] | null = Array.isArray(data.findings)
+        ? (data.findings as Finding[])
+        : null
+      const refreshedJob = data.job || null
+
+      // Backend's refreshed findings take precedence over the
+      // optimistic patch when an AB re-analysis ran.
+      if (refreshed) {
+        setFindings(refreshed)
+      } else if (failedList.length > 0) {
+        // Roll back only the failed subset — processed ones stay
+        // in their new status from the optimistic patch above.
+        const failedIds = new Set(failedList.map((x) => x.finding_id))
+        setFindings((prev) =>
+          prev.map((f) =>
+            failedIds.has(f.id)
+              ? {
+                  ...f,
+                  status: (prevStatuses.get(f.id) as Finding['status']) || f.status,
+                  edited_text: prevEdited.get(f.id) ?? f.edited_text,
+                }
+              : f,
+          ),
+        )
+      }
+      if (refreshedJob) {
+        setJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                total_findings:
+                  refreshedJob.total_findings ?? prev.total_findings,
+                accepted_count:
+                  refreshedJob.accepted_count ?? prev.accepted_count,
+                edited_count:
+                  refreshedJob.edited_count ?? prev.edited_count,
+                rejected_count:
+                  refreshedJob.rejected_count ?? prev.rejected_count,
+              }
+            : prev,
+        )
+      }
+      // Drop the bulk selection — everyone's been actioned.
+      clearSelection()
+      const pLabel = status === 'accepted' ? 'accepted' : 'ignored'
+      if (failedList.length === 0) {
+        toast.success(`${processed.length} finding${processed.length === 1 ? '' : 's'} ${pLabel}`)
+      } else {
+        toast.info(
+          `${processed.length} ${pLabel}; ${failedList.length} skipped (${failedList
+            .map((x) => x.reason)
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .join(', ')})`,
+        )
+      }
+    } catch (err) {
+      // Full rollback: restore every target's prior status + the job
+      // counter snapshot. Editor changes are reverted via TipTap's
+      // undo (one call per replacement).
+      setFindings((prev) =>
+        prev.map((f) =>
+          targetIds.has(f.id)
+            ? {
+                ...f,
+                status: (prevStatuses.get(f.id) as Finding['status']) || f.status,
+                edited_text: prevEdited.get(f.id) ?? f.edited_text,
+              }
+            : f,
+        ),
+      )
+      if (prevJob) {
+        setJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                accepted_count: prevJob.accepted_count,
+                edited_count: prevJob.edited_count,
+                rejected_count: prevJob.rejected_count,
+                total_findings: prevJob.total_findings,
+              }
+            : prev,
+        )
+      }
+      if (status === 'accepted' && editorRef.current?.editor?.commands?.undo) {
+        for (let i = 0; i < targets.length; i++) {
+          try {
+            editorRef.current.editor.commands.undo()
+          } catch {
+            break
+          }
+        }
+      }
+      toast.error(getApiErrorMessage(err, 'Bulk action failed'))
+    } finally {
+      setSavingFindingIds((prev) => {
+        if (!targetIds.size) return prev
+        const next = new Set(prev)
+        for (const id of targetIds) next.delete(id)
+        return next
+      })
+    }
+  }
+
   // Batch Accept All
   const handleAcceptAll = async () => {
     // Skip advisory-identity findings — they have no replacement to
@@ -850,6 +1096,53 @@ export function LanguageReviewPage() {
       requestAnimationFrame(() => { tryScroll() })
     })
   }, [findings])
+
+  // Scroll the editor to a DOCX paragraph / character position. Used
+  // by the AB04 "First Definition" reference rows — those don't map
+  // to a finding id, so ``focusOccurrenceInEditor`` can't be used.
+  // Instead we walk the TipTap doc for a block whose ``paraIdx``
+  // attribute matches the target DOCX para, compute the matching
+  // ProseMirror position, and scroll its DOM node into view.
+  // ``startOffset`` is optional; when provided it's added to the
+  // block's start position to home in on the exact character range
+  // (improves accuracy on long paragraphs).
+  const scrollEditorToParaIndex = useCallback((paraIndex: number, startOffset?: number) => {
+    const ed: any = editorRef.current?.editor
+    if (!ed || ed.isDestroyed) return
+    const doc = ed.state.doc
+    let targetPos: number | null = null
+    doc.descendants((node: any, pos: number) => {
+      if (targetPos !== null) return false
+      if (
+        node.isBlock &&
+        (node.type.name === 'paragraph' || node.type.name.startsWith('heading'))
+      ) {
+        const raw = node.attrs?.paraIdx
+        const pi = raw != null ? parseInt(String(raw), 10) : NaN
+        if (Number.isFinite(pi) && pi === paraIndex) {
+          const offsetInBlock = Math.max(
+            0,
+            Math.min(node.content.size, startOffset ?? 0),
+          )
+          targetPos = pos + 1 + offsetInBlock
+          return false
+        }
+      }
+      return true
+    })
+    if (targetPos === null) return
+    try {
+      const info = ed.view.domAtPos(targetPos)
+      const el: Element | null =
+        info?.node?.nodeType === Node.TEXT_NODE
+          ? info.node.parentElement
+          : (info?.node as Element)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } catch {
+      // Positions can briefly fall outside the mapped doc during
+      // re-renders; swallow and try again later if needed.
+    }
+  }, [])
 
   // Close inline popover: clear state + input.
   const closeInlinePopover = useCallback(() => {
@@ -1183,6 +1476,11 @@ export function LanguageReviewPage() {
       onEditInputChange={(id, value) => setEditedInputs({ ...editedInputs, [id]: value })}
       onRowMount={(id, el) => { cardRefs.current[id] = el as any }}
       isFindingSaving={isFindingSaving}
+      selectedFindingIds={selectedFindingIds}
+      onToggleSelect={toggleFindingSelection}
+      onSelectAllInGroup={addFindingsToSelection}
+      onClearSelectionInGroup={removeFindingsFromSelection}
+      onJumpToDocPosition={scrollEditorToParaIndex}
     />
   )
 
@@ -1414,6 +1712,58 @@ export function LanguageReviewPage() {
             {f.message}
           </p>
         )}
+
+        {/* AB04 reference row — shows the document-first valid
+            definition for the abbreviation so the reviewer sees
+            exactly where it was already defined. Rendered for
+            every AB04 finding card (including singletons that
+            render as flat cards instead of grouped cards), per
+            spec: "every AB04 repeated-definition card shows the
+            first valid definition". Non-interactive — no
+            checkbox, no actions — and intentionally excluded
+            from Accept All / Ignore All / selection since it's
+            not a finding, just the reference. Suppressed when
+            the server already wrote this card itself as the
+            first-use position (``first_definition`` null) or
+            when no earlier valid definition exists. */}
+        {f.rule_id === 'AB04' && f.first_definition && (() => {
+          const ref = f.first_definition
+          const jumpToReference = (e: React.MouseEvent | React.KeyboardEvent) => {
+            e.stopPropagation()
+            scrollEditorToParaIndex(ref.para_index, ref.start_offset)
+          }
+          return (
+            <div
+              className="mt-2 px-3 py-2 rounded-lg bg-emerald-50/60 hover:bg-emerald-50/90 border border-emerald-100 hover:border-emerald-300 text-xs cursor-pointer transition-colors"
+              data-testid="flat-ab04-reference"
+              onClick={jumpToReference}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') jumpToReference(e)
+              }}
+              role="button"
+              tabIndex={0}
+              title={`Click to jump to the first definition in paragraph ${ref.para_index + 1}`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  ★ First Definition · Reference
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700/80">
+                  Para {ref.para_index + 1}
+                </span>
+                <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200">
+                  View only
+                </span>
+              </div>
+              <div
+                className="text-slate-700 leading-snug underline decoration-emerald-300 decoration-dotted underline-offset-2"
+                data-testid="flat-ab04-reference-text"
+              >
+                {ref.text}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* DN notation banner — the workbook's
             intended-meaning + applies_in context are
@@ -2345,7 +2695,110 @@ export function LanguageReviewPage() {
                   <div className="py-12 text-center text-slate-400 text-xs">
                     No suggestions found in this category.
                   </div>
-                ) : activeRightTab === 'abbreviations' ? (
+                ) : (
+                  <>
+                    {(() => {
+                      // Category-level action bar. Rendered for every
+                      // ACTIONABLE finding category — not for ``all``,
+                      // ``bias`` (Inclusive is view-only per spec), or
+                      // ``comments``. Shows Accept All / Ignore All
+                      // against the full pending set, plus Accept
+                      // Selected / Ignore Selected when the user has
+                      // ticked individual checkboxes.
+                      const ACTIONABLE_TABS = new Set([
+                        'abbreviations', 'medical_terms', 'hyphenation',
+                        'grammar', 'spelling', 'sentence', 'typo',
+                      ])
+                      if (!ACTIONABLE_TABS.has(activeRightTab)) return null
+                      const pendingIds = activeCategoryFindings
+                        .filter(f => f.status !== 'accepted' && f.status !== 'edited' && f.status !== 'rejected')
+                        .map(f => f.id)
+                      const selectedInCategory = pendingIds.filter(id => selectedFindingIds.has(id))
+                      if (pendingIds.length === 0) return null
+                      return (
+                        <div
+                          className="sticky top-0 z-10 mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white/95 backdrop-blur-sm shadow-sm"
+                          data-testid="category-action-bar"
+                        >
+                          <div className="flex items-center gap-2 text-xs text-slate-600">
+                            <span className="font-semibold text-slate-800">
+                              {pendingIds.length} pending
+                            </span>
+                            {selectedInCategory.length > 0 && (
+                              <span className="text-indigo-600 font-medium">
+                                · {selectedInCategory.length} selected
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {selectedInCategory.length > 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleBulkDecide(selectedInCategory, 'accepted')}
+                                  className="px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold"
+                                  data-testid="category-accept-selected"
+                                >
+                                  Accept Selected ({selectedInCategory.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        `Ignore ${selectedInCategory.length} selected finding${selectedInCategory.length === 1 ? '' : 's'}?`,
+                                      )
+                                    ) {
+                                      handleBulkDecide(selectedInCategory, 'rejected')
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 rounded-full border border-slate-200 hover:bg-slate-50 text-[11px] font-semibold text-slate-600"
+                                  data-testid="category-ignore-selected"
+                                >
+                                  Ignore Selected ({selectedInCategory.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={clearSelection}
+                                  className="px-2.5 py-1 text-[11px] text-slate-400 hover:text-slate-600 underline decoration-dotted"
+                                  data-testid="category-clear-selection"
+                                >
+                                  Clear
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleBulkDecide(pendingIds, 'accepted')}
+                                  className="px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold"
+                                  data-testid="category-accept-all"
+                                >
+                                  Accept All ({pendingIds.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        `Ignore all ${pendingIds.length} pending finding${pendingIds.length === 1 ? '' : 's'} in this category?`,
+                                      )
+                                    ) {
+                                      handleBulkDecide(pendingIds, 'rejected')
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 rounded-full border border-slate-200 hover:bg-slate-50 text-[11px] font-semibold text-slate-600"
+                                  data-testid="category-ignore-all"
+                                >
+                                  Ignore All ({pendingIds.length})
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    {activeRightTab === 'abbreviations' ? (
                   // Grouped-card render path — multi-occurrence AB
                   // groups render as ONE outer card containing a
                   // header and compact occurrence rows (see
@@ -2362,6 +2815,8 @@ export function LanguageReviewPage() {
                   )
                 ) : (
                   activeCategoryFindings.map(renderFlatFindingCard)
+                )}
+                  </>
                 )
               ) : (
                 /* ── CE SUPPORT RULES MANAGER TAB ── */

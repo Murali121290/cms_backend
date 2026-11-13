@@ -601,6 +601,321 @@ def test_reanalyze_only_inserts_truly_new_rows(db_session, _ab_fixture):
     )
 
 
+# ─── First-definition reference (AB04 cards) ───────────────────────
+
+def test_first_definition_map_identifies_each_abbr_first_valid_definition(
+    db_session, _ab_fixture,
+):
+    """``_build_first_definition_map`` must identify the document-
+    first valid definition for every abbreviation the engine knows
+    about. Covers the Wheeler-style cascade where the first
+    definition is ahead of the AB04 findings and respects the
+    engine's existing scope rules via ``build_document_state``."""
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    # Replace the fixture doc with text that has a first definition
+    # pair and then a later redefinition — the canonical AB04 case.
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph(
+        "The chronic kidney disease (CKD) burden in older adults is high."
+    )
+    doc.add_paragraph(
+        "A later section notes chronic kidney disease (CKD) remains "
+        "a leading cause of morbidity."
+    )
+    doc.save(file.path)
+
+    from app.routers import language_edit as le
+    m = le._build_first_definition_map(job, db_session)
+    assert "CKD" in m, (
+        f"CKD must appear in the first-definition map, got keys: {sorted(m.keys())[:5]}..."
+    )
+    info = m["CKD"]
+    assert info["para_index"] == 0, (
+        f"CKD first definition must be at para 0 (document order), got {info}"
+    )
+    assert "chronic kidney disease (ckd)" in info["text"].lower()
+
+
+def test_first_definition_map_omits_abbreviations_without_a_valid_definition(
+    db_session, _ab_fixture,
+):
+    """When the engine never recognises a definition (e.g. the
+    document has only bare abbreviation usage), the map must NOT
+    fabricate an entry for that abbreviation."""
+    file = _ab_fixture["file"]
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph("A CKD workup is indicated.")  # no "(CKD)" definition
+    doc.add_paragraph("The CKD stage determines therapy.")
+    doc.save(file.path)
+
+    from app.routers import language_edit as le
+    m = le._build_first_definition_map(_ab_fixture["job"], db_session)
+    assert "CKD" not in m, (
+        f"CKD without a workbook definition must be absent from the map; got {m.get('CKD')}"
+    )
+
+
+def test_serialize_finding_row_attaches_first_definition_to_ab04(
+    db_session, _ab_fixture,
+):
+    """AB04 findings carry a ``first_definition`` dict in their
+    serialised row so the frontend can prepend the reference
+    occurrence to the card."""
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph("The chronic kidney disease (CKD) burden is high.")
+    doc.add_paragraph("Later, chronic kidney disease (CKD) is discussed again.")
+    doc.save(file.path)
+
+    # Emit an AB04 at the second paragraph's definition span.
+    ab04_row = _ab_finding(
+        job.job_id, file.id, para_index=1, start=7, end=38,
+        rule_id="AB04", original="chronic kidney disease (CKD)",
+        suggestion="CKD",
+    )
+    db_session.add(ab04_row)
+    db_session.commit()
+
+    from app.routers import language_edit as le
+    m = le._build_first_definition_map(job, db_session)
+    serialized = le._serialize_finding_row(ab04_row, m)
+    assert serialized.get("first_definition") is not None
+    ref = serialized["first_definition"]
+    assert ref["para_index"] == 0
+    assert "chronic kidney disease (ckd)" in ref["text"].lower()
+
+
+def test_serialize_finding_row_does_not_attach_first_definition_to_non_ab04(
+    db_session, _ab_fixture,
+):
+    """Non-AB04 rules (AB01 first use, AB13 periods-in-initialism,
+    DN notations, grammar, spelling, etc.) must NOT carry a
+    ``first_definition`` — the reference row is specific to AB04
+    ``Repeated definition`` cards."""
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph("The chronic kidney disease (CKD) burden is high.")
+    doc.save(file.path)
+
+    ab01_row = _ab_finding(
+        job.job_id, file.id, para_index=0, start=0, end=5,
+        rule_id="AB01", original="CKD", suggestion="chronic kidney disease (CKD)",
+    )
+    db_session.add(ab01_row)
+    db_session.commit()
+
+    from app.routers import language_edit as le
+    m = le._build_first_definition_map(job, db_session)
+    serialized = le._serialize_finding_row(ab01_row, m)
+    assert serialized.get("first_definition") is None
+
+
+def test_serialize_finding_row_handles_missing_first_def_map():
+    """Defensive: callers that don't build the map (legacy code
+    paths or early-exit error branches) can pass ``None`` and the
+    row still serialises without raising. ``first_definition`` is
+    simply ``None`` in that case."""
+    from app.routers import language_edit as le
+    class _FakeFinding:
+        id = 1; job_id = "j"; file_id = 1; para_index = 0
+        start_offset = 0; end_offset = 1; rule_id = "AB04"
+        category = "abbreviations"; severity = "warning"
+        original_text = "foo (FOO)"; suggestion = "FOO"
+        alt_suggestions = None; message = ""; autofixable = True
+        status = "pending"; edited_text = None; reviewer = None
+        decided_at = None; source = "rule"; term_list_id = None
+    row = le._serialize_finding_row(_FakeFinding())  # type: ignore[arg-type]
+    assert row.get("first_definition") is None
+
+
+# ─── batch_decide_findings ──────────────────────────────────────────
+
+def test_batch_decide_processes_only_pending_findings_in_the_job(
+    db_session, _ab_fixture, admin_user,
+):
+    """Partial-failure semantics: ids that don't exist, belong to a
+    different job, or are already decided must be reported in
+    ``failed`` while the valid ones still commit."""
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    f1 = _ab_finding(job.job_id, file.id, para_index=0, start=10, end=20,
+                      rule_id="AB13", original="U.S.A.", suggestion="USA")
+    f2 = _ab_finding(job.job_id, file.id, para_index=1, start=4, end=10,
+                      rule_id="AB13", original="U.S.A.", suggestion="USA")
+    already = _ab_finding(job.job_id, file.id, para_index=2, start=4, end=10,
+                           rule_id="AB13", original="U.S.A.", suggestion="USA",
+                           status="accepted")
+    db_session.add_all([f1, f2, already])
+    db_session.commit()
+
+    from app.routers import language_edit as le
+    from app.routers.language_edit import BatchDecideRequest, BatchDecisionItem
+    import app.domains.processing.service as svc
+    orig_check = svc.check_permission
+    svc.check_permission = lambda *a, **kw: None
+    try:
+        resp = le.batch_decide_findings(
+            job_id=job.job_id,
+            body=BatchDecideRequest(
+                status="rejected",
+                decisions=[
+                    BatchDecisionItem(finding_id=f1.id),
+                    BatchDecisionItem(finding_id=f2.id),
+                    BatchDecisionItem(finding_id=already.id),
+                    BatchDecisionItem(finding_id=9_999_999),  # not_found
+                ],
+            ),
+            db=db_session,
+            current_user=admin_user,
+        )
+    finally:
+        svc.check_permission = orig_check
+
+    assert set(resp["processed"]) == {f1.id, f2.id}
+    failed_ids = {f["finding_id"]: f["reason"] for f in resp["failed"]}
+    assert failed_ids.get(9_999_999) == "not_found"
+    assert failed_ids.get(already.id) == "already_resolved"
+    assert resp.get("reanalyzed") is not True, "Ignore batch must not re-analyse AB"
+
+    db_session.expire_all()
+    db_session.refresh(f1); db_session.refresh(f2); db_session.refresh(already)
+    assert f1.status == "rejected"
+    assert f2.status == "rejected"
+    # The already-accepted row is NOT demoted — bulk actions only
+    # apply to pending findings per spec.
+    assert already.status == "accepted"
+
+
+def test_batch_decide_runs_abbreviation_reanalysis_exactly_once(
+    db_session, _ab_fixture, admin_user,
+):
+    """Accepting many AB findings in one batch should trigger the
+    re-analysis helper ONCE, not once per finding. The response
+    carries ``reanalyzed: True`` and the refreshed findings bundle."""
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    seeds = [
+        _ab_finding(job.job_id, file.id, para_index=i, start=4, end=10,
+                     rule_id="AB13", original="U.S.A.", suggestion="USA")
+        for i in range(4)
+    ]
+    db_session.add_all(seeds)
+    db_session.commit()
+    seed_ids = [s.id for s in seeds]
+
+    reanalysis_calls = {"n": 0}
+    from app.routers import language_edit as le
+    from app.routers.language_edit import BatchDecideRequest, BatchDecisionItem
+    orig = le._reanalyze_abbreviations_for_job
+
+    def _spy(j, d):
+        reanalysis_calls["n"] += 1
+        return orig(j, d)
+
+    le._reanalyze_abbreviations_for_job = _spy
+    import app.domains.processing.service as svc
+    orig_check = svc.check_permission
+    svc.check_permission = lambda *a, **kw: None
+    try:
+        resp = le.batch_decide_findings(
+            job_id=job.job_id,
+            body=BatchDecideRequest(
+                status="accepted",
+                decisions=[BatchDecisionItem(finding_id=i) for i in seed_ids],
+            ),
+            db=db_session,
+            current_user=admin_user,
+        )
+    finally:
+        le._reanalyze_abbreviations_for_job = orig
+        svc.check_permission = orig_check
+
+    assert reanalysis_calls["n"] == 1, (
+        f"AB batch must run re-analysis exactly once; got {reanalysis_calls['n']}"
+    )
+    assert resp.get("reanalyzed") is True
+    # Response carries the refreshed findings so the client can
+    # replace its local list atomically.
+    assert "findings" in resp
+
+
+def test_batch_decide_rejects_unknown_status(db_session, _ab_fixture, admin_user):
+    from app.routers import language_edit as le
+    from app.routers.language_edit import BatchDecideRequest, BatchDecisionItem
+    import app.domains.processing.service as svc
+    orig_check = svc.check_permission
+    svc.check_permission = lambda *a, **kw: None
+    try:
+        import pytest as _pt
+        from fastapi import HTTPException
+        with _pt.raises(HTTPException) as ei:
+            le.batch_decide_findings(
+                job_id=_ab_fixture["job"].job_id,
+                body=BatchDecideRequest(
+                    status="archived",
+                    decisions=[BatchDecisionItem(finding_id=1)],
+                ),
+                db=db_session,
+                current_user=admin_user,
+            )
+        assert ei.value.status_code == 400
+    finally:
+        svc.check_permission = orig_check
+
+
+def test_batch_decide_updates_job_counters_from_final_row_set(
+    db_session, _ab_fixture, admin_user,
+):
+    """Job counters are recomputed authoritatively from the current
+    status distribution after the batch commits, so partial failures
+    can't drift the dashboard off the real row count."""
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    seeds = [
+        _ab_finding(job.job_id, file.id, para_index=i, start=0, end=5,
+                     rule_id="AB13", original="U.S.A.", suggestion="USA")
+        for i in range(3)
+    ]
+    db_session.add_all(seeds)
+    db_session.commit()
+
+    from app.routers import language_edit as le
+    from app.routers.language_edit import BatchDecideRequest, BatchDecisionItem
+    import app.domains.processing.service as svc
+    orig_check = svc.check_permission
+    svc.check_permission = lambda *a, **kw: None
+    try:
+        le.batch_decide_findings(
+            job_id=job.job_id,
+            body=BatchDecideRequest(
+                status="rejected",
+                decisions=[BatchDecisionItem(finding_id=s.id) for s in seeds],
+            ),
+            db=db_session,
+            current_user=admin_user,
+        )
+    finally:
+        svc.check_permission = orig_check
+
+    db_session.expire_all()
+    db_session.refresh(job)
+    assert job.rejected_count == 3
+    # The 3 seeded rows don't overlap with the fixture job's existing
+    # rows (fixture job started empty), so total_findings is 3.
+    assert job.total_findings == 3
+
+
 def test_ignore_does_not_trigger_abbreviation_reanalysis(db_session, _ab_fixture, admin_user):
     """Ignoring an AB finding must NOT delete / re-insert other
     pending AB rows — Ignore does not run the re-analysis path (only

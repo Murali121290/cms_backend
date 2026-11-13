@@ -157,6 +157,22 @@ class DecisionRequest(BaseModel):
     reviewer: Optional[str] = "editor"
 
 
+class BatchDecisionItem(BaseModel):
+    finding_id: int
+    edited_text: Optional[str] = None
+
+
+class BatchDecideRequest(BaseModel):
+    """Bulk decide payload. ``status`` applies to every item; per-item
+    ``edited_text`` is only consulted when ``status == 'edited'``. The
+    client can mix any subset of a single job's pending findings — the
+    endpoint silently skips ones that don't belong to the job rather
+    than failing the whole batch (partial-failure semantics)."""
+    status: str  # accepted | edited | rejected | highlighted
+    reviewer: Optional[str] = "editor"
+    decisions: list[BatchDecisionItem]
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/projects/{project_id}/language-rules")
@@ -1358,6 +1374,132 @@ def start_language_edit_analysis(
     }
 
 
+def _resolve_file_path(stored_path: str) -> Optional[str]:
+    """Resolve a File row's ``path`` into something readable by the
+    current process.
+
+    Legacy DB rows carry absolute HOST paths of the form
+    ``/Users/kavuthamapriya/cms_backend/runtime/data/uploads/...``
+    because the analyze endpoint ran when the backend was configured
+    with a host-side ``CMS_RUNTIME_ROOT``. After the switch to the
+    containerised layout those paths don't exist inside the
+    container — we have to remap them to the mounted locations.
+
+    Resolution order (first match wins):
+
+      1. The stored path exists as-is.
+      2. ``{CMS_RUNTIME_ROOT}/...`` where ``CMS_RUNTIME_ROOT`` is the
+         current env value (``/opt/cms_runtime`` in-container by
+         default). We strip whatever host prefix the stored path
+         carries up to the ``runtime/`` segment and prepend the
+         current root.
+      3. ``/app/data/runtime/data/uploads/<basename>`` — covers the
+         ``./data:/app/data`` mount case where legacy uploads got
+         stashed under a flat directory.
+
+    Returns ``None`` when no candidate is accessible. Callers must
+    handle this — the feature that depends on the file (first-def
+    map, re-analysis) then degrades gracefully instead of raising.
+    """
+    if not stored_path:
+        return None
+    if os.path.exists(stored_path):
+        return stored_path
+
+    # Trim any leading host prefix up to the first ``runtime/`` or
+    # ``uploads/`` segment and probe common container roots.
+    norm = stored_path.replace("\\", "/")
+    candidates: list[str] = []
+    runtime_root = os.getenv("CMS_RUNTIME_ROOT", "/opt/cms_runtime")
+
+    idx = norm.find("/runtime/")
+    if idx >= 0:
+        rel = norm[idx + len("/runtime/"):]
+        # ``/opt/legacy_uploads`` is the docker-compose bind of
+        # ``./runtime`` — covers the common case of a DB row created
+        # when the backend ran outside the container.
+        candidates.append(os.path.join("/opt/legacy_uploads", rel))
+        candidates.append(os.path.join(runtime_root, rel))
+        candidates.append(os.path.join("/app/data/runtime", rel))
+
+    idx2 = norm.find("/data/uploads/")
+    if idx2 >= 0:
+        rel = norm[idx2 + len("/data/uploads/"):]
+        candidates.append(os.path.join("/opt/legacy_uploads/data/uploads", rel))
+        candidates.append(os.path.join(runtime_root, "data", "uploads", rel))
+        candidates.append(os.path.join("/opt/cms_runtime/data/uploads", rel))
+        candidates.append(os.path.join("/app/data/runtime/data/uploads", rel))
+        # Flat-dir fallback for the legacy layout.
+        candidates.append(os.path.join("/app/data/runtime/data/uploads", os.path.basename(rel)))
+
+    for cand in candidates:
+        if os.path.exists(cand):
+            return cand
+    return None
+
+
+def _build_first_definition_map(job: LanguageEditJob, db: Session) -> dict[str, dict]:
+    """Per-abbreviation first-definition lookup, computed once per
+    GET/decide response so the serializer can attach a reference
+    occurrence to AB04 (repeated definition) findings.
+
+    Honors the engine's existing scope rules — the state build is
+    exactly the one ``build_document_state`` uses, so document regions
+    the router excludes (references, extract, abstract, src, etc.)
+    stay excluded here too. Returns an empty map when the DOCX can't
+    be read; the serializer then just omits the reference field.
+
+    Returned shape per abbreviation:
+
+        {
+          "para_index":    int,   # 0-based paragraph index
+          "start_offset":  int,
+          "end_offset":    int,
+          "text":          str,   # exact surface in the document
+          "kind":          str,   # e.g. "exp_paren_abbr"
+        }
+    """
+    file_record = db.query(models.File).filter(models.File.id == job.file_id).first()
+    if not file_record:
+        return {}
+    resolved = _resolve_file_path(file_record.path or "")
+    if not resolved:
+        logger.warning(
+            "first-def map: DOCX unreachable from container (DB path=%r)",
+            file_record.path,
+        )
+        return {}
+    try:
+        doc_obj, paragraphs = docx_io.read_paragraphs(resolved)
+    except Exception as exc:
+        logger.warning("first-def map: read_paragraphs failed: %s", exc)
+        return {}
+    try:
+        para_roles = docx_io.classify_paragraphs(doc_obj)
+    except Exception:
+        para_roles = {}
+    try:
+        state = abbreviations.build_document_state(
+            paragraphs, audience="general", min_uses=2, para_roles=para_roles,
+        )
+    except Exception as exc:
+        logger.warning("first-def map: state build failed: %s", exc)
+        return {}
+    out: dict[str, dict] = {}
+    for abbr, s in state.items():
+        if not s.definitions:
+            continue
+        pi, start, end, surface, kind = s.definitions[0]
+        out[abbr] = {
+            "para_index": int(pi),
+            "start_offset": int(start),
+            "end_offset": int(end),
+            "text": surface,
+            "kind": kind,
+        }
+    return out
+
+
 @router.get("/language-edit/jobs/{job_id}/findings")
 def get_job_findings(
     job_id: str,
@@ -1377,6 +1519,8 @@ def get_job_findings(
         .all()
     )
 
+    first_def_map = _build_first_definition_map(job, db)
+
     return {
         "job": {
             "job_id": job.job_id,
@@ -1388,11 +1532,13 @@ def get_job_findings(
             "edited_count": job.edited_count,
             "rejected_count": job.rejected_count,
         },
-        "findings": [_serialize_finding_row(f) for f in findings],
+        "findings": [_serialize_finding_row(f, first_def_map) for f in findings],
     }
 
 
-def _serialize_finding_row(f: LanguageEditFinding) -> dict:
+def _serialize_finding_row(
+    f: LanguageEditFinding, first_def_map: Optional[dict[str, dict]] = None,
+) -> dict:
     """Row-shape helper for the GET /findings serializer AND the
     decide endpoint's refreshed-findings bundle. Keeps the two paths
     emitting IDENTICAL shape so the frontend has a single model for
@@ -1438,6 +1584,51 @@ def _serialize_finding_row(f: LanguageEditFinding) -> dict:
             if f.decided_at and f.decided_at.tzinfo is None
             else (f.decided_at.isoformat() if f.decided_at else None)
         ),
+        "first_definition": _first_definition_for(f, first_def_map),
+    }
+
+
+def _first_definition_for(
+    f: LanguageEditFinding, first_def_map: Optional[dict[str, dict]],
+) -> Optional[dict]:
+    """Return the first-in-document definition reference the frontend
+    should display at the top of an AB04 (repeated definition) card,
+    or ``None`` for every other case.
+
+    Scope: AB04 only. Other AB rules either represent the first use
+    themselves (AB01) or don't warrant a reference row by spec.
+    When no map was built (missing file, I/O error) or the finding's
+    abbreviation couldn't be extracted, returns ``None`` — the UI
+    then falls back to showing the group's own earliest item.
+
+    Also returns ``None`` when the computed first definition's span
+    exactly equals the finding's own span: that means THIS AB04
+    finding IS the first definition (shouldn't happen under the
+    current engine, but the guard keeps the serializer robust in
+    case the state and the finding fall out of sync)."""
+    if not first_def_map:
+        return None
+    if f.rule_id != "AB04":
+        return None
+    abbr = abbreviations_metadata.extract_abbreviation(
+        f.rule_id, f.original_text or "", f.suggestion or "",
+    )
+    if not abbr:
+        return None
+    info = first_def_map.get(abbr)
+    if not info:
+        return None
+    if (
+        info.get("para_index") == f.para_index
+        and info.get("start_offset") == f.start_offset
+        and info.get("end_offset") == f.end_offset
+    ):
+        return None
+    return {
+        "para_index": info["para_index"],
+        "start_offset": info["start_offset"],
+        "end_offset": info["end_offset"],
+        "text": info["text"],
     }
 
 
@@ -1496,6 +1687,13 @@ def _reanalyze_abbreviations_for_job(
     file_record = db.query(models.File).filter(models.File.id == job.file_id).first()
     if not file_record or not file_record.path:
         return None
+    resolved_path = _resolve_file_path(file_record.path)
+    if not resolved_path:
+        logger.warning(
+            "reanalyze_ab: DOCX unreachable from container (DB path=%r)",
+            file_record.path,
+        )
+        return None
 
     all_findings = (
         db.query(LanguageEditFinding)
@@ -1527,9 +1725,9 @@ def _reanalyze_abbreviations_for_job(
         )
 
     try:
-        doc_obj, paragraphs = docx_io.read_paragraphs(file_record.path)
+        doc_obj, paragraphs = docx_io.read_paragraphs(resolved_path)
     except Exception as exc:
-        logger.warning("reanalyze_ab: failed to read DOCX at %s: %s", file_record.path, exc)
+        logger.warning("reanalyze_ab: failed to read DOCX at %s: %s", resolved_path, exc)
         return None
     try:
         para_roles = docx_io.classify_paragraphs(doc_obj)
@@ -1840,7 +2038,164 @@ def decide_finding(
         } if job else None,
     }
     if refreshed_rows is not None:
-        response["findings"] = [_serialize_finding_row(f) for f in refreshed_rows]
+        # After AB Accept/Edit the definition map may have shifted;
+        # rebuild once so the reference row attached to any AB04
+        # finding in the refreshed bundle stays accurate.
+        first_def_map = _build_first_definition_map(job, db) if job else {}
+        response["findings"] = [
+            _serialize_finding_row(f, first_def_map) for f in refreshed_rows
+        ]
+        response["reanalyzed"] = True
+    return response
+
+
+@router.post("/language-edit/jobs/{job_id}/batch-decide")
+def batch_decide_findings(
+    job_id: str,
+    body: BatchDecideRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_from_cookie),
+):
+    """Apply the same decision to a list of findings in one
+    transaction.
+
+    * Only processes findings that both belong to ``job_id`` and are
+      still pending. Items that don't exist, belong to a different
+      job, or are already decided are reported in ``failed`` with a
+      short reason; the rest still commit. The reviewer sees a
+      partial-success toast and the UI can leave the failed cards
+      pending for retry.
+    * If any processed finding is an AB rule AND the decision is
+      ``accepted`` / ``edited``, the server-side abbreviations
+      re-analysis runs exactly ONCE at the end (instead of per
+      finding). Non-AB categories never trigger it.
+    * Job counters are recomputed once from the final row set so
+      they can't drift under partial failures.
+
+    The response mirrors ``decide_finding`` on structure (``ok``,
+    ``job``, optional ``findings`` + ``reanalyzed`` when the
+    re-analysis ran) so the frontend can reuse its refresh logic.
+    """
+    _require_language_user(current_user)
+    if body.status not in ("accepted", "edited", "rejected", "highlighted"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid status. Must be accepted, edited, rejected, or highlighted.",
+        )
+    if not body.decisions:
+        raise HTTPException(status_code=400, detail="decisions must be non-empty.")
+
+    job = db.query(LanguageEditJob).filter(LanguageEditJob.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
+
+    reviewer = (
+        (get_user_full_name(current_user) if current_user else None)
+        or body.reviewer
+        or "editor"
+    )
+    decided_at = datetime.datetime.now(datetime.timezone.utc)
+
+    # Map every requested finding id to its ORM row via a single IN
+    # query so the batch is O(1) round trips regardless of size.
+    ids = [d.finding_id for d in body.decisions]
+    edited_lookup: dict[int, Optional[str]] = {
+        d.finding_id: d.edited_text for d in body.decisions
+    }
+    rows_by_id = {
+        r.id: r for r in (
+            db.query(LanguageEditFinding)
+            .filter(LanguageEditFinding.id.in_(ids))
+            .all()
+        )
+    }
+
+    processed: list[int] = []
+    failed: list[dict] = []
+    any_ab_resolved = False
+
+    for d in body.decisions:
+        fid = d.finding_id
+        row = rows_by_id.get(fid)
+        if row is None:
+            failed.append({"finding_id": fid, "reason": "not_found"})
+            continue
+        if row.job_id != job_id:
+            failed.append({"finding_id": fid, "reason": "wrong_job"})
+            continue
+        # Spec: bulk actions apply only to pending findings. An
+        # already-decided row is skipped — it reports as ``failed`` so
+        # the UI can surface it, but no silent re-decision happens.
+        # Highlighted is "not yet resolved" and therefore eligible
+        # (highlight alone doesn't count as resolved).
+        if row.status in ("accepted", "edited", "rejected"):
+            failed.append({"finding_id": fid, "reason": "already_resolved"})
+            continue
+        row.status = body.status
+        row.edited_text = edited_lookup.get(fid) if body.status == "edited" else None
+        row.reviewer = reviewer
+        row.decided_at = decided_at
+        processed.append(fid)
+        if (
+            body.status in ("accepted", "edited")
+            and row.rule_id
+            and row.rule_id.startswith("AB")
+        ):
+            any_ab_resolved = True
+
+    # Commit the per-row status updates BEFORE running the AB
+    # re-analysis so the helper sees the fresh decisions when it
+    # reads existing findings.
+    db.commit()
+
+    # Re-analysis runs AT MOST once per batch, even when many AB
+    # findings were accepted together. The helper is diff-based so
+    # unchanged pending AB rows retain their ids.
+    refreshed_rows: Optional[list[LanguageEditFinding]] = None
+    if any_ab_resolved:
+        try:
+            refreshed_rows = _reanalyze_abbreviations_for_job(job, db)
+        except Exception as exc:
+            logger.exception("AB batch re-analysis failed: %s", exc)
+            refreshed_rows = None
+
+    # Recompute job counters authoritatively from the committed row
+    # set — cheaper and more trustworthy than tracking deltas across
+    # an unknown number of status transitions.
+    from sqlalchemy import func as _sql_func
+    status_counts = dict(
+        db.query(LanguageEditFinding.status, _sql_func.count())
+        .filter(LanguageEditFinding.job_id == job_id)
+        .group_by(LanguageEditFinding.status)
+        .all()
+    )
+    job.accepted_count = int(status_counts.get("accepted", 0))
+    job.edited_count = int(status_counts.get("edited", 0))
+    job.rejected_count = int(status_counts.get("rejected", 0))
+    job.total_findings = int(sum(status_counts.values()))
+    db.commit()
+
+    response: dict = {
+        "ok": True,
+        "job_id": job_id,
+        "processed": processed,
+        "failed": failed,
+        "job": {
+            "job_id": job.job_id,
+            "total_findings": job.total_findings,
+            "accepted_count": job.accepted_count,
+            "edited_count": job.edited_count,
+            "rejected_count": job.rejected_count,
+        },
+    }
+    if refreshed_rows is not None:
+        # After AB Accept/Edit the definition map may have shifted;
+        # rebuild once so the reference row attached to any AB04
+        # finding in the refreshed bundle stays accurate.
+        first_def_map = _build_first_definition_map(job, db) if job else {}
+        response["findings"] = [
+            _serialize_finding_row(f, first_def_map) for f in refreshed_rows
+        ]
         response["reanalyzed"] = True
     return response
 

@@ -72,6 +72,11 @@ services:
       - ./outputs:/app/outputs
       - ./data:/app/data
       - ./temp_reports:/app/temp_reports
+      # Legacy upload tree: DB rows from early sessions carry
+      # absolute host paths under ``./runtime/``. Mount the tree
+      # read-only so the language-edit file-path resolver can
+      # re-find those DOCX files inside the container.
+      - ./runtime:/opt/legacy_uploads:ro
       # ref_cache.json is maintained inside the named volume to avoid the
       # "directory created instead of file" pitfall of bind-mounting a file
       # that doesn't exist yet.
