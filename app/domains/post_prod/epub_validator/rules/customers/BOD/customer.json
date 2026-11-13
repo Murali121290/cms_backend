@@ -92,6 +92,45 @@
       "category": "Copyright Check"
     },
     {
+      "id": "BOD-COPY-002",
+      "name": "Alignment of the copyright page should be top aligned (Control in CSS)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "allowed_classes": [
+          "cpytxt",
+          "cpytxt-top-space"
+        ],
+        "required_classes": [
+          "cpytxt-top-space"
+        ],
+        "min_required_count": {
+          "cpytxt-top-space": 1,
+          "cpytxt": 0
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-003",
+      "name": "Copyright should fit on one page",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",

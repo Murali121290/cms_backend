@@ -218,12 +218,17 @@ def validate_epub(
             for file in files:
                 if target_file and file != target_file:
                     continue
-                matches_pattern = any(fnmatch.fnmatch(file, p) for p in file_patterns)
+                full_path = os.path.join(root, file)
+                rel_from_search = os.path.relpath(full_path, search_folder).replace("\\", "/")
+                matches_pattern = any(
+                    fnmatch.fnmatch(file.lower(), p.lower())
+                    or fnmatch.fnmatch(rel_from_search.lower(), p.lower())
+                    for p in file_patterns
+                )
                 matches_db_chapter = check_db_chapters and (file.lower() in db_chapter_files or os.path.basename(file).lower() in db_chapter_files)
                 if not (matches_pattern or matches_db_chapter):
                     continue
 
-                full_path = os.path.join(root, file)
                 relative_path = os.path.relpath(full_path, epub_folder).replace("\\", "/")
                 file_details = {
                     "file_name": file,
