@@ -236,6 +236,55 @@ describe('AbbreviationGroupCard — per-occurrence actions', () => {
     // Row 2: rejected → disabled
     expect(within(rows[2]).getByTestId('action-accept')).toBeDisabled()
   })
+
+  it('a pending row whose decide POST is in flight shows a saving state and disables every action', () => {
+    // Regression for the duplicate-click bug: the nginx access log
+    // showed five POSTs to the same finding id within 18 seconds
+    // because the UI didn't give immediate feedback. The ``isFindingSaving``
+    // predicate now reports the in-flight status and the card must
+    // disable Accept / Edit / Highlight / Ignore until it clears.
+    const group = buildICUGroup(['pending', 'pending', 'pending'])
+    const savingId = group.items[1].id
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...defaultHandlers()}
+        isFindingSaving={(id) => id === savingId}
+      />,
+    )
+    const rows = screen.getAllByTestId('abbr-occurrence-row')
+    // Row 1 (the one in flight) — every action disabled, Accept
+    // shows "Saving…".
+    expect(within(rows[1]).getByTestId('action-accept')).toBeDisabled()
+    expect(within(rows[1]).getByTestId('action-edit')).toBeDisabled()
+    expect(within(rows[1]).getByTestId('action-highlight')).toBeDisabled()
+    expect(within(rows[1]).getByTestId('action-ignore')).toBeDisabled()
+    expect(within(rows[1]).getByTestId('action-accept').getAttribute('aria-busy')).toBe('true')
+    expect(within(rows[1]).getByTestId('action-accept').textContent).toContain('Saving')
+    // Row 0 and Row 2 remain enabled — the lock is per-finding, not per-group.
+    expect(within(rows[0]).getByTestId('action-accept')).not.toBeDisabled()
+    expect(within(rows[2]).getByTestId('action-accept')).not.toBeDisabled()
+  })
+
+  it('clicking Accept on an in-flight row does NOT fire onDecide a second time', () => {
+    const group = buildICUGroup()
+    const h = defaultHandlers()
+    const savingId = group.items[0].id
+    render(
+      <AbbreviationGroupCard
+        group={group}
+        collapsed={false}
+        {...h}
+        isFindingSaving={(id) => id === savingId}
+      />,
+    )
+    const row = screen.getAllByTestId('abbr-occurrence-row')[0]
+    fireEvent.click(within(row).getByTestId('action-accept'))
+    // Button was disabled → React fires no click handler → onDecide
+    // is never invoked for that row.
+    expect(h.onDecide).not.toHaveBeenCalled()
+  })
 })
 
 describe('AbbreviationGroupCard — grouping invariants', () => {

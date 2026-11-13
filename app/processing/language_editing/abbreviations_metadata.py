@@ -133,6 +133,28 @@ def _abbr_index_by_token() -> dict[str, list[dict[str, Any]]]:
     return out
 
 
+@lru_cache(maxsize=1)
+def _plural_abbr_to_singular() -> dict[str, str]:
+    """Case-sensitive plural abbreviation form → its singular workbook
+    key, for entries that declare one (``NPs`` → ``NP``, ``ICUs`` →
+    ``ICU``). Used by ``extract_abbreviation`` so an AB finding whose
+    suggestion / original is the plural form (``nurse practitioners``
+    → ``NPs``) resolves to the same canonical abbreviation as the
+    singular finding, which in turn means both land in the same
+    grouping bucket (``NP | nurse practitioner``) rather than
+    splintering into separate ungrouped cards."""
+    out: dict[str, str] = {}
+    for row in (_ab._list_data().get("abbreviations") or []):
+        singular = (row.get("abbreviation") or "").strip()
+        plural = (row.get("plural_abbreviation") or "").strip()
+        if singular and plural and plural != singular:
+            # If two entries disagree on a plural form, the first
+            # one wins (deterministic across process starts; tests
+            # pin the specific row if they care).
+            out.setdefault(plural, singular)
+    return out
+
+
 # Common shape for an AB finding's suggestion: ``expansion (ABBR)``.
 # Used to extract the abbreviation from AB01/AB02/AB03 suggestions.
 _ABBR_IN_PARENS_RE = re.compile(r"\(([A-Z][A-Za-z0-9]{0,15})\)\s*$")
@@ -141,37 +163,59 @@ _ABBR_IN_PARENS_RE = re.compile(r"\(([A-Z][A-Za-z0-9]{0,15})\)\s*$")
 def extract_abbreviation(rule_id: str, original: str, suggestion: str) -> Optional[str]:
     """Best-effort extraction of the abbreviation an AB finding is
     about. Used so the serializer can look up the Abbreviation_List
-    row for note / mw_lookup / confidence.
+    row for note / mw_lookup / confidence AND so ``grouping_fields_for``
+    can collapse singular / plural variants into one card.
 
     Order of attempts:
-      1. ``original`` itself is a registered abbreviation (case-sensitive).
-      2. ``suggestion`` ends with ``(ABBR)`` — extract ABBR.
-      3. ``original`` ends with ``(ABBR)`` — extract ABBR.
-      4. First whitespace-separated token of ``suggestion`` that is a
-         registered abbreviation (handles AB02 where suggestion is
-         just the bare abbreviation).
+      1. ``original`` itself is a registered singular abbreviation.
+      2. ``original`` itself is a registered PLURAL abbreviation —
+         returns the singular form so downstream lookups hit one row.
+      3. ``suggestion`` ends with ``(ABBR)`` — extract ABBR. Resolves
+         plural → singular if needed.
+      4. ``original`` ends with ``(ABBR)`` — same.
+      5. First whitespace-separated token of ``suggestion`` that is
+         a registered singular OR plural abbreviation (handles AB02
+         where ``suggestion`` is just the bare abbreviation, e.g.
+         ``NPs``).
 
-    Returns None when extraction isn't reliable; the serializer then
-    skips abbreviation-metadata lookup for that finding.
+    Returns None when extraction isn't reliable.
     """
     index = _abbr_index_by_token()
+    plural_map = _plural_abbr_to_singular()
+
+    def _resolve(token: str) -> Optional[str]:
+        if not token:
+            return None
+        if token in index:
+            return token
+        if token in plural_map:
+            return plural_map[token]
+        return None
+
     original = (original or "").strip()
     suggestion = (suggestion or "").strip()
-    # 1
-    if original and original in index:
-        return original
-    # 2
-    m = _ABBR_IN_PARENS_RE.search(suggestion)
-    if m and m.group(1) in index:
-        return m.group(1)
+    # 1 & 2
+    r = _resolve(original)
+    if r:
+        return r
     # 3
+    m = _ABBR_IN_PARENS_RE.search(suggestion)
+    if m:
+        r = _resolve(m.group(1))
+        if r:
+            return r
+    # 4
     m = _ABBR_IN_PARENS_RE.search(original)
-    if m and m.group(1) in index:
-        return m.group(1)
-    # 4 — tokens of suggestion
+    if m:
+        r = _resolve(m.group(1))
+        if r:
+            return r
+    # 5 — tokens of suggestion (handles AB02 whose suggestion is bare
+    # ``NPs`` / ``ICU`` / ``NP``). Plural-aware through _resolve.
     for tok in re.split(r"[\s(),.;:]+", suggestion):
-        if tok and tok in index:
-            return tok
+        r = _resolve(tok)
+        if r:
+            return r
     return None
 
 
@@ -308,6 +352,7 @@ def clear_cache() -> None:
     patch the backing JSON files."""
     _dn_index.cache_clear()
     _abbr_index_by_token.cache_clear()
+    _plural_abbr_to_singular.cache_clear()
 
 
 # ─── Finding-level composite ──────────────────────────────────────

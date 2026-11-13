@@ -359,3 +359,303 @@ def test_reanalyze_missing_file_is_a_safe_noop(db_session, _ab_fixture):
         .count()
     )
     assert pending_after == pending_before, "DB must not change on I/O failure"
+
+
+# ─── ID preservation across re-analysis (bug-fix regression) ────────
+
+def _rewrite_fixture_with_ab13(fixture: dict) -> None:
+    """Replace the fixture DOCX with text known to produce AB13
+    (periods-in-initialism) findings. ``U.S.A.`` reliably matches
+    ``_analyze_periods_in_initialism`` without needing document-
+    state coverage. Lets the ID-preservation tests seed real-shaped
+    rows without depending on fragile workbook state."""
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph("The U.S.A. was founded in 1776.")
+    doc.add_paragraph("The U.S.A. has fifty states.")
+    doc.add_paragraph("Trade with U.S.A. continues to grow.")
+    doc.save(fixture["docx_path"])
+
+
+def test_reanalyze_preserves_ids_of_unchanged_pending_rows(db_session, _ab_fixture):
+    """Regression for the "Failed to save decision" bug:
+
+    Previously ``_reanalyze_abbreviations_for_job`` deleted every
+    pending AB row on every Accept/Edit and re-inserted fresh rows
+    with new auto-increment ids. The frontend's event handlers close
+    over ``f.id`` at render time, so when the reviewer Accepted ONE
+    AB finding, every OTHER AB card's id instantly became stale —
+    subsequent clicks posted to ``POST /findings/{stale_id}/decide``
+    and the backend returned 404 ("Finding ID not found"), surfaced
+    as "Failed to save decision".
+
+    The fix: diff the fresh analyzer output against existing pending
+    rows by (para_index, start_offset, end_offset, rule_id,
+    original_text). Matched rows keep their id; only stale rows are
+    deleted and only genuinely new rows are inserted.
+
+    This test seeds a pending AB row that exactly matches what the
+    analyzer will re-emit for the fixture document, runs re-analysis,
+    and asserts the row's id is unchanged. It is the load-bearing
+    assertion that prevents the UI regression from coming back.
+    """
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    # Reset the AB caches and get the analyzer's fresh view of the
+    # fixture paragraphs so we can seed a pending row that exactly
+    # matches a producible finding.
+    _rewrite_fixture_with_ab13(_ab_fixture)
+    from app.processing.language_editing import abbreviations as ab_mod
+    ab_mod.clear_cache()
+    from app.processing.language_editing import docx_io
+    doc_obj, paragraphs = docx_io.read_paragraphs(file.path)
+    state = ab_mod.build_document_state(paragraphs, audience="general", min_uses=2)
+    seed_ab_row: LanguageEditFinding | None = None
+    for pi, text in paragraphs:
+        for fd in ab_mod.analyze_abbreviations(text, para_idx=pi, document_state=state):
+            if fd.rule_id and fd.rule_id.startswith("AB"):
+                seed_ab_row = LanguageEditFinding(
+                    job_id=job.job_id,
+                    file_id=file.id,
+                    para_index=pi,
+                    start_offset=fd.start,
+                    end_offset=fd.end,
+                    rule_id=fd.rule_id,
+                    category=fd.category,
+                    severity=fd.severity,
+                    original_text=fd.original,
+                    suggestion=fd.suggestion,
+                    message=fd.message,
+                    autofixable=fd.autofixable,
+                    status="pending",
+                    source="rule",
+                )
+                break
+        if seed_ab_row:
+            break
+
+    if seed_ab_row is None:
+        pytest.skip("fixture produced no AB finding for this test")
+
+    db_session.add(seed_ab_row)
+    db_session.commit()
+    preserved_id = seed_ab_row.id
+    key = (
+        seed_ab_row.para_index,
+        seed_ab_row.start_offset,
+        seed_ab_row.end_offset,
+        seed_ab_row.rule_id,
+        seed_ab_row.original_text,
+    )
+
+    le_router._reanalyze_abbreviations_for_job(job, db_session)
+
+    # The row MUST still be there with its original id — the diff-
+    # based update keeps matched rows.
+    surviving = (
+        db_session.query(LanguageEditFinding)
+        .filter(LanguageEditFinding.id == preserved_id)
+        .first()
+    )
+    assert surviving is not None, (
+        f"re-analysis deleted the matching pending AB row (id={preserved_id}) "
+        "— this breaks the UI by invalidating finding ids already rendered "
+        "in the sidebar"
+    )
+    # And no duplicate row for the same key was created.
+    dup_count = (
+        db_session.query(LanguageEditFinding)
+        .filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.para_index == key[0],
+            LanguageEditFinding.start_offset == key[1],
+            LanguageEditFinding.end_offset == key[2],
+            LanguageEditFinding.rule_id == key[3],
+            LanguageEditFinding.original_text == key[4],
+            LanguageEditFinding.status == "pending",
+        )
+        .count()
+    )
+    assert dup_count == 1, (
+        f"expected exactly one pending row for key {key!r}; found {dup_count}"
+    )
+
+
+def test_reanalyze_deletes_only_stale_rows(db_session, _ab_fixture):
+    """A pending AB row whose key is NOT re-emitted (because the
+    analyzer no longer produces it after the patch was applied) MUST
+    be deleted. A pending AB row whose key IS re-emitted must NOT be
+    deleted.
+
+    We assert the delta precisely by seeding two rows: a bogus one
+    (key impossible to re-emit — made-up span, nonsense original)
+    and a legit one (keyed to a real analyzer hit). After re-analysis
+    the bogus id is gone; the legit id survives.
+    """
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    _rewrite_fixture_with_ab13(_ab_fixture)
+    from app.processing.language_editing import abbreviations as ab_mod
+    ab_mod.clear_cache()
+    from app.processing.language_editing import docx_io
+    doc_obj, paragraphs = docx_io.read_paragraphs(file.path)
+    state = ab_mod.build_document_state(paragraphs, audience="general", min_uses=2)
+    legit_row: LanguageEditFinding | None = None
+    for pi, text in paragraphs:
+        for fd in ab_mod.analyze_abbreviations(text, para_idx=pi, document_state=state):
+            if fd.rule_id and fd.rule_id.startswith("AB"):
+                legit_row = LanguageEditFinding(
+                    job_id=job.job_id, file_id=file.id,
+                    para_index=pi, start_offset=fd.start, end_offset=fd.end,
+                    rule_id=fd.rule_id, category=fd.category, severity=fd.severity,
+                    original_text=fd.original, suggestion=fd.suggestion,
+                    message=fd.message, autofixable=fd.autofixable,
+                    status="pending", source="rule",
+                )
+                break
+        if legit_row:
+            break
+    if legit_row is None:
+        pytest.skip("fixture produced no AB finding for this test")
+
+    bogus_row = _ab_finding(
+        job.job_id, file.id,
+        para_index=99, start=9000, end=9001,
+        rule_id="AB01", original="xyzqpd", suggestion="does-not-matter",
+    )
+    db_session.add_all([legit_row, bogus_row])
+    db_session.commit()
+    legit_id, bogus_id = legit_row.id, bogus_row.id
+
+    le_router._reanalyze_abbreviations_for_job(job, db_session)
+
+    # Query the engine directly — session identity-map caching made
+    # intra-session queries unreliable for observing the helper's
+    # committed deletions.
+    from sqlalchemy import text as sql_text
+    engine = db_session.get_bind()
+    with engine.connect() as c:
+        legit_count = c.execute(sql_text(
+            "SELECT COUNT(*) FROM language_edit_findings WHERE id = :i"
+        ), {"i": legit_id}).scalar()
+        bogus_count = c.execute(sql_text(
+            "SELECT COUNT(*) FROM language_edit_findings WHERE id = :i"
+        ), {"i": bogus_id}).scalar()
+    assert legit_count == 1, "matched pending AB row must survive"
+    assert bogus_count == 0, "stale pending AB row must be deleted"
+
+
+def test_reanalyze_only_inserts_truly_new_rows(db_session, _ab_fixture):
+    """When the fresh analyzer produces a key that an existing
+    pending row ALREADY covers, no new row is inserted — the existing
+    row is kept. Any new key gets a brand-new row.
+    """
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    _rewrite_fixture_with_ab13(_ab_fixture)
+    from app.processing.language_editing import abbreviations as ab_mod
+    ab_mod.clear_cache()
+    from app.processing.language_editing import docx_io
+    doc_obj, paragraphs = docx_io.read_paragraphs(file.path)
+    state = ab_mod.build_document_state(paragraphs, audience="general", min_uses=2)
+    seeded = 0
+    for pi, text in paragraphs:
+        for fd in ab_mod.analyze_abbreviations(text, para_idx=pi, document_state=state):
+            if fd.rule_id and fd.rule_id.startswith("AB"):
+                db_session.add(LanguageEditFinding(
+                    job_id=job.job_id, file_id=file.id,
+                    para_index=pi, start_offset=fd.start, end_offset=fd.end,
+                    rule_id=fd.rule_id, category=fd.category, severity=fd.severity,
+                    original_text=fd.original, suggestion=fd.suggestion,
+                    message=fd.message, autofixable=fd.autofixable,
+                    status="pending", source="rule",
+                ))
+                seeded += 1
+    db_session.commit()
+    if seeded == 0:
+        pytest.skip("fixture produced no AB findings for this test")
+    pre_ids = {
+        r.id for r in db_session.query(LanguageEditFinding).filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.status == "pending",
+            LanguageEditFinding.rule_id.like("AB%"),
+        )
+    }
+
+    le_router._reanalyze_abbreviations_for_job(job, db_session)
+
+    post_ids = {
+        r.id for r in db_session.query(LanguageEditFinding).filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.status == "pending",
+            LanguageEditFinding.rule_id.like("AB%"),
+        )
+    }
+    # Every pre-existing id is still present. (Post may add rows if
+    # the analyzer now sees additional findings — allowed.)
+    assert pre_ids.issubset(post_ids), (
+        f"re-analysis removed existing pending AB ids: {pre_ids - post_ids}"
+    )
+
+
+def test_ignore_does_not_trigger_abbreviation_reanalysis(db_session, _ab_fixture, admin_user):
+    """Ignoring an AB finding must NOT delete / re-insert other
+    pending AB rows — Ignore does not run the re-analysis path (only
+    Accept/Edit do). This test confirms by taking a snapshot of all
+    AB finding ids before and after an Ignore, then checking the set
+    is unchanged.
+    """
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    # Seed one AB finding we will ignore, plus three siblings.
+    target = _ab_finding(
+        job.job_id, file.id,
+        para_index=0, start=32, end=51,
+        rule_id="AB01", original="intensive care unit",
+        suggestion="intensive care unit (ICU)",
+    )
+    sib1 = _ab_finding(job.job_id, file.id, para_index=1, start=4, end=23,
+                       rule_id="AB02", original="intensive care unit", suggestion="ICU")
+    sib2 = _ab_finding(job.job_id, file.id, para_index=2, start=22, end=41,
+                       rule_id="AB02", original="intensive care unit", suggestion="ICU")
+    db_session.add_all([target, sib1, sib2])
+    db_session.commit()
+    sibling_ids_before = {sib1.id, sib2.id}
+
+    # Walk the real router handler with a Reject decision — this must
+    # NOT invoke _reanalyze_abbreviations_for_job.
+    from app.routers.language_edit import DecisionRequest
+    from app.routers import language_edit as le
+    # The permission guard walks real role data — bypass it so the
+    # handler reaches the decide logic without role-master seeding.
+    import app.domains.processing.service as svc
+    orig_check = svc.check_permission
+    svc.check_permission = lambda *a, **kw: None
+    try:
+        resp = le.decide_finding(
+            finding_id=target.id,
+            body=DecisionRequest(status="rejected", edited_text=None, reviewer="tester"),
+            db=db_session, current_user=admin_user,
+        )
+    finally:
+        svc.check_permission = orig_check
+
+    assert resp["status"] == "rejected"
+    assert resp.get("reanalyzed") is not True, "Ignore must not trigger re-analysis"
+    assert "findings" not in resp, "Ignore response must not carry a refreshed findings bundle"
+
+    sibling_ids_after = {
+        r.id for r in db_session.query(LanguageEditFinding).filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.rule_id.like("AB%"),
+            LanguageEditFinding.status == "pending",
+        )
+    }
+    assert sibling_ids_before.issubset(sibling_ids_after), (
+        "Ignore wrongly deleted or renumbered sibling AB rows — they must "
+        "stay untouched because Ignore does not run the AB re-analysis"
+    )

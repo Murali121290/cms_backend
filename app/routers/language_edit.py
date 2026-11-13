@@ -1579,8 +1579,12 @@ def _reanalyze_abbreviations_for_job(
         for f in ab_rejected_or_highlighted
     }
 
-    # Produce new AB findings against the virtual document.
-    new_findings_rows: list[LanguageEditFinding] = []
+    # Produce the fresh pending-AB set from the virtual document.
+    # Each entry is a tuple describing what SHOULD be in the DB after
+    # the diff; we intentionally don't construct ORM rows yet because
+    # most will match existing rows and we want to KEEP their ids.
+    fresh: list[tuple[int, int, int, str, str, str, str, str, str, bool, list]] = []
+    seen: set[tuple[int, int, int, str, str]] = set()
     for pi, v_text in virtual_paragraphs:
         if _is_excluded(pi):
             continue
@@ -1596,56 +1600,128 @@ def _reanalyze_abbreviations_for_job(
             continue
         for fd in found:
             if not fd.rule_id or not fd.rule_id.startswith("AB"):
-                continue  # only AB rules in this re-analysis
-            key = (pi, fd.rule_id, fd.original)
-            if key in suppressed_keys:
                 continue
-            new_findings_rows.append(LanguageEditFinding(
-                job_id=job.job_id,
-                file_id=job.file_id,
-                para_index=pi,
-                start_offset=fd.start,
-                end_offset=fd.end,
-                rule_id=fd.rule_id,
-                category=fd.category,
-                severity=fd.severity,
-                original_text=fd.original,
-                suggestion=fd.suggestion,
-                message=fd.message,
-                autofixable=fd.autofixable,
-                status="pending",
-                source="rule",
-                alt_suggestions=list(getattr(fd, "alt_suggestions", []) or []) or None,
+            if (pi, fd.rule_id, fd.original) in suppressed_keys:
+                continue
+            dedup_key = (pi, fd.start, fd.end, fd.rule_id, fd.original)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            fresh.append((
+                pi, fd.start, fd.end, fd.rule_id, fd.original,
+                fd.suggestion or "", fd.message or "", fd.category, fd.severity,
+                bool(fd.autofixable),
+                list(getattr(fd, "alt_suggestions", []) or []),
             ))
 
-    # Dedup within the newly-produced set so an AB rule emitting the
-    # same (para, start, end, rule_id, original) twice doesn't double
-    # up in the DB. Keys are exact-span + rule — different rules on
-    # the same span legitimately coexist.
-    seen_spans: set[tuple[int, int, int, str, str]] = set()
-    deduped_new_rows: list[LanguageEditFinding] = []
-    for row in new_findings_rows:
-        k = (row.para_index, row.start_offset, row.end_offset, row.rule_id, row.original_text)
-        if k in seen_spans:
-            continue
-        seen_spans.add(k)
-        deduped_new_rows.append(row)
-
-    # Delete the stale pending AB rows and bulk-insert the fresh set
-    # in a single transaction so GET /findings never observes a
-    # half-rewritten view.
-    (
+    # Diff against currently-pending AB rows. The identity key is
+    # (para_index, start_offset, end_offset, rule_id, original_text)
+    # — the same five fields used for intra-run dedupe above. Matching
+    # on these preserves the DB row and its id when a finding is
+    # re-emitted unchanged, so the frontend's existing card id stays
+    # valid across a re-analysis.
+    #
+    # This fix matters: the previous implementation deleted every
+    # pending AB row on every Accept/Edit and bulk-inserted fresh
+    # ones with new auto-increment ids. The result was that the
+    # UI's event handlers, which close over ``f.id`` at render time,
+    # pointed at ids that no longer existed — subsequent clicks on
+    # OTHER cards resolved to ``POST /findings/{stale_id}/decide``
+    # and the handler returned 404 ("Finding ID not found"), surfaced
+    # to the reviewer as "Failed to save decision".
+    existing_pending = (
         db.query(LanguageEditFinding)
         .filter(
             LanguageEditFinding.job_id == job.job_id,
             LanguageEditFinding.status == "pending",
             LanguageEditFinding.rule_id.like("AB%"),
         )
-        .delete(synchronize_session=False)
+        .all()
     )
-    if deduped_new_rows:
-        db.bulk_save_objects(deduped_new_rows)
+    existing_by_key: dict[tuple[int, int, int, str, str], LanguageEditFinding] = {}
+    for row in existing_pending:
+        key = (
+            row.para_index, row.start_offset, row.end_offset,
+            row.rule_id, row.original_text,
+        )
+        # If a duplicate ever snuck in previously, keep the first and
+        # mark the rest for deletion (collision below).
+        if key not in existing_by_key:
+            existing_by_key[key] = row
 
+    fresh_keys = {(f[0], f[1], f[2], f[3], f[4]) for f in fresh}
+
+    # 1) Delete pending rows no longer produced by the analyzer.
+    stale_ids = [
+        row.id for key, row in existing_by_key.items()
+        if key not in fresh_keys
+    ]
+    # Also delete duplicate pending rows (rows whose key matches an
+    # earlier one we kept) so the set is truly keyed.
+    seen_for_dup: set[tuple[int, int, int, str, str]] = set()
+    for row in existing_pending:
+        key = (row.para_index, row.start_offset, row.end_offset, row.rule_id, row.original_text)
+        if key in seen_for_dup:
+            stale_ids.append(row.id)
+        else:
+            seen_for_dup.add(key)
+    if stale_ids:
+        # Fetch the ORM rows first and delete each via ORM-level
+        # ``db.delete(row)``. This works uniformly across backends /
+        # sessions and sidesteps ``bulk .delete()`` edge cases where
+        # stale instances in the session get re-inserted on commit.
+        for row in (
+            db.query(LanguageEditFinding)
+            .filter(LanguageEditFinding.id.in_(stale_ids))
+            .all()
+        ):
+            db.delete(row)
+
+    # 2) Insert only brand-new rows (not matched by any existing row).
+    #    Unchanged findings keep their original id → UI cards keep
+    #    working across re-analyses.
+    new_rows: list[LanguageEditFinding] = []
+    for (pi, s, e, rid, orig, sug, msg, cat, sev, autofix, alts) in fresh:
+        if (pi, s, e, rid, orig) in existing_by_key:
+            # Matched. Optionally refresh mutable workbook fields so
+            # a workbook update post-analyze is reflected without an
+            # id change.
+            row = existing_by_key[(pi, s, e, rid, orig)]
+            if row.suggestion != sug:
+                row.suggestion = sug
+            if row.message != msg:
+                row.message = msg
+            if row.severity != sev:
+                row.severity = sev
+            if bool(row.autofixable) != autofix:
+                row.autofixable = autofix
+            desired_alts = list(alts) or None
+            if (row.alt_suggestions or None) != desired_alts:
+                row.alt_suggestions = desired_alts
+            continue
+        new_rows.append(LanguageEditFinding(
+            job_id=job.job_id,
+            file_id=job.file_id,
+            para_index=pi,
+            start_offset=s,
+            end_offset=e,
+            rule_id=rid,
+            category=cat,
+            severity=sev,
+            original_text=orig,
+            suggestion=sug,
+            message=msg,
+            autofixable=autofix,
+            status="pending",
+            source="rule",
+            alt_suggestions=list(alts) or None,
+        ))
+    if new_rows:
+        db.bulk_save_objects(new_rows)
+
+    # Flush pending deletes / inserts so the COUNT below reflects the
+    # actual post-rewrite row set rather than the pre-flush snapshot.
+    db.flush()
     # Keep job.total_findings consistent with the new row count.
     job.total_findings = (
         db.query(LanguageEditFinding)

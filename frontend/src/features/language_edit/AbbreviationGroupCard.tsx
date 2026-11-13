@@ -32,6 +32,10 @@ export interface AbbreviationGroupCardProps {
   onEditInputChange: (id: number, value: string) => void
   /** Optional: callback refs for scroll-into-view. */
   onRowMount?: (id: number, el: HTMLElement | null) => void
+  /** Predicate returning ``true`` while this row's decide POST is
+   *  in flight. The card uses it to disable Accept / Edit / Highlight
+   *  / Ignore so repeated clicks don't fire duplicate requests. */
+  isFindingSaving?: (id: number) => boolean
 }
 
 const STATUS_CHIPS: Record<DecideStatus | 'pending', { label: string; cls: string } | null> = {
@@ -66,7 +70,9 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
     onToggleEdit,
     onEditInputChange,
     onRowMount,
+    isFindingSaving,
   } = props
+  const isSaving = (id: number): boolean => isFindingSaving ? isFindingSaving(id) : false
 
   const abbrLabel = group.abbreviation || 'Abbreviation'
   const expansionLabel = group.expansion || ''
@@ -118,6 +124,8 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
             const isHighlighted = f.status === 'highlighted'
             const isDecided = isAccepted || isEdited || isRejected || isHighlighted
             const isEditingThis = editingFindingId === f.id
+            const rowSaving = isSaving(f.id)
+            const actionDisabled = isDecided || rowSaving
             const inputValue = editedInputs[f.id] ?? f.suggestion ?? ''
             const displayText = isEdited ? (f.edited_text || f.suggestion) : f.suggestion
             const statusChip = STATUS_CHIPS[f.status] || null
@@ -183,16 +191,22 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
                 <div className="flex items-center gap-1.5 flex-wrap" data-testid="row-actions">
                   <button
                     onClick={(e) => { e.stopPropagation(); onDecide(f.id, 'accepted') }}
-                    disabled={isDecided}
-                    className="px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-semibold transition-colors"
+                    disabled={actionDisabled}
+                    aria-busy={rowSaving}
+                    title={rowSaving ? 'Saving…' : undefined}
+                    className="px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-semibold transition-colors inline-flex items-center gap-1"
                     data-testid="action-accept"
                     data-finding-id={f.id}
                   >
-                    Accept
+                    {rowSaving ? (
+                      <span className="inline-block w-2.5 h-2.5 border border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                    ) : null}
+                    {rowSaving ? 'Saving…' : 'Accept'}
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onToggleEdit(f.id) }}
-                    disabled={isDecided}
+                    disabled={actionDisabled}
+                    aria-busy={rowSaving}
                     className="px-2.5 py-1 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-[11px] font-semibold text-slate-600 transition-colors"
                     data-testid="action-edit"
                     data-finding-id={f.id}
@@ -201,7 +215,8 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onDecide(f.id, 'highlighted') }}
-                    disabled={isDecided}
+                    disabled={actionDisabled}
+                    aria-busy={rowSaving}
                     className="px-2.5 py-1 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed text-[11px] font-semibold text-amber-700 transition-colors"
                     data-testid="action-highlight"
                     data-finding-id={f.id}
@@ -210,7 +225,8 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onDecide(f.id, 'rejected') }}
-                    disabled={isDecided}
+                    disabled={actionDisabled}
+                    aria-busy={rowSaving}
                     className="px-2.5 py-1 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-[11px] font-semibold text-slate-600 transition-colors"
                     data-testid="action-ignore"
                     data-finding-id={f.id}

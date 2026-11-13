@@ -26,7 +26,7 @@ import {
   Eye,
   Smile
 } from 'lucide-react'
-import apiClient from '@/api/client'
+import apiClient, { getApiErrorMessage } from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import { uiPaths } from '@/utils/appPaths'
 import { useJournalReviewMode } from '@/features/journals/useJournalReviewMode'
@@ -57,7 +57,7 @@ import { displayCategoryFor } from '@/features/language_edit/findingLabel'
 import { SaveRegexAsRuleDialog, type RegexDraft } from '@/features/language_edit/SaveRegexAsRuleDialog'
 import { buildAbbreviationGroups, isDisplayableGroup, type AbbreviationGroup } from '@/features/language_edit/abbreviationGroups'
 import { AbbreviationGroupCard } from '@/features/language_edit/AbbreviationGroupCard'
-import { computeCategoryWorkflow, type UnlockCategory } from '@/features/language_edit/categoryWorkflow'
+import { computeCategoryWorkflow, isInclusiveFinding, type UnlockCategory } from '@/features/language_edit/categoryWorkflow'
 
 interface Finding {
   id: number
@@ -508,10 +508,40 @@ export function LanguageReviewPage() {
     }
   }, [selectedFindingId])
 
+  // In-flight decide requests. Prevents the common "I clicked Accept
+  // but nothing happened, so I clicked again" failure mode we saw in
+  // nginx logs (five back-to-back POSTs to the same finding id within
+  // 18 seconds). Every pending decide is tracked here; the Accept /
+  // Edit / Highlight / Ignore buttons check this set to disable
+  // themselves until the backend confirms.
+  const [savingFindingIds, setSavingFindingIds] = useState<Set<number>>(new Set())
+  const isFindingSaving = useCallback(
+    (id: number) => savingFindingIds.has(id),
+    [savingFindingIds],
+  )
+
   // Handle Finding Decision
   const handleDecide = async (findingId: number, status: 'accepted' | 'edited' | 'rejected' | 'highlighted') => {
+    // Duplicate-click guard: if a prior click's POST is still in
+    // flight for this finding, drop the new click. Browser Network
+    // tab shows one request, server receives one write, counters
+    // move once.
+    if (savingFindingIds.has(findingId)) return
     const finding = findings.find(f => f.id === findingId)
+    // Idempotency guard: if the finding is already in the requested
+    // state (a stale click on an already-handled card can reach this
+    // path during a re-analysis state-replace), skip. No visible UI
+    // change expected; the server shouldn't get the same decision
+    // twice. ``edited`` always re-submits because the editor may
+    // have entered new ``edited_text`` since the last save.
+    if (finding && finding.status === status && status !== 'edited') return
     const editedText = editedInputs[findingId] ?? finding?.suggestion ?? ''
+
+    setSavingFindingIds(prev => {
+      const next = new Set(prev)
+      next.add(findingId)
+      return next
+    })
 
     try {
       const resp = await apiClient.post(`/language-edit/findings/${findingId}/decide`, {
@@ -602,7 +632,22 @@ export function LanguageReviewPage() {
 
       toast.success(`Finding ${status}`)
     } catch (err) {
-      toast.error('Failed to save decision')
+      // Surface the backend's own error detail (e.g. 404 "Finding ID
+      // not found") instead of a generic message. Do NOT mutate local
+      // finding state — the row stays in its current status (usually
+      // pending) so the reviewer can retry or refresh. The editor
+      // side-effect above was already skipped because we never
+      // reached it (the await re-raised before replaceOccurrence).
+      toast.error(getApiErrorMessage(err, 'Failed to save decision'))
+    } finally {
+      // Always clear the in-flight marker so retries and subsequent
+      // actions are possible whether the call succeeded or failed.
+      setSavingFindingIds(prev => {
+        if (!prev.has(findingId)) return prev
+        const next = new Set(prev)
+        next.delete(findingId)
+        return next
+      })
     }
   }
 
@@ -1038,16 +1083,28 @@ export function LanguageReviewPage() {
   // Without this, the chip would disappear from the row while its
   // filtered content panel kept rendering — effectively letting
   // the user remain on a locked category.
+  //
+  // ``bias`` (Inclusive) and ``comments`` are view-only chips gated
+  // on ``allActionableCategoriesComplete`` — if a re-analysis makes
+  // the chain incomplete again, both chips disappear and the user
+  // must also be snapped back.
   useEffect(() => {
     const t = activeRightTab
-    if (t === 'all' || t === 'comments' || t === 'rules') return
+    if (t === 'all' || t === 'rules') return
+    if (t === 'bias' || t === 'comments') {
+      if (!categoryWorkflow.allActionableCategoriesComplete) {
+        setActiveRightTab('all')
+      }
+      return
+    }
     if (!categoryWorkflow.visible.has(t as UnlockCategory)) {
       setActiveRightTab('all')
     }
   }, [categoryWorkflow, activeRightTab])
 
-  // Chip-visibility predicate used by the JSX below. Non-finding
-  // chips ("comments", "rules") are always visible.
+  // Chip-visibility predicate used by the JSX below. ``rules`` is
+  // the always-visible settings cog; ``bias`` and ``comments`` are
+  // handled directly in JSX via allActionableCategoriesComplete.
   const isChipVisible = (cat: UnlockCategory): boolean => categoryWorkflow.visible.has(cat)
 
   // Thin wrapper: renders the presentational AbbreviationGroupCard
@@ -1071,6 +1128,7 @@ export function LanguageReviewPage() {
       onToggleEdit={(id) => setEditingFindingId(prev => prev === id ? null : id)}
       onEditInputChange={(id, value) => setEditedInputs({ ...editedInputs, [id]: value })}
       onRowMount={(id, el) => { cardRefs.current[id] = el as any }}
+      isFindingSaving={isFindingSaving}
     />
   )
 
@@ -1437,9 +1495,13 @@ export function LanguageReviewPage() {
 
         {/* Action Buttons — Case 2 (advisory identity)
             drops Accept + Edit (nothing to apply /
-            replace) and keeps Highlight + Ignore only. */}
+            replace) and keeps Highlight + Ignore only.
+            View-only (Inclusive) findings drop Accept +
+            Edit + Ignore; Highlight remains because the
+            spec explicitly scopes "view-only" to the
+            three resolution actions only. */}
         <div className="mt-3 flex items-center gap-2 flex-wrap">
-          {!isAdvisoryIdentity(f) && (() => {
+          {!isAdvisoryIdentity(f) && !isInclusiveFinding(f) && (() => {
             // AB07 accepts the reviewer's chosen meaning
             // (stored in editedInputs on click) by routing
             // through the 'edited' decision so the server
@@ -1448,6 +1510,8 @@ export function LanguageReviewPage() {
             // — never pre-select, per README §7.
             const ab07NeedsChoice = hasAb07Meanings && !editedInputs[f.id]
             const acceptStatus: 'accepted' | 'edited' = hasAb07Meanings ? 'edited' : 'accepted'
+            const saving = isFindingSaving(f.id)
+            const acceptDisabled = ab07NeedsChoice || saving
             return (
               <>
                 <button
@@ -1456,15 +1520,25 @@ export function LanguageReviewPage() {
                     e.stopPropagation()
                     handleDecide(f.id, acceptStatus)
                   }}
-                  disabled={ab07NeedsChoice}
-                  title={ab07NeedsChoice ? 'Pick a meaning above to continue' : undefined}
+                  disabled={acceptDisabled}
+                  aria-busy={saving}
+                  title={
+                    saving ? 'Saving…'
+                      : ab07NeedsChoice ? 'Pick a meaning above to continue'
+                      : undefined
+                  }
                   className={`flex-1 py-1.5 rounded-full text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm ${
-                    ab07NeedsChoice
+                    acceptDisabled
                       ? 'bg-slate-300 cursor-not-allowed'
                       : 'bg-emerald-600 hover:bg-emerald-500'
                   }`}
                 >
-                  <Check size={13} /> Accept
+                  {saving ? (
+                    <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Check size={13} />
+                  )}
+                  {saving ? 'Saving…' : 'Accept'}
                 </button>
 
                 <button
@@ -1473,7 +1547,8 @@ export function LanguageReviewPage() {
                     e.stopPropagation()
                     setEditingFindingId(prev => prev === f.id ? null : f.id)
                   }}
-                  className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 transition-colors"
+                  disabled={saving}
+                  className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-slate-600 transition-colors"
                 >
                   Edit
                 </button>
@@ -1486,7 +1561,10 @@ export function LanguageReviewPage() {
               max_sentence_length, SL001, SL005).
               Those findings have no meaningful
               "highlight in document" action; Ignore
-              is the only action the reviewer takes. */}
+              is the only action the reviewer takes.
+              Highlight stays available for Inclusive
+              findings — only Accept/Edit/Ignore are
+              suppressed there. */}
           {!isSentenceAdvisory(f) && (
             <button
               data-testid="action-highlight"
@@ -1494,22 +1572,27 @@ export function LanguageReviewPage() {
                 e.stopPropagation()
                 handleDecide(f.id, 'highlighted')
               }}
-              className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
+              disabled={isFindingSaving(f.id)}
+              className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-amber-700 transition-colors`}
             >
               Highlight
             </button>
           )}
 
-          <button
-            data-testid="action-ignore"
-            onClick={(e) => {
-              e.stopPropagation()
-              handleDecide(f.id, 'rejected')
-            }}
-            className={`${isSentenceAdvisory(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-400 transition-colors`}
-          >
-            Ignore
-          </button>
+          {!isInclusiveFinding(f) && (
+            <button
+              data-testid="action-ignore"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleDecide(f.id, 'rejected')
+              }}
+              disabled={isFindingSaving(f.id)}
+              aria-busy={isFindingSaving(f.id)}
+              className={`${isSentenceAdvisory(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-slate-400 transition-colors`}
+            >
+              {isFindingSaving(f.id) ? 'Saving…' : 'Ignore'}
+            </button>
+          )}
         </div>
 
         {/* Inline Custom Edit Row — Case 2 findings
@@ -1862,20 +1945,24 @@ export function LanguageReviewPage() {
                   All {pendingFindings.length}
                 </button>
 
-                {/* Chip order (user spec):
-                      1. Abbreviations
-                      2. Medical Terms
-                      3. Hyphenated Words (was "Hyphenation")
-                      4. Inclusive (now folds in the former Terms chip)
-                      5. Grammar
-                      6. Punctuation and Capitalization (was "Sentence")
-                      7. Spelling
-                      8. Comments
-                      9. Spell Check
+                {/* Chip order (sequential unlock spec):
+                      1. Abbreviations       (actionable)
+                      2. Medical Terms       (actionable)
+                      3. Hyphenation         (actionable)
+                      4. Grammar             (actionable)
+                      5. Spelling            (actionable)
+                      6. Punctuation and
+                         Capitalization      (actionable; internal id "sentence")
+                      7. Spell Check         (actionable; internal id "typo")
+                      8. Inclusive           (VIEW-ONLY; unlocks after all 7
+                                              actionable are complete)
+                      9. Comments            (VIEW-ONLY; unlocks with Inclusive)
+                    Chips 1–7 render via ``isChipVisible`` so each one
+                    unlocks sequentially; the Inclusive + Comments pair
+                    gates on ``categoryWorkflow.allActionableCategoriesComplete``.
                     Backend ``category`` values and ``activeRightTab``
                     identifiers unchanged — this is a presentation-only
-                    reshuffle so finding IDs / status / actions all
-                    continue to work. */}
+                    reshuffle. */}
                 {isChipVisible('abbreviations') && (
                 <button
                   onClick={() => setActiveRightTab('abbreviations')}
@@ -1921,21 +2008,6 @@ export function LanguageReviewPage() {
                 </button>
                 )}
 
-                {isChipVisible('bias') && (
-                <button
-                  onClick={() => setActiveRightTab('bias')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'bias'
-                      ? 'bg-rose-500 text-white shadow-sm'
-                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-                  }`}
-                  title="Inclusive language findings + term-list highlights"
-                  data-testid="chip-bias"
-                >
-                  Inclusive {inclusiveFindings.length}
-                </button>
-                )}
-
                 {isChipVisible('grammar') && (
                 <button
                   onClick={() => setActiveRightTab('grammar')}
@@ -1947,6 +2019,20 @@ export function LanguageReviewPage() {
                   data-testid="chip-grammar"
                 >
                   Grammar {grammarFindings.length}
+                </button>
+                )}
+
+                {isChipVisible('spelling') && (
+                <button
+                  onClick={() => setActiveRightTab('spelling')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'spelling'
+                      ? 'bg-sky-500 text-white shadow-sm'
+                      : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
+                  }`}
+                  data-testid="chip-spelling"
+                >
+                  Spelling {spellingFindings.length}
                 </button>
                 )}
 
@@ -1965,32 +2051,6 @@ export function LanguageReviewPage() {
                 </button>
                 )}
 
-                {isChipVisible('spelling') && (
-                <button
-                  onClick={() => setActiveRightTab('spelling')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'spelling'
-                      ? 'bg-sky-500 text-white shadow-sm'
-                      : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
-                  }`}
-                  data-testid="chip-spelling"
-                >
-                  Spelling {spellingFindings.length}
-                </button>
-                )}
-
-                <button
-                  onClick={() => setActiveRightTab('comments')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1 ${
-                    activeRightTab === 'comments'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
-                  }`}
-                >
-                  <MessageSquare size={12} />
-                  Comments {comments.length}
-                </button>
-
                 {isChipVisible('typo') && (
                 <button
                   onClick={() => setActiveRightTab('typo')}
@@ -2003,6 +2063,45 @@ export function LanguageReviewPage() {
                   data-testid="chip-typo"
                 >
                   Spell Check {typoFindings.length}
+                </button>
+                )}
+
+                {/* Inclusive — VIEW-ONLY. Hidden until every actionable
+                    category chip is fully resolved. Accept/Edit/Ignore
+                    are suppressed inside the Inclusive tab (see the
+                    renderFlatFindingCard view-only branch). Highlight
+                    stays available because the spec explicitly covers
+                    only the three resolution actions. */}
+                {categoryWorkflow.allActionableCategoriesComplete && (
+                <button
+                  onClick={() => setActiveRightTab('bias')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'bias'
+                      ? 'bg-rose-500 text-white shadow-sm'
+                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                  }`}
+                  title="Inclusive language findings + term-list highlights (view-only)"
+                  data-testid="chip-bias"
+                >
+                  Inclusive {inclusiveFindings.length}
+                </button>
+                )}
+
+                {/* Comments — VIEW-ONLY reviewer annotations. Follows
+                    Inclusive in the chain: unlocks once every actionable
+                    category is complete. */}
+                {categoryWorkflow.allActionableCategoriesComplete && (
+                <button
+                  onClick={() => setActiveRightTab('comments')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1 ${
+                    activeRightTab === 'comments'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                  }`}
+                  data-testid="chip-comments"
+                >
+                  <MessageSquare size={12} />
+                  Comments {comments.length}
                 </button>
                 )}
 

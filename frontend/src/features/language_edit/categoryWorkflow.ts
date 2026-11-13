@@ -21,21 +21,30 @@
  */
 
 /**
- * Chip-order unlock sequence. Matches the visual chip order in
- * ``LanguageReviewPage``: Abbreviations → Medical Terms → Hyphenated
- * Words → Inclusive → Grammar → Punctuation and Capitalization →
- * Spelling → Spell Check. Comments (position 9 in the UI) is
- * excluded because comments aren't AI findings; Spell Check (typo)
- * is therefore the eighth and last chip in the chain.
+ * Chip-order unlock sequence — the SEVEN actionable finding
+ * categories whose findings the reviewer must Accept, Edit, or
+ * Ignore before the next chip unlocks:
+ *
+ *   1. Abbreviations
+ *   2. Medical Terms
+ *   3. Hyphenation
+ *   4. Grammar
+ *   5. Spelling
+ *   6. Punctuation and Capitalization  (internal id ``sentence``)
+ *   7. Spell Check                     (internal id ``typo``)
+ *
+ * ``Inclusive`` (internal id ``bias``) is NOT part of this chain —
+ * it is view-only and appears only after every actionable category
+ * is complete. ``Comments`` is also view-only and surfaces alongside
+ * Inclusive. See ``allActionableCategoriesComplete`` below.
  */
 export const CATEGORY_UNLOCK_ORDER = [
   'abbreviations',
   'medical_terms',
   'hyphenation',
-  'bias',
   'grammar',
-  'sentence',
   'spelling',
+  'sentence',
   'typo',
 ] as const
 
@@ -67,20 +76,16 @@ export function isResolvedStatus(status: string): boolean {
 /**
  * Map a finding to the unlock category it belongs to. Mirrors the
  * ``pendingFindings`` filter predicates in ``LanguageReviewPage`` so
- * a finding counted toward the ``Inclusive`` chip (bias / article /
- * term source) completes the ``bias`` slot; a finding counted toward
- * the ``Hyphenated Words`` chip (hyphenation / compounds / compound)
- * completes the ``hyphenation`` slot.
+ * a finding counted toward the ``Hyphenated Words`` chip (hyphenation
+ * / compounds / compound) completes the ``hyphenation`` slot.
+ *
+ * ``Inclusive`` findings (category ``bias`` / ``article`` / ``term``
+ * / source ``term``) are NOT part of this map — Inclusive is view-
+ * only and sits outside the actionable unlock chain. The
+ * ``isInclusiveFinding`` predicate below handles the view-only tab's
+ * own filter.
  */
 export function categoryMatches(f: WorkflowFinding, cat: UnlockCategory): boolean {
-  if (cat === 'bias') {
-    return (
-      f.category === 'bias' ||
-      f.category === 'article' ||
-      f.category === 'term' ||
-      f.source === 'term'
-    )
-  }
   if (cat === 'hyphenation') {
     return (
       f.category === 'hyphenation' ||
@@ -89,6 +94,21 @@ export function categoryMatches(f: WorkflowFinding, cat: UnlockCategory): boolea
     )
   }
   return f.category === cat
+}
+
+/**
+ * True when a finding belongs to the view-only Inclusive tab
+ * (``bias`` / ``article`` category, or any term-matcher highlight).
+ * These findings are visible once the seven actionable categories
+ * finish; they never require Accept / Edit / Ignore themselves.
+ */
+export function isInclusiveFinding(f: WorkflowFinding): boolean {
+  return (
+    f.category === 'bias' ||
+    f.category === 'article' ||
+    f.category === 'term' ||
+    f.source === 'term'
+  )
 }
 
 export interface WorkflowState {
@@ -112,6 +132,18 @@ export interface WorkflowState {
    * so the reviewer can return to them.
    */
   visible: Set<UnlockCategory>
+  /**
+   * True when every actionable (non-empty) category in
+   * ``CATEGORY_UNLOCK_ORDER`` is fully resolved. The page uses
+   * this flag to reveal the view-only ``Inclusive`` and
+   * ``Comments`` chips — they appear together once the seven
+   * actionable categories are complete.
+   *
+   * Zero-finding categories are treated as complete (per rule 3),
+   * so a document with no findings at all starts out with this
+   * flag ``true``.
+   */
+  allActionableCategoriesComplete: boolean
 }
 
 /**
@@ -157,5 +189,11 @@ export function computeCategoryWorkflow(findings: WorkflowFinding[]): WorkflowSt
     nextUnlocked = cat
     break
   }
-  return { completed, nextUnlocked, visible }
+  // Inclusive + Comments gate: true only when every actionable
+  // category has been walked through to the end of the chain
+  // without stopping on a non-empty unresolved one. ``nextUnlocked
+  // == null`` after a full walk means every category was either
+  // skipped-empty or fully resolved.
+  const allActionableCategoriesComplete = nextUnlocked === null
+  return { completed, nextUnlocked, visible, allActionableCategoriesComplete }
 }

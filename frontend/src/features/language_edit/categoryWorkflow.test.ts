@@ -130,11 +130,11 @@ describe('categoryWorkflow / empty-category auto-skip', () => {
   it('skips multiple empty categories in sequence and lands on the first with findings', () => {
     const findings = [
       // Abbreviations, Medical Terms, Hyphenation all empty.
-      f('bias', 'pending'),
+      f('grammar', 'pending'),
     ]
     const state = computeCategoryWorkflow(findings)
     expect(state.visible.size).toBe(1)
-    expect(state.nextUnlocked).toBe('bias')
+    expect(state.nextUnlocked).toBe('grammar')
   })
 
   it('every category empty → nothing visible, no next', () => {
@@ -151,16 +151,16 @@ describe('categoryWorkflow / only one next category unlocks at a time', () => {
       f('abbreviations', 'accepted'),
       f('medical_terms', 'pending'),
       f('hyphenation', 'pending'),
-      f('bias', 'pending'),
       f('grammar', 'pending'),
+      f('spelling', 'pending'),
     ]
     const state = computeCategoryWorkflow(findings)
     expect(state.visible.has('abbreviations')).toBe(true)
     expect(state.visible.has('medical_terms')).toBe(true)
-    // None of the other three unlock yet.
+    // None of the downstream chips unlock yet.
     expect(state.visible.has('hyphenation')).toBe(false)
-    expect(state.visible.has('bias')).toBe(false)
     expect(state.visible.has('grammar')).toBe(false)
+    expect(state.visible.has('spelling')).toBe(false)
     expect(state.nextUnlocked).toBe('medical_terms')
   })
 
@@ -170,13 +170,13 @@ describe('categoryWorkflow / only one next category unlocks at a time', () => {
       f('abbreviations', 'accepted'),
       f('medical_terms', 'edited'),
       f('hyphenation', 'pending'),
-      f('bias', 'pending'),
+      f('grammar', 'pending'),
     ]
     const state = computeCategoryWorkflow(findings)
     expect(state.visible.has('abbreviations')).toBe(true)
     expect(state.visible.has('medical_terms')).toBe(true)
     expect(state.visible.has('hyphenation')).toBe(true)
-    expect(state.visible.has('bias')).toBe(false)
+    expect(state.visible.has('grammar')).toBe(false)
     expect(state.nextUnlocked).toBe('hyphenation')
   })
 
@@ -275,20 +275,7 @@ describe('categoryWorkflow / per-document independence', () => {
 })
 
 describe('categoryWorkflow / category matching mirrors page filters', () => {
-  it('term-source findings count toward the Inclusive (bias) slot', () => {
-    const findings = [
-      f('abbreviations', 'accepted'),
-      f('medical_terms', 'accepted'),
-      f('hyphenation', 'accepted'),
-      f('term', 'pending', { source: 'term' }),
-    ]
-    const state = computeCategoryWorkflow(findings)
-    // bias category becomes the active slot because of the term row.
-    expect(state.nextUnlocked).toBe('bias')
-    expect(state.visible.has('bias')).toBe(true)
-  })
-
-  it('"compounds" category count toward Hyphenation slot', () => {
+  it('"compounds" category counts toward the Hyphenation slot', () => {
     const findings = [
       f('abbreviations', 'accepted'),
       f('medical_terms', 'accepted'),
@@ -296,5 +283,81 @@ describe('categoryWorkflow / category matching mirrors page filters', () => {
     ]
     const state = computeCategoryWorkflow(findings)
     expect(state.nextUnlocked).toBe('hyphenation')
+  })
+
+  it('Inclusive-class findings (bias / article / term) are NOT in the actionable chain', () => {
+    // Inclusive is view-only and outside the unlock chain. A doc
+    // whose only findings are term-source or bias must leave the
+    // chain fully "complete" (nothing to action) and surface the
+    // Inclusive chip via ``allActionableCategoriesComplete``.
+    const findings = [
+      f('term', 'pending', { source: 'term' }),
+      f('bias', 'pending'),
+      f('article', 'pending'),
+    ]
+    const state = computeCategoryWorkflow(findings)
+    expect(state.nextUnlocked).toBeNull()
+    expect(state.allActionableCategoriesComplete).toBe(true)
+  })
+})
+
+// ─── Inclusive + Comments gate (view-only chips) ──────────────────
+
+describe('categoryWorkflow / allActionableCategoriesComplete', () => {
+  it('is false while any actionable category still has pending findings', () => {
+    const state = computeCategoryWorkflow(oneEach('pending'))
+    expect(state.allActionableCategoriesComplete).toBe(false)
+  })
+
+  it('is true when every actionable category is fully resolved', () => {
+    const state = computeCategoryWorkflow(oneEach('accepted'))
+    expect(state.allActionableCategoriesComplete).toBe(true)
+  })
+
+  it('is true for a document with no findings at all (every chain slot auto-skipped)', () => {
+    const state = computeCategoryWorkflow([])
+    expect(state.allActionableCategoriesComplete).toBe(true)
+  })
+
+  it('counts a mix of Accept / Edit / Ignore as resolved; Highlight blocks', () => {
+    // Six actionable categories resolved, the seventh still highlighted.
+    const findings = [
+      f('abbreviations', 'accepted'),
+      f('medical_terms', 'edited'),
+      f('hyphenation', 'rejected'),
+      f('grammar', 'accepted'),
+      f('spelling', 'edited'),
+      f('sentence', 'rejected'),
+      f('typo', 'highlighted'), // Highlight alone is NOT resolved.
+    ]
+    const state = computeCategoryWorkflow(findings)
+    expect(state.allActionableCategoriesComplete).toBe(false)
+    expect(state.nextUnlocked).toBe('typo')
+  })
+
+  it('re-analysis that reopens an earlier chain slot closes the gate again', () => {
+    const before = oneEach('accepted')
+    const beforeState = computeCategoryWorkflow(before)
+    expect(beforeState.allActionableCategoriesComplete).toBe(true)
+    const after: WorkflowFinding[] = [
+      ...before,
+      f('abbreviations', 'pending'),  // re-analysis added this
+    ]
+    const afterState = computeCategoryWorkflow(after)
+    expect(afterState.allActionableCategoriesComplete).toBe(false)
+    expect(afterState.nextUnlocked).toBe('abbreviations')
+  })
+})
+
+describe('categoryWorkflow / isInclusiveFinding', () => {
+  it('matches every rule category that belongs in the view-only Inclusive tab', async () => {
+    const { isInclusiveFinding } = await import('./categoryWorkflow')
+    expect(isInclusiveFinding(f('bias', 'pending'))).toBe(true)
+    expect(isInclusiveFinding(f('article', 'pending'))).toBe(true)
+    expect(isInclusiveFinding(f('term', 'pending'))).toBe(true)
+    expect(isInclusiveFinding(f('grammar', 'pending', { source: 'term' }))).toBe(true)
+    // Non-inclusive categories:
+    expect(isInclusiveFinding(f('grammar', 'pending'))).toBe(false)
+    expect(isInclusiveFinding(f('abbreviations', 'pending'))).toBe(false)
   })
 })
