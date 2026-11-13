@@ -44,22 +44,22 @@
       "enabled": true,
       "rule_config": {
         "forbidden_terms_by_language": {
+          "en": "Half title / Title Page",
           "de": "Vortitel / Titelseite",
-          "en": "Half title / Title page",
           "fr": "Faux-titre / Page de titre",
           "da": "Smudstitel / Titelside",
-          "fi": "Nimiösivu / Esinimiö",
-          "es": "Portadilla / Portada",
-          "pt": "Falsa folha de rosto / Folha de rosto",
           "sv": "Halvtitel / Titelsida",
-          "no": "Smusstittel / Tittelside",
-          "ca": "Portadella / Portada",
-          "va": "Portadella / Portada",
+          "fi": "Esinimiö / Nimiösivu",
           "it": "Occhietto / Frontespizio",
-          "nl": "Franse pagina / Titelpagina"
+          "es": "Portadilla / Portada",
+          "pt": "Falsa folha de rosto / Frontispício",
+          "no": "Smusstittel / Tittelside",
+          "nl": "Franse pagina / Titelpagina",
+          "ca": "Portadella / Portada",
+          "va": "Portadella / Portada"
         },
-        "forbidden_terms_pattern": "\\b(half[\\s\\-]?title|title[\\s\\-]?page|vortitel|vor[\\s\\-]?titel|schmutztitel|schmutz[\\s\\-]?titel|titelseite|titel[\\s\\-]?seite|titelblatt|titel[\\s\\-]?blatt|haupttitel|haupt[\\s\\-]?titel|portadilla|portada|faux[\\s\\-]?titre|page[\\s\\-]?de[\\s\\-]?titre|smudstitel|titelside|smusstittel|tittelside|occhietto|frontespizio|folha[\\s\\-]?de[\\s\\-]?rosto|franse[\\s\\-]?pagina|titelpagina|nimiösivu|esinimiö)\\b|^title$|^titel$",
-        "forbidden_file_stem_pattern": "(half[\\s\\-_]?title|title[\\s\\-_]?page|vortitel|vor[\\s\\-_]?titel|schmutztitel|schmutz[\\s\\-_]?titel|titelseite|titel[\\s\\-_]?seite|titelblatt|titel[\\s\\-_]?blatt|haupttitel|haupt[\\s\\-_]?titel|portadilla|portada|faux[\\s\\-_]?titre|smudstitel|titelside|smusstittel|tittelside|occhietto|frontespizio|rosto|franse[\\s\\-_]?pagina|titelpagina|nimiosivu|esinymio)|^title$|^titel$"
+        "forbidden_terms_pattern": "\\b(half[\\s\\-]?title|title[\\s\\-]?page|vortitel|vor[\\s\\-]?titel|schmutztitel|schmutz[\\s\\-]?titel|titelseite|titel[\\s\\-]?seite|titelblatt|titel[\\s\\-]?blatt|haupttitel|haupt[\\s\\-]?titel|portadilla|portada|faux[\\s\\-]?titre|page[\\s\\-]?de[\\s\\-]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontisp[ií]cio|folha[\\s\\-]?de[\\s\\-]?rosto|franse[\\s\\-]?pagina|titelpagina|nimiösivu|esinimiö)\\b|^title$|^titel$",
+        "forbidden_file_stem_pattern": "(half[\\s\\-_]?title|title[\\s\\-_]?page|vortitel|vor[\\s\\-_]?titel|schmutztitel|schmutz[\\s\\-_]?titel|titelseite|titel[\\s\\-_]?seite|titelblatt|titel[\\s\\-_]?blatt|haupttitel|haupt[\\s\\-_]?titel|portadilla|portada|faux[\\s\\-_]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontispicio|frontispício|rosto|franse[\\s\\-_]?pagina|titelpagina|nimiosivu|nimiösivu|esinymio|esinimiö)|^title$|^titel$"
       },
       "category": "Structure Check"
     },
