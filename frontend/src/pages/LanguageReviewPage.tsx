@@ -1734,7 +1734,7 @@ export function LanguageReviewPage() {
           }
           return (
             <div
-              className="mt-2 px-3 py-2 rounded-lg bg-emerald-50/60 hover:bg-emerald-50/90 border border-emerald-100 hover:border-emerald-300 text-xs cursor-pointer transition-colors"
+              className="mt-2 px-3 py-2 rounded-lg bg-emerald-50/60 border border-emerald-100 text-xs cursor-pointer"
               data-testid="flat-ab04-reference"
               onClick={jumpToReference}
               onKeyDown={(e) => {
@@ -1742,7 +1742,7 @@ export function LanguageReviewPage() {
               }}
               role="button"
               tabIndex={0}
-              title={`Click to jump to the first definition in paragraph ${ref.para_index + 1}`}
+              title={`Jump to the first definition in paragraph ${ref.para_index + 1}`}
             >
               <div className="flex items-center gap-2 mb-1">
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -1756,7 +1756,7 @@ export function LanguageReviewPage() {
                 </span>
               </div>
               <div
-                className="text-slate-700 leading-snug underline decoration-emerald-300 decoration-dotted underline-offset-2"
+                className="text-slate-700 leading-snug"
                 data-testid="flat-ab04-reference-text"
               >
                 {ref.text}

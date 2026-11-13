@@ -240,14 +240,14 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
             }
             return (
               <li
-                className={`px-4 py-3 bg-emerald-50/40 ${canJump ? 'hover:bg-emerald-50/70 cursor-pointer transition-colors' : ''}`}
+                className={`px-4 py-3 bg-emerald-50/40 ${canJump ? 'cursor-pointer' : ''}`}
                 data-testid="abbr-reference-row"
                 data-ref-para={ref.para_index}
                 onClick={canJump ? jump : undefined}
                 onKeyDown={canJump ? (e) => { if (e.key === 'Enter' || e.key === ' ') jump(e) } : undefined}
                 role={canJump ? 'button' : undefined}
                 tabIndex={canJump ? 0 : undefined}
-                title={canJump ? `Click to jump to the first definition in paragraph ${ref.para_index + 1}` : undefined}
+                title={canJump ? `Jump to the first definition in paragraph ${ref.para_index + 1}` : undefined}
               >
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <div className="flex items-center gap-2 min-w-0">
@@ -263,7 +263,7 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
                   </span>
                 </div>
                 <div
-                  className={`text-sm leading-snug text-slate-700 ${canJump ? 'underline decoration-emerald-300 decoration-dotted underline-offset-2' : ''}`}
+                  className="text-sm leading-snug text-slate-700"
                   data-testid="abbr-reference-text"
                 >
                   {ref.text}
