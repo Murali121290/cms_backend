@@ -38,6 +38,13 @@
       "category": "Structure Check"
     },
     {
+      "id": "BOD-FN-001",
+      "name": "Do not use unicode in file names",
+      "scope": "book",
+      "enabled": true,
+      "category": "Structure Check"
+    },
+    {
       "id": "BOD-FM-001",
       "name": "If half title and title page are part of the source files’ front matter, they must be removed from the E-Book",
       "scope": "book",
@@ -139,6 +146,14 @@
       "category": "XHTML Check"
     },
     {
+      "id": "XHTML006",
+      "name": "Single <h1> per page and no adjacent headings",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "[0-9]*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
       "id": "BOD-XHTML-001",
       "name": "Individual HTML files within the E-Book must be smaller than 30 MB",
       "target_path": "OEBPS/xhtml",
@@ -151,13 +166,21 @@
     },
     {
       "id": "BOD-ENC-001",
-      "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp; and &lt; allowed)",
+      "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp;, &lt;, &gt;, &#8617; allowed)",
       "target_path": "OEBPS",
       "file_name_pattern": [
         "*.xhtml",
         "*.ncx"
       ],
       "enabled": true,
+      "rule_config": {
+        "allowed_entities": [
+          "&amp;",
+          "&lt;",
+          "&gt;",
+          "&#8617;"
+        ]
+      },
       "category": "Encoding Check"
     },
     {

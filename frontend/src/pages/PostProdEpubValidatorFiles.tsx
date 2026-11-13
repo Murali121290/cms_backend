@@ -1168,6 +1168,7 @@ export function PostProdEpubValidatorFiles() {
                 : undefined
             }
             onRenameSuccess={(newName) => {
+              queryClient.invalidateQueries({ queryKey: ['epub-projects'] });
               refetchFiles();
               setSelectedFile(prev => prev ? { ...prev, file_name: newName } : prev);
             }}
