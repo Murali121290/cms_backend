@@ -543,101 +543,155 @@ export function LanguageReviewPage() {
       return next
     })
 
-    try {
-      const resp = await apiClient.post(`/language-edit/findings/${findingId}/decide`, {
-        status,
-        edited_text: status === 'edited' ? editedText : undefined,
-        reviewer: 'editor'
-      })
-
-      // Replace text or apply highlight directly inside WysiwygEditor
-      if (editorRef.current && finding) {
-        const occ: Occurrence = {
-          para_index: finding.para_index,
-          match_start: finding.start_offset,
-          match_end: finding.end_offset,
-          surface: finding.original_text,
-          category: finding.category
+    // ── Snapshot for rollback on backend failure ────────────────────
+    const prevStatus = finding?.status
+    const prevEditedText = finding?.edited_text
+    const prevJobSnapshot = job
+      ? {
+          accepted_count: job.accepted_count,
+          edited_count: job.edited_count,
+          rejected_count: job.rejected_count,
+          total_findings: job.total_findings,
         }
+      : null
+
+    // ── OPTIMISTIC UPDATES — apply before the network hop so the
+    //    reviewer sees the accepted / edited / highlighted / ignored
+    //    change immediately. The backend confirmation still arrives
+    //    asynchronously; the Accept button keeps its spinner until
+    //    then. On failure the catch block rolls every bit of this
+    //    back.
+
+    // 1) Editor replacement / highlight overlay — must NOT wait on the
+    //    HTTP round-trip or the server-side AB re-analysis (which can
+    //    take seconds on large documents). The reviewer sees the
+    //    document mutate the moment they click.
+    let editorMutated = false
+    if (editorRef.current && finding) {
+      const occ: Occurrence = {
+        para_index: finding.para_index,
+        match_start: finding.start_offset,
+        match_end: finding.end_offset,
+        surface: finding.original_text,
+        category: finding.category,
+      }
+      try {
         if (status === 'highlighted') {
-          editorRef.current.replaceOccurrence(occ, '', replaceOptionsFor('highlighted', false))
+          editorMutated = editorRef.current.replaceOccurrence(
+            occ, '', replaceOptionsFor('highlighted', false),
+          ) !== false
         } else if (status === 'accepted' || status === 'edited') {
           const repText = status === 'edited' ? editedText : (finding.suggestion || '')
           // Honor the editor's TC toggle: ON ⇒ record a del+ins pair so the
           // original stays visible as a tracked deletion and the new text is
           // an identifiable insertion; OFF ⇒ plain in-place replace.
-          editorRef.current.replaceOccurrence(
-            occ,
-            repText,
-            replaceOptionsFor(status, isTrackChangesEnabled()),
-          )
+          editorMutated = editorRef.current.replaceOccurrence(
+            occ, repText, replaceOptionsFor(status, isTrackChangesEnabled()),
+          ) !== false
         }
+      } catch {
+        // replaceOccurrence throws should not block the decide call —
+        // the server still owns the authoritative state. Continue.
+        editorMutated = false
       }
+    }
 
-      // AB Accept / Edit may trigger a server-side re-analysis of
-      // the abbreviation finding set (see backend
-      // ``_reanalyze_abbreviations_for_job``). When it does, the
-      // response carries ``reanalyzed: true`` and a refreshed
-      // ``findings`` list. Replace local state atomically so group
-      // cards reflect the post-edit document — no stale occurrences,
-      // no duplicate rows. Collapse state keyed by
-      // ``abbreviation|expansion`` survives the swap because the
-      // backend produces stable group keys.
+    // 2) Optimistically update the finding so the sidebar card
+    //    transitions out of pending at the same moment. The real
+    //    backend response may replace this later with a full
+    //    re-analysed list (AB only).
+    setFindings(prev =>
+      prev.map(f => (f.id === findingId ? { ...f, status, edited_text: editedText } : f))
+    )
+
+    // 3) Optimistic job-counter delta so the header progress bar
+    //    moves instantly. The backend's refreshed job counters still
+    //    overwrite this when they arrive.
+    setJob(prev => {
+      if (!prev) return prev
+      let accepted = prev.accepted_count
+      let edited = prev.edited_count
+      let rejected = prev.rejected_count
+      if (prevStatus === 'accepted') accepted--
+      if (prevStatus === 'edited') edited--
+      if (prevStatus === 'rejected') rejected--
+      if (status === 'accepted') accepted++
+      if (status === 'edited') edited++
+      if (status === 'rejected') rejected++
+      return { ...prev, accepted_count: accepted, edited_count: edited, rejected_count: rejected }
+    })
+
+    if (editingFindingId === findingId) {
+      setEditingFindingId(null)
+    }
+
+    try {
+      const resp = await apiClient.post(`/language-edit/findings/${findingId}/decide`, {
+        status,
+        edited_text: status === 'edited' ? editedText : undefined,
+        reviewer: 'editor',
+      })
+
+      // AB Accept / Edit triggers a server-side re-analysis
+      // (``_reanalyze_abbreviations_for_job``). The response carries
+      // ``reanalyzed: true`` and a refreshed ``findings`` list.
+      // Replace local state atomically so group cards reflect the
+      // post-edit document — unchanged pending AB rows keep their
+      // ids (the diff-based re-analysis preserves them), so the
+      // user's current card references stay valid. Non-AB decides
+      // leave the optimistic patch untouched.
       const refreshed = (resp?.data && Array.isArray((resp.data as any).findings))
         ? ((resp.data as any).findings as Finding[])
         : null
       if (refreshed) {
         setFindings(refreshed)
-      } else {
-        setFindings(prev =>
-          prev.map(f => (f.id === findingId ? { ...f, status, edited_text: editedText } : f))
-        )
       }
 
-      // Job counters: when the backend re-analyzed, trust its totals
-      // (they reflect the post-rewrite row count). Otherwise fall
-      // back to the optimistic delta so the dashboard updates
-      // instantly for non-AB decides.
+      // Trust the backend's job counters whenever they come back so
+      // the dashboard stays accurate after re-analysis.
       const refreshedJob = (resp?.data && (resp.data as any).job) || null
-      setJob(prev => {
-        if (!prev) return prev
-        if (refreshedJob) {
-          return {
-            ...prev,
-            total_findings: refreshedJob.total_findings ?? prev.total_findings,
-            accepted_count: refreshedJob.accepted_count ?? prev.accepted_count,
-            edited_count: refreshedJob.edited_count ?? prev.edited_count,
-            rejected_count: refreshedJob.rejected_count ?? prev.rejected_count,
-          }
-        }
-        const oldStatus = findings.find(f => f.id === findingId)?.status
-        let accepted = prev.accepted_count
-        let edited = prev.edited_count
-        let rejected = prev.rejected_count
-
-        if (oldStatus === 'accepted') accepted--
-        if (oldStatus === 'edited') edited--
-        if (oldStatus === 'rejected') rejected--
-
-        if (status === 'accepted') accepted++
-        if (status === 'edited') edited++
-        if (status === 'rejected') rejected++
-
-        return { ...prev, accepted_count: accepted, edited_count: edited, rejected_count: rejected }
-      })
-
-      if (editingFindingId === findingId) {
-        setEditingFindingId(null)
+      if (refreshedJob) {
+        setJob(prev => prev ? {
+          ...prev,
+          total_findings: refreshedJob.total_findings ?? prev.total_findings,
+          accepted_count: refreshedJob.accepted_count ?? prev.accepted_count,
+          edited_count: refreshedJob.edited_count ?? prev.edited_count,
+          rejected_count: refreshedJob.rejected_count ?? prev.rejected_count,
+        } : prev)
       }
 
       toast.success(`Finding ${status}`)
     } catch (err) {
-      // Surface the backend's own error detail (e.g. 404 "Finding ID
-      // not found") instead of a generic message. Do NOT mutate local
-      // finding state — the row stays in its current status (usually
-      // pending) so the reviewer can retry or refresh. The editor
-      // side-effect above was already skipped because we never
-      // reached it (the await re-raised before replaceOccurrence).
+      // ── Rollback every optimistic mutation so the UI matches the
+      //    unchanged server state and the reviewer can retry. ──
+      // 1) Finding status reverts to its prior value.
+      setFindings(prev =>
+        prev.map(f =>
+          f.id === findingId
+            ? { ...f, status: prevStatus as Finding['status'], edited_text: prevEditedText }
+            : f,
+        ),
+      )
+      // 2) Job counters revert to their pre-click snapshot.
+      if (prevJobSnapshot) {
+        setJob(prev => prev ? { ...prev, ...prevJobSnapshot } : prev)
+      }
+      // 3) Editor replacement revert via the TipTap history. We only
+      //    call undo when the optimistic replace actually mutated the
+      //    doc (replaceOccurrence returned truthy). The duplicate-
+      //    click guard above means no other finding's transaction can
+      //    have been interleaved between our dispatch and this
+      //    rollback, so the TipTap history's last entry IS our
+      //    transaction and ``undo()`` reverses exactly it.
+      if (editorMutated) {
+        try {
+          editorRef.current?.editor?.commands?.undo?.()
+        } catch {
+          // Nothing more we can do — reviewer sees the toast; they
+          // can use the editor's native Undo or re-trigger the
+          // analyse to resync.
+        }
+      }
       toast.error(getApiErrorMessage(err, 'Failed to save decision'))
     } finally {
       // Always clear the in-flight marker so retries and subsequent
