@@ -960,6 +960,149 @@ def _first_abbr_per_section(
     return seen
 
 
+# Lowercase English function words that can appear between
+# capitalized words inside a proper-name phrase ("University of
+# California", "National Center for Biotechnology Information",
+# "Department of Health and Human Services"). Case-insensitive
+# match; uppercase variants are accepted implicitly as regular
+# capitalized words by the main regex below.
+_PROPER_NAME_CONNECTORS = frozenset({
+    "a", "an", "and", "at", "by", "for", "from", "in", "of", "on",
+    "or", "the", "to", "with", "&",
+})
+
+# A parenthesized token that looks like an initialism / acronym:
+# starts with an uppercase letter, 2-10 total chars of uppercase
+# letters and digits, with an optional interior hyphen (CDC, NATO,
+# COVID-19, G-8, NONPF, AIDS). Allows an optional comma-citation
+# ``, 2022`` after the acronym — the APA form ``(WHO, 2022)``. The
+# regex captures only the acronym itself; the enclosing parens and
+# optional citation are matched by the surrounding literals.
+_PAREN_ACRONYM_RE = re.compile(
+    r"\(([A-Z][A-Z0-9]{1,9}(?:-[A-Z0-9]+)?)(?:\s*,\s*n\.?d\.?|\s*,\s*\d{4}[a-z]?)?\)"
+)
+
+# An APA-style citation parenthetical: ``(Capitalized Phrase, YEAR)``
+# where ``Phrase`` is one or more capitalized words (connector words
+# permitted between them). Protects capitalized proper nouns inside
+# the citation from AB14 ("Cancer" in ``(National Cancer Institute,
+# 2023)``). Generic — covers National Cancer Institute, World Health
+# Organization, American Psychological Association, etc.
+# ``YEAR`` matches a 4-digit year with an optional trailing letter
+# (``2023a``, ``2023b``) or the APA no-date marker ``n.d.``.
+_CITATION_PAREN_RE = re.compile(
+    r"\((?P<name>(?:[A-Z][A-Za-z0-9'\-]*"
+    r"(?:\s+(?:[A-Z][A-Za-z0-9'\-]*|(?:a|an|and|at|by|for|from|in|of|on|or|the|to|with|&)(?![A-Za-z])))*"
+    r"))"
+    r"(?:,\s*(?:(?:19|20)\d{2}[a-z]?|n\.?d\.?))+\)"
+)
+
+# Match the trailing proper-name phrase immediately before an
+# acronym parenthetical. CASE-SENSITIVE — the pattern distinguishes
+# capitalized words (contentful name components) from lowercase
+# connectors (grammatical glue). Requires at least two capitalized
+# words to avoid treating "The (FOO)" or lone-cap-word phrases as
+# proper names.
+_CAP_WORD = r"[A-Z][A-Za-z0-9'\-]*"
+_CONNECTOR_ALT = "|".join(sorted(_PROPER_NAME_CONNECTORS, key=len, reverse=True))
+_PROPER_NAME_TRAILING_RE = re.compile(
+    r"(?<![A-Za-z0-9])("
+    + _CAP_WORD
+    + r"(?:\s+(?:" + _CAP_WORD + r"|(?:" + _CONNECTOR_ALT + r")(?![A-Za-z])))*"
+    + r"\s+" + _CAP_WORD
+    + r")\s*$"
+)
+
+
+def _find_citation_parenthetical_spans(text: str) -> list[tuple[int, int]]:
+    """Return spans of ``(Capitalized Phrase, YEAR)`` citation
+    parentheticals.
+
+    These are NOT abbreviation definitions — they don't declare a
+    short form. But they DO wrap capitalized proper nouns (official
+    organisation / institution / agency / program / publication
+    names) that must not be flagged as case errors by AB14 when a
+    sub-token (``Cancer`` inside ``National Cancer Institute``)
+    happens to match a workbook expansion whose canonical form is
+    lowercase.
+
+    Syntactic pattern only — ``name`` is 1+ capitalised words with
+    function-word connectors tolerated, followed by one or more
+    comma-year or comma-``n.d.`` citation suffixes before the
+    closing paren. Generic across citation styles; no workbook
+    lookup; no literal name list.
+    """
+    out: list[tuple[int, int]] = []
+    for m in _CITATION_PAREN_RE.finditer(text):
+        out.append((m.start(), m.end()))
+    return out
+
+
+def _find_proper_name_parenthetical_spans(text: str) -> list[tuple[int, int]]:
+    """Return (start, end) spans of ``Capitalized Phrase (ACRONYM)``
+    constructs — a generic proper-name definition pattern.
+
+    The engine's workbook-bound ``_detect_definitions`` only
+    recognises ``expansion (ABBR)`` when ``ABBR`` is already in the
+    Abbreviation_List. But organizations, institutions and programs
+    routinely declare their own acronyms (``NONPF``, ``NSF``,
+    ``IEEE``) that aren't in the workbook — and inside those full
+    names, substrings may happen to match other workbook expansions
+    (``Nurse Practitioner`` inside ``National Organization of Nurse
+    Practitioner Faculties (NONPF)``). Without a protection span,
+    those substring hits are wrongly reported as standalone
+    expansion occurrences and trigger AB02.
+
+    This helper detects proper-name definitions purely from the
+    paragraph's surface shape: an uppercase acronym in parentheses
+    preceded by a phrase of two or more capitalized words (with
+    function-word connectors allowed between caps). The resulting
+    spans join the workbook-bound ``def_spans`` set in
+    ``build_document_state`` so any expansion hit entirely inside
+    one of them is excluded from state — the same mechanism the
+    workbook path already relies on.
+
+    Notably this helper:
+      * Does NOT consult the workbook — the fix is syntactic, not
+        data-driven, so new proper names work on day one.
+      * Does NOT create ``Finding`` objects or add to the
+        ``definitions`` list — it only contributes to the
+        exclusion set. A proper-name acronym not in the workbook
+        won't be registered as a first-use definition of anything.
+      * Requires at least TWO capitalized words to fire — single
+        words in front of parentheticals (``Nurse (NP)``,
+        ``Only (ONLY)``) do not trigger suppression.
+      * Stops walking at sentence boundaries (``.``, ``!``,
+        ``?``) so a proper-name phrase can't accidentally extend
+        back into the previous sentence.
+    """
+    spans: list[tuple[int, int]] = []
+    for m in _PAREN_ACRONYM_RE.finditer(text):
+        open_paren = m.start()
+        close_paren = m.end()
+        # Find the nearest preceding sentence boundary (if any) so
+        # the proper-name walk can't span sentences.
+        left_limit = 0
+        for i in range(open_paren - 1, -1, -1):
+            if text[i] in ".!?":
+                left_limit = i + 1
+                break
+        chunk = text[left_limit:open_paren]
+        # Strip trailing whitespace so ``\s*$`` in the regex has
+        # something to anchor against while preserving the chunk's
+        # absolute offsets in ``text``.
+        stripped_chunk = chunk.rstrip()
+        if not stripped_chunk:
+            continue
+        name_match = _PROPER_NAME_TRAILING_RE.search(stripped_chunk)
+        if not name_match:
+            continue
+        phrase_start_in_chunk = name_match.start(1)
+        phrase_start = left_limit + phrase_start_in_chunk
+        spans.append((phrase_start, close_paren))
+    return spans
+
+
 def _detect_definitions(
     text: str,
     abbr_hits: list[tuple[int, int, str]],
@@ -978,43 +1121,102 @@ def _detect_definitions(
     # (exp_index was intentionally dropped — _detect_definitions scans the
     # text around each abbr hit directly rather than cross-referencing hits.)
 
+    def _expansion_variants(entry: _AbbrEntry) -> list[str]:
+        """Expansion surfaces the detector accepts (lowercased). Covers
+        the canonical singular form AND the pluralised form so a
+        plural-expansion / singular-abbreviation pairing like
+        ``adverse childhood experiences (ACE)`` still counts as a
+        definition — otherwise the engine would miss the definition
+        and re-emit AB01 as ``… (ACEs)``."""
+        variants: list[str] = []
+        if entry.expansion:
+            variants.append(entry.expansion.lower())
+        plural = _plural_expansion_for(entry)
+        if plural:
+            pl = plural.lower()
+            if pl not in variants:
+                variants.append(pl)
+        return variants
+
     for abbr_s, abbr_e, abbr in abbr_hits:
         entry = chosen_by_abbr.get(abbr)
-        if not entry:
+        if not entry or not entry.expansion:
             continue
-        canonical_exp = entry.expansion.lower()
 
-        # Pattern 1: ``expansion (ABBR)`` — abbr preceded by '(' and before that
-        # by the canonical expansion.
-        if abbr_s >= 2 and text[abbr_s - 1] == "(" and abbr_e < len(text) and text[abbr_e] == ")":
-            # Find the expansion ending at abbr_s - 1 (ignoring whitespace
-            # between expansion and the '(').
-            exp_end = abbr_s - 1
-            # Walk back past whitespace between the ')' before and the exp text.
-            # Expansion must end just before the '(' with at most one space.
-            # Simplest check: does text[exp_end - len(exp) - 1 : exp_end - 1] (approx) equal the expansion case-insensitively?
-            exp_len = len(entry.expansion)
-            exp_candidate_start = exp_end - 1 - exp_len  # skip the single space before '('
-            if exp_candidate_start >= 0 and text[exp_candidate_start:exp_candidate_start + exp_len].lower() == canonical_exp:
-                # Confirm word boundary at the start of the expansion.
-                prior = text[exp_candidate_start - 1] if exp_candidate_start > 0 else " "
-                if not prior.isalnum():
-                    out.append((
-                        exp_candidate_start,
-                        abbr_e + 1,  # include the ')'
-                        text[exp_candidate_start:abbr_e + 1],
-                        "exp_paren_abbr",
-                    ))
+        # Pattern 1: ``expansion (ABBR[, citation…])`` or
+        # ``expansion [ABBR[, citation…]]`` — abbr preceded by an
+        # opener (``(`` or ``[``) and followed by the matching closer
+        # OR by ``,``/``;`` (the APA citation form ``(WHO, 2022)``).
+        # Square brackets are the convention in some medical / scientific
+        # styles (``B-type natriuretic peptide [BNP]``); both delimiters
+        # must count as a valid first-use definition so the engine
+        # doesn't re-emit AB01. Detection is syntactic — the original
+        # delimiter is preserved in the stored span and never rewritten.
+        # When a separator follows the abbr, we walk forward to the
+        # MATCHING closer so the span covers the whole parenthetical
+        # / bracketed citation.
+        _MATCHING_CLOSER = {"(": ")", "[": "]"}
+        opener = text[abbr_s - 1] if abbr_s >= 1 else ""
+        closer = _MATCHING_CLOSER.get(opener)
+        if (
+            closer
+            and abbr_s >= 2
+            and abbr_e < len(text)
+            and text[abbr_e] in (closer, ",", ";")
+        ):
+            close_pos = abbr_e
+            if text[abbr_e] != closer:
+                # Scan forward for the matching closer without crossing
+                # a nested opener of the same kind.
+                j = abbr_e
+                depth = 0
+                close_pos = -1
+                while j < len(text):
+                    c = text[j]
+                    if c == opener:
+                        depth += 1
+                    elif c == closer:
+                        if depth == 0:
+                            close_pos = j
+                            break
+                        depth -= 1
+                    j += 1
+            if close_pos >= 0:
+                exp_end = abbr_s - 1
+                matched = False
+                for variant in _expansion_variants(entry):
+                    exp_len = len(variant)
+                    exp_candidate_start = exp_end - 1 - exp_len
+                    if (
+                        exp_candidate_start >= 0
+                        and text[exp_candidate_start:exp_candidate_start + exp_len].lower() == variant
+                    ):
+                        prior = text[exp_candidate_start - 1] if exp_candidate_start > 0 else " "
+                        if not prior.isalnum():
+                            out.append((
+                                exp_candidate_start,
+                                close_pos + 1,  # include the closing delimiter
+                                text[exp_candidate_start:close_pos + 1],
+                                "exp_paren_abbr",
+                            ))
+                            matched = True
+                            break
+                if matched:
                     continue
 
-        # Pattern 2: ``ABBR (expansion)`` — abbr followed by ' (' and the
-        # canonical expansion then ')'.
-        if abbr_e + 1 < len(text) and text[abbr_e] == " " and text[abbr_e + 1] == "(":
+        # Pattern 2: ``ABBR (expansion)`` / ``ABBR [expansion]`` — abbr
+        # followed by a space and an opener, then the canonical
+        # expansion, then the matching closer. The reversed form is
+        # rare but we accept both delimiter pairs for symmetry with
+        # Pattern 1.
+        if abbr_e + 1 < len(text) and text[abbr_e] == " " and text[abbr_e + 1] in ("(", "["):
+            pat2_opener = text[abbr_e + 1]
+            pat2_closer = _MATCHING_CLOSER[pat2_opener]
             exp_start = abbr_e + 2
             exp_len = len(entry.expansion)
             if exp_start + exp_len < len(text) \
-                    and text[exp_start:exp_start + exp_len].lower() == canonical_exp \
-                    and text[exp_start + exp_len] == ")":
+                    and text[exp_start:exp_start + exp_len].lower() == entry.expansion.lower() \
+                    and text[exp_start + exp_len] == pat2_closer:
                 out.append((
                     abbr_s,
                     exp_start + exp_len + 1,
@@ -1108,6 +1310,19 @@ def build_document_state(
         # double-count the embedded abbreviation / expansion that lives
         # inside each definition.
         def_spans: set[tuple[int, int]] = {(s, e) for s, e, _, _ in definitions}
+
+        # Generic proper-name parenthetical protection. Covers the
+        # false-positive class "workbook expansion appears as a
+        # substring inside a longer organization / institution name
+        # that declares its own acronym the workbook doesn't know
+        # about" (``Nurse Practitioner`` inside ``... (NONPF)``) AND
+        # the APA-citation form ``(National Cancer Institute, 2023)``
+        # whose proper-name surface wraps capitalized sub-terms.
+        # Both are syntactic, not workbook-driven; merging into
+        # ``def_spans`` reuses the existing "hit inside span → skip"
+        # check below — no new skip paths.
+        def_spans |= set(_find_proper_name_parenthetical_spans(text))
+        def_spans |= set(_find_citation_parenthetical_spans(text))
 
         # Phase-4 excluded spans — URLs, emails, DOIs, inline-code
         # backticks. Any hit overlapping one of these is skipped so
@@ -1844,13 +2059,32 @@ def _emit_doc_scope_findings(
 # Phase B — paragraph-local regex rules (AB09, AB10, AB13)
 # ---------------------------------------------------------------------------
 
-# Common Latin / titular abbreviations that MUST retain their periods.
-# AB13 skips any match whose lowercased form is in this set.
+# Common Latin / titular / citation abbreviations that MUST retain
+# their periods. AB13 skips any match whose lowercased form is in
+# this set.
+#
+# Additions beyond the historical Latin / titular list:
+#   * ``n.d.`` — APA "no date" citation marker. Not an initialism; the
+#     periods are the convention. Flagging ``n.d.`` as a periods-in-
+#     initialism error is wrong across every supported style.
+#   * ``cf.`` / ``ibid.`` / ``op. cit.`` / ``loc. cit.`` / ``s.v.`` —
+#     academic citation shorthands that are never meant to be
+#     de-punctuated.
+#   * ``a.d.`` / ``b.c.`` / ``b.c.e.`` / ``c.e.`` / ``r.`` — date and
+#     era markers (common in historical prose).
+#
+# U.S. / U.K. / U.N. / D.C. stay on the list because they are
+# documented exceptions in the US/UK style profiles that ship with
+# the engine; AB13 continues to flag other genuine initialisms
+# (``U.S.A.``, ``I.C.U.``) per the selected style.
 _PERIODS_WHITELIST: frozenset[str] = frozenset({
     "e.g.", "i.e.", "a.m.", "p.m.", "et al.", "etc.", "vs.", "no.", "nos.",
     "vol.", "vols.", "p.", "pp.", "ch.", "fig.", "figs.", "eq.", "ref.",
     "mr.", "mrs.", "ms.", "dr.", "prof.", "jr.", "sr.", "st.", "mt.",
     "u.s.", "u.k.", "u.n.", "d.c.",
+    # Citation shorthands
+    "n.d.", "cf.", "ibid.", "op. cit.", "loc. cit.", "s.v.",
+    "a.d.", "b.c.", "b.c.e.", "c.e.", "r.",
 })
 
 
@@ -1999,6 +2233,21 @@ def _analyze_case_of_expansion(
     if not lookup:
         return []
     out: list[Finding] = []
+    # Reuse the generic proper-name parenthetical detector so a
+    # Title-Cased workbook expansion appearing INSIDE a larger
+    # proper name like "National Organization of Nurse Practitioner
+    # Faculties (NONPF)" does NOT get flagged as case-wrong. The
+    # Title Case there is legitimate — it's part of the org name,
+    # not a mid-sentence recapitalisation of the common term.
+    # Also include citation parentheticals of the form
+    # ``(Capitalized Phrase, YEAR)`` — ``National Cancer Institute``
+    # inside ``(National Cancer Institute, 2023)`` must stay
+    # title-cased because it's a proper organization name quoted in
+    # an APA citation, not a mis-capitalised common term.
+    proper_name_spans = (
+        _find_proper_name_parenthetical_spans(text)
+        + _find_citation_parenthetical_spans(text)
+    )
     for title_form, lower_form in lookup.items():
         esc = re.escape(title_form)
         try:
@@ -2010,6 +2259,11 @@ def _analyze_case_of_expansion(
             # Skip sentence-initial — Title Case at a sentence start is
             # a legitimate capitalisation choice.
             if _is_sentence_initial(text, s):
+                continue
+            # Skip hits that fall inside a proper-name parenthetical
+            # construct — same exclusion ``build_document_state``
+            # uses for AB02 expansion occurrences.
+            if any(ps <= s and e <= pe for ps, pe in proper_name_spans):
                 continue
             eff_tb = _effective_tool_behaviour("AB14", "flag", rule_overrides)
             severity = "suggestion" if eff_tb == "auto_replace" else "warning"

@@ -203,3 +203,94 @@ def test_enrich_finding_unknown_rule_still_has_full_shape():
             "first_use_rule", "ambiguity", "meanings",
         )
     )
+
+
+# ─── grouping_fields_for — frontend card coalescing ───────────────
+
+def test_grouping_fields_ab01_uses_canonical_expansion():
+    """AB01 (first-use) findings on ``ICU`` land in the stable
+    ``ICU | intensive care unit`` bucket keyed off the workbook's
+    canonical expansion."""
+    out = meta.grouping_fields_for("AB01", "ICU", "intensive care unit (ICU)")
+    assert out["abbreviation"] == "ICU"
+    assert out["expansion"] == "intensive care unit"
+    assert out["group_key"] == "ICU|intensive care unit"
+
+
+def test_grouping_fields_ab13_same_abbreviation_same_group():
+    """Multiple AB13 (periods-in-initialism) occurrences on the same
+    initialism must share a group_key so the UI reducer coalesces
+    them into one card. ``C.D.C.`` → ``CDC`` is a stable case because
+    CDC is a registered workbook token."""
+    a = meta.grouping_fields_for("AB13", "C.D.C.", "CDC")
+    b = meta.grouping_fields_for("AB13", "C.D.C.", "CDC")
+    assert a == b
+    assert a["abbreviation"] == "CDC"
+    assert a["group_key"] is not None
+    assert a["group_key"].startswith("CDC|")
+
+
+def test_grouping_fields_ab01_and_ab02_same_abbreviation_same_group():
+    """Requirement (revised): AB01 (first use) and AB02 (repeated
+    expansion) on the same abbreviation MUST coalesce into the same
+    group. The reviewer sees one ICU card listing the first-use
+    occurrence and every subsequent-use occurrence together."""
+    ab01 = meta.grouping_fields_for("AB01", "ICU", "intensive care unit (ICU)")
+    ab02 = meta.grouping_fields_for("AB02", "intensive care unit", "ICU")
+    ab13 = meta.grouping_fields_for("AB13", "I.C.U.", "ICU")
+    assert ab01["abbreviation"] == ab02["abbreviation"] == ab13["abbreviation"] == "ICU"
+    # All three AB rules collapse into the same bucket.
+    assert ab01["group_key"] == ab02["group_key"] == ab13["group_key"]
+
+
+def test_grouping_fields_dn_rules_stay_ungrouped():
+    """DN01-DN32 rules are patient-safety notations and must NOT be
+    coalesced — each notation gets its own card."""
+    out = meta.grouping_fields_for("DN01", "U", "units")
+    assert out == {"abbreviation": None, "expansion": None, "group_key": None}
+
+
+def test_grouping_fields_ab07_ambiguous_meanings_split_groups():
+    """Requirement #2: ambiguous abbreviations with different chosen
+    expansions must NOT coalesce — reviewer needs them visually
+    separate."""
+    a = meta.grouping_fields_for("AB07", "AMA", "American Medical Association")
+    b = meta.grouping_fields_for("AB07", "AMA", "Against Medical Advice")
+    assert a["abbreviation"] == b["abbreviation"] == "AMA"
+    assert a["expansion"] != b["expansion"]
+    assert a["group_key"] != b["group_key"]
+
+
+def test_grouping_fields_non_ab_rules_return_null_shape():
+    """Non-AB findings (DN, LWW-NE, grammar, hyphenation, spelling,
+    typo, term) must get ``abbreviation=None``, ``expansion=None``,
+    ``group_key=None`` so the frontend keeps its flat-list render
+    path for them."""
+    for rule_id, original, suggestion in (
+        ("DN01", "U", "units"),
+        ("LWW-NE-U.S", "U.S", "U.S."),
+        ("GV-001", "should of", "should have"),
+        ("SL001", "long sentence", ""),
+        ("", "", ""),
+        (None, "x", "y"),  # type: ignore[arg-type]
+    ):
+        out = meta.grouping_fields_for(rule_id, original, suggestion)
+        assert out == {"abbreviation": None, "expansion": None, "group_key": None}, (
+            f"rule_id={rule_id!r} leaked grouping fields: {out}"
+        )
+
+
+def test_grouping_fields_ab_with_unknown_abbreviation_returns_null():
+    """Defensive: an AB finding whose abbreviation can't be extracted
+    (unusual suggestion shape, hand-synthesised tests) must still
+    return the null-shape so the serializer doesn't crash."""
+    out = meta.grouping_fields_for("AB01", "flibbertigibbet", "no expansion here")
+    assert out == {"abbreviation": None, "expansion": None, "group_key": None}
+
+
+def test_grouping_fields_output_shape_is_stable():
+    """Keys are always present (even when values are None) — the
+    serializer spreads this dict into every finding row and the UI
+    relies on a consistent shape."""
+    out = meta.grouping_fields_for("GV-001", "x", "y")
+    assert set(out.keys()) == {"abbreviation", "expansion", "group_key"}

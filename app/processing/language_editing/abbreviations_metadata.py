@@ -133,6 +133,28 @@ def _abbr_index_by_token() -> dict[str, list[dict[str, Any]]]:
     return out
 
 
+@lru_cache(maxsize=1)
+def _plural_abbr_to_singular() -> dict[str, str]:
+    """Case-sensitive plural abbreviation form → its singular workbook
+    key, for entries that declare one (``NPs`` → ``NP``, ``ICUs`` →
+    ``ICU``). Used by ``extract_abbreviation`` so an AB finding whose
+    suggestion / original is the plural form (``nurse practitioners``
+    → ``NPs``) resolves to the same canonical abbreviation as the
+    singular finding, which in turn means both land in the same
+    grouping bucket (``NP | nurse practitioner``) rather than
+    splintering into separate ungrouped cards."""
+    out: dict[str, str] = {}
+    for row in (_ab._list_data().get("abbreviations") or []):
+        singular = (row.get("abbreviation") or "").strip()
+        plural = (row.get("plural_abbreviation") or "").strip()
+        if singular and plural and plural != singular:
+            # If two entries disagree on a plural form, the first
+            # one wins (deterministic across process starts; tests
+            # pin the specific row if they care).
+            out.setdefault(plural, singular)
+    return out
+
+
 # Common shape for an AB finding's suggestion: ``expansion (ABBR)``.
 # Used to extract the abbreviation from AB01/AB02/AB03 suggestions.
 _ABBR_IN_PARENS_RE = re.compile(r"\(([A-Z][A-Za-z0-9]{0,15})\)\s*$")
@@ -141,37 +163,59 @@ _ABBR_IN_PARENS_RE = re.compile(r"\(([A-Z][A-Za-z0-9]{0,15})\)\s*$")
 def extract_abbreviation(rule_id: str, original: str, suggestion: str) -> Optional[str]:
     """Best-effort extraction of the abbreviation an AB finding is
     about. Used so the serializer can look up the Abbreviation_List
-    row for note / mw_lookup / confidence.
+    row for note / mw_lookup / confidence AND so ``grouping_fields_for``
+    can collapse singular / plural variants into one card.
 
     Order of attempts:
-      1. ``original`` itself is a registered abbreviation (case-sensitive).
-      2. ``suggestion`` ends with ``(ABBR)`` — extract ABBR.
-      3. ``original`` ends with ``(ABBR)`` — extract ABBR.
-      4. First whitespace-separated token of ``suggestion`` that is a
-         registered abbreviation (handles AB02 where suggestion is
-         just the bare abbreviation).
+      1. ``original`` itself is a registered singular abbreviation.
+      2. ``original`` itself is a registered PLURAL abbreviation —
+         returns the singular form so downstream lookups hit one row.
+      3. ``suggestion`` ends with ``(ABBR)`` — extract ABBR. Resolves
+         plural → singular if needed.
+      4. ``original`` ends with ``(ABBR)`` — same.
+      5. First whitespace-separated token of ``suggestion`` that is
+         a registered singular OR plural abbreviation (handles AB02
+         where ``suggestion`` is just the bare abbreviation, e.g.
+         ``NPs``).
 
-    Returns None when extraction isn't reliable; the serializer then
-    skips abbreviation-metadata lookup for that finding.
+    Returns None when extraction isn't reliable.
     """
     index = _abbr_index_by_token()
+    plural_map = _plural_abbr_to_singular()
+
+    def _resolve(token: str) -> Optional[str]:
+        if not token:
+            return None
+        if token in index:
+            return token
+        if token in plural_map:
+            return plural_map[token]
+        return None
+
     original = (original or "").strip()
     suggestion = (suggestion or "").strip()
-    # 1
-    if original and original in index:
-        return original
-    # 2
-    m = _ABBR_IN_PARENS_RE.search(suggestion)
-    if m and m.group(1) in index:
-        return m.group(1)
+    # 1 & 2
+    r = _resolve(original)
+    if r:
+        return r
     # 3
+    m = _ABBR_IN_PARENS_RE.search(suggestion)
+    if m:
+        r = _resolve(m.group(1))
+        if r:
+            return r
+    # 4
     m = _ABBR_IN_PARENS_RE.search(original)
-    if m and m.group(1) in index:
-        return m.group(1)
-    # 4 — tokens of suggestion
+    if m:
+        r = _resolve(m.group(1))
+        if r:
+            return r
+    # 5 — tokens of suggestion (handles AB02 whose suggestion is bare
+    # ``NPs`` / ``ICU`` / ``NP``). Plural-aware through _resolve.
     for tok in re.split(r"[\s(),.;:]+", suggestion):
-        if tok and tok in index:
-            return tok
+        r = _resolve(tok)
+        if r:
+            return r
     return None
 
 
@@ -221,11 +265,94 @@ def abbreviation_metadata_for(abbreviation: Optional[str]) -> dict[str, Any]:
     return out
 
 
+def _canonical_expansion_for(abbreviation: Optional[str]) -> Optional[str]:
+    """First workbook row's ``expansion`` for an abbreviation token,
+    or None when the token isn't in the list. Used by the grouping
+    serializer below."""
+    if not abbreviation:
+        return None
+    rows = _abbr_index_by_token().get(abbreviation)
+    if not rows:
+        return None
+    exp = (rows[0].get("expansion") or "").strip()
+    return exp or None
+
+
+def grouping_fields_for(
+    rule_id: Optional[str],
+    original: str,
+    suggestion: str,
+) -> dict[str, Optional[str]]:
+    """Derive the three fields the frontend needs to coalesce multiple
+    AB occurrences of the same abbreviation into a single card:
+
+      * ``abbreviation`` — the short form (e.g. ``ICU``)
+      * ``expansion``    — the long form the card header displays
+      * ``group_key``    — stable identity used by the frontend's
+                           ``Map<groupKey, Finding[]>`` reducer
+
+    Rules:
+      * Populated only for AB rules (``rule_id`` starts with ``AB``).
+        Non-AB findings (DN01-32, LWW-NE, grammar, spelling, …) get
+        all three keys set to ``None`` so the UI falls through to the
+        existing one-card-per-finding render path. DN rules in
+        particular are excluded by requirement: each patient-safety
+        notation stays as its own card.
+      * Key does NOT include ``rule_id``: AB01 (first use), AB02
+        (repeated expansion) and AB13 (periods in initialism) on the
+        same ``ICU`` abbreviation MUST land in the same group so the
+        reviewer sees the full first-use / subsequent-use picture
+        inside one card. Each occurrence keeps its own ``rule_id``
+        and ``id`` fields untouched — grouping is purely a UI concern.
+      * AB07 (ambiguous) uses the finding's ``suggestion`` as the
+        expansion — different reviewer-visible meanings on the same
+        abbreviation (``AMA`` → "American Medical Association" vs
+        "Against Medical Advice") must stay in DIFFERENT groups
+        ("different expansions → separate groups").
+      * Other AB rules use the canonical workbook expansion so every
+        finding on ``ICU`` for ``intensive care unit`` coalesces
+        regardless of each occurrence's local ``suggestion`` text.
+      * When the abbreviation cannot be extracted (unlikely but
+        possible for an unusually-shaped suggestion), we return
+        ``group_key=None`` and the card renders ungrouped.
+
+    Keys are always present in the output dict so the serializer's
+    row shape stays consistent across rules.
+    """
+    out: dict[str, Optional[str]] = {
+        "abbreviation": None,
+        "expansion": None,
+        "group_key": None,
+    }
+    if not rule_id or not rule_id.startswith("AB"):
+        return out
+
+    abbr = extract_abbreviation(rule_id, original, suggestion)
+    if not abbr:
+        return out
+
+    if rule_id == "AB07":
+        # Different candidate meanings must stay in separate groups.
+        expansion = (suggestion or "").strip() or None
+    else:
+        expansion = _canonical_expansion_for(abbr)
+
+    out["abbreviation"] = abbr
+    out["expansion"] = expansion
+    # group_key covers only (abbreviation, expansion). Mixed rule_ids
+    # (AB01 + AB02 + AB13) on the same abbreviation all land in the
+    # same bucket; per-occurrence ``problem_label`` differentiates
+    # first-use from subsequent-use inside the card.
+    out["group_key"] = f"{abbr}|{expansion or ''}"
+    return out
+
+
 def clear_cache() -> None:
     """Drop LRU caches — test fixtures call this when they monkey-
     patch the backing JSON files."""
     _dn_index.cache_clear()
     _abbr_index_by_token.cache_clear()
+    _plural_abbr_to_singular.cache_clear()
 
 
 # ─── Finding-level composite ──────────────────────────────────────

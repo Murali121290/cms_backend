@@ -103,27 +103,69 @@ export const SearchReplace = Extension.create({
             const MAX_RESULTS = 5000;
             let aborted = false;
 
+            // For each textblock, build a FLAT text buffer joining every
+            // inline text child, plus a per-character ``pmPos`` map
+            // translating flat-text indices back to ProseMirror positions.
+            //
+            // Running the regex against the flat buffer (rather than each
+            // text node in isolation) lets a search phrase match ACROSS
+            // text-node boundaries. Those boundaries appear whenever
+            // inline marks differ — language-edit highlights,
+            // OccurrenceHighlight decorations, bold/italic, tracked-
+            // change ins/del marks, hard breaks, etc. Previously a phrase
+            // like "psychiatric-mental health nurse practitioner" would
+            // only match the subsequence that happened to live inside a
+            // single run; after the fix every real occurrence is counted
+            // regardless of how many marks split it.
+            //
+            // Non-text inline nodes (images, hard breaks, …) contribute a
+            // single ``U+FFFC`` placeholder character to the buffer so
+            // their ProseMirror position stays accounted for but the
+            // regex won't accidentally match across them (image alt-text
+            // or similar is not considered part of the surrounding text).
             state.doc.descendants((node, pos) => {
               if (aborted) return false;
-              if (node.isText && node.text) {
-                let match;
-                regex.lastIndex = 0;
-                while ((match = regex.exec(node.text)) !== null) {
-                  // Zero-width matches (e.g. `\b` with punctuation, or an
-                  // empty-matchable regex pattern) advance manually.
-                  if (match[0].length === 0) { regex.lastIndex++; continue; }
-                  results.push({
-                    from: pos + match.index,
-                    to: pos + match.index + match[0].length,
-                    groups: match.slice(1),
-                  });
-                  if (results.length >= MAX_RESULTS) {
-                    aborted = true;
-                    break;
+              if (!node.isTextblock) return true;
+
+              interface CharEntry { ch: string; pmPos: number; }
+              const chars: CharEntry[] = [];
+              let cursor = pos + 1; // first content position inside the block
+              node.content.forEach((child) => {
+                if (child.isText && child.text) {
+                  const t = child.text;
+                  for (let i = 0; i < t.length; i++) {
+                    chars.push({ ch: t[i], pmPos: cursor + i });
                   }
+                  cursor += t.length;
+                } else {
+                  // Non-text inline node; reserve one slot in the buffer.
+                  chars.push({ ch: "￼", pmPos: cursor });
+                  cursor += child.nodeSize;
+                }
+              });
+              if (chars.length === 0) return false;
+
+              const flatText = chars.map((c) => c.ch).join("");
+              regex.lastIndex = 0;
+              let match: RegExpExecArray | null;
+              while ((match = regex.exec(flatText)) !== null) {
+                if (match[0].length === 0) { regex.lastIndex++; continue; }
+                const startChar = chars[match.index];
+                const endChar = chars[match.index + match[0].length - 1];
+                if (!startChar || !endChar) break;
+                results.push({
+                  from: startChar.pmPos,
+                  to: endChar.pmPos + 1,
+                  groups: match.slice(1),
+                });
+                if (results.length >= MAX_RESULTS) {
+                  aborted = true;
+                  break;
                 }
               }
-              return !aborted;
+
+              // Already walked every inline child above — don't descend.
+              return false;
             });
 
             storage.results = results;
