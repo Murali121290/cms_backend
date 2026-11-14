@@ -81,6 +81,7 @@ import Paragraph from "@tiptap/extension-paragraph";
 import Heading from "@tiptap/extension-heading";
 import { TrackChanges } from "./TrackChanges";
 import { OccurrenceHighlight, type Occurrence } from "./OccurrenceHighlight";
+import { ReferenceHighlight } from "./ReferenceHighlight";
 import { RunAnchor } from "./RunAnchor";
 import { Bookmark } from "./Bookmark";
 import { CharStyle } from "./CharStyle";
@@ -706,6 +707,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" },
         }),
         OccurrenceHighlight,
+        ReferenceHighlight,
         RunAnchor,
         Bookmark,
         CharStyle,

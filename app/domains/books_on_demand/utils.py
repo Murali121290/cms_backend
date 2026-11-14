@@ -60,8 +60,40 @@ def generate_bod_history_csv(job, target_dir: str) -> str:
 
     file_size_str = str(file_size) if file_size > 0 else "1111"
 
+    # Determine WCAG conformance level from ACE report if available
+    wcag_conformance = "A"
+    ace_candidates = []
+    if getattr(job, "ace_report_filepath", None) and os.path.exists(job.ace_report_filepath):
+        ace_candidates.append(job.ace_report_filepath)
+
+    folder_name = getattr(job, "project_name", None) or (job.pdf_filename.rsplit('.', 1)[0] if getattr(job, "pdf_filename", None) else f"bod_job_{getattr(job, 'id', '')}")
+    folder_name_clean = re.sub(r'[^a-zA-Z0-9_\-]', '_', folder_name)
+
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+    validator_ace_json = os.path.join(UPLOAD_DIR, folder_name_clean, "ace", "report.json")
+    if os.path.exists(validator_ace_json):
+        ace_candidates.append(validator_ace_json)
+
+    # Also check without regex replacement if different
+    if folder_name != folder_name_clean:
+        alt_ace_json = os.path.join(UPLOAD_DIR, folder_name, "ace", "report.json")
+        if os.path.exists(alt_ace_json):
+            ace_candidates.append(alt_ace_json)
+
+    import json
+    for ace_p in ace_candidates:
+        try:
+            with open(ace_p, "r", encoding="utf-8", errors="replace") as f_ace:
+                ace_data = json.load(f_ace)
+            conf_val = ace_data.get("conformance_level") or ace_data.get("data", {}).get("report", {}).get("conformance_level")
+            if conf_val and conf_val.strip().lower() not in ("none", ""):
+                wcag_conformance = conf_val.strip()
+                break
+        except Exception:
+            pass
+
     history_header = "Project,Status,Format,Layout,User,Correction Type,Correction Request,File Size,Conformity level WCAG,Level of Complexity,Non-Accessible Elements,Primary Content Type,Content Type"
-    history_row = f"{eisbn},y,ePub all,Reflowable,,,,{file_size_str},A,simple,n,textual,textual visual"
+    history_row = f"{eisbn},y,ePub all,Reflowable,,,,{file_size_str},{wcag_conformance},simple,n,textual,textual visual"
     history_row_clean = history_row.replace("\r", " ").replace("\n", " ").strip()
     history_csv_content = f"{history_header}\n{history_row_clean}\n"
 
