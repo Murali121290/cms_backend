@@ -194,6 +194,7 @@ export function BodInternalJobPage() {
   const [isEditingAnalysis, setIsEditingAnalysis] = useState(false)
   const [isSavingAnalysis, setIsSavingAnalysis] = useState(false)
   const [analysisPages, setAnalysisPages] = useState<number | string>('')
+  const [analysisEisbn, setAnalysisEisbn] = useState<string>('')
   const [analysisType, setAnalysisType] = useState<string>('Text PDF')
   const [analysisLanguage, setAnalysisLanguage] = useState<string>('English')
   const [analysisDueDate, setAnalysisDueDate] = useState<string>('')
@@ -211,6 +212,7 @@ export function BodInternalJobPage() {
   const startEditingAnalysis = () => {
     if (!job) return
     setAnalysisPages(job.pdf_page_count ?? '')
+    setAnalysisEisbn(job.eisbn || '')
     setAnalysisType(job.pdf_type || 'Text PDF')
     setAnalysisLanguage(job.pdf_language || 'English')
     const dStr = job.due_date ? (parseUtcDate(job.due_date)?.toISOString().slice(0, 10) || '') : ''
@@ -232,6 +234,7 @@ export function BodInternalJobPage() {
 
       await api.put(`/bod/jobs/${job.id}/analysis`, {
         pdf_page_count: isNaN(pageCountNum as any) ? null : pageCountNum,
+        eisbn: analysisEisbn.trim() || null,
         pdf_type: analysisType,
         pdf_language: analysisLanguage,
         due_date: formattedDueDate,
@@ -696,7 +699,14 @@ export function BodInternalJobPage() {
           </div>
 
           {!isEditingAnalysis ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 pt-4">
+              <div className="bg-background/70 border border-border/60 rounded-lg p-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">eISBN</span>
+                <p className="text-base font-bold text-text mt-1 m-0 truncate" title={job.eisbn || ''}>
+                  {job.eisbn || <span className="text-muted font-normal italic">Not set</span>}
+                </p>
+              </div>
+
               <div className="bg-background/70 border border-border/60 rounded-lg p-3">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Pages</span>
                 <p className="text-base font-bold text-text mt-1 m-0">
@@ -740,7 +750,18 @@ export function BodInternalJobPage() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-muted">eISBN</label>
+                <input
+                  type="text"
+                  value={analysisEisbn}
+                  onChange={(e) => setAnalysisEisbn(e.target.value)}
+                  placeholder="e.g. 9783696305819"
+                  className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-primary transition-colors"
+                />
+              </div>
+
               <div className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted">Pages</label>
                 <input
@@ -811,7 +832,7 @@ export function BodInternalJobPage() {
                 />
               </div>
 
-              <div className="col-span-1 sm:col-span-2 lg:col-span-4 space-y-1">
+              <div className="col-span-1 sm:col-span-2 lg:col-span-5 space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
                   Update Reason <span className="text-rose-500 font-bold">*</span>
                 </label>

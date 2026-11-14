@@ -2137,6 +2137,11 @@ export function BodInternalPage() {
                           </td>
                           <td className="px-2 py-2 overflow-hidden">
                             <h3 className="font-semibold text-xs truncate m-0 text-text" title={job.pdf_filename}>{job.pdf_filename}</h3>
+                            {job.eisbn && (
+                              <p className="text-[10px] text-muted font-mono truncate mt-0.5" title={`eISBN: ${job.eisbn}`}>
+                                eISBN: {job.eisbn}
+                              </p>
+                            )}
                             {job.epub_filename && (
                               <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
                                 {job.epub_filename}
@@ -2387,6 +2392,11 @@ export function BodInternalPage() {
                         )}
                         <div className="min-w-0">
                           <h3 className="font-semibold text-sm text-text truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
+                          {job.eisbn && (
+                            <p className="text-[10px] text-muted font-mono truncate mt-0.5" title={`eISBN: ${job.eisbn}`}>
+                              eISBN: {job.eisbn}
+                            </p>
+                          )}
                           {job.epub_filename && (
                             <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
                               {job.epub_filename}

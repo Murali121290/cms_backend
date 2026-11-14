@@ -64,6 +64,7 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "project_name": job.project_name,
             "pdf_filename": job.pdf_filename,
             "pdf_filepath": job.pdf_filepath,
+            "eisbn": getattr(job, "eisbn", None),
             "cover_filename": getattr(job, "cover_filename", None),
             "cover_filepath": getattr(job, "cover_filepath", None),
             "pdf_page_count": job.pdf_page_count,
@@ -124,6 +125,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "project_name": job.project_name,
         "pdf_filename": job.pdf_filename,
         "pdf_filepath": job.pdf_filepath,
+        "eisbn": getattr(job, "eisbn", None),
         "cover_filename": getattr(job, "cover_filename", None),
         "cover_filepath": getattr(job, "cover_filepath", None),
         "pdf_page_count": job.pdf_page_count,
@@ -300,13 +302,14 @@ def download_dispatch_package(job_id: int, db: Session = Depends(get_db)):
     zip_filepath = os.path.join(local_dir, zip_filename)
 
     # Determine eisbn
-    eisbn = ""
-    for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
-        if candidate:
-            m_isbn = re.search(r'(\d{10,13})', candidate)
-            if m_isbn:
-                eisbn = m_isbn.group(1)
-                break
+    eisbn = getattr(job, "eisbn", None) or ""
+    if not eisbn:
+        for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
+            if candidate:
+                m_isbn = re.search(r'(\d{10,13})', candidate)
+                if m_isbn:
+                    eisbn = m_isbn.group(1)
+                    break
 
     if not eisbn:
         if job.pdf_filename:
@@ -420,6 +423,7 @@ def get_customer_report(
             "client_name": "BOD",
             "project_name": job.project_name,
             "pdf_filename": job.pdf_filename,
+            "eisbn": getattr(job, "eisbn", None),
             "cover_filename": getattr(job, "cover_filename", None),
             "cover_filepath": getattr(job, "cover_filepath", None),
             "pdf_type": job.pdf_type,
@@ -682,6 +686,7 @@ class BodAnalysisUpdateRequest(BaseModel):
     pdf_page_count: Optional[int] = None
     pdf_type: Optional[str] = None
     pdf_language: Optional[str] = None
+    eisbn: Optional[str] = None
     due_date: Optional[str] = None
     due_date_reason: Optional[str] = None
 
@@ -740,7 +745,19 @@ def update_job_analysis(
             })
             job.pdf_language = new_lang or None
 
-    # 4. Due Date
+    # 4. eISBN
+    if payload.eisbn is not None:
+        new_eisbn = payload.eisbn.strip() if payload.eisbn else ""
+        old_eisbn = (getattr(job, "eisbn", None) or "").strip()
+        if new_eisbn != old_eisbn:
+            changes.append({
+                "field": "eISBN",
+                "old": old_eisbn if old_eisbn else None,
+                "new": new_eisbn if new_eisbn else None
+            })
+            job.eisbn = new_eisbn or None
+
+    # 5. Due Date
     if payload.due_date is not None and payload.due_date.strip():
         new_due_date = None
         try:
@@ -815,6 +832,7 @@ def update_job_analysis(
             "id": job.id,
             "pdf_filename": job.pdf_filename,
             "pdf_filepath": job.pdf_filepath,
+            "eisbn": getattr(job, "eisbn", None),
             "pdf_page_count": job.pdf_page_count,
             "pdf_type": job.pdf_type,
             "pdf_language": job.pdf_language,
@@ -1082,14 +1100,15 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
         zip_filepath = os.path.join(local_dir, zip_filename)
 
         # Determine eisbn base:
-        # First priority: find 10 to 13 digits (ISBN) in pdf_filename, epub_filename, or project_name
-        eisbn = ""
-        for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
-            if candidate:
-                m_isbn = re.search(r'(\d{10,13})', candidate)
-                if m_isbn:
-                    eisbn = m_isbn.group(1)
-                    break
+        # First priority: job.eisbn if set, else find 10 to 13 digits (ISBN) in pdf_filename, epub_filename, or project_name
+        eisbn = getattr(job, "eisbn", None) or ""
+        if not eisbn:
+            for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
+                if candidate:
+                    m_isbn = re.search(r'(\d{10,13})', candidate)
+                    if m_isbn:
+                        eisbn = m_isbn.group(1)
+                        break
 
         # Fallback if no numeric ISBN found (e.g. non-standard or test names)
         if not eisbn:
@@ -1632,10 +1651,20 @@ def create_job(
             with open(cover_filepath, "wb") as c_buf:
                 shutil.copyfileobj(cover_file.file, c_buf)
 
+    # Automatically extract eISBN if present in filename or project_name
+    extracted_eisbn = None
+    for cand in (file.filename, project_name):
+        if cand:
+            m_isbn = re.search(r'(\d{10,13})', cand)
+            if m_isbn:
+                extracted_eisbn = m_isbn.group(1)
+                break
+
     new_job = BodJob(
         project_name=project_name,
         pdf_filename=file.filename,
         pdf_filepath=local_path,
+        eisbn=extracted_eisbn,
         cover_filename=cover_filename,
         cover_filepath=cover_filepath,
         pdf_page_count=page_count,
