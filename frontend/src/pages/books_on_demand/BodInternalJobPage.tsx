@@ -675,7 +675,7 @@ export function BodInternalJobPage() {
                   </span>
                 </div>
                 <p className="text-xs text-muted m-0 mt-0.5">
-                  Review and update document specifications (Pages, Type, Language, Due Date).
+                  Review and update document specifications (eISBN, Pages, Type, Language, Due Date).
                 </p>
               </div>
             </div>
