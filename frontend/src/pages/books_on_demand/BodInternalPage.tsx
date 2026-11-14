@@ -29,6 +29,7 @@ export function BodInternalPage() {
   // Form states
   const [showAddJobModal, setShowAddJobModal] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [coverFile, setCoverFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
@@ -141,6 +142,9 @@ export function BodInternalPage() {
     setErrorMsg(null)
     const formData = new FormData()
     formData.append('file', pdfFile)
+    if (coverFile) {
+      formData.append('cover_file', coverFile)
+    }
 
     try {
       await api.post('/bod/jobs', formData, {
@@ -149,6 +153,7 @@ export function BodInternalPage() {
       toast.success("Job created successfully")
 
       setPdfFile(null)
+      setCoverFile(null)
       setShowAddJobModal(false)
       fetchJobs()
     } catch (err: any) {
@@ -2608,6 +2613,37 @@ export function BodInternalPage() {
                       <button
                         type="button"
                         onClick={() => setPdfFile(null)}
+                        className="text-red-600 hover:text-red-500 font-bold text-[10px]"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                    Cover Image <span className="text-muted/60 normal-case font-normal">(Optional — .jpg, .png)</span>
+                  </label>
+                  <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-3 text-center cursor-pointer transition-colors bg-background/50">
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.tif,.tiff"
+                      onChange={e => e.target.files && setCoverFile(e.target.files[0])}
+                      className="hidden"
+                      id="cover-upload"
+                    />
+                    <label htmlFor="cover-upload" className="cursor-pointer space-y-1 block">
+                      <p className="text-xs font-semibold text-text">Click to choose Cover Image</p>
+                      <p className="text-[9px] text-muted">Supports JPG, PNG, TIFF</p>
+                    </label>
+                  </div>
+                  {coverFile && (
+                    <div className="mt-2 bg-background border border-border rounded-lg p-2 text-xs text-muted flex items-center justify-between">
+                      <span className="truncate max-w-[280px] font-medium text-emerald-600 dark:text-emerald-400">{coverFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setCoverFile(null)}
                         className="text-red-600 hover:text-red-500 font-bold text-[10px]"
                       >
                         Remove

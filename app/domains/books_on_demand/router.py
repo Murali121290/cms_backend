@@ -1469,9 +1469,92 @@ def upload_epub(
     return {"message": "EPUB uploaded and moved to QC", "job": job}
 
 
+@router.post("/jobs/{job_id}/upload-cover")
+def upload_cover(
+    job_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Upload or replace the cover image for a Books on Demand job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    allowed_exts = ('.jpg', '.jpeg', '.png', '.tif', '.tiff')
+    if ext not in allowed_exts:
+        raise HTTPException(status_code=400, detail=f"Cover file must be an image ({', '.join(allowed_exts)})")
+
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_upload_dir = os.path.join(upload_dir, "bod")
+    project_dir = os.path.join(bod_upload_dir, "BOD", job.project_name or f"job_{job.id}")
+    os.makedirs(project_dir, exist_ok=True)
+
+    # Determine user identifier for backup/audit
+    user_identifier = None
+    if current_user:
+        first_name = current_user.get("first_name") if isinstance(current_user, dict) else getattr(current_user, "first_name", None)
+        last_name = current_user.get("last_name") if isinstance(current_user, dict) else getattr(current_user, "last_name", None)
+        full_name = f"{first_name or ''} {last_name or ''}".strip()
+        user_identifier = full_name or (current_user.get("username") if isinstance(current_user, dict) else getattr(current_user, "username", None))
+    if not user_identifier:
+        user_identifier = job.current_assignee or "System"
+
+    # Backup existing cover if present
+    if job.cover_filepath and os.path.exists(job.cover_filepath):
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        old_basename = os.path.basename(job.cover_filepath)
+        name_no_ext, old_ext = os.path.splitext(old_basename)
+        backup_filename = f"{name_no_ext}_{re.sub(r'[^a-zA-Z0-9_-]', '_', user_identifier)}_{timestamp_str}{old_ext}"
+        backup_dir = os.path.join(project_dir, "backup")
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(backup_dir, backup_filename)
+        try:
+            shutil.move(job.cover_filepath, backup_path)
+            logger.info(f"Backed up existing cover to {backup_path}")
+        except Exception as e:
+            logger.warning(f"Could not backup existing cover image: {e}")
+
+    cover_filename = file.filename
+    target_cover_path = os.path.join(project_dir, cover_filename)
+    with open(target_cover_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    job.cover_filename = cover_filename
+    job.cover_filepath = target_cover_path
+
+    # Record in file history
+    from sqlalchemy.orm.attributes import flag_modified
+    now_iso = datetime.now(timezone.utc).isoformat()
+    file_hist = list(job.file_history or [])
+    file_hist.append({
+        "action": "upload_cover",
+        "cover_filename": cover_filename,
+        "cover_filepath": target_cover_path,
+        "user": user_identifier,
+        "timestamp": now_iso,
+        "stage": job.current_stage_name or "Production"
+    })
+    job.file_history = file_hist
+    flag_modified(job, "file_history")
+
+    db.commit()
+    db.refresh(job)
+
+    return {
+        "status": True,
+        "message": "Cover image uploaded successfully",
+        "cover_filename": job.cover_filename,
+        "job": job
+    }
+
+
 @router.post("/jobs")
 def create_job(
     file: UploadFile = File(...),
+    cover_file: Optional[UploadFile] = File(None),
     is_fastrack: bool = Form(False),
     db: Session = Depends(get_db)
 ):
@@ -1538,10 +1621,23 @@ def create_job(
         }
     }
     
+    # Handle optional cover image upload during job creation
+    cover_filename = None
+    cover_filepath = None
+    if cover_file and cover_file.filename:
+        c_ext = os.path.splitext(cover_file.filename)[1].lower()
+        if c_ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff'):
+            cover_filename = cover_file.filename
+            cover_filepath = os.path.join(project_dir, cover_filename)
+            with open(cover_filepath, "wb") as c_buf:
+                shutil.copyfileobj(cover_file.file, c_buf)
+
     new_job = BodJob(
         project_name=project_name,
         pdf_filename=file.filename,
         pdf_filepath=local_path,
+        cover_filename=cover_filename,
+        cover_filepath=cover_filepath,
         pdf_page_count=page_count,
         pdf_type=pdf_type,
         pdf_language=pdf_language,
@@ -1559,7 +1655,7 @@ def create_job(
     
     # Send email
     if settings.BOD_MANAGER_EMAIL:
-        send_bod_new_job_email(settings.BOD_MANAGER_EMAIL, new_job.project_name, file.filename)
+        send_bod_new_job_email(settings.BOD_MANAGER_EMAIL, new_job.project_name, file.filename, cover_filename=cover_filename)
     
     return {"message": "Job created successfully", "job": new_job}
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X, Image as ImageIcon } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -41,6 +41,7 @@ export function BodInternalJobPage() {
   const [loading, setLoading] = useState(true)
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [isUploadingCover, setIsUploadingCover] = useState(false)
   const [isOpeningValidator, setIsOpeningValidator] = useState(false)
   const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files'>('stage')
   const [aceFile, setAceFile] = useState<File | null>(null)
@@ -243,6 +244,28 @@ export function BodInternalJobPage() {
       toast.error(err.response?.data?.detail || "Failed to update job analysis")
     } finally {
       setIsSavingAnalysis(false)
+    }
+  }
+
+  const uploadCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return
+    const file = e.target.files[0]
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    setIsUploadingCover(true)
+    try {
+      await api.post(`/bod/jobs/${jobId}/upload-cover`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      toast.success("Cover image uploaded successfully")
+      fetchJob()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to upload cover image")
+    } finally {
+      setIsUploadingCover(false)
+      if (e.target) e.target.value = ''
     }
   }
 
@@ -823,17 +846,54 @@ export function BodInternalJobPage() {
               </Button>
             </div>
 
-            {job.cover_filename && (
+            {job.cover_filename ? (
               <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Cover Image</p>
                   <p className="text-sm font-semibold truncate text-emerald-600 dark:text-emerald-400">{job.cover_filename}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={downloadCover} leftIcon={<Download size={14} />}>
-                  Download
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={downloadCover} leftIcon={<Download size={14} />}>
+                    Download
+                  </Button>
+                  {!isCompleted && (
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.tif,.tiff"
+                        onChange={uploadCover}
+                        disabled={isUploadingCover}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
+                        title="Replace Cover Image"
+                      />
+                      <Button size="sm" variant="outline" disabled={isUploadingCover} leftIcon={<Upload size={14} />}>
+                        {isUploadingCover ? '...' : 'Replace'}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            ) : !isCompleted ? (
+              <div className="bg-background/60 border border-dashed border-border hover:border-primary/50 rounded-lg p-3 flex items-center justify-between transition-colors">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Cover Image</p>
+                  <p className="text-xs text-muted">No cover image uploaded yet</p>
+                </div>
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.tif,.tiff"
+                    onChange={uploadCover}
+                    disabled={isUploadingCover}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
+                    title="Upload Cover Image"
+                  />
+                  <Button size="sm" variant="outline" disabled={isUploadingCover} leftIcon={<Upload size={14} />}>
+                    {isUploadingCover ? 'Uploading...' : 'Upload Cover'}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             {job.epub_filename && (
               <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
@@ -912,25 +972,25 @@ export function BodInternalJobPage() {
             {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
               (!h.changes || h.changes.length === 0) || h.changes.some((c: any) => c.field === 'Due Date')
             ) && (
-              <button
-                onClick={() => setActiveTab('duedate')}
-                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-                  }`}
-              >
-                Due Date History
-              </button>
-            )}
+                <button
+                  onClick={() => setActiveTab('duedate')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Due Date History
+                </button>
+              )}
             {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
               h.changes && h.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
             ) && (
-              <button
-                onClick={() => setActiveTab('priority')}
-                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-                  }`}
-              >
-                Priority History
-              </button>
-            )}
+                <button
+                  onClick={() => setActiveTab('priority')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Priority History
+                </button>
+              )}
             {job.file_history && Array.isArray(job.file_history) && job.file_history.length > 0 && (
               <button
                 onClick={() => setActiveTab('files')}
