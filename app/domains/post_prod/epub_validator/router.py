@@ -1087,3 +1087,239 @@ def export_qa_report(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{folder_name}_QA_Report.xlsx"'},
     )
+
+
+@router.get("/projects/{folder_name}/qc-status")
+def get_qc_readiness_status(folder_name: str, db: Session = Depends(get_db)):
+    """
+    Evaluates QC readiness across stages:
+    1. EPUBCheck: Latest txt log in epubcheck/ must contain 'No errors or warnings detected. EPUB is valid!'
+    2. ACE: ace/report.json totals must have critical=0, serious=0, moderate=0, minor=0
+    3. Customised check: Latest validation json in validations/ must have all issues_count == 0
+    4. Output EPUB: output/*.epub must exist and be <= 100 MB
+    """
+    import glob
+    import json
+    from .services.upload_service import UPLOAD_DIR
+    from .models import EvProject
+
+    project_dir = os.path.join(UPLOAD_DIR, folder_name)
+    if not os.path.exists(project_dir):
+        raise HTTPException(status_code=404, detail=f"Project directory '{folder_name}' not found")
+
+    stages = {}
+
+    # ── Stage 1: EPUBCheck ──────────────────────────────────────────────────
+    epubcheck_dir = os.path.join(project_dir, "epubcheck")
+    epubcheck_txt_files = []
+    if os.path.isdir(epubcheck_dir):
+        epubcheck_txt_files = sorted(
+            glob.glob(os.path.join(epubcheck_dir, "*.txt")),
+            key=lambda p: os.path.getmtime(p),
+            reverse=True
+        )
+
+    if not epubcheck_txt_files:
+        stages["epubcheck"] = {
+            "status": "failed",
+            "message": "EPUBCheck log not found. Please run EPUBCheck validation.",
+            "details": "No .txt log generated in epubcheck directory.",
+        }
+    else:
+        latest_txt = epubcheck_txt_files[0]
+        try:
+            with open(latest_txt, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            if "No errors or warnings detected. EPUB is valid!" in content:
+                stages["epubcheck"] = {
+                    "status": "passed",
+                    "message": "EPUB is valid! No errors or warnings detected.",
+                    "details": os.path.basename(latest_txt),
+                }
+            else:
+                stages["epubcheck"] = {
+                    "status": "failed",
+                    "message": "EPUBCheck detected errors or warnings.",
+                    "details": os.path.basename(latest_txt),
+                }
+        except Exception as e:
+            stages["epubcheck"] = {
+                "status": "failed",
+                "message": f"Could not read EPUBCheck log: {str(e)}",
+                "details": os.path.basename(latest_txt),
+            }
+
+    # ── Stage 2: ACE Validation ─────────────────────────────────────────────
+    ace_report_path = os.path.join(project_dir, "ace", "report.json")
+    if not os.path.isfile(ace_report_path):
+        stages["ace"] = {
+            "status": "failed",
+            "message": "ACE report not found. Please run accessibility validation.",
+            "details": "ace/report.json missing",
+            "totals": None,
+        }
+    else:
+        try:
+            with open(ace_report_path, "r", encoding="utf-8", errors="replace") as f:
+                ace_data = json.load(f)
+
+            totals = (
+                ace_data.get("data", {}).get("report", {}).get("totals")
+                or ace_data.get("report", {}).get("totals")
+                or ace_data.get("totals")
+                or {}
+            )
+            critical = int(totals.get("critical", 0) or 0)
+            serious = int(totals.get("serious", 0) or 0)
+            moderate = int(totals.get("moderate", 0) or 0)
+            minor = int(totals.get("minor", 0) or 0)
+
+            total_violations = critical + serious + moderate + minor
+            if total_violations == 0:
+                stages["ace"] = {
+                    "status": "passed",
+                    "message": "All accessibility checks passed (0 violations).",
+                    "totals": totals,
+                }
+            else:
+                parts = []
+                if critical: parts.append(f"{critical} critical")
+                if serious: parts.append(f"{serious} serious")
+                if moderate: parts.append(f"{moderate} moderate")
+                if minor: parts.append(f"{minor} minor")
+                stages["ace"] = {
+                    "status": "failed",
+                    "message": f"Accessibility issues detected: {', '.join(parts)}.",
+                    "totals": totals,
+                }
+        except Exception as e:
+            stages["ace"] = {
+                "status": "failed",
+                "message": f"Could not parse ACE report: {str(e)}",
+                "totals": None,
+            }
+
+    # ── Stage 3: Customised Check ───────────────────────────────────────────
+    val_dir = os.path.join(project_dir, "validations")
+    latest_val_file = None
+
+    proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+    if proj and proj.latest_validation_file:
+        candidate = os.path.join(val_dir, proj.latest_validation_file)
+        if os.path.isfile(candidate):
+            latest_val_file = candidate
+
+    if not latest_val_file and os.path.isdir(val_dir):
+        # Fall back to newest non-chapter validation file (or any newest JSON)
+        all_vals = sorted(
+            glob.glob(os.path.join(val_dir, "*.json")),
+            key=lambda p: os.path.getmtime(p),
+            reverse=True
+        )
+        if all_vals:
+            # Prefer comprehensive runs (like admin_*) if available
+            admin_runs = [f for f in all_vals if os.path.basename(f).startswith("admin_") or "_" in os.path.basename(f)]
+            latest_val_file = admin_runs[0] if admin_runs else all_vals[0]
+
+    if not latest_val_file or not os.path.isfile(latest_val_file):
+        stages["customised_check"] = {
+            "status": "failed",
+            "message": "Customised validation report not found. Run validation first.",
+            "details": "No validation file available",
+            "failed_count": 0,
+        }
+    else:
+        try:
+            with open(latest_val_file, "r", encoding="utf-8", errors="replace") as f:
+                val_data = json.load(f)
+
+            files = val_data.get("files", [])
+            failing_entries = []
+            for item in files:
+                res = item.get("result", {})
+                count = res.get("issues_count", 0)
+                if count > 0:
+                    r_id = item.get("rule_id", "Rule")
+                    f_name = item.get("file_details", {}).get("file_name", "unknown")
+                    failing_entries.append(f"{r_id} on {f_name} ({count} issue{'s' if count > 1 else ''})")
+
+            if len(failing_entries) == 0:
+                stages["customised_check"] = {
+                    "status": "passed",
+                    "message": "All customised validation rules passed (0 issues).",
+                    "details": os.path.basename(latest_val_file),
+                    "failed_count": 0,
+                }
+            else:
+                stages["customised_check"] = {
+                    "status": "failed",
+                    "message": f"{len(failing_entries)} rule failure(s) found in {os.path.basename(latest_val_file)}.",
+                    "details": failing_entries[:5],
+                    "failed_count": len(failing_entries),
+                }
+        except Exception as e:
+            stages["customised_check"] = {
+                "status": "failed",
+                "message": f"Could not read validation run: {str(e)}",
+                "details": str(e),
+                "failed_count": 1,
+            }
+
+    # ── Stage 4: Output EPUB File Size Check ────────────────────────────────
+    out_dir = os.path.join(project_dir, "output")
+    epub_files = []
+    if os.path.isdir(out_dir):
+        epub_files = sorted(
+            glob.glob(os.path.join(out_dir, "*.epub")),
+            key=lambda p: os.path.getmtime(p),
+            reverse=True
+        )
+
+    if not epub_files:
+        stages["output_epub"] = {
+            "status": "failed",
+            "message": "Output EPUB file not found in output directory.",
+            "file_size_mb": 0,
+        }
+    else:
+        latest_epub = epub_files[0]
+        try:
+            size_bytes = os.path.getsize(latest_epub)
+            size_mb = round(size_bytes / (1024 * 1024), 2)
+            epub_name = os.path.basename(latest_epub)
+
+            # Check threshold: <= 100 MB
+            if size_mb <= 100:
+                stages["output_epub"] = {
+                    "status": "passed",
+                    "message": f"{epub_name} is {size_mb} MB (<= 100 MB limit).",
+                    "file_name": epub_name,
+                    "file_size_mb": size_mb,
+                }
+            else:
+                stages["output_epub"] = {
+                    "status": "failed",
+                    "message": f"{epub_name} size ({size_mb} MB) exceeds 100 MB limit.",
+                    "file_name": epub_name,
+                    "file_size_mb": size_mb,
+                }
+        except Exception as e:
+            stages["output_epub"] = {
+                "status": "failed",
+                "message": f"Could not inspect output EPUB: {str(e)}",
+                "file_size_mb": 0,
+            }
+
+    # Overall readiness
+    all_passed = (
+        stages.get("epubcheck", {}).get("status") == "passed"
+        and stages.get("ace", {}).get("status") == "passed"
+        and stages.get("customised_check", {}).get("status") == "passed"
+        and stages.get("output_epub", {}).get("status") == "passed"
+    )
+
+    return {
+        "folder_name": folder_name,
+        "all_passed": all_passed,
+        "stages": stages,
+    }
