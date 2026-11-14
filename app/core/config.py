@@ -37,7 +37,9 @@ class Settings(BaseSettings):
     PEOPLEHUB_DATABASE_URL: str = "postgresql://postgres:password@localhost:5435/peoplehub_db"
     UPLOAD_FOLDER: str = str(UPLOADS_DIR)
     REDIS_URL: str = "redis://localhost:6379/0"
-    INDESIGN_SERVER_URL: str = "http://10.1.6.108:5555"
+    INDESIGN_SERVER_URL: str = "http://10.1.6.24:5555"
+    WORD_TO_XML_SERVER_URL: str = ""
+    WORD_TO_XML_TIMEOUT_SECONDS: int = 3600
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:8085",
         "http://localhost:8080",
@@ -103,6 +105,7 @@ class Settings(BaseSettings):
     BOD_FTP_USERNAME: str = ""
     BOD_FTP_PASSWORD: str = ""
     BOD_FTP_BASE_PATH: str = "Input"
+    BOD_FTP_PRODUCTION_PATH: str = "Production"
     BOD_FTP_DELIVERY_PATH: str = "Delivery"
     BOD_MANAGER_EMAIL: str = ""
     BOD_CUSTOM_STAGES: str = "Add job,Production,QC,Ready to Dispatch,Archive"

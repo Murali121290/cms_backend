@@ -185,7 +185,7 @@ def test_api_v2_parse_docx_stylesheet_endpoint(client, user_factory, db_session)
     client.post("/api/v2/session/login", json={"username": "alice", "password": "Secret123!"})
 
     from app.domains.projects.models import Project
-    project = Project(name="Virology Book", code="VIR-01", description="Virology test project")
+    project = Project(project_title="Virology Book", project_code="VIR-01")
     db_session.add(project)
     db_session.commit()
 

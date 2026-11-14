@@ -10,6 +10,7 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
+  BookMarked,
 } from "lucide-react";
 
 import type {
@@ -20,10 +21,12 @@ import type {
   StylesheetCreateRequest,
   DocxStylesheetParseResponse,
   CESeverity,
+  StyleProfile,
 } from "@/types/api";
 import { CERulesEditor } from "./CERulesEditor";
 import { useCeRulesQuery, useIATemplateQuery } from "./useStylesheetsQuery";
-import { parseDocxStylesheet } from "@/api/stylesheets";
+import { parseDocxStylesheet, getSpringerPreset } from "@/api/stylesheets";
+import { StyleProfilePanel } from "./StyleProfilePanel";
 
 interface StylesheetFormDrawerProps {
   isOpen: boolean;
@@ -56,16 +59,27 @@ export function StylesheetFormDrawer({
   const [selectedRows, setSelectedRows] = useState<IATemplateRow[]>([]);
   const [expandedElements, setExpandedElements] = useState<Set<string>>(new Set());
   const [ceRules, setCeRules] = useState<CERuleSettings>({});
-  const [section, setSection] = useState<"ia" | "ce">("ce");
+  const [section, setSection] = useState<"ce" | "profile" | "ia">("ce");
+  const [styleProfile, setStyleProfile] = useState<StyleProfile>({});
+  const [isUploadingDocx, setIsUploadingDocx] = useState(false);
+  const [isLoadingSpringer, setIsLoadingSpringer] = useState(false);
+  const [docxImportData, setDocxImportData] = useState<DocxStylesheetParseResponse | null>(null);
+  const [showDocxDetails, setShowDocxDetails] = useState(false);
+  const [isApplyingBookType, setIsApplyingBookType] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const ceRulesQuery = useCeRulesQuery();
   const fallbackIaQuery = useIATemplateQuery();
   const effectiveIaTemplate = iaTemplate.length > 0 ? iaTemplate : (fallbackIaQuery.data?.rows || []);
 
-  // DOCX Import states
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isUploadingDocx, setIsUploadingDocx] = useState(false);
-  const [docxImportData, setDocxImportData] = useState<DocxStylesheetParseResponse | null>(null);
-  const [showDocxDetails, setShowDocxDetails] = useState(false);
+  // Total style profile items count for badge
+  const totalProfileItems = useMemo(() => {
+    const redFlagsCount = (styleProfile.red_flags as Array<any>)?.length ?? 0;
+    const avoidWordsCount = Object.keys(styleProfile.avoid_words ?? {}).length;
+    const replacementsCount = styleProfile.word_replacements?.length ?? 0;
+    const wordsCount = styleProfile.word_list?.length ?? 0;
+    return redFlagsCount + avoidWordsCount + replacementsCount + wordsCount;
+  }, [styleProfile]);
 
   useEffect(() => {
     if (editingStylesheet) {
@@ -81,6 +95,7 @@ export function StylesheetFormDrawer({
         new Set(editingStylesheet.selected_ia_rows.map((row) => row.element))
       );
       setCeRules(editingStylesheet.ce_rules ?? {});
+      setStyleProfile((editingStylesheet.style_profile as StyleProfile) ?? {});
       if (editingStylesheet.ce_rules && Object.keys(editingStylesheet.ce_rules).length > 0) {
         setSection("ce");
       } else if (editingStylesheet.selected_ia_rows?.length > 0) {
@@ -94,6 +109,7 @@ export function StylesheetFormDrawer({
       setSelectedRows([]);
       setExpandedElements(new Set());
       setCeRules({});
+      setStyleProfile({});
       setSection("ce");
     }
     setIsFullPage(true);
@@ -178,12 +194,17 @@ export function StylesheetFormDrawer({
         };
       }
       setCeRules(newCeRules);
+      setStyleProfile(res.style_profile ?? {});
 
       // Auto-match IA rows from template
       const newSelectedRows: IATemplateRow[] = [];
       const newExpanded = new Set<string>(expandedElements);
       for (const matchedIa of res.matched_ia_rows) {
         const found =
+          effectiveIaTemplate.find(
+            (t) => t.element === matchedIa.element && t.pattern === matchedIa.pattern &&
+              (!matchedIa.subtype || t.subtype === matchedIa.subtype),
+          ) ||
           effectiveIaTemplate.find(
             (t) =>
               t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
@@ -238,6 +259,123 @@ export function StylesheetFormDrawer({
     }
   };
 
+  // Book type / list style: re-apply only the Springer overlay rules and lists
+  const handleBookTypeChange = async (bookType: string, listStyle: string) => {
+    try {
+      setIsApplyingBookType(true);
+      const res = await getSpringerPreset(bookType, listStyle);
+      const overlay = ["8", "118", "121"];
+      setCeRules((prev) => {
+        const next = { ...prev };
+        for (const sno of overlay) {
+          const item = res.ce_rules?.[sno];
+          if (item) next[sno] = { enabled: item.enabled, option: item.option, severity: item.severity as CESeverity };
+        }
+        return next;
+      });
+      const overlayFinds = new Set(["ECG", "mmHg", "mm Hg"]);
+      setStyleProfile((prev) => ({
+        ...prev,
+        book_type: bookType,
+        list_style: listStyle,
+        unit_style: { ...(prev.unit_style ?? {}), ...(res.style_profile?.unit_style ?? {}) },
+        word_replacements: [
+          ...(prev.word_replacements ?? []).filter((w) => !overlayFinds.has(w.find)),
+          ...((res.style_profile?.word_replacements ?? []) as { find: string; replace: string; note?: string }[]).filter(
+            (w) => overlayFinds.has(w.find),
+          ),
+        ],
+      }));
+    } catch (err) {
+      console.error("Failed to apply Springer book type:", err);
+    } finally {
+      setIsApplyingBookType(false);
+    }
+  };
+
+  const handleLoadSpringerPreset = async () => {
+    try {
+      setIsLoadingSpringer(true);
+      const res = await getSpringerPreset(styleProfile.book_type ?? "standard", styleProfile.list_style ?? "narrative");
+      setName(res.name);
+      setDescription(res.description);
+
+      const newCeRules: CERuleSettings = {};
+      for (const [sno, r] of Object.entries(res.ce_rules || {})) {
+        const item = r as any;
+        newCeRules[sno] = {
+          enabled: item.enabled,
+          option: item.option,
+          severity: item.severity as CESeverity,
+        };
+      }
+      setCeRules(newCeRules);
+      setStyleProfile(res.style_profile ?? {});
+
+      const newSelectedRows: IATemplateRow[] = [];
+      const newExpanded = new Set<string>(expandedElements);
+      for (const matchedIa of (res.selected_ia_rows || [])) {
+        const found =
+          effectiveIaTemplate.find(
+            (t) => t.element === matchedIa.element && t.pattern === matchedIa.pattern &&
+              (!matchedIa.subtype || t.subtype === matchedIa.subtype),
+          ) ||
+          effectiveIaTemplate.find(
+            (t) =>
+              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
+              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
+                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern)) &&
+              (!matchedIa.subtype || t.subtype.toLowerCase() === matchedIa.subtype.toLowerCase())
+          ) || {
+            element: matchedIa.element,
+            subtype: matchedIa.subtype || "General",
+            pattern: matchedIa.pattern,
+            example: matchedIa.example || null,
+          };
+        newSelectedRows.push(found);
+        newExpanded.add(found.element);
+      }
+      setSelectedRows(newSelectedRows);
+      setExpandedElements(newExpanded);
+
+      const matchedMap: Record<string, any> = {};
+      for (const [sno, r] of Object.entries(res.ce_rules || {})) {
+        const item = r as any;
+        matchedMap[sno] = {
+          sno: Number(sno),
+          rule_name: `Rule ${sno}`,
+          option: item.option,
+          enabled: item.enabled,
+          severity: item.severity,
+          source_label: "Springer Preset",
+          source_value: "Springer Style Sheet (July 2026)",
+          explanation: `Default Springer specification (Option ${item.option})`,
+          notes: `Default Springer specification (Option ${item.option})`,
+        };
+      }
+      setDocxImportData({
+        metadata: { "Customer": "Springer Publishing Company", "Edition": "July 2026 Update" },
+        suggested_name: res.name,
+        suggested_description: res.description,
+        detected_preset_id: "springer",
+        matched_ce_rules: matchedMap,
+        matched_ia_rows: res.selected_ia_rows || [],
+        word_list: res.word_list || [],
+        total_specs_scanned: Object.keys(res.ce_rules || {}).length,
+        matched_rules_count: Object.keys(res.ce_rules || {}).length,
+        style_profile: res.style_profile,
+        unresolved_specs: [],
+      });
+
+      setSection("ce");
+    } catch (err: any) {
+      console.error("Failed to load Springer preset:", err);
+      alert("Failed to load Springer Publishing House Style preset.");
+    } finally {
+      setIsLoadingSpringer(false);
+    }
+  };
+
   const handleSubmit = () => {
     if (!name.trim()) {
       return;
@@ -248,6 +386,7 @@ export function StylesheetFormDrawer({
       description: description.trim() || null,
       selected_ia_rows: selectedRows,
       ce_rules: ceRules,
+      style_profile: styleProfile,
     };
 
     if (editingStylesheet) {
@@ -258,6 +397,7 @@ export function StylesheetFormDrawer({
           description: payload.description,
           selected_ia_rows: payload.selected_ia_rows,
           ce_rules: payload.ce_rules,
+          style_profile: payload.style_profile,
         },
       });
     } else {
@@ -330,7 +470,7 @@ export function StylesheetFormDrawer({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploadingDocx}
+              disabled={isUploadingDocx || isLoadingSpringer}
               title="Upload existing Word style sheet (.docx) to automatically choose rules and options"
               className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs disabled:opacity-50"
             >
@@ -343,6 +483,25 @@ export function StylesheetFormDrawer({
                 <>
                   <FileText className="w-3.5 h-3.5 text-blue-600" />
                   <span>Word Style Sheet</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleLoadSpringerPreset}
+              disabled={isLoadingSpringer || isUploadingDocx}
+              title="Load official Springer Publishing House Style Sheet (July 2026 update)"
+              className="px-2.5 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-md transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs disabled:opacity-50"
+            >
+              {isLoadingSpringer ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                  <span>Loading...</span>
+                </>
+              ) : (
+                <>
+                  <BookMarked className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Springer Preset</span>
                 </>
               )}
             </button>
@@ -361,19 +520,47 @@ export function StylesheetFormDrawer({
                     : "text-slate-600 hover:text-slate-900"
                   }`}
               >
-                CE Rules ({ceRulesQuery.data?.rules.length ?? 72})
+                CE Rules ({ceRulesQuery.data?.rules.length ?? 106})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={section === "profile"}
+                onClick={() => setSection("profile")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${section === "profile"
+                    ? "bg-white text-slate-900 shadow-xs font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                  }`}
+              >
+                <span>Style Profile &amp; Red Flags</span>
+                {totalProfileItems > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                    {totalProfileItems}
+                  </span>
+                )}
               </button>
               <button
                 type="button"
                 role="tab"
                 aria-selected={section === "ia"}
                 onClick={() => setSection("ia")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${section === "ia"
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${section === "ia"
                     ? "bg-white text-slate-900 shadow-xs font-semibold"
                     : "text-slate-600 hover:text-slate-900"
                   }`}
               >
-                IA Rows ({selectedRows.length})
+                <span>IA Rules</span>
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                    selectedRows.length > 0
+                      ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                      : "bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  {selectedRows.length > 0
+                    ? `${selectedRows.length} active`
+                    : `${effectiveIaTemplate.length} available`}
+                </span>
               </button>
             </div>
 
@@ -468,6 +655,11 @@ export function StylesheetFormDrawer({
                         <div key={sno} className="bg-white p-1.5 rounded border border-emerald-200 text-slate-800">
                           <span className="font-mono font-bold text-emerald-800">R{sno}</span> ({r.rule_name}):{" "}
                           <span className="font-semibold">Option {r.option}</span>
+                          {r.source_label.startsWith("Springer default") ? (
+                            <span className="ml-1 text-[9px] font-bold uppercase text-sky-700 bg-sky-50 border border-sky-200 px-1 rounded">default</span>
+                          ) : (
+                            <span className="ml-1 text-[9px] font-bold uppercase text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 rounded">from sheet</span>
+                          )}
                           <span className="block text-[10px] text-slate-500 truncate" title={r.source_value}>
                             From: "{r.source_label}" → {r.source_value}
                           </span>
@@ -495,7 +687,15 @@ export function StylesheetFormDrawer({
             </div>
           )}
 
-          {section === "ce" ? (
+          {section === "profile" ? (
+            <StyleProfilePanel
+              profile={styleProfile}
+              unresolved={docxImportData?.unresolved_specs ?? []}
+              onChange={setStyleProfile}
+              onBookTypeChange={handleBookTypeChange}
+              isApplyingBookType={isApplyingBookType}
+            />
+          ) : section === "ce" ? (
             <div>
               {ceRulesQuery.isPending ? (
                 <div className="p-12 text-center text-sm text-muted">Loading checklist rules…</div>
@@ -516,11 +716,26 @@ export function StylesheetFormDrawer({
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-text">Legacy Style Rules from IA Analysis</h3>
-                  <p className="text-xs text-muted">Select specific patterns to enforce from previous publication analyses.</p>
+                  <p className="text-xs text-muted">Select specific patterns to enforce from previous publication analyses ({effectiveIaTemplate.length} available).</p>
                 </div>
-                <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
-                  {selectedRows.length} rules selected
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+                    {selectedRows.length} of {effectiveIaTemplate.length} rules selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedRows.length === effectiveIaTemplate.length) {
+                        setSelectedRows([]);
+                      } else {
+                        setSelectedRows([...effectiveIaTemplate]);
+                      }
+                    }}
+                    className="text-xs font-semibold px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors cursor-pointer"
+                  >
+                    {selectedRows.length === effectiveIaTemplate.length ? "Clear All" : "Select All 357 Rules"}
+                  </button>
+                </div>
               </div>
               <div className="border border-border rounded-lg bg-white overflow-hidden shadow-xs divide-y divide-border">
                 {groupedRows.map((group) => (
@@ -667,7 +882,7 @@ export function StylesheetFormDrawer({
               />
             </div>
 
-            <div className="flex gap-1.5" role="tablist">
+            <div className="flex flex-wrap gap-1.5" role="tablist">
               <button
                 type="button"
                 role="tab"
@@ -676,7 +891,22 @@ export function StylesheetFormDrawer({
                 className={`px-3 py-1 rounded-full text-xs font-medium border ${section === "ce" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
                   }`}
               >
-                CE rules ({ceRulesQuery.data?.rules.length ?? 72})
+                CE rules ({ceRulesQuery.data?.rules.length ?? 106})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={section === "profile"}
+                onClick={() => setSection("profile")}
+                className={`px-3 py-1 rounded-full text-xs font-medium border flex items-center gap-1 ${section === "profile" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
+                  }`}
+              >
+                <span>Style profile</span>
+                {totalProfileItems > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
+                    {totalProfileItems}
+                  </span>
+                )}
               </button>
               <button
                 type="button"
@@ -686,11 +916,19 @@ export function StylesheetFormDrawer({
                 className={`px-3 py-1 rounded-full text-xs font-medium border ${section === "ia" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
                   }`}
               >
-                IA rows ({selectedRows.length})
+                IA Rules ({selectedRows.length > 0 ? `${selectedRows.length} active` : `${effectiveIaTemplate.length} available`})
               </button>
             </div>
 
-            {section === "ce" ? (
+            {section === "profile" ? (
+              <StyleProfilePanel
+                profile={styleProfile}
+                unresolved={docxImportData?.unresolved_specs ?? []}
+                onChange={setStyleProfile}
+                onBookTypeChange={handleBookTypeChange}
+                isApplyingBookType={isApplyingBookType}
+              />
+            ) : section === "ce" ? (
               <div className="space-y-2">
                 <p className="text-[11px] text-muted">
                   Options tagged &ldquo;From IA row&rdquo; follow the ticked IA rows. Choosing a different option here overrides that.

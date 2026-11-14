@@ -98,3 +98,13 @@ export async function parseDocxStylesheet(
   );
   return response.data;
 }
+
+export async function getSpringerPreset(
+  bookType: string = "standard",
+  listStyle: string = "narrative",
+) {
+  const response = await apiClient.get<any>("/stylesheets/presets/springer", {
+    params: { book_type: bookType, list_style: listStyle },
+  });
+  return response.data;
+}

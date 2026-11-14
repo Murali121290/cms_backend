@@ -1,13 +1,16 @@
+import { useState, useMemo } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { Mail, ArrowRight } from "lucide-react";
+import { Mail, ArrowRight, Truck } from "lucide-react";
 
 interface TransitionConfirmModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (shipmentNotes?: string) => void;
   loading?: boolean;
   currentStage: string;
   nextStage: string;
+  chapterNumber?: string;
+  dueDate?: string;
   config: {
     custom_message?: string;
     to: string[];
@@ -15,6 +18,9 @@ interface TransitionConfirmModalProps {
     subject: string;
     body: string;
     from_email?: string;
+    next_stage_due_date?: string;
+    next_stage_owner_name?: string;
+    next_stage_owner_username?: string;
   };
 }
 
@@ -25,9 +31,130 @@ export function TransitionConfirmModal({
   loading = false,
   currentStage,
   nextStage,
+  chapterNumber,
+  dueDate,
   config,
 }: TransitionConfirmModalProps) {
+  const [shipmentNotes, setShipmentNotes] = useState("");
   const displayMsg = config.custom_message || `Complete ${currentStage} and move to ${nextStage}?`;
+
+  // Format next stage due date or target date cleanly as DD-Mon-YYYY
+  const displayDueDate = useMemo(() => {
+    const raw = config.next_stage_due_date || ((dueDate && dueDate !== "—") ? dueDate : null);
+    if (raw) {
+      const match = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const mIdx = parseInt(match[2], 10) - 1;
+        return `${match[3]}-${months[mIdx] || match[2]}-${match[1]}`;
+      }
+      return String(raw).replace(/\s+00:00:00(\+00:00)?$/, "");
+    }
+    const now = new Date();
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const d = String(now.getDate()).padStart(2, "0");
+    const m = months[now.getMonth()];
+    const y = now.getFullYear();
+    return `${d}-${m}-${y}`;
+  }, [config.next_stage_due_date, dueDate]);
+
+  // Resolve chapter number from props or fallback from subject
+  const resolvedChapterNumber = useMemo(() => {
+    let raw = "";
+    if (chapterNumber) {
+      const c = chapterNumber.trim();
+      raw = c.toLowerCase().startsWith("chapter ") ? c.slice(8).trim() : c;
+    } else {
+      const match = (config.subject || "").match(/Chapter(?:s)?\s+([^|]+)/i);
+      if (match) {
+        raw = match[1].trim();
+      } else if (config.subject?.includes(" - Book |") || config.subject?.includes(" - Book ")) {
+        raw = "Book";
+      } else {
+        raw = "01";
+      }
+    }
+    if (raw === "00" || raw === "0" || raw.toLowerCase() === "book") {
+      return "Book";
+    }
+    return raw;
+  }, [chapterNumber, config.subject]);
+
+  const isBook = resolvedChapterNumber === "Book";
+
+  // Clean subject:
+  // Target: {client_name}-- {project_code} - {stage_transition} | Stage Transition Notification
+  const displaySubject = useMemo(() => {
+    let subj = config.subject || "—";
+    if (subj !== "—") {
+      // 1. Remove open close brackets around client: [Client] -> Client--
+      subj = subj.replace(/^\[([^\]]+)\]\s*/, "$1-- ");
+      // 2. Remove brackets around project code if any: -- [Project] -> -- Project
+      subj = subj.replace(/--\s*\[([^\]]+)\]/, "-- $1");
+      // 3. Remove chapter details: - Chapters? ... or - Book
+      subj = subj.replace(/\s*-\s*Chapters?\s+[^|\n]+/gi, "");
+      subj = subj.replace(/\s*-\s*Book\b/gi, "");
+      // 4. Normalize separator between project and stage flow to ' - '
+      subj = subj.replace(/(--\s*[^\-|]+?)\s*[\|\-]\s*([^|]+?)\s*\|\s*Stage Transition Notification/, "$1 - $2 | Stage Transition Notification");
+    }
+    return subj.trim();
+  }, [config.subject]);
+
+  // Parse body around {chapter_table} or ASCII table pattern
+  const { introText, outroText } = useMemo(() => {
+    let raw = config.body || "";
+    // Clean any full ASCII box table block
+    raw = raw.replace(/(?:^[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$))(?:[ \t]*[+|][^\r\n]*(?:\r?\n|$))*?[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$)?/gm, "{chapter_table}\n");
+    // Clean any residual ASCII table lines
+    raw = raw.replace(/^[ \t]*\|[^\r\n]*\|[ \t]*$/gm, "");
+    raw = raw.replace(/^[ \t]*\+[-+]+\+[ \t]*$/gm, "");
+    raw = raw.replace(/(\{chapter_table\}\s*)+/g, "{chapter_table}\n");
+
+    if (isBook) {
+      raw = raw.replace(/\bChapter(?:s)?\s+(?:Book|00|0)\b/gi, "Book");
+      raw = raw.replace(/\bChapter\s*:\s*(?:Book|00|0)\b/gi, "Chapter: Book");
+    }
+
+    // Ensure Client Name comes first, Project Name next (no brackets), separated by blank line
+    const mClient = raw.match(/Client Name:\s*([^\n\r]+)/i);
+    const mProj = raw.match(/Project Name:\s*([^\n\r]+)/i);
+    if (mClient || mProj) {
+      let cVal = mClient ? mClient[1].trim().replace(/^\[|\]$/g, "") : "";
+      let pVal = mProj ? mProj[1].trim().replace(/^\[|\]$/g, "") : "";
+      raw = raw.replace(/^[ \t]*Project Name:.*(?:\r?\n|$)/gim, "");
+      raw = raw.replace(/^[ \t]*Client Name:.*(?:\r?\n|$)/gim, "");
+      const headerBlock = `Client Name: ${cVal}\n\nProject Name: ${pVal}`;
+      if (raw.includes("{chapter_table}")) {
+        const parts = raw.split("{chapter_table}");
+        raw = `${parts[0].trim()}\n\n${headerBlock}\n\n{chapter_table}${parts.slice(1).join("{chapter_table}")}`;
+      } else if (raw.includes("Regards,")) {
+        const parts = raw.split("Regards,");
+        raw = `${parts[0].trim()}\n\n${headerBlock}\n\n{chapter_table}\n\nRegards,${parts.slice(1).join("Regards,")}`;
+      } else {
+        raw = `${raw.trim()}\n\n${headerBlock}\n\n{chapter_table}`;
+      }
+      raw = raw.replace(/\n{3,}/g, "\n\n");
+    } else if (!raw.includes("{chapter_table}")) {
+      if (raw.includes("Regards,")) {
+        const parts = raw.split("Regards,");
+        raw = parts[0].trim() + "\n\n{chapter_table}\n\nRegards," + parts.slice(1).join("Regards,");
+      } else {
+        raw += "\n\n{chapter_table}";
+      }
+    }
+
+    if (raw.includes("{chapter_table}")) {
+      const parts = raw.split("{chapter_table}");
+      return {
+        introText: parts[0].trim(),
+        outroText: parts.slice(1).join("{chapter_table}").trim(),
+      };
+    }
+    return {
+      introText: raw.trim(),
+      outroText: "",
+    };
+  }, [config.body, isBook]);
 
   return (
     <Modal
@@ -37,7 +164,7 @@ export function TransitionConfirmModal({
       size="xl"
     >
       <div className="relative space-y-4 py-2 min-h-[250px]">
-        {/* Loading Overlay to freeze screen */}
+        {/* Loading Overlay */}
         {loading && (
           <div className="absolute inset-0 bg-background/70 backdrop-blur-[1px] flex flex-col items-center justify-center z-50 rounded-xl">
             <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-primary"></div>
@@ -48,14 +175,49 @@ export function TransitionConfirmModal({
         {/* Custom warning/transition message */}
         <div className="p-3 bg-accent/40 rounded-lg border border-border/80 flex items-start gap-3">
           <Mail className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-          <div>
+          <div className="flex-1">
             <p className="text-sm font-medium text-text">{displayMsg}</p>
-            <div className="flex items-center gap-1.5 mt-1 text-xs text-muted">
+            <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-muted">
               <span>{currentStage}</span>
               <ArrowRight size={10} />
               <span className="font-semibold text-primary">{nextStage}</span>
+              {config.next_stage_owner_name && (
+                <>
+                  <span className="text-border">|</span>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Stage Owner: {config.next_stage_owner_name}
+                  </span>
+                </>
+              )}
             </div>
           </div>
+        </div>
+
+        {/* Shipment Notes Query Prompt */}
+        <div className="p-3 bg-surface/80 rounded-xl border border-border space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label htmlFor="shipmentNotesInput" className="text-xs font-semibold text-text flex items-center gap-1.5">
+              <Truck className="h-4 w-4 text-primary flex-shrink-0" />
+              <span>Any shipment notes available?</span>
+            </label>
+            <span className="text-[10px] text-muted font-medium bg-background px-2 py-0.5 rounded border border-border">
+              Optional
+            </span>
+          </div>
+          <input
+            id="shipmentNotesInput"
+            type="text"
+            value={shipmentNotes}
+            onChange={(e) => setShipmentNotes(e.target.value)}
+            placeholder="e.g. Batch 01 priority ingest, Dispatched via FTP, etc."
+            className="w-full text-xs px-3 py-2 bg-background border border-border rounded-lg text-text placeholder:text-muted/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+          />
+          <p className="text-[11px] text-muted">
+            {shipmentNotes.trim()
+              ? "✓ Notes will be rendered in the email table and recorded on this chapter."
+              : 'Leave blank to display as "—" in the email notification table.'}
+          </p>
         </div>
 
         {/* Unified Email Composer Preview */}
@@ -78,15 +240,96 @@ export function TransitionConfirmModal({
             )}
             <div className="flex items-start text-sm border-t border-border/50 pt-2 mt-1">
               <span className="w-16 font-medium text-muted flex-shrink-0">Subject:</span>
-              <span className="text-text font-semibold break-words">{config.subject || "—"}</span>
+              <span className="text-text font-semibold break-words">{displaySubject}</span>
             </div>
           </div>
 
-          {/* Email Content Body */}
-          <div className="p-4 bg-card min-h-[150px]">
-            <pre className="text-sm text-text font-sans whitespace-pre-wrap leading-relaxed">
-              {config.body || "—"}
-            </pre>
+          {/* Email Content Body with REAL Table */}
+          <div className="p-4 bg-card min-h-[150px] space-y-3 font-sans text-xs leading-relaxed text-text">
+            {/* Intro text */}
+            {introText && (
+              <div className="space-y-2 whitespace-pre-wrap">
+                {introText.split("\n\n").map((para, idx) => (
+                  <p key={idx} className="leading-relaxed">
+                    {para.split("\n").map((line, lIdx) => {
+                      const pMatch = line.match(/^(Client Name:|Project Name:)(.*)$/);
+                      if (pMatch) {
+                        const cleanVal = pMatch[2].trim().replace(/^\[|\]$/g, "");
+                        return (
+                          <span key={lIdx} className="block font-bold text-text">
+                            <span>{pMatch[1]} </span>
+                            <span>{cleanVal}</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <span key={lIdx} className="block">
+                          {line}
+                        </span>
+                      );
+                    })}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* The REAL Structured HTML/React Table */}
+            <div className="my-3 overflow-hidden rounded-lg border border-border shadow-xs bg-surface/30">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-surface/80 border-b border-border text-muted font-semibold">
+                    <th className="py-2.5 px-3 border-r border-border">Chapter</th>
+                    <th className="py-2.5 px-3 border-r border-border">Stage</th>
+                    <th className="py-2.5 px-3 border-r border-border">Due Date {nextStage ? `( ${nextStage} )` : ""}</th>
+                    <th className="py-2.5 px-3">Shipment Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border bg-card">
+                  <tr>
+                    <td className="py-2.5 px-3 border-r border-border font-medium text-text">
+                      {resolvedChapterNumber}
+                    </td>
+                    <td className="py-2.5 px-3 border-r border-border text-text">
+                      <span className="inline-flex items-center gap-1.5 font-medium">
+                        <span>{currentStage}</span>
+                        <span className="text-muted">→</span>
+                        <span className="text-primary font-semibold">{nextStage}</span>
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 border-r border-border text-text">
+                      {displayDueDate}
+                    </td>
+                    <td className="py-2.5 px-3 text-text">
+                      {shipmentNotes.trim() ? (
+                        <span className="text-primary font-semibold bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                          {shipmentNotes.trim()}
+                        </span>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Outro text */}
+            {outroText && (
+              <div className="space-y-2 whitespace-pre-wrap pt-1">
+                {outroText.split("\n\n").map((para, idx) => (
+                  <p
+                    key={idx}
+                    className={
+                      para.toLowerCase().includes("note :")
+                        ? "text-muted italic text-[11px] pt-1"
+                        : "leading-relaxed"
+                    }
+                  >
+                    {para}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -102,7 +345,7 @@ export function TransitionConfirmModal({
           </button>
           <button
             type="button"
-            onClick={onConfirm}
+            onClick={() => onConfirm(shipmentNotes.trim() || undefined)}
             disabled={loading}
             className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/95 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
           >

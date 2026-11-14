@@ -6,8 +6,8 @@ import subprocess
 import re
 import logging
 from lxml import etree
+import requests
 from app.core.config import get_settings
-from app.integrations.pph.client import PPHClient
 from app.database import SessionLocal
 from app.models import ChapterInfo
 from app.domains.projects.models import Project
@@ -20,8 +20,8 @@ class XMLEngine:
         """
         Runs the Word2XML conversion on the given document.
         Returns the generated XML and log file paths.
-        Offloads to PPH Server if PPH_ENABLED is configured.
-        Falls back to local Perl Word2XML converter if PPH is offline or fails.
+        Offloads to Windows Conversion Server microservice (/convert-book-to-xml).
+        Falls back to local Perl Word2XML converter if Windows server is offline or fails.
         """
         settings = get_settings()
         folder = os.path.dirname(file_path)
@@ -32,83 +32,93 @@ class XMLEngine:
         expected_xml_path = os.path.join(xml_folder, f"{base_name}.xml")
         expected_log_path = os.path.join(xml_folder, f"{base_name}.log")
 
-        if settings.PPH_ENABLED:
+        # 1. Attempt Word-to-XML conversion via Windows Conversion Server microservice
+        server_url = (
+            getattr(settings, "WORD_TO_XML_SERVER_URL", "").strip() or
+            getattr(settings, "INDESIGN_SERVER_URL", "").strip()
+        ).rstrip("/")
+
+        if server_url:
             try:
-                logger.info(f"Attempting Word to XML conversion via PPH server for: {file_path}")
-                client = PPHClient()
+                endpoint = f"{server_url}/convert-book-to-xml"
+                logger.info(f"Attempting Word to XML conversion via Windows Server: {endpoint} for: {file_path}")
+                timeout = getattr(settings, "WORD_TO_XML_TIMEOUT_SECONDS", 3600)
+
                 with open(file_path, "rb") as f:
                     files = {
-                        "files": (
+                        "file": (
                             os.path.basename(file_path),
-                            f.read(),
+                            f,
                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         )
                     }
-                
-                zip_bytes = client.submit_and_wait(
-                    endpoint="/word-to-xml",
-                    files=files
-                )
-                
-                os.makedirs(xml_folder, exist_ok=True)
-                generated_files = []
-                
-                with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-                    # Find XML file in zip and save it to expected_xml_path
-                    xml_files = [name for name in z.namelist() if name.endswith(".xml")]
-                    log_files = [name for name in z.namelist() if name.endswith(".log")]
-                    
-                    if xml_files:
-                        with open(expected_xml_path, "wb") as out_f:
-                            out_f.write(z.read(xml_files[0]))
-                        generated_files.append(expected_xml_path)
-                        
-                        self._save_layout_html_file(expected_xml_path, file_path, xml_folder, base_name, generated_files)
-                        
-                        if log_files:
-                            with open(expected_log_path, "wb") as out_f:
-                                out_f.write(z.read(log_files[0]))
-                            generated_files.append(expected_log_path)
-                        else:
-                            with open(expected_log_path, "w") as out_f:
-                                out_f.write("PPH XML conversion succeeded.\n")
-                            generated_files.append(expected_log_path)
-                        return generated_files
-                    else:
-                        # If not found directly, extract everything and try to find any XML
-                        temp_extract_dir = os.path.join(xml_folder, "temp_extract")
-                        z.extractall(temp_extract_dir)
-                        for root, dirs, files_list in os.walk(temp_extract_dir):
-                            for file in files_list:
-                                if file.endswith(".xml"):
-                                    shutil.move(os.path.join(root, file), expected_xml_path)
-                                    generated_files.append(expected_xml_path)
-                                elif file.endswith(".log"):
-                                    shutil.move(os.path.join(root, file), expected_log_path)
-                                    generated_files.append(expected_log_path)
-                        
-                        try:
-                            shutil.rmtree(temp_extract_dir)
-                        except Exception:
-                            pass
-                            
-                        if not generated_files:
-                            raise FileNotFoundError("XML output file not found in PPH response ZIP.")
-                            
-                        xml_in_gen = any(f.endswith(".xml") for f in generated_files)
-                        log_in_gen = any(f.endswith(".log") for f in generated_files)
-                        
-                        if xml_in_gen:
+                    resp = requests.post(endpoint, files=files, timeout=timeout)
+
+                if resp.status_code == 200:
+                    os.makedirs(xml_folder, exist_ok=True)
+                    generated_files = []
+
+                    with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                        # Find XML file in zip and save it to expected_xml_path
+                        xml_files = [name for name in z.namelist() if name.endswith(".xml")]
+                        log_files = [name for name in z.namelist() if name.endswith(".log")]
+
+                        if xml_files:
+                            with open(expected_xml_path, "wb") as out_f:
+                                out_f.write(z.read(xml_files[0]))
+                            generated_files.append(expected_xml_path)
+
                             self._save_layout_html_file(expected_xml_path, file_path, xml_folder, base_name, generated_files)
-                            
-                        if xml_in_gen and not log_in_gen:
-                            with open(expected_log_path, "w") as out_f:
-                                out_f.write("PPH XML conversion succeeded (after search).\n")
-                            generated_files.append(expected_log_path)
-                        return generated_files
-            except Exception as pph_err:
+
+                            if log_files:
+                                with open(expected_log_path, "wb") as out_f:
+                                    out_f.write(z.read(log_files[0]))
+                                generated_files.append(expected_log_path)
+                            else:
+                                with open(expected_log_path, "w", encoding="utf-8") as out_f:
+                                    out_f.write("Windows Server XML conversion succeeded.\n")
+                                generated_files.append(expected_log_path)
+                            return generated_files
+                        else:
+                            # If not found directly, extract everything and try to find any XML
+                            temp_extract_dir = os.path.join(xml_folder, "temp_extract")
+                            z.extractall(temp_extract_dir)
+                            for root, dirs, files_list in os.walk(temp_extract_dir):
+                                for file in files_list:
+                                    if file.endswith(".xml"):
+                                        shutil.move(os.path.join(root, file), expected_xml_path)
+                                        generated_files.append(expected_xml_path)
+                                    elif file.endswith(".log"):
+                                        shutil.move(os.path.join(root, file), expected_log_path)
+                                        generated_files.append(expected_log_path)
+
+                            try:
+                                shutil.rmtree(temp_extract_dir)
+                            except Exception:
+                                pass
+
+                            if not generated_files:
+                                raise FileNotFoundError("XML output file not found in Windows Server response ZIP.")
+
+                            xml_in_gen = any(f.endswith(".xml") for f in generated_files)
+                            log_in_gen = any(f.endswith(".log") for f in generated_files)
+
+                            if xml_in_gen:
+                                self._save_layout_html_file(expected_xml_path, file_path, xml_folder, base_name, generated_files)
+
+                            if xml_in_gen and not log_in_gen:
+                                with open(expected_log_path, "w", encoding="utf-8") as out_f:
+                                    out_f.write("Windows Server XML conversion succeeded (after search).\n")
+                                generated_files.append(expected_log_path)
+                            return generated_files
+                else:
+                    logger.warning(
+                        f"Windows Conversion Server returned status code {resp.status_code}: {resp.text[:500]}. "
+                        f"Falling back to local Perl Word2XML converter..."
+                    )
+            except Exception as remote_err:
                 logger.warning(
-                    f"PPH server Word to XML conversion failed or server unavailable ({pph_err}). "
+                    f"Windows Conversion Server Word to XML failed or server unavailable ({remote_err}). "
                     f"Falling back to local Perl Word2XML converter..."
                 )
 

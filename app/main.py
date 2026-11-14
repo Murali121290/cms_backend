@@ -159,6 +159,40 @@ def init_data():
 
         try:
             db.execute(text("ALTER TABLE users ALTER COLUMN team DROP NOT NULL;"))
+            db.execute(text("ALTER TABLE stage_master ADD COLUMN IF NOT EXISTS owner_designation VARCHAR(100);"))
+            db.execute(text("UPDATE stage_master SET owner_designation = 'Team Lead - LE' WHERE stage_name = 'Language Editing' AND (owner_designation IS NULL OR owner_designation = '');"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        try:
+            from app.domains.workflow.models import StageTransitionConfig
+            from sqlalchemy.orm.attributes import flag_modified
+            configs = db.query(StageTransitionConfig).all()
+            for cfg in configs:
+                if cfg.stages_config and isinstance(cfg.stages_config, dict):
+                    cfg_mod = False
+                    for s_name, s_data in cfg.stages_config.items():
+                        if isinstance(s_data, dict):
+                            old_subj = s_data.get("subject", "")
+                            if old_subj and ("[" in old_subj or "Chapter" in old_subj):
+                                s_data["subject"] = "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification"
+                                cfg_mod = True
+                            old_body = s_data.get("body", "")
+                            if old_body and ("Project Name: [" in old_body or (old_body.find("Project Name:") != -1 and old_body.find("Client Name:") != -1 and old_body.find("Project Name:") < old_body.find("Client Name:"))):
+                                s_data["body"] = (
+                                    "Hi,\n\n"
+                                    "Below Files are Completed {current_stage} for your review and processing.\n\n"
+                                    "Client Name: {client_name}\n\n"
+                                    "Project Name: {project_code}\n\n"
+                                    "{chapter_table}\n\n"
+                                    "Regards,\n"
+                                    "S4C Ninja Inkflow Team\n\n"
+                                    "Note : This is an automated mail and please do not reply."
+                                )
+                                cfg_mod = True
+                    if cfg_mod:
+                        flag_modified(cfg, "stages_config")
             db.commit()
         except Exception:
             db.rollback()

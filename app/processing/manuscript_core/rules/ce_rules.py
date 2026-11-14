@@ -28,7 +28,8 @@ IA_ROW_TO_CE: dict[tuple[str, str], tuple[int, int]] = {
     ("Percent", "%"): (6, 1),
     ("Percent", "percent"): (6, 3),
     ("Percent", "per cent"): (6, 4),
-    ("Percent", "percentage"): (6, 6),
+    ("Percent", "percentage"): (6, 1),  # "percentage" for bare words; numbers take the symbol
+    ("Percent", "percentage points"): (6, 5),
     ("Ranges", "X–Y (en dash)"): (14, 1),
     ("Ranges", "X to Y"): (14, 2),
     ("Numbers", "0 to 9 spelled out"): (13, 1),
@@ -129,7 +130,42 @@ _QUERY_OPTION_RE = re.compile(r"^query author|only if the author confirms|only a
 
 @lru_cache(maxsize=1)
 def load_catalog() -> list[dict]:
-    return json.loads(CATALOG_PATH.read_text(encoding="utf-8"))["rules"]
+    """Workbook catalog merged with ce_rules_extensions (option forms, extra rule ids, rules 92+)."""
+    from . import ce_rules_extensions as ext
+    rules =json.loads(CATALOG_PATH.read_text(encoding="utf-8"))["rules"]
+    for r in rules:
+        forms = ext.FORMS.get(r["sno"])
+        if forms:
+            r["forms"] = [{"label": label, "preview": preview} for label, preview in forms]
+            # The forms follow the engine's option keys, so their labels are the options.
+            r["workbook_options"] = list(r["options"])
+            r["options"] = [label for label, _ in forms]
+        else:
+            r["forms"] = [{"label": o, "preview": o} for o in r["options"]]
+        r["te_rule_ids"] = list(r["te_rule_ids"]) + ext.EXTRA_TE_RULE_IDS.get(r["sno"], [])
+        r.setdefault("default_enabled", True)
+    known = {r["sno"] for r in rules}
+    for nr in ext.NEW_RULES:
+        if nr["sno"] in known:
+            continue
+        rule = dict(nr)
+        rule["forms"] = [{"label": label, "preview": preview} for label, preview in nr["forms"]]
+        rules.append(rule)
+    return rules
+
+
+def option_count(sno: int) -> int:
+    rule = by_sno().get(sno, {})
+    return max(3, len(rule.get("forms") or []), len(rule.get("options") or []))
+
+
+def option_text(sno: int, option: int | str) -> str:
+    opts = by_sno().get(sno, {}).get("options", [])
+    try:
+        idx = int(option) - 1
+    except (TypeError, ValueError):
+        return ""
+    return opts[idx] if 0 <= idx < len(opts) else ""
 
 
 @lru_cache(maxsize=1)
@@ -178,13 +214,7 @@ def allows_autofix(sno: int, option: int | str = 1) -> bool:
         return False
     if rule["behaviour"] == "Flag and suggest":
         return False
-    opts = rule.get("options", [])
-    try:
-        idx = int(option) - 1
-        text = opts[idx] if 0 <= idx < len(opts) else ""
-    except (ValueError, TypeError):
-        text = ""
-    return not is_query_option(text)
+    return not is_query_option(option_text(sno, option))
 
 
 def derive_from_ia_rows(selected_rows: Iterable[dict]) -> tuple[dict[int, dict], list[int]]:
@@ -219,7 +249,7 @@ def resolve_ce_config(selected_rows: Iterable[dict] | None = None, ce_rules: dic
     explicit = {int(k): v for k, v in (ce_rules or {}).items() if str(k).isdigit()}
     out: dict[int, dict] = {}
     for sno, rule in by_sno().items():
-        cfg = {"enabled": True, "option": 1, "severity": rule["severity"],
+        cfg = {"enabled": rule.get("default_enabled", True), "option": 1, "severity": rule["severity"],
                "source": {"enabled": "catalog", "option": "catalog", "severity": "catalog"}}
         if sno in derived:
             cfg["option"] = derived[sno]["option"]
@@ -247,9 +277,10 @@ def validate_ce_rules(ce_rules: dict | None) -> dict:
         if isinstance(setting.get("enabled"), bool):
             item["enabled"] = setting["enabled"]
         opt = setting.get("option")
-        rule_opts = rules.get(sno, {}).get("options", [])
-        max_opt = max(3, len(rule_opts))
-        if isinstance(opt, int):
+        max_opt = option_count(sno)
+        if isinstance(opt, str) and opt.strip().isdigit():
+            opt = int(opt.strip())
+        if isinstance(opt, int) and not isinstance(opt, bool):
             if 1 <= opt <= max_opt:
                 item["option"] = opt
         elif isinstance(opt, str) and opt.strip():
@@ -277,51 +308,69 @@ def choose_replacement(
 ) -> dict:
     """Apply resolved settings to one finding.
 
-    Returns {"enabled", "replacement", "query", "severity", "option"}. A replacement
-    of None means the finding is only highlighted (or kept, when the option says so).
+    Returns {"enabled", "replacement", "suggestion", "status", "query", "severity", "option"}.
+
+    The selected option is the house style; every other form is an error:
+      status "error"     the text differs from the selected option's form. ``suggestion``
+                         is that form; ``replacement`` carries it too when the rule may
+                         auto-correct (Flag-and-suggest rules only suggest).
+      status "compliant" the text already is the selected form (or the option says keep).
+      status "query"     the option raises an author query.
+      status "flag"      the rule has no automatic form for this hit; the editor decides.
+      status "off"       the rule is switched off in the stylesheet.
     `ce_steps` describes a composite unit edit: {"parts": {...}, "order": [...],
     "steps": [{"sno", "part", "to": {"1": str|None|"QUERY", ...}}]}.
     """
     resolved = resolved or default_config()
-    cfg = resolved.get(sno) or {"enabled": True, "option": 1, "severity": by_sno().get(sno, {}).get("severity", "Minor")}
-    result = {"enabled": cfg["enabled"], "replacement": None, "query": False,
-              "severity": cfg["severity"], "option": cfg["option"]}
+    cfg = resolved.get(sno) or {"enabled": by_sno().get(sno, {}).get("default_enabled", True), "option": 1,
+                                "severity": by_sno().get(sno, {}).get("severity", "Minor")}
+    result = {"enabled": cfg["enabled"], "replacement": None, "suggestion": None, "status": "off",
+              "query": False, "severity": cfg["severity"], "option": cfg["option"]}
     if not cfg["enabled"]:
         return result
 
     if ce_steps:
         parts = dict(ce_steps["parts"])
-        applied = False
+        applied = suggested = False
         for step in ce_steps["steps"]:
             step_cfg = resolved.get(step["sno"], cfg)
             if not step_cfg["enabled"]:
                 continue
             opt = step_cfg["option"]
             value = step["to"].get(str(opt))
-            text = by_sno().get(step["sno"], {}).get("options", ["", "", ""])[opt - 1]
-            if value == QUERY or is_query_option(text):
+            if value == QUERY or is_query_option(option_text(step["sno"], opt)):
                 result["query"] = True
                 continue
-            if value is None or not allows_autofix(step["sno"], opt):
+            if value is None:
                 continue
             parts[step["part"]] = value
-            applied = True
+            suggested = True
+            applied = applied or allows_autofix(step["sno"], opt)
         new = "".join(parts[k] for k in ce_steps["order"])
-        result["replacement"] = new if applied and new != surface else None
+        if suggested and new != surface:
+            result["suggestion"] = new
+            result["replacement"] = new if applied else None
+            result["status"] = "error"
+        else:
+            result["status"] = "query" if result["query"] else "compliant"
         return result
 
     opt = cfg["option"]
-    opts = by_sno().get(sno, {}).get("options", [])
-    try:
-        opt_idx = int(opt) - 1
-        text = opts[opt_idx] if 0 <= opt_idx < len(opts) else ""
-    except (ValueError, TypeError):
-        text = ""
-    value = (option_replacements or {}).get(str(opt))
-    if value == QUERY or is_query_option(text):
+    replacements = option_replacements or {}
+    value = replacements.get(str(opt))
+    if value is None and isinstance(opt, str) and cfg.get("custom_template"):
+        value = None  # custom templates are rendered by the stylesheet editor only
+    if value == QUERY or is_query_option(option_text(sno, opt)):
         result["query"] = True
+        result["status"] = "query"
         return result
-    if value is None or value == surface or not allows_autofix(sno, opt):
+    if value is None or value == surface:
+        has_any = any(v not in (None, QUERY) for v in replacements.values())
+        keep_option = option_text(sno, opt).strip().lower().startswith("keep")
+        result["status"] = "compliant" if (value == surface or has_any or keep_option) else "flag"
         return result
-    result["replacement"] = value
+    result["suggestion"] = value
+    result["status"] = "error"
+    if allows_autofix(sno, opt):
+        result["replacement"] = value
     return result

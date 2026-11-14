@@ -758,6 +758,10 @@ class TechnicalScanResponse(BaseModel):
     ia_report: dict[str, Any] | None = None
     stats: dict[str, Any] | None = None
     active_stylesheet: "StylesheetSummary | None" = None
+    # Rule-engine version of the scan (drafts of older versions are discarded by the page)
+    engine_version: str | None = None
+    # Where the active rules came from: "stylesheet.json" | "database" | None
+    stylesheet_source: str | None = None
 
 
 class TechnicalApplyRequest(BaseModel):
@@ -942,6 +946,10 @@ class CERule(BaseModel):
     notes: str = ""
     source_point: int | None = None
     detectable: Literal["auto", "flag", "manual"]
+    # One entry per option, in the engine's option order: {"label", "preview"}
+    forms: list[dict[str, str]] = Field(default_factory=list)
+    # Rules 92+ (house-style points) are off until a stylesheet turns them on
+    default_enabled: bool = True
 
 
 class CERulesResponse(BaseModel):
@@ -1005,6 +1013,12 @@ class DocxStylesheetParseResponse(BaseModel):
     word_list: list[str] = Field(default_factory=list)
     total_specs_scanned: int = 0
     matched_rules_count: int = 0
+    # "springer_sectioned" | "lww_3table"
+    layout: str = "lww_3table"
+    # Lists for list-driven rules (word list replacements, acronyms, registered terms, ...)
+    style_profile: dict[str, Any] = Field(default_factory=dict)
+    # Sheet rows that map to no rule (stored as reference only)
+    unresolved_specs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ─── WYSIWYG Editor XHTML Save ────────────────────────────────────────────────
@@ -1303,6 +1317,7 @@ class BulkTransitionItemPreview(BaseModel):
     next_stage: str | None = None
     workflow_name: str
     is_last_stage: bool = False
+    next_stage_due_date: str | None = None
 
     def model_post_init(self, __context):
         if not self.chapter_num:
@@ -1324,6 +1339,7 @@ class BulkTransitionConfigResponse(BaseModel):
     subject: str | None = None
     body: str | None = None
     from_email: str | None = None
+    next_stage_due_date: str | None = None
 
     def model_post_init(self, __context):
         if not self.preview_items and self.chapters:
@@ -1338,11 +1354,17 @@ class BulkTransitionConfigResponse(BaseModel):
 
 class BulkTransitionExecuteRequest(BaseModel):
     chapter_ids: list[int]
+    stage_name: Optional[str] = None
     send_email: bool = False
     to_emails: list[str] = Field(default_factory=list)
     cc_emails: list[str] = Field(default_factory=list)
     subject: str = ""
     body: str = ""
+    shipment_notes: Optional[str] = None
+    email_to: Optional[str] = None
+    email_cc: Optional[str] = None
+    email_subject: Optional[str] = None
+    email_body: Optional[str] = None
 
 
 

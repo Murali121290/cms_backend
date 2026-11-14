@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap, History, FileText } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -29,6 +29,7 @@ export function BodInternalPage() {
   // Form states
   const [showAddJobModal, setShowAddJobModal] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [coverFile, setCoverFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
@@ -43,12 +44,17 @@ export function BodInternalPage() {
   // Fastrack modal state
   const [fastrackModalJob, setFastrackModalJob] = useState<any | null>(null)
   const [fastrackExpectedDate, setFastrackExpectedDate] = useState('')
+  const [fastrackReason, setFastrackReason] = useState('')
   const [savingFastrack, setSavingFastrack] = useState(false)
 
   // Date Filter states
   const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'tomorrow' | 'day_3' | 'day_4' | 'day_5' | 'week' | 'month' | 'custom'>('today')
   const [customFromDate, setCustomFromDate] = useState('')
   const [customToDate, setCustomToDate] = useState('')
+
+  // History Drawer state
+  const [historyJob, setHistoryJob] = useState<any | null>(null)
+  const [historyActiveTab, setHistoryActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files'>('stage')
 
   // Table heading filters & sorting
   const [colFilters, setColFilters] = useState({
@@ -69,6 +75,14 @@ export function BodInternalPage() {
 
   // Delete Modal states
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null)
+
+  // Dispatch Confirmation Modal states
+  const [confirmDispatchModal, setConfirmDispatchModal] = useState<{
+    type: 'single' | 'bulk';
+    jobId?: number;
+    jobName?: string;
+    jobIds?: number[];
+  } | null>(null)
 
   // Edit Due Date Modal states
   const [showEditDueDateModal, setShowEditDueDateModal] = useState<any>(null)
@@ -128,6 +142,9 @@ export function BodInternalPage() {
     setErrorMsg(null)
     const formData = new FormData()
     formData.append('file', pdfFile)
+    if (coverFile) {
+      formData.append('cover_file', coverFile)
+    }
 
     try {
       await api.post('/bod/jobs', formData, {
@@ -136,6 +153,7 @@ export function BodInternalPage() {
       toast.success("Job created successfully")
 
       setPdfFile(null)
+      setCoverFile(null)
       setShowAddJobModal(false)
       fetchJobs()
     } catch (err: any) {
@@ -180,25 +198,39 @@ export function BodInternalPage() {
 
   const handleFastrackClick = (e: React.MouseEvent, job: any) => {
     e.stopPropagation()
-    if (job.is_fastrack) {
-      toggleFastrackOff(job.id)
+    setFastrackModalJob(job)
+    setFastrackReason('')
+    if (job.is_fastrack && job.fastrack_requested_date) {
+      const raw = String(job.fastrack_requested_date).split('T')[0]
+      setFastrackExpectedDate(raw)
     } else {
-      setFastrackModalJob(job)
       const now = new Date()
       setFastrackExpectedDate(now.toISOString().slice(0, 10))
     }
   }
 
-  const toggleFastrackOff = async (jobId: number) => {
-    setTogglingFastrackId(jobId)
+  const handleTurnOffFastrack = async () => {
+    if (!fastrackModalJob) return
+    const jobId = fastrackModalJob.id
+    setSavingFastrack(true)
     try {
-      await api.put(`/bod/jobs/${jobId}/fastrack`, { is_fastrack: false })
-      toast.success("Job set to Normal")
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, is_fastrack: false, fastrack_requested_date: null } : j))
+      const { data } = await api.put(`/bod/jobs/${jobId}/fastrack`, {
+        is_fastrack: false,
+        reason: fastrackReason.trim() || undefined
+      })
+      toast.success("Fastrack turned off")
+      setJobs(prev => prev.map(j => j.id === jobId ? {
+        ...j,
+        is_fastrack: false,
+        fastrack_requested_date: null,
+        due_date_history: data.due_date_history || j.due_date_history
+      } : j))
+      setFastrackModalJob(null)
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to update Fastrack status")
+      console.error(err)
+      toast.error(err.response?.data?.detail || "Failed to turn off Fastrack")
     } finally {
-      setTogglingFastrackId(null)
+      setSavingFastrack(false)
     }
   }
 
@@ -221,17 +253,20 @@ export function BodInternalPage() {
     try {
       const { data } = await api.put(`/bod/jobs/${fastrackModalJob.id}/fastrack`, {
         is_fastrack: true,
-        fastrack_requested_date: finalDateStr
+        fastrack_requested_date: finalDateStr,
+        reason: fastrackReason.trim() || undefined
       })
-      toast.success("Job marked as Fastrack with expected completion date")
+      toast.success(fastrackModalJob.is_fastrack ? "Fastrack expected date updated" : "Fastrack enabled with expected completion date")
       setJobs(prev => prev.map(j => j.id === fastrackModalJob.id ? {
         ...j,
         is_fastrack: true,
-        fastrack_requested_date: data.fastrack_requested_date || finalDateStr
+        fastrack_requested_date: data.fastrack_requested_date || finalDateStr,
+        due_date_history: data.due_date_history || j.due_date_history
       } : j))
       setFastrackModalJob(null)
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to enable Fastrack")
+      console.error(err)
+      toast.error(err.response?.data?.detail || "Failed to update Fastrack")
     } finally {
       setSavingFastrack(false)
     }
@@ -503,7 +538,8 @@ export function BodInternalPage() {
     )
   }
 
-  const hasBaseFiltersActive = searchQuery.trim() !== '' || assigneeFilter !== 'all' || isDateFilterActive
+  const effectiveAssigneeFilter = colFilters.assignee !== 'all' ? colFilters.assignee : assigneeFilter
+  const hasBaseFiltersActive = searchQuery.trim() !== '' || effectiveAssigneeFilter !== 'all' || isDateFilterActive
 
   // Base jobs filtered by base filters (Search, Assignee, Date)
   // When 'fastrack' card filter is selected, date filtering is bypassed because Fastrack is independent of the date filter
@@ -514,8 +550,8 @@ export function BodInternalPage() {
       || (j.client_name && j.client_name.toLowerCase().includes(query))
 
     const currentAssignee = j.current_assignee || null
-    const matchesAssignee = assigneeFilter === 'all'
-      || (assigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === assigneeFilter)
+    const matchesAssignee = effectiveAssigneeFilter === 'all'
+      || (effectiveAssigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === effectiveAssigneeFilter)
 
     const matchesDate = cardFilter === 'fastrack' ? true : matchesDateFilter(j)
 
@@ -646,6 +682,35 @@ export function BodInternalPage() {
     }
   }
 
+  // Download dispatch package (ZIP containing EPUB, history.csv, ACE, EPUBCheck)
+  const handleDownloadDispatchPackage = async (e: React.MouseEvent | null, jobId: number, filename?: string) => {
+    if (e) e.stopPropagation()
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-dispatch-package`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      const dlName = filename ? (filename.endsWith('.zip') ? filename : `${filename.replace(/\.[^/.]+$/, "")}.zip`) : `deliverable_${jobId}.zip`
+      link.setAttribute('download', dlName)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+      toast.success("Dispatch package downloaded successfully!")
+    } catch (err: any) {
+      let errMsg = "Failed to download dispatch package"
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text()
+          const json = JSON.parse(text)
+          if (json.detail) errMsg = json.detail
+        } catch (_) {}
+      } else if (err.response?.data?.detail) {
+        errMsg = err.response.data.detail
+      }
+      toast.error(errMsg)
+    }
+  }
+
   const getUserDisplayName = (username: string | null | undefined) => {
     if (!username) return ''
     if (!users || users.length === 0) return username
@@ -693,11 +758,11 @@ export function BodInternalPage() {
     if (job.current_stage_name === 'Add job') {
       const addedToday = isCreatedToday(job.created_at)
       return {
-        label: addedToday ? 'Fresh (Today)' : 'Fresh (Previous)',
+        label: addedToday ? 'Fresh (Today)' : 'Fresh (Backlog)',
         badgeClass: addedToday
           ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold'
           : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400',
-        sublabel: addedToday ? 'Added Today' : 'Previous Days',
+        sublabel: addedToday ? 'Added Today' : 'Backlog',
         isOverdue: isOverdueJob,
         isTomorrow: isTomorrowJob,
       }
@@ -1004,8 +1069,8 @@ export function BodInternalPage() {
     setSortDirection('asc')
   }
 
-  // Jobs eligible for dispatch in the currently filtered list
-  const dispatchableJobs = filteredJobs.filter(j => j.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(j))
+  // Jobs eligible for dispatch in the currently filtered list (must be in Ready to Dispatch, not completed, and have completed QC deliverables)
+  const dispatchableJobs = filteredJobs.filter(j => j.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(j) && (j.is_dispatchable !== false))
   const allDispatchableSelected = dispatchableJobs.length > 0 && dispatchableJobs.every(j => selectedJobIds.includes(j.id))
 
   const toggleSelectAllDispatchable = () => {
@@ -1022,8 +1087,17 @@ export function BodInternalPage() {
     )
   }
 
-  const handleSingleDispatch = async (e: React.MouseEvent, jobId: number) => {
+  const handleSingleDispatch = async (e: React.MouseEvent, jobId: number, jobName?: string) => {
     e.stopPropagation()
+    setConfirmDispatchModal({
+      type: 'single',
+      jobId,
+      jobName: jobName || `Job #${jobId}`
+    })
+  }
+
+  const executeSingleDispatch = async (jobId: number) => {
+    setConfirmDispatchModal(null)
     setDispatchingJobId(jobId)
     try {
       await api.post(`/bod/jobs/${jobId}/dispatch`, {
@@ -1041,21 +1115,38 @@ export function BodInternalPage() {
 
   const handleBulkDispatch = async () => {
     if (selectedJobIds.length === 0) return
+    setConfirmDispatchModal({
+      type: 'bulk',
+      jobIds: [...selectedJobIds]
+    })
+  }
+
+  const executeBulkDispatch = async (jobIds: number[]) => {
+    setConfirmDispatchModal(null)
     setIsBulkDispatching(true)
     try {
       const { data } = await api.post('/bod/jobs/bulk-dispatch', {
-        job_ids: selectedJobIds,
+        job_ids: jobIds,
         dispatched_by: viewer?.username || undefined
       })
       if (data.failed_count === 0) {
         toast.success(`All ${data.success_count} job(s) dispatched successfully to FTP!`)
         setSelectedJobIds([])
       } else if (data.success_count === 0) {
-        const errorDetails = data.results.filter((r: any) => !r.success).map((r: any) => `${r.job_name || r.job_id}: ${r.error}`).join('; ')
-        toast.error(`Dispatch failed: ${errorDetails}`)
+        const failedItems = data.results
+          .filter((r: any) => !r.success)
+          .map((r: any) => `Job #${r.job_id}${r.job_name ? ` (${r.job_name})` : ''}: ${r.error}`)
+          .join('\n')
+        toast.error(`Dispatch failed for all jobs:\n${failedItems}`)
       } else {
-        toast.warning(`${data.success_count} job(s) dispatched, ${data.failed_count} failed.`)
         const failedIds = data.results.filter((r: any) => !r.success).map((r: any) => r.job_id)
+        const failedNames = data.results
+          .filter((r: any) => !r.success)
+          .map((r: any) => `Job #${r.job_id}${r.job_name ? ` (${r.job_name})` : ''}`)
+          .join(', ')
+        toast.warning(
+          `${data.success_count} job(s) dispatched, ${data.failed_count} failed. Failed: ${failedNames}`
+        )
         setSelectedJobIds(failedIds)
       }
       fetchJobs()
@@ -2046,6 +2137,11 @@ export function BodInternalPage() {
                           </td>
                           <td className="px-2 py-2 overflow-hidden">
                             <h3 className="font-semibold text-xs truncate m-0 text-text" title={job.pdf_filename}>{job.pdf_filename}</h3>
+                            {job.eisbn && (
+                              <p className="text-[10px] text-muted font-mono truncate mt-0.5" title={`eISBN: ${job.eisbn}`}>
+                                eISBN: {job.eisbn}
+                              </p>
+                            )}
                             {job.epub_filename && (
                               <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
                                 {job.epub_filename}
@@ -2196,19 +2292,39 @@ export function BodInternalPage() {
                           <td className="px-1 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-center gap-1">
                               {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
-                                <button
-                                  onClick={(e) => handleSingleDispatch(e, job.id)}
-                                  disabled={dispatchingJobId === job.id}
-                                  className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
-                                  title="Dispatch & Deliver to FTP"
-                                >
-                                  {dispatchingJobId === job.id ? (
-                                    <Loader2 size={15} className="animate-spin text-emerald-600" />
-                                  ) : (
-                                    <Send size={15} />
-                                  )}
-                                </button>
+                                <>
+                                  <button
+                                    onClick={(e) => handleSingleDispatch(e, job.id, job.project_name || job.pdf_filename)}
+                                    disabled={dispatchingJobId === job.id}
+                                    className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                                    title="Dispatch & Deliver to FTP"
+                                  >
+                                    {dispatchingJobId === job.id ? (
+                                      <Loader2 size={15} className="animate-spin text-emerald-600" />
+                                    ) : (
+                                      <Send size={15} />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDownloadDispatchPackage(e, job.id, job.project_name || job.pdf_filename)}
+                                    className="p-1 text-muted hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                                    title="Download Deliverables Package (.zip)"
+                                  >
+                                    <Download size={15} />
+                                  </button>
+                                </>
                               )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setHistoryJob(job)
+                                  setHistoryActiveTab('stage')
+                                }}
+                                className="p-1 text-muted hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                                title="View History (Stages, Assignments, Updates, Files)"
+                              >
+                                <History size={15} />
+                              </button>
                               {isAdmin && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
@@ -2276,6 +2392,11 @@ export function BodInternalPage() {
                         )}
                         <div className="min-w-0">
                           <h3 className="font-semibold text-sm text-text truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
+                          {job.eisbn && (
+                            <p className="text-[10px] text-muted font-mono truncate mt-0.5" title={`eISBN: ${job.eisbn}`}>
+                              eISBN: {job.eisbn}
+                            </p>
+                          )}
                           {job.epub_filename && (
                             <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
                               {job.epub_filename}
@@ -2295,7 +2416,7 @@ export function BodInternalPage() {
                       <div className="flex items-center gap-1 shrink-0">
                         {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
                           <button
-                            onClick={(e) => handleSingleDispatch(e, job.id)}
+                            onClick={(e) => handleSingleDispatch(e, job.id, job.project_name || job.pdf_filename)}
                             disabled={dispatchingJobId === job.id}
                             className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
                             title="Dispatch & Deliver to FTP"
@@ -2510,6 +2631,37 @@ export function BodInternalPage() {
                   )}
                 </div>
 
+                <div>
+                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                    Cover Image <span className="text-muted/60 normal-case font-normal">(Optional — .jpg, .jpeg)</span>
+                  </label>
+                  <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-3 text-center cursor-pointer transition-colors bg-background/50">
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg"
+                      onChange={e => e.target.files && setCoverFile(e.target.files[0])}
+                      className="hidden"
+                      id="cover-upload"
+                    />
+                    <label htmlFor="cover-upload" className="cursor-pointer space-y-1 block">
+                      <p className="text-xs font-semibold text-text">Click to choose Cover Image</p>
+                      <p className="text-[9px] text-muted">Supports JPG, JPEG</p>
+                    </label>
+                  </div>
+                  {coverFile && (
+                    <div className="mt-2 bg-background border border-border rounded-lg p-2 text-xs text-muted flex items-center justify-between">
+                      <span className="truncate max-w-[280px] font-medium text-emerald-600 dark:text-emerald-400">{coverFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setCoverFile(null)}
+                        className="text-red-600 hover:text-red-500 font-bold text-[10px]"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="pt-2 flex justify-end gap-2.5">
                   <button
                     type="button"
@@ -2572,6 +2724,125 @@ export function BodInternalPage() {
                 >
                   Delete Job
                 </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Dispatch to FTP Confirmation Modal */}
+      {
+        confirmDispatchModal !== null && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+            <div className="bg-card border border-border rounded-xl max-w-md w-full p-5 shadow-2xl space-y-4">
+              <div className="flex justify-between items-start border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <Send size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-text m-0">Confirm FTP Dispatch</h3>
+                    <p className="text-[11px] text-muted m-0 mt-0.5">Package deliverables and upload to FTP server</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setConfirmDispatchModal(null)}
+                  className="text-muted hover:text-text transition-colors p-1"
+                >
+                  <XCircle size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-2 text-xs text-text">
+                {confirmDispatchModal.type === 'single' ? (
+                  <p>
+                    Are you sure you want to dispatch <span className="font-bold text-foreground">{confirmDispatchModal.jobName}</span> to the Books on Demand FTP server?
+                  </p>
+                ) : (
+                  <p>
+                    Are you sure you want to dispatch <span className="font-bold text-emerald-600 dark:text-emerald-400">{confirmDispatchModal.jobIds?.length} selected job(s)</span> to the Books on Demand FTP server?
+                  </p>
+                )}
+
+                {(() => {
+                  const targetJob = confirmDispatchModal.type === 'single'
+                    ? jobs.find(j => j.id === confirmDispatchModal.jobId)
+                    : null;
+                  const hasEpub = targetJob ? Boolean(targetJob.has_epub || targetJob.epub_filepath) : true;
+                  const hasHistory = targetJob ? Boolean(targetJob.has_history_csv) : true;
+                  const hasAce = targetJob ? Boolean(targetJob.has_ace || targetJob.ace_report_filepath) : true;
+                  const hasEpubcheck = targetJob ? Boolean(targetJob.has_epubcheck || targetJob.epubcheck_report_filepath) : true;
+                  const isReady = hasEpub && hasHistory && hasAce && hasEpubcheck;
+
+                  return (
+                    <div className="bg-muted/15 border border-border/50 rounded-lg p-3 text-[11px] text-muted space-y-1.5">
+                      <div className="flex items-center justify-between text-foreground font-semibold">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 size={13} className={isReady ? "text-emerald-500" : "text-amber-500"} />
+                          Deliverables status:
+                        </span>
+                        {!isReady && (
+                          <span className="text-[10px] text-rose-500 font-bold">Missing QC deliverables</span>
+                        )}
+                      </div>
+                      <ul className="space-y-1 pl-1 text-[11px]">
+                        <li className="flex items-center gap-1.5">
+                          {hasEpub ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasEpub ? "text-foreground" : "text-rose-500 font-medium"}>Validated EPUB file</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasHistory ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasHistory ? "text-foreground" : "text-rose-500 font-medium"}>history.csv (with WCAG Conformance Level)</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasAce ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasAce ? "text-foreground" : "text-rose-500 font-medium"}>ACE Accessibility report</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasEpubcheck ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasEpubcheck ? "text-foreground" : "text-rose-500 font-medium"}>EPUBCheck validation log</span>
+                        </li>
+                      </ul>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-2.5 border-t border-border/60">
+                <div>
+                  {confirmDispatchModal.type === 'single' && confirmDispatchModal.jobId && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadDispatchPackage(null, confirmDispatchModal.jobId!, confirmDispatchModal.jobName)}
+                      className="px-3 py-1.5 bg-secondary text-secondary-foreground hover:bg-secondary/80 font-semibold rounded-lg transition-colors flex items-center gap-1.5 text-xs border border-border/60"
+                      title="Download the complete deliverable ZIP before dispatching"
+                    >
+                      <Download size={13} />
+                      Download Package (.zip)
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setConfirmDispatchModal(null)}
+                    className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirmDispatchModal.type === 'single' && confirmDispatchModal.jobId) {
+                        executeSingleDispatch(confirmDispatchModal.jobId)
+                      } else if (confirmDispatchModal.type === 'bulk' && confirmDispatchModal.jobIds) {
+                        executeBulkDispatch(confirmDispatchModal.jobIds)
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1.5 text-xs shadow-xs"
+                  >
+                    <Send size={13} />
+                    Yes, Dispatch to FTP
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2658,65 +2929,111 @@ export function BodInternalPage() {
         )
       }
 
-      {/* Fastrack Expected Date Modal */}
-      {
-        fastrackModalJob && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-            <div className="bg-card w-full max-w-sm rounded-xl shadow-2xl border border-border flex flex-col p-5 gap-4">
-              <div className="flex items-center justify-between border-b border-border/60 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                    <Zap size={16} className="fill-amber-500 text-amber-500" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-text text-sm m-0">Enable Fastrack</h3>
-                    <p className="text-[10px] text-muted m-0 truncate max-w-[200px]" title={fastrackModalJob.pdf_filename}>
-                      {fastrackModalJob.pdf_filename}
-                    </p>
-                  </div>
+      {/* Fastrack Management Modal */}
+      {fastrackModalJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-card w-full max-w-sm rounded-xl shadow-2xl border border-border flex flex-col p-5 gap-4">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                  <Zap size={16} className="fill-amber-500 text-amber-500" />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setFastrackModalJob(null)}
-                  className="text-muted hover:text-text transition-colors p-1 rounded-md"
-                >
-                  <XCircle size={16} />
-                </button>
-              </div>
-
-              <form onSubmit={submitFastrackEnable} className="flex flex-col gap-4">
-                <div className="bg-muted/30 border border-border/60 rounded-lg p-2.5 text-xs text-muted flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-text">Current Due Date:</span>
-                    <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
-                      {fastrackModalJob.due_date ? formatDate(fastrackModalJob.due_date) : 'No due date set'}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground m-0">
-                    Set the target date this Fastrack job should be completed by (on or before current due date).
+                <div>
+                  <h3 className="font-bold text-text text-sm m-0">
+                    {fastrackModalJob.is_fastrack ? 'Manage Fastrack' : 'Enable Fastrack'}
+                  </h3>
+                  <p className="text-[10px] text-muted m-0 truncate max-w-[200px]" title={fastrackModalJob.pdf_filename}>
+                    {fastrackModalJob.pdf_filename}
                   </p>
                 </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFastrackModalJob(null)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={16} />
+              </button>
+            </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-text flex items-center gap-1">
-                    <Calendar size={12} className="text-amber-500" />
-                    Expected Completion Date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={fastrackExpectedDate}
-                    max={(() => {
-                      const parsed = parseUtcDate(fastrackModalJob.due_date)
-                      return parsed ? parsed.toISOString().slice(0, 10) : undefined
-                    })()}
-                    onChange={(e) => setFastrackExpectedDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-text focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all shadow-xs"
-                    style={{ colorScheme: 'light dark' }}
-                  />
+            <form onSubmit={submitFastrackEnable} className="flex flex-col gap-4">
+              <div className="bg-muted/30 border border-border/60 rounded-lg p-2.5 text-xs text-muted flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-text">Current Status:</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    fastrackModalJob.is_fastrack 
+                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40' 
+                      : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {fastrackModalJob.is_fastrack ? 'Fastrack Active' : 'Normal Priority'}
+                  </span>
                 </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-text">Current Due Date:</span>
+                  <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
+                    {fastrackModalJob.due_date ? formatDate(fastrackModalJob.due_date) : 'No due date set'}
+                  </span>
+                </div>
+                {fastrackModalJob.is_fastrack && fastrackModalJob.fastrack_requested_date && (
+                  <div className="flex items-center justify-between border-t border-border/40 pt-1">
+                    <span className="font-semibold text-text">Expected Date:</span>
+                    <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                      {formatDate(fastrackModalJob.fastrack_requested_date)}
+                    </span>
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground m-0">
+                  {fastrackModalJob.is_fastrack
+                    ? "Update the expected completion date or turn off Fastrack to return to standard priority."
+                    : "Specify when you need this job completed by (must be on or before the current due date)."}
+                </p>
+              </div>
 
-                <div className="pt-2 flex justify-end gap-2 border-t border-border/60">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-text flex items-center gap-1">
+                  <Calendar size={12} className="text-amber-500" />
+                  Expected Completion Date
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={fastrackExpectedDate}
+                  max={(() => {
+                    const parsed = parseUtcDate(fastrackModalJob.due_date)
+                    return parsed ? parsed.toISOString().slice(0, 10) : undefined
+                  })()}
+                  onChange={(e) => setFastrackExpectedDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-text focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all shadow-xs"
+                  style={{ colorScheme: 'light dark' }}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-text flex items-center justify-between">
+                  <span>Reason / Note <span className="text-[10px] text-muted font-normal">(optional)</span></span>
+                </label>
+                <input
+                  type="text"
+                  placeholder={fastrackModalJob.is_fastrack ? "e.g., Client requested deadline adjustment" : "e.g., Priority customer request"}
+                  value={fastrackReason}
+                  onChange={(e) => setFastrackReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-text placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all shadow-xs"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-2 border-t border-border/60">
+                {fastrackModalJob.is_fastrack ? (
+                  <button
+                    type="button"
+                    onClick={handleTurnOffFastrack}
+                    disabled={savingFastrack}
+                    className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-semibold rounded-lg transition-colors text-xs flex items-center gap-1 shadow-xs disabled:opacity-50"
+                    title="Turn off Fastrack and return job to normal priority"
+                  >
+                    {savingFastrack && <Loader2 size={11} className="animate-spin" />}
+                    Turn Off Fastrack
+                  </button>
+                ) : (
                   <button
                     type="button"
                     onClick={() => setFastrackModalJob(null)}
@@ -2725,20 +3042,350 @@ export function BodInternalPage() {
                   >
                     Cancel
                   </button>
+                )}
+
+                <div className="flex items-center gap-2 ml-auto">
+                  {fastrackModalJob.is_fastrack && (
+                    <button
+                      type="button"
+                      onClick={() => setFastrackModalJob(null)}
+                      disabled={savingFastrack}
+                      className="px-2.5 py-1.5 bg-background border border-border hover:bg-muted/50 text-text font-semibold rounded-lg transition-colors text-xs"
+                    >
+                      Cancel
+                    </button>
+                  )}
                   <button
                     type="submit"
                     disabled={savingFastrack || !fastrackExpectedDate}
                     className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg transition-colors flex items-center gap-1.5 text-xs shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {savingFastrack && <Loader2 size={12} className="animate-spin" />}
-                    Confirm & Enable Fastrack
+                    {fastrackModalJob.is_fastrack ? "Update Date" : "Confirm & Enable Fastrack"}
                   </button>
                 </div>
-              </form>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* History Slide-over Drawer */}
+      {historyJob && (
+        <div className="fixed inset-0 z-50 flex justify-end animate-in fade-in duration-200">
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs"
+            onClick={() => setHistoryJob(null)}
+          />
+          <div className="relative w-full max-w-lg bg-card border-l border-border shadow-2xl h-full flex flex-col z-10 animate-in slide-in-from-right duration-200">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted/20">
+              <div className="min-w-0 pr-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                    <History size={16} />
+                  </div>
+                  <h3 className="text-sm font-bold text-text truncate m-0">
+                    {historyJob.pdf_filename || historyJob.project_name || `Job #${historyJob.id}`}
+                  </h3>
+                </div>
+                <p className="text-[11px] text-muted mt-0.5 truncate m-0">
+                  Stage: <span className="font-semibold text-text">{historyJob.current_stage_name}</span> • Assignee: <span className="font-medium text-text">{getUserDisplayName(historyJob.current_assignee) || 'Unassigned'}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setHistoryJob(null)}
+                className="p-1.5 text-muted hover:text-text rounded-lg hover:bg-muted transition-colors shrink-0"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex items-center gap-4 px-5 pt-3 border-b border-border bg-card overflow-x-auto hide-scrollbar shrink-0">
+              <button
+                onClick={() => setHistoryActiveTab('stage')}
+                className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'stage' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                  }`}
+              >
+                Stage History
+              </button>
+              {historyJob.assigned_users && Array.isArray(historyJob.assigned_users) && historyJob.assigned_users.length > 0 && (
+                <button
+                  onClick={() => setHistoryActiveTab('assignment')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'assignment' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Assignment History
+                </button>
+              )}
+              {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
+                (!h.changes || h.changes.length === 0) || h.changes.some((c: any) => c.field === 'Due Date')
+              ) && (
+                <button
+                  onClick={() => setHistoryActiveTab('duedate')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Due Date History
+                </button>
+              )}
+              {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
+                h.changes && h.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
+              ) && (
+                <button
+                  onClick={() => setHistoryActiveTab('priority')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Priority History
+                </button>
+              )}
+              {historyJob.file_history && Array.isArray(historyJob.file_history) && historyJob.file_history.length > 0 && (
+                <button
+                  onClick={() => setHistoryActiveTab('files')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'files' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  File History
+                </button>
+              )}
+            </div>
+
+            {/* Tab Contents */}
+            <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-3">
+              {historyActiveTab === 'stage' && (
+                <div className="space-y-3">
+                  {Object.keys(historyJob.stage_history || {})
+                    .filter(stageName => {
+                      const data = historyJob.stage_history[stageName]
+                      return stageName === historyJob.current_stage_name || Boolean(data?.start_time || data?.end_time)
+                    })
+                    .map((stageName, idx) => {
+                      const data = historyJob.stage_history[stageName]
+                      const isCurrent = stageName === historyJob.current_stage_name && !isJobCompleted(historyJob)
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3.5 rounded-xl border transition-all ${isCurrent
+                            ? 'bg-primary/5 border-primary/30 shadow-xs ring-1 ring-primary/10'
+                            : 'bg-background/80 border-border'
+                            }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`w-2 h-2 rounded-full ${isCurrent ? 'bg-primary animate-pulse' : 'bg-emerald-500'
+                                  }`}
+                              />
+                              <span className="text-xs font-bold text-text">{stageName}</span>
+                            </div>
+                            {isCurrent && (
+                              <span className="text-[10px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded-full">
+                                In Progress
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11px] text-muted border-t border-border/50 pt-2">
+                            <div>
+                              <span className="block text-[9px] uppercase tracking-wider text-muted-foreground">Started</span>
+                              <span className="font-medium text-text">{data?.start_time ? formatDateTime(data.start_time) : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="block text-[9px] uppercase tracking-wider text-muted-foreground">Completed</span>
+                              <span className="font-medium text-text">{data?.end_time ? formatDateTime(data.end_time) : (isCurrent ? 'Ongoing' : '-')}</span>
+                            </div>
+                          </div>
+                          {data?.assignee && (
+                            <div className="mt-2 text-[11px] text-muted">
+                              Assignee: <span className="font-medium text-text">{getUserDisplayName(data.assignee)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                </div>
+              )}
+
+              {historyActiveTab === 'assignment' && historyJob.assigned_users && (
+                <div className="space-y-3">
+                  {[...historyJob.assigned_users].reverse().map((assignment: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between bg-background border border-border rounded-xl p-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0">
+                          {assignment.action && assignment.action.toLowerCase().includes('dispatch') ? (
+                            <Send size={14} className="text-emerald-600 dark:text-emerald-400" />
+                          ) : (
+                            <User size={14} />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-text m-0 truncate">
+                            {getUserDisplayName(assignment.username || assignment.user_id) || 'Unassigned'}
+                          </p>
+                          <p className="text-[10px] text-muted m-0 mt-0.5 truncate">
+                            Stage: <span className="font-semibold text-text">{assignment.stage}</span>
+                            {assignment.assigned_by && (
+                              <span> • By {getUserDisplayName(assignment.assigned_by)}</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-muted font-medium shrink-0 text-right whitespace-nowrap pl-2">
+                        {formatDateTime(assignment.time)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {historyActiveTab === 'duedate' && historyJob.due_date_history && (
+                <div className="space-y-3">
+                  {[...historyJob.due_date_history]
+                    .filter((historyItem: any) =>
+                      (!historyItem.changes || historyItem.changes.length === 0) ||
+                      historyItem.changes.some((c: any) => c.field === 'Due Date')
+                    )
+                    .reverse().map((historyItem: any, idx: number) => {
+                      const hasChanges = Array.isArray(historyItem.changes) && historyItem.changes.length > 0;
+                      return (
+                        <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md">
+                                <Calendar size={13} />
+                              </div>
+                              <span className="text-xs font-bold text-text">
+                                {historyItem.date ? formatDate(historyItem.date) : 'Due Date Update'}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-muted font-medium">
+                              {formatDateTime(historyItem.timestamp)}
+                            </span>
+                          </div>
+
+                          {hasChanges && (
+                            <div className="space-y-1 pt-1 border-t border-border/50">
+                              {historyItem.changes.filter((c: any) => c.field === 'Due Date').map((change: any, cIdx: number) => (
+                                <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                  <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded text-[10px]">
+                                    {change.field}
+                                  </span>
+                                  {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                    <>
+                                      <span className="text-muted line-through text-[11px]">{String(change.old)}</span>
+                                      <span className="text-muted text-[10px]">→</span>
+                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">{String(change.new)}</span>
+                                    </>
+                                  ) : (
+                                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">set to {String(change.new)}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {historyItem.reason && (
+                            <p className="text-xs text-text/80 m-0 break-words bg-muted/20 p-2 rounded-lg">
+                              <span className="text-muted font-medium">Reason:</span> {historyItem.reason}
+                            </p>
+                          )}
+                          <p className="text-[10px] text-muted m-0">
+                            Changed By: <span className="font-medium text-text">{historyItem.changed_by || 'Unknown'}</span>
+                          </p>
+                        </div>
+                      )
+                    })}
+                </div>
+              )}
+
+              {historyActiveTab === 'priority' && historyJob.due_date_history && (
+                <div className="space-y-3">
+                  {[...historyJob.due_date_history]
+                    .filter((historyItem: any) =>
+                      historyItem.changes && historyItem.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
+                    )
+                    .reverse().map((historyItem: any, idx: number) => (
+                      <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md">
+                              <Zap size={13} className="fill-amber-500 text-amber-500" />
+                            </div>
+                            <span className="text-xs font-bold text-text">
+                              Fastrack / Priority Update
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-muted font-medium">
+                            {formatDateTime(historyItem.timestamp)}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1 pt-1 border-t border-border/50">
+                          {historyItem.changes.filter((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date').map((change: any, cIdx: number) => (
+                            <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                              <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded text-[10px]">
+                                {change.field}
+                              </span>
+                              {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                <>
+                                  <span className="text-muted line-through text-[11px]">{String(change.old)}</span>
+                                  <span className="text-muted text-[10px]">→</span>
+                                  <span className="font-semibold text-amber-600 dark:text-amber-400 text-[11px]">{String(change.new)}</span>
+                                </>
+                              ) : (
+                                <span className="font-semibold text-amber-600 dark:text-amber-400 text-[11px]">set to {String(change.new)}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {historyItem.reason && (
+                          <p className="text-xs text-text/80 m-0 break-words bg-muted/20 p-2 rounded-lg">
+                            <span className="text-muted font-medium">Reason / Note:</span> {historyItem.reason}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted m-0">
+                          Changed By: <span className="font-medium text-text">{historyItem.changed_by || 'Unknown'}</span>
+                        </p>
+                      </div>
+                    ))}
+                </div>
+              )}
+
+              {historyActiveTab === 'files' && historyJob.file_history && (
+                <div className="space-y-3">
+                  {[...historyJob.file_history].reverse().map((fItem: any, idx: number) => (
+                    <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="p-1.5 bg-primary/10 text-primary rounded-md shrink-0">
+                            <FileText size={13} />
+                          </div>
+                          <span className="text-xs font-bold text-text truncate">
+                            {fItem.new_filename || fItem.original_filename}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted font-medium shrink-0">
+                          {formatDateTime(fItem.timestamp)}
+                        </span>
+                      </div>
+                      {fItem.backup_filename && (
+                        <p className="text-[10px] text-muted font-mono break-all m-0 bg-muted/20 p-1.5 rounded">
+                          Backed up: <span className="text-amber-600 dark:text-amber-400">{fItem.backup_filename}</span>
+                        </p>
+                      )}
+                      <p className="text-[10px] text-muted m-0 pt-1">
+                        Stage: <span className="font-semibold text-text">{fItem.stage || 'QC'}</span> • Uploaded By: <span className="font-medium text-text">{fItem.user || 'Unknown'}</span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
-        )
-      }
+        </div>
+      )}
     </div >
   )
 }

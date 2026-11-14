@@ -23,7 +23,7 @@ import {
   Code2, Download, ExternalLink, Eye, File, FileCode, FileOutput, FilePen, FileText,
   FolderOpen, History, Image, Languages, Layers, Loader2, LogIn, LogOut,
   ScanLine, Search, ShieldCheck, Sparkles, Trash2,
-  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer, BookOpen,
+  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer, BookOpen, RotateCcw,
 } from 'lucide-react'
 import { FOLDER_CONFIG, COLUMN_DEFINITIONS, fileTypeIcon, isProcessingActionVisibleForStage, getFolderConfigForChapter } from '@/config/fileManagerConfig'
 import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
@@ -41,7 +41,7 @@ import {
   startProcessingJob,
   startStructuring,
   startLanguageEdit,
-  startPpdGeneration, startPermissionsCheck, startCreditExtraction,
+  startPpdGeneration, startManuscriptAnalysisQa, startPreEditingQa, startPermissionsCheck, startCreditExtraction,
   startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof, startInddToProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
@@ -118,6 +118,9 @@ interface ChapterFilePageProps {
   isAssigned?: boolean
   onRefresh?: () => void
   onProceed?: () => void
+  onRevert?: () => void
+  prevStageName?: string | null
+  isReverting?: boolean
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -406,23 +409,18 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {(showAction('structuring') || showAction('structuringQa')) && (
+        {(showAction('structuring') || showAction('structuringQa') || showAction('preEditingQa')) && (
           <button
             disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
-            onClick={async () => {
-              if (!fid || !fname.endsWith('.docx')) return
-              try {
-                toast.info('Running QA Report...')
-                await startProcessingJob(fid, 'structuring_qa', 'style')
-                toast.success('QA Report generated successfully')
-                void invalidateFiles()
-              } catch (e: any) {
-                toast.error(`QA Report failed: ${e.message || 'Error running QA'}`)
-              }
-            }}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Pre-Editing QA',
+              jobFn: () => startPreEditingQa(fid),
+              pollFileId: fid,
+              pollProcessType: 'preediting_qa'
+            })}
           >
-            <ShieldCheck size={12} className="text-emerald-600" /> Run QA Report
+            <ShieldCheck size={12} className="text-emerald-600" /> Run Pre-Editing QA
           </button>
         )}
 
@@ -491,9 +489,29 @@ function ProcessingActionsMenu({
           <button
             disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
-            onClick={() => fid && setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid), pollFileId: fid, pollProcessType: 'ppd' })}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Manuscript Analysis',
+              jobFn: () => startPpdGeneration(fid),
+              pollFileId: fid,
+              pollProcessType: 'ppd'
+            })}
           >
             <FileOutput size={12} /> Manuscript Analysis
+          </button>
+        )}
+
+        {showAction('manuscriptAnalysisQa') && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Manuscript Analysis QA',
+              jobFn: () => startManuscriptAnalysisQa(fid),
+              pollFileId: fid,
+              pollProcessType: 'manuscript_analysis_qa'
+            })}
+          >
+            <ShieldCheck size={12} className="text-sky-600" /> Manuscript Analysis QA
           </button>
         )}
 
@@ -725,6 +743,9 @@ export function ChapterFilePage({
   isAssigned: propIsAssigned,
   onRefresh,
   onProceed,
+  onRevert,
+  prevStageName,
+  isReverting,
 }: ChapterFilePageProps) {
   const navigate = useNavigate()
   const { isAdmin: isAdminUser } = useRBAC()
@@ -1092,6 +1113,7 @@ export function ChapterFilePage({
         const isExpanded = fid != null && !!expandedSources[fid]
         const isImageRow = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(name)
         const isDocxRow = /\.docx?$/i.test(name)
+        const isHtmlRow = /\.html?$/i.test(name)
         const openTarget = isImageRow
           ? `/projects/${pid}/image-review?fileId=${fid}&chapterId=${cid}&folder=${activeFolder}`
           : isDocxRow
@@ -1116,20 +1138,35 @@ export function ChapterFilePage({
             )}
             <FolderIcon name={icon} size={14} color={color} />
             {fid && activeFolder !== 'backup' ? (
-              <button
-                type="button"
-                disabled={!resolvedIsAssigned}
-                onClick={e => {
-                  e.stopPropagation()
-                  navigate(openTarget)
-                }}
-                title={name}
-                className={resolvedIsAssigned
-                  ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
-                  : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
-              >
-                {name}
-              </button>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <button
+                  type="button"
+                  disabled={!resolvedIsAssigned}
+                  onClick={e => {
+                    e.stopPropagation()
+                    navigate(openTarget)
+                  }}
+                  title={name}
+                  className={resolvedIsAssigned
+                    ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+                    : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
+                >
+                  {name}
+                </button>
+                {isHtmlRow && (
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation()
+                      window.open(`/api/v2/files/${fid}/download?inline=true`, '_blank')
+                    }}
+                    title="Open in new browser tab"
+                    className="p-0.5 text-muted hover:text-primary hover:bg-accent rounded shrink-0"
+                  >
+                    <ExternalLink size={12} />
+                  </button>
+                )}
+              </div>
             ) : (
               <span className="font-medium text-text truncate max-w-[2000px]" title={name}>{name}</span>
             )}
@@ -1628,6 +1665,19 @@ export function ChapterFilePage({
         )}
 
 
+
+        {/* Revert Stage - Admin only */}
+        {isAdminUser && onRevert && prevStageName && (
+          <button
+            onClick={onRevert}
+            disabled={isReverting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title={`Revert to ${prevStageName} (Admin only)`}
+          >
+            {isReverting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+            Revert to {prevStageName}
+          </button>
+        )}
 
         {/* Proceed */}
         {onProceed && (

@@ -11,6 +11,8 @@ from app.processing.manuscript_core.fixer import apply_fixes_targeted, apply_te_
 
 # Cache directory inside the app workspace
 RESULTS_DIR = Path(__file__).parent.parent.parent / "processing" / "results"
+# Bump when detectors change so cached scans made by older rule code are re-run.
+SCAN_ENGINE_VERSION = "2026.11-house-style-6"
 
 def _map_findings_to_legacy_issues(findings: list[dict]) -> list[dict]:
     """Maps rich occurrences back to legacy issues schema for backward compatibility."""
@@ -71,8 +73,9 @@ def scan_errors(
                 cached = json.load(cf)
             cached_file = cached.get("file", {})
             file_mtime = os.path.getmtime(file_path)
-            if (cached_file.get("version") == file_record.version and 
-                cached_file.get("mtime") == file_mtime):
+            if (cached_file.get("version") == file_record.version and
+                cached_file.get("mtime") == file_mtime and
+                cached.get("engine_version") == SCAN_ENGINE_VERSION):
                 logger.info(f"Technical Review Cache HIT for file {file_id}")
                 return cached
         except Exception as e:
@@ -81,13 +84,22 @@ def scan_errors(
     # 2. Run manuscript_core Analyzer
     try:
         logger.info(f"Running manuscript_core analyzer on file: {file_path}")
+        # Resolve real client and project names
+        project = file_record.project if hasattr(file_record, "project") and file_record.project else (
+            db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
+            if file_record.project_id else None
+        )
+        from app.services.stylesheet_service import project_client_name
+        resolved_client_name = project_client_name(project)
+        resolved_project_name = project.title if project and project.title else (project.name if project and hasattr(project, "name") else "DefaultProject")
+
         chapters = [
             {
                 "index": 1,
                 "filename": file_record.filename,
                 "path": file_path,
-                "client_name": "DefaultClient",
-                "project_name": "DefaultProject",
+                "client_name": resolved_client_name or "DefaultClient",
+                "project_name": resolved_project_name,
                 "role": "PM",
                 "ia_mapping_path": ""
             }
@@ -100,6 +112,7 @@ def scan_errors(
         
         scan_result = {
             "status": "ok",
+            "engine_version": SCAN_ENGINE_VERSION,
             "file": {
                 "id": file_record.id,
                 "project_id": file_record.project_id,

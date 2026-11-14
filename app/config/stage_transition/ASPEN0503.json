@@ -1,302 +1,402 @@
 {
   "Job Initiation": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Job Initiation stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Manuscript Analysis": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Manuscript Analysis stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Editorial Assessment": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Editorial Assessment stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
-    "Pre-editing": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+  "Pre-editing": {
+    "custom_message": "The Pre-editing stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
-    "Pre-editing QA": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+  "Pre-editing QA": {
+    "custom_message": "The Pre-editing QA stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Language Editing": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Language Editing stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
-    "Language Editing QA": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+  "Language Editing QA": {
+    "custom_message": "The Language Editing QA stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "AQ Resolution": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The AQ Resolution stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Technical Editing": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Technical Editing stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Template Processing": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Template Processing stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Art Processing": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Art Processing stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Non-XML Processing": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Non-XML Processing stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Typesetting": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Typesetting stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Proofreading": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Proofreading stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Indexing": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Indexing stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Corrections & 2P": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Corrections & 2P stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "QC & Pre-flight": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The QC & Pre-flight stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Delivery": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Delivery stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Reprint": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Reprint stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "XML Conversion": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The XML Conversion stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Digital Processing": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Digital Processing stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Accessibility": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Accessibility stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Accessibility QC": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Accessibility QC stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Publisher Review": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Publisher Review stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   },
   "Author Review": {
-    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "custom_message": "The Author Review stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
-      "hemamalinik@s4carlisle.com",
-      "MuthukumarS@s4carlisle.com",
-      "muraliba@s4carlisle.com",
-      "selvabharathp@s4carlisle.com"
+      "{next_stage_owner_emails}"
     ],
-    "cc": [],
-    "subject": "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
-    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+    "cc": [
+      "{project_manager_email}",
+      "{stage_owner_emails}"
+    ],
+    "subject": "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+    "body": "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply.",
+    "stage_owner_username": null,
+    "stage_owner_email": null,
+    "stage_group_email": null,
+    "stage_owner_mode": "both"
   }
 }

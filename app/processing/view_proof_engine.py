@@ -203,17 +203,15 @@ class ViewProofEngine:
                                     rel_within = os.path.relpath(f_full, art_folder)
                                     zf.write(f_full, f"{target_sub}/{rel_within}".replace("\\", "/"))
 
-                # Also include project-level common art if present
-                common_art = os.path.join(project_dir, "Design", "template", "Common Art")
-                if os.path.exists(common_art):
-                    for r, _, sub_files in os.walk(common_art):
-                        for f in sub_files:
-                            f_full = os.path.join(r, f)
-                            if f_full in seen_art_files:
-                                continue
-                            seen_art_files.add(f_full)
-                            rel_within = os.path.relpath(f_full, common_art)
-                            zf.write(f_full, f"artfile/{rel_within}".replace("\\", "/"))
+                # Also search and package project-level Common Art if present
+                from app.services.file_service import resolve_project_common_art_files
+                common_art_files = resolve_project_common_art_files(project_dir=project_dir, db=db, project_id=project.id)
+                for f_full in common_art_files:
+                    fname = os.path.basename(f_full)
+                    arc = f"Design/template/Common Art/{fname}"
+                    if arc not in seen_art_files:
+                        seen_art_files.add(arc)
+                        zf.write(f_full, arc)
 
             # 6. Call Windows InDesign Server using Redis Lock
             if not settings.INDESIGN_SERVER_URL:

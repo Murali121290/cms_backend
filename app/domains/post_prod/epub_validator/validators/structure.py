@@ -352,3 +352,42 @@ def validate_no_cover_xhtml(book_details, rule_config=None):
                 })
                 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-FN-001")
+def validate_no_unicode_in_filenames(book_details, rule_config=None):
+    """
+    Ensure all files and directory names in the EPUB do not use non-ASCII / Unicode characters.
+    """
+    epub = book_details.get("epub_path") or ""
+    issues = []
+
+    if not epub or not os.path.isdir(epub):
+        return {"issues_count": 0, "issues": []}
+
+    for root, dirs, files in os.walk(epub):
+        # Exclude hidden directories/files e.g. .DS_Store, __MACOSX
+        dirs[:] = [d for d in dirs if not d.startswith(".") and not d.startswith("__")]
+
+        for name in files:
+            if name.startswith(".") or name.startswith("__"):
+                continue
+
+            # Check if filename contains non-ASCII characters
+            if not name.isascii():
+                full_item_path = os.path.join(root, name)
+                rel_path = os.path.relpath(full_item_path, epub)
+                non_ascii_chars = sorted(list(set(c for c in name if ord(c) > 127)))
+                chars_display = ", ".join(f"'{c}' (U+{ord(c):04X})" for c in non_ascii_chars)
+                issues.append({
+                    "rule_name": "Do not use unicode in file names",
+                    "type": "unicode_in_filename",
+                    "message": f"Filename '{name}' contains non-ASCII/Unicode character(s): {chars_display}. Use only ASCII characters (a-z, A-Z, 0-9, _, -).",
+                    "category": "Structure Check",
+                    "file_path": rel_path,
+                    "line_number": 1,
+                    "snippet": f"Filename: {name}",
+                    "extract": f"Filename: {name}",
+                })
+
+    return {"issues_count": len(issues), "issues": issues}

@@ -158,6 +158,25 @@ class PPDEngine:
             excel_output = html_to_excel_no_images(out_html, output_dir)
             if excel_output:
                 generated_files.append(excel_output)
+
+            # 7. Generate Standalone Manuscript Analysis Stage QA Report
+            try:
+                from app.processing.manuscript_analysis_qa import generate_manuscript_analysis_qa_report
+                qa_report_path = os.path.join(output_dir, f"{base_name}_Manuscript_Analysis_QA_Report.html")
+                generate_manuscript_analysis_qa_report(
+                    docx_path=file_path,
+                    output_html_path=qa_report_path,
+                    dtypes=dtypes,
+                    paras=paras,
+                    comments=comments,
+                    imgs=imgs,
+                    foot=foot,
+                    end=end,
+                    analyst_name=user_name,
+                )
+                generated_files.append(qa_report_path)
+            except Exception as qae:
+                print(f"Manuscript Analysis QA Report generation failed: {qae}")
                 
             return generated_files
 

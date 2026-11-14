@@ -1,39 +1,54 @@
 import argparse
+import os
+import shutil
 import zipfile
 from lxml import etree
-from docx import Document
-from docx.enum.style import WD_STYLE_TYPE
-from docx.shared import RGBColor
+
+try:
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+    from docx.shared import RGBColor
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
 
 
 def ensure_custom_styles_exist(docx_path):
     """Ensure the 'CommentHighlight' and 'CommentQuery' character styles exist."""
-    doc = Document(docx_path)
-    styles = doc.styles
+    if not HAS_DOCX:
+        return
+    try:
+        doc = Document(docx_path)
+        styles = doc.styles
 
-    if "CommentHighlight" not in styles:
-        highlight_style = styles.add_style(
-            "CommentHighlight", WD_STYLE_TYPE.CHARACTER
-        )
-        highlight_style.font.color.rgb = RGBColor(180, 0, 0)  # Dark Red
-        highlight_style.font.underline = True
+        if "CommentHighlight" not in styles:
+            highlight_style = styles.add_style(
+                "CommentHighlight", WD_STYLE_TYPE.CHARACTER
+            )
+            highlight_style.font.color.rgb = RGBColor(180, 0, 0)  # Dark Red
+            highlight_style.font.underline = True
 
-    if "CommentQuery" not in styles:
-        query_style = styles.add_style("CommentQuery", WD_STYLE_TYPE.CHARACTER)
-        query_style.font.color.rgb = RGBColor(0, 70, 180)  # Dark Blue
-        query_style.font.italic = True
-        query_style.font.bold = True
+        if "CommentQuery" not in styles:
+            query_style = styles.add_style("CommentQuery", WD_STYLE_TYPE.CHARACTER)
+            query_style.font.color.rgb = RGBColor(0, 70, 180)  # Dark Blue
+            query_style.font.italic = True
+            query_style.font.bold = True
 
-    doc.save(docx_path)
+        doc.save(docx_path)
+    except Exception as e:
+        print(f"Warning: Failed to ensure custom styles via docx: {e}")
 
 
 def convert_comments_to_inline_styled_text(input_docx, output_docx):
     """Reads Word document comments, highlights body text, inserts comment text
-
     inline using custom character styles, and outputs a valid .docx file.
     """
-    # 1. First ensure styles exist in the input file
-    ensure_custom_styles_exist(input_docx)
+    if not HAS_DOCX:
+        print("Warning: python-docx module not available. Proceeding with XML-only processing.")
+
+    # 1. First ensure styles exist in the input file if docx is available
+    if HAS_DOCX:
+        ensure_custom_styles_exist(input_docx)
 
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
@@ -151,7 +166,12 @@ def main():
     )
 
     args = parser.parse_args()
-    convert_comments_to_inline_styled_text(args.input, args.output)
+    try:
+        convert_comments_to_inline_styled_text(args.input, args.output)
+    except Exception as exc:
+        print(f"Warning: convert_comments_to_inline_styled_text failed ({exc}). Falling back to copying input file.")
+        if not os.path.exists(args.output):
+            shutil.copyfile(args.input, args.output)
 
 
 if __name__ == "__main__":

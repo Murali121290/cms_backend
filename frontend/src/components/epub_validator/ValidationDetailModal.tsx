@@ -1904,25 +1904,51 @@ function ImageReplaceModal({
   const [file, setFile] = useState<File | null>(null);
   const [reason, setReason] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
+  // Extract expected extension from target filePath (e.g. .jpg, .png, .svg)
+  const targetExt = filePath ? (filePath.split('.').pop() || '').toLowerCase() : '';
+  const acceptPattern = targetExt ? `.${targetExt}` : 'image/*';
+
+  const validateFileExtension = (selectedFile: File): boolean => {
+    if (!targetExt) return true;
+    const selectedExt = (selectedFile.name.split('.').pop() || '').toLowerCase();
+    if (selectedExt !== targetExt) {
+      setFileError(`Extension mismatch: Selected file is .${selectedExt}, but target file requires .${targetExt}`);
+      alert(`Cannot upload .${selectedExt} file! The target file requires the exact same extension (.${targetExt}).`);
+      return false;
+    }
+    setFileError(null);
+    return true;
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile && droppedFile.type.startsWith('image/')) {
-      setFile(droppedFile);
+    if (droppedFile) {
+      if (validateFileExtension(droppedFile)) {
+        setFile(droppedFile);
+      }
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile) setFile(selectedFile);
+    if (selectedFile) {
+      if (validateFileExtension(selectedFile)) {
+        setFile(selectedFile);
+      } else {
+        e.target.value = '';
+      }
+    }
   };
 
   const handleSubmit = async () => {
     if (!file || !reason) return;
+    if (!validateFileExtension(file)) return;
     setIsUploading(true);
     try {
       const formData = new FormData();
@@ -1976,14 +2002,16 @@ function ImageReplaceModal({
             <div
               className={cn(
                 "border-[1.5px] border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all duration-200",
-                file 
-                  ? "border-primary bg-primary/5" 
-                  : "border-border hover:border-primary hover:bg-accent/50"
+                fileError
+                  ? "border-destructive bg-destructive/5"
+                  : file 
+                    ? "border-primary bg-primary/5" 
+                    : "border-border hover:border-primary hover:bg-accent/50"
               )}
               onClick={() => fileInputRef.current?.click()}
             >
-              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
-              <Upload className={cn("w-6 h-6 mb-3", file ? "text-primary" : "text-muted-foreground")} strokeWidth={1.5} />
+              <input type="file" accept={acceptPattern} className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+              <Upload className={cn("w-6 h-6 mb-3", fileError ? "text-destructive" : file ? "text-primary" : "text-muted-foreground")} strokeWidth={1.5} />
               {file ? (
                 <div className="text-center">
                   <span className="text-[15px] font-bold text-foreground">{file.name}</span>
@@ -1992,10 +2020,15 @@ function ImageReplaceModal({
               ) : (
                 <div className="text-center">
                   <p className="text-[15px] font-bold text-foreground">Click to choose Image File</p>
-                  <p className="text-[13px] text-muted-foreground mt-1">Supports .jpg, .png, .webp files</p>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {targetExt ? `Only .${targetExt} file allowed to replace this image` : 'Supports .jpg, .png, .webp files'}
+                  </p>
                 </div>
               )}
             </div>
+            {fileError && (
+              <p className="text-xs text-destructive font-medium mt-1">{fileError}</p>
+            )}
           </div>
           
           <div className="flex flex-col gap-1.5">

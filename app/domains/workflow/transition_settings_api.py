@@ -28,6 +28,13 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 
 AVAILABLE_VARIABLES = [
     {
+        "key": "{chapter_table}",
+        "label": "Chapter Transition Table",
+        "description": "Structured table: Chapter | Stage (Current → Next) | Due Date | Shipment Notes",
+        "sample": "{chapter_table}",
+        "category": "Layout"
+    },
+    {
         "key": "{chapter_name}",
         "label": "Chapter Number",
         "description": "Chapter number or identifier (e.g., 01, FM, BM)",
@@ -66,7 +73,14 @@ AVAILABLE_VARIABLES = [
         "key": "{client_name}",
         "label": "Client Name",
         "description": "Name of the publishing client / imprint",
-        "sample": "Cambridge University Press",
+        "sample": "Wolters Kluwer Health",
+        "category": "Project"
+    },
+    {
+        "key": "{customer_name}",
+        "label": "Customer Name",
+        "description": "Alias for Client Name / Publishing Imprint",
+        "sample": "Wolters Kluwer Health",
         "category": "Project"
     },
     {
@@ -104,6 +118,167 @@ AVAILABLE_VARIABLES = [
         "sample": "pre_editing_team@example.com",
         "category": "Teams"
     },
+    {
+        "key": "{next_stage_owner_emails}",
+        "label": "Next Stage Owner and Group Mail",
+        "description": "Dynamic destination combining Next Stage Lead and Team Group Mail ID",
+        "sample": "sarah.jenkins@example.com, preediting-team@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{next_stage_owner_email}",
+        "label": "Next Stage Owner Email",
+        "description": "Designated individual lead email for next stage",
+        "sample": "sarah.jenkins@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{next_stage_group_email}",
+        "label": "Next Stage Group Mail ID",
+        "description": "Shared mailbox / DL for next stage department",
+        "sample": "preediting-team@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{stage_owner_emails}",
+        "label": "Current Stage Owner and Group Mail",
+        "description": "Current Stage Lead and Team Group Mail ID combined",
+        "sample": "david.ross@example.com, analysis-team@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{stage_owner_email}",
+        "label": "Current Stage Owner Email",
+        "description": "Designated individual lead email for completed stage",
+        "sample": "david.ross@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{stage_group_email}",
+        "label": "Current Stage Group Mail ID",
+        "description": "Shared mailbox / DL for completed stage department",
+        "sample": "analysis-team@example.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{stage_owner_name}",
+        "label": "Current Stage Owner Name",
+        "description": "Full name of the completed stage lead",
+        "sample": "David Ross",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{next_stage_owner_name}",
+        "label": "Next Stage Owner Name",
+        "description": "Full name of the destination stage lead",
+        "sample": "Sarah Jenkins",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{project_manager_email}",
+        "label": "Project Manager Email",
+        "description": "Assigned Project Manager email from project record",
+        "sample": "pm.editorial@example.com",
+        "category": "Project"
+    },
+    {
+        "key": "{project_manager_name}",
+        "label": "Project Manager Name",
+        "description": "Assigned Project Manager full display name",
+        "sample": "John Smith",
+        "category": "Project"
+    },
+    {
+        "key": "{stage_transition}",
+        "label": "Stage Transition Flow",
+        "description": "Current stage to next stage flow (e.g. Pre-editing → XML)",
+        "sample": "Pre-editing → XML",
+        "category": "Workflow"
+    },
+    {
+        "key": "{due_date}",
+        "label": "Due Date",
+        "description": "Chapter target completion or delivery due date",
+        "sample": "04-Nov-2026",
+        "category": "Chapter"
+    },
+    {
+        "key": "{shipment_notes}",
+        "label": "Shipment Notes",
+        "description": "Transition shipment remarks or dispatch instructions",
+        "sample": "Batch 01 priority ingest",
+        "category": "Chapter"
+    },
+    {
+        "key": "{chapter_table}",
+        "label": "Chapter Transition Table",
+        "description": "Multi-chapter table listing Chapter, Stage (Current → Next), Due Date, and Notes",
+        "sample": "| Chapter | Stage | Due Date | Shipment Notes |",
+        "category": "Chapter"
+    },
+    {
+        "key": "{project_info_table}",
+        "label": "Project Info Table",
+        "description": "Project metadata table (Code, Client, Title, Composition, Due Date, Pages, etc.)",
+        "sample": "{project_info_table}",
+        "category": "Layout"
+    },
+    {
+        "key": "{planning_schedule_table}",
+        "label": "Planning Schedule Table",
+        "description": "Stages schedule table with Start Date, Due Date, SLA, and Stage Owner",
+        "sample": "{planning_schedule_table}",
+        "category": "Layout"
+    },
+    {
+        "key": "{workflow_stage_owners}",
+        "label": "All Workflow Stage Owners",
+        "description": "Comma-separated email addresses of all stage owners in the selected workflow",
+        "sample": "le_lead@s4carlisle.com, pre_lead@s4carlisle.com",
+        "category": "Ownership and Routing"
+    },
+    {
+        "key": "{project_title}",
+        "label": "Project Title",
+        "description": "Full title of the project / book",
+        "sample": "Digital Consumer Behavior",
+        "category": "Project"
+    },
+    {
+        "key": "{workflow_name}",
+        "label": "Workflow Name",
+        "description": "Name of the workflow template assigned to the project",
+        "sample": "WF-01 Fresh Book",
+        "category": "Workflow"
+    },
+    {
+        "key": "{composition}",
+        "label": "Composition Complexity",
+        "description": "Complexity level (Low, Medium, High)",
+        "sample": "Medium",
+        "category": "Project"
+    },
+    {
+        "key": "{priority}",
+        "label": "Project Priority",
+        "description": "Priority level (e.g. Normal, High, Urgent)",
+        "sample": "Normal",
+        "category": "Project"
+    },
+    {
+        "key": "{approval_type}",
+        "label": "Approval Type",
+        "description": "Approved or Re-approved status label",
+        "sample": "Approved",
+        "category": "Workflow"
+    },
+    {
+        "key": "{adjustment_reason}",
+        "label": "Adjustment Reason",
+        "description": "Reason provided when re-approving a project plan",
+        "sample": "Author requested revised schedule",
+        "category": "Workflow"
+    },
 ]
 
 
@@ -111,6 +286,11 @@ AVAILABLE_VARIABLES = [
 
 class StageEmailConfig(BaseModel):
     enabled: bool = True
+    stage_owner_username: Optional[str] = None
+    stage_owner_first_name: Optional[str] = None
+    stage_owner_email: Optional[str] = None
+    stage_group_email: Optional[str] = None
+    stage_owner_mode: Optional[str] = "both"
     custom_message: Optional[str] = ""
     to: List[str] = Field(default_factory=list)
     cc: List[str] = Field(default_factory=list)
@@ -121,6 +301,10 @@ class StageEmailConfig(BaseModel):
 class AddStagePayload(BaseModel):
     stage_name: str
     add_to_system_master: bool = False
+    stage_owner_username: Optional[str] = None
+    stage_owner_email: Optional[str] = None
+    stage_group_email: Optional[str] = None
+    stage_owner_mode: Optional[str] = "both"
     custom_message: Optional[str] = None
     to: Optional[List[str]] = None
     cc: Optional[List[str]] = None
@@ -233,17 +417,20 @@ def _get_raw_config_for_client(db: Session, safe_code: str) -> tuple[Dict[str, A
 
 def _save_raw_config_to_db(db: Session, safe_code: str, stages_dict: Dict[str, Any]):
     """Save or update transition configuration directly in PostgreSQL."""
+    from sqlalchemy.orm.attributes import flag_modified
     db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == safe_code).first()
     if db_rec:
-        db_rec.stages_config = stages_dict
+        db_rec.stages_config = dict(stages_dict)
+        flag_modified(db_rec, "stages_config")
         db_rec.updated_at = datetime.utcnow()
     else:
         db_rec = StageTransitionConfig(
             client_code=safe_code,
-            stages_config=stages_dict
+            stages_config=dict(stages_dict)
         )
         db.add(db_rec)
     db.commit()
+    db.refresh(db_rec)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -275,12 +462,14 @@ def sync_all_json_to_db(db: Session = Depends(get_db)):
 
                 db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == code).first()
                 if db_rec:
-                    db_rec.stages_config = clean_stages
+                    db_rec.stages_config = dict(clean_stages)
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(db_rec, "stages_config")
                     db_rec.updated_at = datetime.utcnow()
                 else:
                     db_rec = StageTransitionConfig(
                         client_code=code,
-                        stages_config=clean_stages
+                        stages_config=dict(clean_stages)
                     )
                     db.add(db_rec)
                 synced_clients.append(code)
@@ -458,16 +647,68 @@ def get_customer_transition_config(client_code: str, db: Session = Depends(get_d
 
     stages_data, is_custom, is_in_db = _get_raw_config_for_client(db, safe_code)
 
+    user_fn_map = {}
+    user_email_map = {}
+    try:
+        from app.domains.auth.models import User
+        users_list = db.query(User).all()
+        for u in users_list:
+            display_first = (u.first_name or "").strip() or (u.last_name or "").strip()
+            if display_first and not display_first.isdigit():
+                if u.username:
+                    user_fn_map[str(u.username).strip()] = display_first
+                if u.email:
+                    user_fn_map[str(u.email).strip().lower()] = display_first
+            if u.email:
+                if u.username:
+                    user_email_map[str(u.username).strip()] = u.email.strip()
+    except Exception as e:
+        logger.warning(f"Could not build user map: {e}")
+
     parsed_stages: Dict[str, StageEmailConfig] = {}
     for stage_name, cfg in stages_data.items():
         if isinstance(cfg, dict):
+            u_name = cfg.get("stage_owner_username")
+            u_email = cfg.get("stage_owner_email")
+            
+            resolved_fn = None
+            if u_name and str(u_name).strip() in user_fn_map:
+                resolved_fn = user_fn_map[str(u_name).strip()]
+            elif u_email and str(u_email).strip().lower() in user_fn_map:
+                resolved_fn = user_fn_map[str(u_email).strip().lower()]
+
+            stored_fn = cfg.get("stage_owner_first_name")
+            if not resolved_fn and stored_fn and not str(stored_fn).strip().isdigit():
+                resolved_fn = str(stored_fn).strip()
+
+            resolved_email = (user_email_map.get(str(u_name).strip()) if (u_name and str(u_name).strip() in user_email_map) else u_email)
+
+            from app.routers.api_v2 import _normalize_transition_subject, _normalize_transition_body_template
+            stage_subject = _normalize_transition_subject(cfg.get("subject", ""))
+            stage_body = _normalize_transition_body_template(cfg.get("body", ""))
+
+            import re
+            stage_body = re.sub(r'\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+', '{chapter_table}', stage_body)
+            stage_body = re.sub(r'\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+', '', stage_body)
+            if "{chapter_table}" not in stage_body:
+                if "Regards," in stage_body:
+                    parts = stage_body.split("Regards,")
+                    stage_body = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
+                else:
+                    stage_body = stage_body.rstrip() + "\n\n{chapter_table}"
+
             parsed_stages[stage_name] = StageEmailConfig(
                 enabled=cfg.get("enabled", True),
+                stage_owner_username=u_name,
+                stage_owner_first_name=resolved_fn,
+                stage_owner_email=resolved_email,
+                stage_group_email=cfg.get("stage_group_email"),
+                stage_owner_mode=cfg.get("stage_owner_mode", "both"),
                 custom_message=cfg.get("custom_message", ""),
                 to=cfg.get("to") if isinstance(cfg.get("to"), list) else [],
                 cc=cfg.get("cc") if isinstance(cfg.get("cc"), list) else [],
-                subject=cfg.get("subject", ""),
-                body=cfg.get("body", "")
+                subject=stage_subject,
+                body=stage_body
             )
 
     return CustomerConfigResponse(
@@ -493,14 +734,65 @@ def save_customer_transition_config(
     safe_code = _sanitize_code(client_code)
     stages_dict: Dict[str, Any] = {}
 
+    user_fn_map = {}
+    user_email_map = {}
+    try:
+        from app.domains.auth.models import User
+        users_list = db.query(User).all()
+        for u in users_list:
+            display_first = (u.first_name or "").strip() or (u.last_name or "").strip()
+            if display_first and not display_first.isdigit():
+                if u.username:
+                    user_fn_map[str(u.username).strip()] = display_first
+                if u.email:
+                    user_fn_map[str(u.email).strip().lower()] = display_first
+            if u.email:
+                if u.username:
+                    user_email_map[str(u.username).strip()] = u.email.strip()
+    except Exception:
+        user_fn_map = {}
+        user_email_map = {}
+
     for stage_name, stage_cfg in payload.stages.items():
+        u_name = str(stage_cfg.stage_owner_username).strip() if stage_cfg.stage_owner_username else None
+
+        resolved_fn = stage_cfg.stage_owner_first_name
+        if u_name and u_name in user_fn_map:
+            resolved_fn = user_fn_map[u_name]
+        elif not resolved_fn or str(resolved_fn).strip().isdigit():
+            u_ident = stage_cfg.stage_owner_username or stage_cfg.stage_owner_email
+            if u_ident and str(u_ident).strip() in user_fn_map:
+                resolved_fn = user_fn_map[str(u_ident).strip()]
+
+        resolved_email = stage_cfg.stage_owner_email
+        if u_name and u_name in user_email_map:
+            resolved_email = user_email_map[u_name]
+
+        from app.routers.api_v2 import _normalize_transition_subject, _normalize_transition_body_template
+        normalized_subject = _normalize_transition_subject(stage_cfg.subject or "")
+        body_text = _normalize_transition_body_template(stage_cfg.body or "")
+        import re
+        body_text = re.sub(r'\+[-+]+\+[\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+', '{chapter_table}', body_text)
+        body_text = re.sub(r'\|[^\n\r]*\|[\r\n\s]*\+[-+]+\+', '', body_text)
+        if "{chapter_table}" not in body_text:
+            if "Regards," in body_text:
+                parts = body_text.split("Regards,")
+                body_text = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
+            else:
+                body_text = body_text.rstrip() + "\n\n{chapter_table}"
+
         stages_dict[stage_name] = {
             "enabled": stage_cfg.enabled,
+            "stage_owner_username": u_name,
+            "stage_owner_first_name": resolved_fn or None,
+            "stage_owner_email": resolved_email or None,
+            "stage_group_email": stage_cfg.stage_group_email or None,
+            "stage_owner_mode": stage_cfg.stage_owner_mode or "both",
             "custom_message": stage_cfg.custom_message or "",
             "to": [t.strip() for t in stage_cfg.to if t and t.strip()],
             "cc": [c.strip() for c in stage_cfg.cc if c and c.strip()],
-            "subject": stage_cfg.subject or "",
-            "body": stage_cfg.body or ""
+            "subject": normalized_subject,
+            "body": body_text
         }
 
     _save_raw_config_to_db(db, safe_code, stages_dict)
@@ -553,11 +845,16 @@ def add_stage_to_config(
 
     default_template = {
         "enabled": payload.enabled,
+        "stage_owner_username": payload.stage_owner_username or None,
+        "stage_owner_first_name": payload.stage_owner_first_name or None,
+        "stage_owner_email": payload.stage_owner_email or None,
+        "stage_group_email": payload.stage_group_email or None,
+        "stage_owner_mode": payload.stage_owner_mode or "both",
         "custom_message": payload.custom_message or "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
-        "to": [t.strip() for t in (payload.to or ["{next_stage_team_email}"]) if t and t.strip()],
-        "cc": [c.strip() for c in (payload.cc or []) if c and c.strip()],
-        "subject": payload.subject or "[{client_name}] {project_code} - Chapter {chapter_name} | {current_stage} → {next_stage} | Stage Transition Notification",
-        "body": payload.body or "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+        "to": [t.strip() for t in (payload.to or ["{next_stage_owner_emails}"]) if t and t.strip()],
+        "cc": [c.strip() for c in (payload.cc or ["{project_manager_email}", "{stage_owner_emails}"]) if c and c.strip()],
+        "subject": payload.subject or "{client_name}-- {project_code} - {stage_transition} | Stage Transition Notification",
+        "body": payload.body or "Hi,\n\nBelow Files are Completed {current_stage} for your review and processing.\n\nClient Name: {client_name}\n\nProject Name: {project_code}\n\n{chapter_table}\n\nRegards,\nS4C Ninja Inkflow Team\n\nNote : This is an automated mail and please do not reply."
     }
 
     existing[stage_name] = default_template
@@ -693,17 +990,30 @@ def send_test_notification(req: TestEmailRequest):
 
     final_subject = f"[TEST] {rendered_subject}" if not rendered_subject.startswith("[TEST]") else rendered_subject
 
+    sample_rows = [{
+        "chapter": "01",
+        "stage": f"{req.stage_name or 'Manuscript Analysis'} → Editorial Assessment",
+        "due_date": datetime.now().strftime("%d-%b-%Y"),
+        "notes": "—"
+    }]
+    from app.routers.api_v2 import _prepare_transition_email_content
+    plain_body, html_body = _prepare_transition_email_content(
+        body_template=rendered_body,
+        chapter_rows=sample_rows
+    )
+
     try:
         send_email(
             to_email=req.to_email,
             subject=final_subject,
-            text_body=rendered_body
+            text_body=plain_body,
+            html_body=html_body
         )
         return {
             "success": True,
             "message": f"Test email sent to {req.to_email}.",
             "rendered_subject": final_subject,
-            "rendered_body": rendered_body
+            "rendered_body": plain_body
         }
     except Exception as e:
         logger.error(f"Failed to send test email: {e}")

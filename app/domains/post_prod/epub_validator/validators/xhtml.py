@@ -506,6 +506,16 @@ def validate_h1_count_and_adjacent_headings(file_details, rule_config=None):
     """Ensure exactly 1 <h1> per file and no adjacent heading tags."""
     file_path = file_details["full_path"]
     issues = []
+
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    exclude_files = cfg.get("exclude_files") or ["*cover*.xhtml"]
+
+    import os
+    import fnmatch
+    filename = (file_details.get("file_name") or os.path.basename(file_path)).lower()
+    for pattern in exclude_files:
+        if fnmatch.fnmatch(filename, pattern.lower()):
+            return {"issues_count": 0, "issues": []}
     
     try:
         from bs4 import BeautifulSoup
@@ -556,9 +566,19 @@ def validate_h1_count_and_adjacent_headings(file_details, rule_config=None):
             line = 1
         return line, extract
 
-    # 1) Check for maximum one <h1>
+    # 1) Check for exactly one <h1>
     h1_tags = soup.find_all("h1")
-    if len(h1_tags) > 1:
+    if len(h1_tags) == 0:
+        issues.append({
+            "type": "missing_h1",
+            "rule_name": "Missing <h1> tag",
+            "message": f"Each XHTML file must contain exactly one <h1> tag. None was found in '{os.path.basename(file_path)}'.",
+            "category": "Error",
+            "file_path": file_details.get("relative_path"),
+            "line_number": 1,
+            "extract": "Missing <h1> tag"
+        })
+    elif len(h1_tags) > 1:
         # Skip the first one because 1 is allowed
         for i, h1 in enumerate(h1_tags[1:], start=2):
             line, extract = get_element_info(h1)
@@ -1143,3 +1163,161 @@ def validate_heading_first_paragraph_class(file_details, rule_config=None):
                 issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-XHTML-001")
+def validate_html_file_size(file_details, rule_config=None):
+    """Individual HTML files within the E-Book must be smaller than 30 MB."""
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+    rel_path = file_details.get("relative_path") or file_path
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    cfg = (rule_config or {}).get("rule_config", {})
+    max_mb = cfg.get("max_file_size_mb", 30)
+
+    try:
+        size_bytes = os.path.getsize(full_path)
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "file_read_error",
+            "message": f"Could not check file size for '{os.path.basename(full_path)}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    max_bytes = max_mb * 1024 * 1024
+    if size_bytes >= max_bytes:
+        actual_mb = size_bytes / (1024 * 1024)
+        return {"issues_count": 1, "issues": [{
+            "type": "html_file_size_exceeded",
+            "message": f"HTML file size is {actual_mb:.2f} MB, which exceeds the maximum allowed limit of {max_mb} MB.",
+            "category": "Error",
+            "file_path": rel_path,
+            "extract": f"{actual_mb:.2f} MB",
+        }]}
+
+    return {"issues_count": 0, "issues": []}
+
+
+@rule("BOD-ENC-001")
+def validate_utf8_and_entities(file_details, rule_config=None):
+    """File must be UTF-8 encoded and use Unicode characters directly rather than HTML/XML entities.
+    Allowed entities (configurable via rule_config['allowed_entities']):
+      - &amp; (ampersand)
+      - &lt; (less-than sign)
+      - &gt; (greater-than sign)
+      - &#8617; (leftwards arrow with hook / return arrow)
+    Disallowed:
+      - Other decimal entities (e.g. &#2011;)
+      - Hexadecimal entities (e.g. &#x201C;)
+      - Named character entities (e.g. &auml;, &ouml;)
+    """
+    import html as html_lib
+    import re
+
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+    rel_path = file_details.get("relative_path") or file_path
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    filename = os.path.basename(full_path)
+
+    # 1. Verify valid UTF-8 encoding
+    try:
+        with open(full_path, "rb") as f:
+            raw_bytes = f.read()
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "file_read_error",
+            "message": f"Could not read '{filename}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "invalid_utf8_encoding",
+            "message": f"File '{filename}' is not valid UTF-8: {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    # 2. Check XML declaration encoding attribute if present (e.g. <?xml version="1.0" encoding="UTF-8"?>)
+    xml_decl_match = re.search(r'<\?xml\b[^>]*\bencoding\s*=\s*["\']([^"\']+)["\']', text, re.IGNORECASE)
+    if xml_decl_match:
+        declared_enc = xml_decl_match.group(1).strip().lower()
+        if declared_enc not in ("utf-8", "utf8"):
+            return {"issues_count": 1, "issues": [{
+                "type": "invalid_xml_encoding_declaration",
+                "message": f"File '{filename}' declares encoding '{xml_decl_match.group(1)}', but must be 'utf-8'.",
+                "category": "Error",
+                "file_path": rel_path,
+                "extract": xml_decl_match.group(0),
+                "line_number": 1,
+            }]}
+
+    # 3. Check for disallowed entities: decimal, hexadecimal, named entities
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    allowed_list = cfg.get("allowed_entities") or ["&amp;", "&lt;", "&gt;", "&#8617;"]
+    allowed_entities = {e.lower() for e in allowed_list}
+
+    entity_pattern = re.compile(r'&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z0-9]+);')
+
+    issues = []
+    lines = text.splitlines()
+
+    allowed_display = ", ".join(allowed_list)
+
+    for line_idx, line in enumerate(lines, 1):
+        for m in entity_pattern.finditer(line):
+            entity = m.group(0)
+            body = m.group(1)
+
+            if entity.lower() in allowed_entities:
+                continue
+
+            # Determine kind of entity
+            if body.startswith("#x") or body.startswith("#X"):
+                kind = "Hexadecimal entity"
+            elif body.startswith("#"):
+                kind = "Decimal entity"
+            else:
+                kind = "Named character entity"
+
+            char_equiv = html_lib.unescape(entity)
+            if char_equiv != entity:
+                suggestion = f" Write the character directly as '{char_equiv}'."
+            else:
+                suggestion = ""
+
+            snippet_start = max(0, m.start() - 25)
+            snippet_end = min(len(line), m.end() + 25)
+            snippet = line[snippet_start:snippet_end].strip()
+
+            issues.append({
+                "type": "disallowed_character_entity",
+                "message": (
+                    f"{kind} '{entity}' is not allowed in '{filename}'.{suggestion} "
+                    f"Only {allowed_display} are permitted."
+                ),
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_idx,
+                "extract": entity,
+                "snippet": snippet,
+            })
+
+            if len(issues) >= 100:
+                break
+        if len(issues) >= 100:
+            break
+
+    return {"issues_count": len(issues), "issues": issues}
+

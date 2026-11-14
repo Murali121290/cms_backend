@@ -38,12 +38,288 @@
       "category": "Structure Check"
     },
     {
+      "id": "BOD-FN-001",
+      "name": "Do not use unicode in file names",
+      "scope": "book",
+      "enabled": true,
+      "category": "Structure Check"
+    },
+    {
+      "id": "BOD-FM-001",
+      "name": "If half title and title page are part of the source files’ front matter, they must be removed from the E-Book",
+      "scope": "book",
+      "enabled": true,
+      "rule_config": {
+        "forbidden_terms_by_language": {
+          "en": "Half title / Title Page",
+          "de": "Vortitel / Titelseite",
+          "fr": "Faux-titre / Page de titre",
+          "da": "Smudstitel / Titelside",
+          "sv": "Halvtitel / Titelsida",
+          "fi": "Esinimiö / Nimiösivu",
+          "it": "Occhietto / Frontespizio",
+          "es": "Portadilla / Portada",
+          "pt": "Falsa folha de rosto / Frontispício",
+          "no": "Smusstittel / Tittelside",
+          "nl": "Franse pagina / Titelpagina",
+          "ca": "Portadella / Portada",
+          "va": "Portadella / Portada"
+        },
+        "forbidden_terms_pattern": "\\b(half[\\s\\-]?title|title[\\s\\-]?page|vortitel|vor[\\s\\-]?titel|schmutztitel|schmutz[\\s\\-]?titel|titelseite|titel[\\s\\-]?seite|titelblatt|titel[\\s\\-]?blatt|haupttitel|haupt[\\s\\-]?titel|portadilla|portada|faux[\\s\\-]?titre|page[\\s\\-]?de[\\s\\-]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontisp[ií]cio|folha[\\s\\-]?de[\\s\\-]?rosto|franse[\\s\\-]?pagina|titelpagina|nimiösivu|esinimiö)\\b|^title$|^titel$",
+        "forbidden_file_stem_pattern": "(half[\\s\\-_]?title|title[\\s\\-_]?page|vortitel|vor[\\s\\-_]?titel|schmutztitel|schmutz[\\s\\-_]?titel|titelseite|titel[\\s\\-_]?seite|titelblatt|titel[\\s\\-_]?blatt|haupttitel|haupt[\\s\\-_]?titel|portadilla|portada|faux[\\s\\-_]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontispicio|frontispício|rosto|franse[\\s\\-_]?pagina|titelpagina|nimiosivu|nimiösivu|esinymio|esinimiö)|^title$|^titel$"
+      },
+      "category": "Structure Check"
+    },
+    {
+      "id": "BOD-COPY-001",
+      "name": "The copyright page must be placed as last page of the ePub file",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_term_by_language": {
+          "de": "Impressum",
+          "en": "Copyright",
+          "fr": "Page de copyright",
+          "da": "Kolofon",
+          "fi": "Valmistusmerkinnät",
+          "es": "Pie de Imprenta",
+          "pt": "Pé-de-Imprensa",
+          "sv": "Kolofonside",
+          "no": "Kolofonside",
+          "ca": "Drets d’autor",
+          "va": "Drets d’autor",
+          "it": "Colophon",
+          "nl": "Colofon"
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-002",
+      "name": "Alignment of the copyright page should be top aligned (Control in CSS)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "allowed_classes": [
+          "cpytxt",
+          "cpytxt-top-space"
+        ],
+        "required_classes": [
+          "cpytxt-top-space"
+        ],
+        "min_required_count": {
+          "cpytxt-top-space": 1,
+          "cpytxt": 0
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-003",
+      "name": "Copyright should fit on one page",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-004",
+      "name": "Copyright statement check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_statement_by_language": {
+          "de": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen gemäß § 44b UrhG („Text und Data Mining“) zu gewinnen, ist untersagt.",
+          "ch": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen („Text und Data Mining“) zu gewinnen, ist untersagt.",
+          "da": "Den automatiserede analyse af et værk med henblik på at indhente oplysninger, især om mønstre, tendenser og sammenhænge (”Text and Datamining”) er forbudt.",
+          "fi": "Työn automaattinen analysointi tietojen saamiseksi erityisesti kuvioista, suuntauksista ja korrelaatioista (”tekstin ja tietojen hakeminen”) on kielletty.",
+          "fr": "L’analyse automatique du travail, pour obtenir des informations, notamment sur les motifs, les tendances et les corrélations («data and text mining») est interdite.",
+          "sv": "Automatiserad teknik vilken används för att analysera text och data i digital form i syfte att generera information, enligt 15a, 15b och 15c §§ upphovsrättslagen (text- och datautvinning), är förbjuden.",
+          "es": "El análisis automatizado del trabajo para obtener información en particular sobre patrones, tendencias y correlaciones („minería de datos y textos“) está prohibido.",
+          "no": "Automatisert analyse av verket for å innhente informasjon, særlig om mønstre, trender og sammenhenger („tekst- og datautvinning“) er forbudt."
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-005",
+      "name": "Copyright publisher sentence check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher_by_language": {
+          "de": "Herstellung und Verlag:",
+          "ch": "Herstellung und Verlag:",
+          "da": [
+            "Forlag:",
+            "Fremstilling:"
+          ],
+          "fi": [
+            "Kustantaja:",
+            "Valmistaja:"
+          ],
+          "fr": "Édition et impression :",
+          "sv": [
+            "Förlag:",
+            "Produktion:"
+          ],
+          "es": "Producción y editorial:",
+          "no": [
+            "Forlag:",
+            "Produksjon:"
+          ]
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-006",
+      "name": "Copyright publisher address check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher_address_by_language": {
+          "de": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg",
+          "ch": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Deutschland",
+          "da": [
+            "BoD · Books on Demand GmbH, Hellerup, Danmark",
+            "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamborg, Tyskland"
+          ],
+          "fi": [
+            "BoD · Books on Demand GmbH, Helsinki, Suomi",
+            "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Saksa"
+          ],
+          "fr": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Allemagne",
+          "sv": [
+            "BoD · Books on Demand, Stockholm, Sverige",
+            "BoD · Books on Demand, Hamburg, Tyskland"
+          ],
+          "es": "BoD · Books on Demand GmbH Überseering 33, 22297 Hamburgo, Alemania",
+          "no": [
+            "BoD · Books on Demand, Oslo, Norge",
+            "BoD · Books on Demand, Überseering 33, 22297 Hamburg, Tyskland"
+          ]
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-007",
+      "name": "Copyright 13-digit eISBN check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-008",
+      "name": "Copyright author notice check (© Year Author)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-009",
+      "name": "French copyright Dépôt légal check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true,
       "category": "XHTML Check"
+    },
+    {
+      "id": "XHTML006",
+      "name": "Single <h1> per page and no adjacent headings",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "[0-9]*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
+      "id": "BOD-XHTML-001",
+      "name": "Individual HTML files within the E-Book must be smaller than 30 MB",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "max_file_size_mb": 30
+      },
+      "category": "XHTML Check"
+    },
+    {
+      "id": "BOD-ENC-001",
+      "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp;, &lt;, &gt;, &#8617; allowed)",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.xhtml",
+        "*.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "allowed_entities": [
+          "&amp;",
+          "&lt;",
+          "&gt;",
+          "&#8617;"
+        ]
+      },
+      "category": "Encoding Check"
     },
     {
       "id": "CSS002",
@@ -156,6 +432,23 @@
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*cover*.xhtml",
       "enabled": true,
+      "rule_config": {
+        "expected_alt_by_language": {
+          "de": "Coverabbildung des Buches “{title}”",
+          "en": "Cover image of the book “{title}”",
+          "da": "Forsidebillede af bogen “{title}”",
+          "fi": "Kirjan “{title}”",
+          "fr": "Image de couverture du livre “{title}”",
+          "sv": "Omslagsbild av boken “{title}”",
+          "no": "Forsidebilde av boken “{title}”",
+          "es": "Imagen de portada del libro “{title}”",
+          "it": "Immagine di copertina del libro “{title}”",
+          "pt": "Imagem da capa do livro “{title}”",
+          "nl": "Coverafbeelding van het boek “{title}”",
+          "ca": "Imatge de la coberta del llibre “{title}”",
+          "va": "Imatge de la coberta del llibre “{title}”"
+        }
+      },
       "category": "Image Check"
     },
     {
@@ -164,6 +457,43 @@
       "target_path": "OEBPS",
       "file_name_pattern": "*.opf",
       "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-AUT-001",
+      "name": "Author photo must have a default alt attribute",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*about*author*.xhtml",
+        "*About*Author*.xhtml",
+        "*uber*die*autor*.xhtml",
+        "*ber*die*autor*.xhtml",
+        "*ber*den*autor*.xhtml",
+        "*Die*Autoren*.xhtml",
+        "*die*autoren*.xhtml",
+        "*author*.xhtml",
+        "*Author*.xhtml",
+        "*autor*.xhtml",
+        "*Autor*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_alt_by_language": {
+          "de": "Portraitfoto von “{author}”",
+          "da": "Portrætbillede af “{author}”",
+          "fi": "kansikuva Kirjailijakuva “{author}”",
+          "fr": "Photo de l‘auteur “{author}”",
+          "sv": "Porträttfoto av “{author}”",
+          "no": "Portrettbilde av “{author}”",
+          "es": "Foto del autor “{author}”",
+          "en": "Portrait photo of “{author}”",
+          "it": "Foto ritratto di “{author}”",
+          "pt": "Fotografia de retrato de “{author}”",
+          "nl": "Portretfoto van “{author}”",
+          "ca": "Fotografia de retrat de “{author}”",
+          "va": "Fotografia de retrat de “{author}”"
+        }
+      },
       "category": "Image Check"
     },
     {
@@ -182,12 +512,13 @@
     },
     {
       "id": "BOD-IMG-002",
-      "name": "Images inside the E-Book must have a minimum of 850 pixels in width or height",
+      "name": "Images inside the E-Book must have a minimum of 850 pixels in width or height, and max 5.6M pixels",
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.jpg",
       "enabled": true,
       "rule_config": {
         "min_dimension": 850,
+        "max_pixels": 5600000,
         "exclude_files": [
           "cover.jpg"
         ]
@@ -197,6 +528,14 @@
     {
       "id": "BOD-IMG-003",
       "name": "<img> alt attribute must not be empty",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-IMG-004",
+      "name": "Images and captions have to be contained inside a <figure> element",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true,
@@ -214,9 +553,14 @@
         "*[cC]hap*.xhtml",
         "*[cC]h[0-9]*.xhtml"
       ],
+      "include_mapped_chapters": true,
       "enabled": true,
       "rule_config": {
-        "citation_regex": "\\b(?:see\\s+)?(?:(?:pages?|pp\\.|p\\.)(?![a-zA-Z])[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-\u2013][ \\t]*\\d{1,4})?|(?:chapter|chap\\.|ch\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)(?:[ \\t]*[\\-\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:figure|fig\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:table|tbl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:exhibit|exh\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:plate|pl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|map(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|box(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:section|sec\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:part|pt\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:appendix|app\\.)(?![a-zA-Z])[ \\t\\-]*([1-9]|10|[A-K]|one|two|three|four|five|six|seven|eight|nine|ten)|(?:illustration|illus\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(appendix))\\b"
+        "citation_regex": "\\b(?:see\\s+)?(?:(?:pages?|pp\\.|p\\.)(?![a-zA-Z])[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-–][ \\t]*\\d{1,4})?|(?:chapter|chap\\.|ch\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)(?:[ \\t]*[\\-–][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:figure|fig\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:table|tbl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:exhibit|exh\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:plate|pl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|map(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|box(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:section|sec\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:part|pt\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:appendix|app\\.)(?![a-zA-Z])[ \\t\\-]*([1-9]|10|[A-K]|one|two|three|four|five|six|seven|eight|nine|ten)|(?:illustration|illus\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(appendix))\\b",
+        "citation_regex_by_language": {
+          "en": "\\b(?:see\\s+)?(?:(?:pages?|pp\\.|p\\.)(?![a-zA-Z])[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-–][ \\t]*\\d{1,4})?|(?:chapter|chap\\.|ch\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)(?:[ \\t]*[\\-–][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:figure|fig\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:table|tbl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:exhibit|exh\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:plate|pl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|map(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|box(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:section|sec\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:part|pt\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:appendix|app\\.)(?![a-zA-Z])[ \\t\\-]*([1-9]|10|[A-K]|one|two|three|four|five|six|seven|eight|nine|ten)|(?:illustration|illus\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(appendix))\\b",
+          "de": "\\b(?:siehe\\s+)?(?:(?:seiten?|s\\.)(?![a-zA-Z])[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-\\u2013][ \\t]*\\d{1,4})?|(?:kapitel|kap\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:abbildung|abb\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:tabelle|tab\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:anlage|anl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:tafel|taf\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|karte(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|kasten(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:abschnitt|abschn\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:teil|tl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:anhang|anh\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:illustration|illus\\.|ill\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(anhang))\\b"
+        }
       },
       "category": "Link Check"
     },
@@ -333,8 +677,88 @@
       ],
       "enabled": true,
       "rule_config": {
-        "expected_summary": "Dieses E-Book wurde gemäß der W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit geprüft. Es genügt den Anforderungen an Barrierefreiheit zu Inhaltsstruktur, semantischer Auszeichnung und Alternativtexten.",
-        "is_required": true
+        "is_required": true,
+        "default_level": "AA",
+        "expected_summary_by_language": {
+          "de": {
+            "language_name": "German",
+            "AA": "Dieses E-Book wurde nach den W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit geprüft. Es genügt den Anforderungen an Barrierefreiheit zu Inhaltsstruktur, semantischer Auszeichnung und Alternativtexten.",
+            "A": "Dieses E-Book wurde nach den W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit geprüft. Es genügt den grundsätzlichen Anforderungen an Barrierefreiheit zu Inhaltsstruktur, semantischer Auszeichnung und Alternativtexten.",
+            "Inaccessible": "Dieses E-Book wurde nicht nach den W3C EPUB Accessibility Guidelines oder PDF UA Standards für eine barrierefreie Zugänglichkeit optimiert. Es enthält ggfs. nicht-barrierefreie Elemente."
+          },
+          "da": {
+            "language_name": "Danish",
+            "AA": "Denne e-bog er blevet testet for tilgængelighed i overensstemmelse med W3C EPUB Accessibility Guidelines eller PDF UA-standarderne. Den opfylder tilgængelighedskravene til indholdsstruktur, semantisk opmærkning og alternative tekster",
+            "A": "Denne e-bog er blevet testet for tilgængelighed i overensstemmelse med W3C EPUB Accessibility Guidelines eller PDF UA-standarderne. Den opfylder de grundlæggende tilgængelighedskrav til indholdsstruktur, semantisk opmærkning og alternative tekster.",
+            "Inaccessible": "Denne e-bog er ikke blevet optimeret til tilgængelighed i overensstemmelse med W3C EPUB Accessibility Guidelines eller PDF UA-standarderne. Den kan indeholde ikke-tilgængelige elementer."
+          },
+          "fi": {
+            "language_name": "Finnish",
+            "AA": "Tämän e-kirjan esteettömyys on testattu W3C:n EPUB verkkosisällön saavutettavuusohjeiden tai PDF UA - standardien mukaisesti. Se täyttää sisällön rakennetta, semanttista merkintää ja vaihtoehtoisia tekstejä koskevat saavutettavuusvaatimukset",
+            "A": "Tämä e-kirja on testattu W3C:n EPUB verkkosisällön saavutettavuusohjeiden tai PDF UA -standardien mukaisesti. Se täyttää sisällön rakennetta, semanttista merkintää ja vaihtoehtoisia tekstejä koskevat saavutettavuuden perusvaatimukset.",
+            "Inaccessible": "Tämä e-kirja ei ole W3C EPUB -saavutettavuusohjeiden tai PDF UA -standardien mukaisesti optimoitu esteettömyyden kannalta. Se saattaa sisältää muita kuin esteettömiä elementtejä"
+          },
+          "fr": {
+            "language_name": "French",
+            "AA": "Ce livre électronique a été testé selon les directives d‘accessibilité W3C EPUB ou les normes PDF UA pour une accessibilité sans barrières. Il répond aux exigences d‘accessibilité concernant la structure du contenu, le marquage sémantique et les textes alternatifs",
+            "A": "Ce livre électronique a été testé selon les directives d‘accessibilité EPUB du W3C ou les normes PDF UA pour une accessibilité sans barrières. Il satisfait aux exigences de base en matière d‘accessibilité concernant la structure du contenu, le marquage sémantique et les textes alternatifs.",
+            "Inaccessible": "Ce livre électronique n‘a pas été optimisé pour une accessibilité sans barrières conformément aux directives d‘accessibilité EPUB du W3C ou aux normes PDF UA. Il peut contenir des éléments non accessibles."
+          },
+          "sv": {
+            "language_name": "Swedish",
+            "AA": "Denna e-bok har testats för tillgänglighet i enlighet med W3C:s EPUB Accessibility Guidelines eller PDF UAstandarder. Den uppfyller tillgänglighetskraven för innehållsstruktur, semantisk markering och alternativa texter",
+            "A": "Den här e-boken har testats för tillgänglighet i enlighet med W3C EPUB Accessibility Guidelines eller PDF UAstandarderna. Den uppfyller de grundläggande tillgänglighetskraven för innehållsstruktur, semantisk markering och alternativa texter.",
+            "Inaccessible": "Den här e-boken har inte optimerats för tillgänglighet i enlighet med W3C EPUB Accessibility Guidelines eller PDF UA-standarder. Den kan innehålla otillgängliga element"
+          },
+          "no": {
+            "language_name": "Norwegian",
+            "AA": "Denne e-boken er testet for tilgjengelighet i henhold til W3C EPUB Accessibility Guidelines eller PDF UAstandardene. Den oppfyller tilgjengelighetskravene for innholdsstruktur, semantisk markering og alternative tekster.",
+            "A": "Denne e-boken har blitt testet for tilgjengelighet i henhold til W3C EPUB Accessibility Guidelines eller PDF UAstandardene. Den oppfyller de grundleggende tilgjengelighetskravene for innholdsstruktur, semantisk markering og alternative tekster.",
+            "Inaccessible": "Denne e-boken har ikke blitt optimalisert for tilgjengelighet i samsvar med W3C EPUB Accessibility Guidelines eller PDF UA-standardene. Den kan inneholde utilgjengelige elementer."
+          },
+          "es": {
+            "language_name": "Spanish",
+            "AA": "Este libro electrónico ha sido sometido a pruebas de accesibilidad de acuerdo con las Directrices de Accesibilidad EPUB del W3C o las normas PDF UA. Cumple los requisitos de accesibilidad relativos a la estructura del contenido, el marcado semántico y los textos alternativos.",
+            "A": "Este libro electrónico ha sido sometido a pruebas de accesibilidad de acuerdo con las Pautas de Accesibilidad para EPUB del W3C o las normas PDF UA. Cumple los requisitos básicos de accesibilidad en cuanto a estructura del contenido, marcado semántico y textos alternativos.",
+            "Inaccessible": "Este libro electrónico no ha sido optimizado para la accesibilidad de acuerdo con las Directrices de Accesibilidad EPUB del W3C o los estándares PDF UA. Puede contener elementos no accesibles."
+          },
+          "en": {
+            "language_name": "English",
+            "AA": "This e-book has been reviewed according to the W3C EPUB Accessibility Guidelines or PDF UA standards for accessible usability. It meets the requirements for accessibility regarding content structure, semantic markup and alternative texts.",
+            "A": "This e-book has been reviewed according to the W3C EPUB Accessibility Guidelines or PDF UA standards for accessible usability. It meets the basic requirements for accessibility regarding content structure, semantic markup and alternative texts.",
+            "Inaccessible": "This e-book has not been optimised according to the W3C EPUB Accessibility Guidelines or PDF UA standards for accessible usability. It may contain elements that are not accessibility-compliant."
+          },
+          "it": {
+            "language_name": "Italian",
+            "AA": "Questo e-book è stato verificato secondo le linee guida W3C EPUB Accessibility Guidelines o gli standard PDF UA per l'accessibilità. Soddisfa i requisiti di accessibilità relativi alla struttura del contenuto, alla marcatura semantica e ai testi alternativi.",
+            "A": "Questo e-book è stato verificato secondo le linee guida W3C EPUB Accessibility Guidelines o gli standard PDF UA per l'accessibilità. Soddisfa i requisiti fondamentali di accessibilità relativi alla struttura del contenuto, alla marcatura semantica e ai testi alternativi.",
+            "Inaccessible": "Questo e-book non è stato ottimizzato secondo le linee guida W3C EPUB Accessibility Guidelines o gli standard PDF UA per l'accessibilità. Potrebbe contenere elementi non accessibili."
+          },
+          "pt": {
+            "language_name": "Portuguese",
+            "AA": "Este e-book foi verificado de acordo com as Diretrizes de Acessibilidade W3C EPUB ou os padrões PDF UA para acessibilidade. Cumpre os requisitos de acessibilidade relativos à estrutura do conteúdo, marcação semântica e textos alternativos.",
+            "A": "Este e-book foi verificado de acordo com as Diretrizes de Acessibilidade W3C EPUB ou os padrões PDF UA para acessibilidade. Cumpre os requisitos básicos de acessibilidade relativos à estrutura do conteúdo, marcação semântica e textos alternativos.",
+            "Inaccessible": "Este e-book não foi otimizado de acordo com as Diretrizes de Acessibilidade W3C EPUB ou os padrões PDF UA para acessibilidade. Pode conter elementos não acessíveis."
+          },
+          "nl": {
+            "language_name": "Dutch",
+            "AA": "Dit e-book is gecontroleerd volgens de W3C EPUB Accessibility Guidelines of PDF UA-normen voor toegankelijkheid. Het voldoet aan de vereisten voor toegankelijkheid met betrekking tot inhoudsstructuur, semantische opmaak en alternatieve teksten.",
+            "A": "Dit e-book is gecontroleerd volgens de W3C EPUB Accessibility Guidelines of PDF UA-normen voor toegankelijkheid. Het voldoet aan de basisvereisten voor toegankelijkheid met betrekking tot inhoudsstructuur, semantische opmaak en alternatieve teksten.",
+            "Inaccessible": "Dit e-book is niet geoptimaliseerd volgens de W3C EPUB Accessibility Guidelines of PDF UA-normen voor toegankelijkheid. Het kan mogelijk niet-toegankelijke elementen bevatten."
+          },
+          "ca": {
+            "language_name": "Catalan",
+            "AA": "Aquest llibre electrònic ha estat verificat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Compleix els requisits d'accessibilitat pel que fa a l'estructura del contingut, el marcatge semàntic i els textos alternatius.",
+            "A": "Aquest llibre electrònic ha estat verificat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Compleix els requisits bàsics d'accessibilitat pel que fa a l'estructura del contingut, el marcatge semàntic i els textos alternatius.",
+            "Inaccessible": "Aquest llibre electrònic no ha estat optimitzat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Pot contenir elements no accessibles."
+          },
+          "va": {
+            "language_name": "Valencian",
+            "AA": "Aquest llibre electrònic ha sigut verificat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Compleix els requisits d'accessibilitat quant a l'estructura del contingut, el marcatge semàntic i els textos alternatius.",
+            "A": "Aquest llibre electrònic ha sigut verificat d'acord amb les directrius d'accessibilitat W3C EPUB o els standardes PDF UA per a l'accessibilitat. Compleix els requisits fonamentals d'accessibilitat quant a l'estructura del contingut, el marcatge semàntic i els textos alternatius.",
+            "Inaccessible": "Aquest llibre electrònic no ha sigut optimitzat d'acord amb les directrius d'accessibilitat W3C EPUB o els estàndards PDF UA per a l'accessibilitat. Pot contindre elements no accessibles."
+          }
+        }
       },
       "category": "Metadata Check"
     },
@@ -353,13 +777,14 @@
     }
   ],
   "export": {
-    "filename_format": "{eisbn}_1_ePub_all.ePub"
+    "filename_format": "{eisbn}_ePub_all.ePub"
   },
   "upload": {
-    "filename_format": "{eisbn}_1_ePub_all.ePub"
+    "filename_format": "{eisbn}_ePub_all.ePub"
   },
   "category_order": [
     "STRUCTURE CHECK",
+    "COPYRIGHT CHECK",
     "METADATA CHECK",
     "CSS CHECK",
     "XHTML CHECK",

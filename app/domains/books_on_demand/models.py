@@ -8,6 +8,7 @@ class BodJob(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_name = Column(String(255), nullable=True)
+    eisbn = Column(String(100), nullable=True)
     pdf_filename = Column(String(255), nullable=False)
     pdf_filepath = Column(String(1024), nullable=True)
     cover_filename = Column(String(255), nullable=True)
@@ -34,5 +35,6 @@ class BodJob(Base):
     dispatched_at = Column(DateTime(timezone=True), nullable=True)
     is_fastrack = Column(Boolean, default=False, nullable=False)
     fastrack_requested_date = Column(DateTime(timezone=True), nullable=True)
+    file_history = Column(JSON, nullable=False, default=list) # [{"filename": "...", "backup_filename": "...", "backup_filepath": "...", "uploaded_by": "...", "timestamp": "...", "stage": "..."}]
 
 

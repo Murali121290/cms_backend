@@ -323,37 +323,90 @@ def validate_accessibility_feature(book_details, rule_config=None):
 
 @rule("COM-META-009")
 def validate_accessibility_summary(book_details, rule_config=None):
-    """Validate schema:accessibilitySummary requirements based on configuration."""
+    """Validate schema:accessibilitySummary requirements based on configuration or detected language."""
     config_dict = (rule_config or {}).get("rule_config", {})
     expected_summary = config_dict.get("expected_summary")
+    expected_by_lang = config_dict.get("expected_summary_by_language")
     is_required = config_dict.get("is_required", True)
+    default_level = config_dict.get("default_level", "AA")
 
-    if not expected_summary:
-        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_summary in rule_config for COM-META-009.", "category": "Error", "line_number": 0}]}
+    if not expected_summary and not expected_by_lang:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_summary or expected_summary_by_language in rule_config for COM-META-009.", "category": "Error", "line_number": 0}]}
 
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
         return {"issues_count": 0, "issues": []}
 
+    # Determine expected summary text and language
+    target_expected = expected_summary
+    lang_key = "default"
+
+    if expected_by_lang:
+        # 1. Detect language from book_details or OPF <dc:language>
+        detected_lang = (book_details.get("language") or "").strip().lower()
+        if not detected_lang:
+            dc_lang_tag = soup.find(["dc:language", "language"])
+            if dc_lang_tag:
+                detected_lang = dc_lang_tag.get_text(strip=True).lower()
+
+        # Normalize language (e.g. 'de-DE' -> 'de', 'es-ES' -> 'es', 'valencian' -> 'va')
+        lang_key = detected_lang
+        if "-" in lang_key:
+            lang_key = lang_key.split("-")[0]
+        if "_" in lang_key:
+            lang_key = lang_key.split("_")[0]
+
+        lang_map = {
+            "german": "de", "danish": "da", "finnish": "fi", "french": "fr",
+            "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
+            "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
+            "valencian": "va"
+        }
+        if lang_key in lang_map:
+            lang_key = lang_map[lang_key]
+
+        lang_entry = expected_by_lang.get(lang_key) or expected_by_lang.get(detected_lang)
+        if not lang_entry and "en" in expected_by_lang:
+            lang_entry = expected_by_lang["en"]
+
+        if lang_entry:
+            if isinstance(lang_entry, dict):
+                # Strict AA check
+                target_expected = lang_entry.get("AA") or lang_entry.get(default_level)
+            elif isinstance(lang_entry, str):
+                target_expected = lang_entry
+
+    if not target_expected:
+        target_expected = expected_summary
+
+    # Normalize whitespace for comparison
+    expected_norm = " ".join((target_expected or "").split()) if target_expected else ""
+
     issues = []
     summary = soup.find("meta", attrs={"property": "schema:accessibilitySummary"})
     if summary is None:
         if is_required:
+            expected_tag = f'<meta property="schema:accessibilitySummary">{expected_norm}</meta>'
             issues.append({
                 "type": "missing_accessibilitySummary",
-                "message": "Missing required schema:accessibilitySummary",
+                "message": f"Missing required <meta property=\"schema:accessibilitySummary\"> for language '{lang_key}'.",
                 "category": "Error",
                 "line_number": _find_line(lines, "<metadata"),
                 "extract": "schema:accessibilitySummary",
+                "expected_text": expected_tag,
             })
     else:
-        if summary.get_text(strip=True) != expected_summary:
+        actual_summary = " ".join((summary.get_text() or "").split())
+        # Check match strictly against the expected AA content
+        if actual_summary != expected_norm:
             issues.append({
                 "type": "invalid_accessibilitySummary",
-                "message": f"schema:accessibilitySummary does not match the exact expected string in configuration.",
-                "category": "Warning",
+                "message": f"schema:accessibilitySummary does not match the expected AA accessibility text for language '{lang_key if expected_by_lang else 'default'}'.",
+                "category": "Error",
                 "line_number": _find_line(lines, "schema:accessibilitySummary"),
-                "extract": summary.get_text(strip=True),
+                "extract": actual_summary,
+                "expected_text": f'<meta property="schema:accessibilitySummary">{expected_norm}</meta>',
+                "actual_text": f'<meta property="schema:accessibilitySummary">{actual_summary}</meta>',
             })
     return {"issues_count": len(issues), "issues": issues}
 

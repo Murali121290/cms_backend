@@ -27,7 +27,6 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
       usersList.forEach(u => {
         if (u.user_name) mapped[u.user_name] = u;
         if ((u as any).username) mapped[(u as any).username] = u;
-        if (u.id != null) mapped[String(u.id)] = u;
       });
       set({ users: usersList, usersByUsername: mapped, loading: false });
     } catch (err: any) {

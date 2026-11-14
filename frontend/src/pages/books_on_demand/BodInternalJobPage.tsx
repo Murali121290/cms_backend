@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X, Image as ImageIcon } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -41,8 +41,9 @@ export function BodInternalJobPage() {
   const [loading, setLoading] = useState(true)
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [isUploadingCover, setIsUploadingCover] = useState(false)
   const [isOpeningValidator, setIsOpeningValidator] = useState(false)
-  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate'>('stage')
+  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files'>('stage')
   const [aceFile, setAceFile] = useState<File | null>(null)
   const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
   const [isUploadingReports, setIsUploadingReports] = useState(false)
@@ -193,6 +194,7 @@ export function BodInternalJobPage() {
   const [isEditingAnalysis, setIsEditingAnalysis] = useState(false)
   const [isSavingAnalysis, setIsSavingAnalysis] = useState(false)
   const [analysisPages, setAnalysisPages] = useState<number | string>('')
+  const [analysisEisbn, setAnalysisEisbn] = useState<string>('')
   const [analysisType, setAnalysisType] = useState<string>('Text PDF')
   const [analysisLanguage, setAnalysisLanguage] = useState<string>('English')
   const [analysisDueDate, setAnalysisDueDate] = useState<string>('')
@@ -210,6 +212,7 @@ export function BodInternalJobPage() {
   const startEditingAnalysis = () => {
     if (!job) return
     setAnalysisPages(job.pdf_page_count ?? '')
+    setAnalysisEisbn(job.eisbn || '')
     setAnalysisType(job.pdf_type || 'Text PDF')
     setAnalysisLanguage(job.pdf_language || 'English')
     const dStr = job.due_date ? (parseUtcDate(job.due_date)?.toISOString().slice(0, 10) || '') : ''
@@ -231,6 +234,7 @@ export function BodInternalJobPage() {
 
       await api.put(`/bod/jobs/${job.id}/analysis`, {
         pdf_page_count: isNaN(pageCountNum as any) ? null : pageCountNum,
+        eisbn: analysisEisbn.trim() || null,
         pdf_type: analysisType,
         pdf_language: analysisLanguage,
         due_date: formattedDueDate,
@@ -246,6 +250,28 @@ export function BodInternalJobPage() {
     }
   }
 
+  const uploadCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return
+    const file = e.target.files[0]
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    setIsUploadingCover(true)
+    try {
+      await api.post(`/bod/jobs/${jobId}/upload-cover`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      toast.success("Cover image uploaded successfully")
+      fetchJob()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to upload cover image")
+    } finally {
+      setIsUploadingCover(false)
+      if (e.target) e.target.value = ''
+    }
+  }
+
   const uploadEpub = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return
     const file = e.target.files[0]
@@ -258,8 +284,13 @@ export function BodInternalJobPage() {
       await api.post(`/bod/jobs/${jobId}/upload-epub`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      toast.success("EPUB uploaded and moved to QC")
-      navigate('/bod/internal')
+      if (job?.current_stage_name === 'QC') {
+        toast.success("EPUB re-uploaded and validator workspace refreshed")
+        fetchJob()
+      } else {
+        toast.success("EPUB uploaded and moved to QC")
+        navigate('/bod/internal')
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to upload EPUB")
     } finally {
@@ -341,6 +372,38 @@ export function BodInternalJobPage() {
       link.parentNode?.removeChild(link)
     } catch (err) {
       toast.error("Failed to download Epubcheck report")
+    }
+  }
+
+  const [historyCsvContent, setHistoryCsvContent] = useState<string | null>(null)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+
+  const downloadHistoryCsv = async () => {
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-history-csv`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', 'history.csv')
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+    } catch (err) {
+      toast.error("Failed to download history.csv")
+    }
+  }
+
+  const viewHistoryCsv = async () => {
+    setLoadingHistory(true)
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/view-history-csv`)
+      setHistoryCsvContent(response.data?.content || '')
+      setShowHistoryModal(true)
+    } catch (err) {
+      toast.error("Failed to load history.csv content")
+    } finally {
+      setLoadingHistory(false)
     }
   }
 
@@ -522,7 +585,7 @@ export function BodInternalJobPage() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-4">
             <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
               <div className="min-w-0 pr-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">Processed EPUB</span>
@@ -562,6 +625,36 @@ export function BodInternalJobPage() {
                 </Button>
               )}
             </div>
+
+            <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
+              <div className="min-w-0 pr-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">History CSV</span>
+                <p className="text-xs font-semibold text-text truncate m-0">
+                  {job.has_history_csv || job.history_csv_filename ? 'history.csv' : 'Generated on QC'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={viewHistoryCsv}
+                  disabled={loadingHistory}
+                  className="h-7 px-2 text-xs text-primary"
+                  title="View history.csv"
+                >
+                  {loadingHistory ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={downloadHistoryCsv}
+                  className="h-7 px-2 text-xs text-emerald-600"
+                  title="Download history.csv"
+                >
+                  <Download size={13} />
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -582,7 +675,7 @@ export function BodInternalJobPage() {
                   </span>
                 </div>
                 <p className="text-xs text-muted m-0 mt-0.5">
-                  Review and update document specifications (Pages, Type, Language, Due Date).
+                  Review and update document specifications (eISBN, Pages, Type, Language, Due Date).
                 </p>
               </div>
             </div>
@@ -606,7 +699,14 @@ export function BodInternalJobPage() {
           </div>
 
           {!isEditingAnalysis ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 pt-4">
+              <div className="bg-background/70 border border-border/60 rounded-lg p-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">eISBN</span>
+                <p className="text-base font-bold text-text mt-1 m-0 truncate" title={job.eisbn || ''}>
+                  {job.eisbn || <span className="text-muted font-normal italic">Not set</span>}
+                </p>
+              </div>
+
               <div className="bg-background/70 border border-border/60 rounded-lg p-3">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Pages</span>
                 <p className="text-base font-bold text-text mt-1 m-0">
@@ -650,7 +750,18 @@ export function BodInternalJobPage() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-muted">eISBN</label>
+                <input
+                  type="text"
+                  value={analysisEisbn}
+                  onChange={(e) => setAnalysisEisbn(e.target.value)}
+                  placeholder="e.g. 9783696305819"
+                  className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-primary transition-colors"
+                />
+              </div>
+
               <div className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted">Pages</label>
                 <input
@@ -721,7 +832,7 @@ export function BodInternalJobPage() {
                 />
               </div>
 
-              <div className="col-span-1 sm:col-span-2 lg:col-span-4 space-y-1">
+              <div className="col-span-1 sm:col-span-2 lg:col-span-5 space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
                   Update Reason <span className="text-rose-500 font-bold">*</span>
                 </label>
@@ -756,17 +867,54 @@ export function BodInternalJobPage() {
               </Button>
             </div>
 
-            {job.cover_filename && (
+            {job.cover_filename ? (
               <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Cover Image</p>
                   <p className="text-sm font-semibold truncate text-emerald-600 dark:text-emerald-400">{job.cover_filename}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={downloadCover} leftIcon={<Download size={14} />}>
-                  Download
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={downloadCover} leftIcon={<Download size={14} />}>
+                    Download
+                  </Button>
+                  {!isCompleted && (
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg"
+                        onChange={uploadCover}
+                        disabled={isUploadingCover}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
+                        title="Replace Cover Image"
+                      />
+                      <Button size="sm" variant="outline" disabled={isUploadingCover} leftIcon={<Upload size={14} />}>
+                        {isUploadingCover ? '...' : 'Replace'}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            ) : !isCompleted ? (
+              <div className="bg-background/60 border border-dashed border-border hover:border-primary/50 rounded-lg p-3 flex items-center justify-between transition-colors">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Cover Image</p>
+                  <p className="text-xs text-muted">No cover image uploaded yet</p>
+                </div>
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg"
+                    onChange={uploadCover}
+                    disabled={isUploadingCover}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
+                    title="Upload Cover Image"
+                  />
+                  <Button size="sm" variant="outline" disabled={isUploadingCover} leftIcon={<Upload size={14} />}>
+                    {isUploadingCover ? 'Uploading...' : 'Upload Cover'}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             {job.epub_filename && (
               <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
@@ -803,6 +951,23 @@ export function BodInternalJobPage() {
                 </Button>
               </div>
             )}
+
+            {(job.has_history_csv || job.history_csv_filename) && (
+              <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">BOD History CSV</p>
+                  <p className="text-sm font-semibold truncate">{job.history_csv_filename || 'history.csv'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={viewHistoryCsv} leftIcon={<Eye size={14} />}>
+                    View
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={downloadHistoryCsv} leftIcon={<Download size={14} />}>
+                    Download
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -825,13 +990,35 @@ export function BodInternalJobPage() {
                 Assignment History
               </button>
             )}
-            {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
+            {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
+              (!h.changes || h.changes.length === 0) || h.changes.some((c: any) => c.field === 'Due Date')
+            ) && (
+                <button
+                  onClick={() => setActiveTab('duedate')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Due Date History
+                </button>
+              )}
+            {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
+              h.changes && h.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
+            ) && (
+                <button
+                  onClick={() => setActiveTab('priority')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Priority History
+                </button>
+              )}
+            {job.file_history && Array.isArray(job.file_history) && job.file_history.length > 0 && (
               <button
-                onClick={() => setActiveTab('duedate')}
-                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                onClick={() => setActiveTab('files')}
+                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'files' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
                   }`}
               >
-                Update History
+                File History
               </button>
             )}
           </div>
@@ -911,7 +1098,9 @@ export function BodInternalJobPage() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-text m-0">
-                          {assignment.action || `Assigned to: ${getUserDisplayName(assignment.user_id)}`}
+                          {assignment.action && assignment.user_id
+                            ? assignment.action.replace(new RegExp(`\\b${assignment.user_id}\\b`, 'g'), getUserDisplayName(assignment.user_id))
+                            : (assignment.action || `Assigned to: ${getUserDisplayName(assignment.user_id)}`)}
                         </p>
                         <p className="text-[10px] text-muted m-0 mt-0.5">
                           Stage: {assignment.stage} {assignment.assigned_by ? `• By: ${getUserDisplayName(assignment.assigned_by)}` : ''}
@@ -926,49 +1115,101 @@ export function BodInternalJobPage() {
               </div>
             )}
 
-            {activeTab === 'duedate' && job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
+            {activeTab === 'duedate' && job.due_date_history && Array.isArray(job.due_date_history) && (
               <div className="space-y-3">
-                {[...job.due_date_history].reverse().map((historyItem: any, idx: number) => {
-                  const hasChanges = Array.isArray(historyItem.changes) && historyItem.changes.length > 0;
-                  return (
+                {[...job.due_date_history]
+                  .filter((historyItem: any) =>
+                    (!historyItem.changes || historyItem.changes.length === 0) ||
+                    historyItem.changes.some((c: any) => c.field === 'Due Date')
+                  )
+                  .reverse().map((historyItem: any, idx: number) => {
+                    const hasChanges = Array.isArray(historyItem.changes) && historyItem.changes.length > 0;
+                    return (
+                      <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-3">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
+                            <Calendar size={14} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {hasChanges ? (
+                              <div className="space-y-1.5">
+                                {historyItem.changes.filter((c: any) => c.field === 'Due Date').map((change: any, cIdx: number) => (
+                                  <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                    <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded border border-border text-[10px] uppercase tracking-wider">
+                                      {change.field}
+                                    </span>
+                                    {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                      <>
+                                        <span className="text-muted line-through">{String(change.old)}</span>
+                                        <span className="text-muted text-[10px]">→</span>
+                                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">{String(change.new)}</span>
+                                      </>
+                                    ) : (
+                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">set to {String(change.new)}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm font-semibold text-text m-0">
+                                Changed Due Date to: {historyItem.date ? new Date(historyItem.date).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' }) : 'None'}
+                              </p>
+                            )}
+
+                            {historyItem.reason && (
+                              <p className="text-xs text-text/80 mt-1.5 mb-0 break-words">
+                                <span className="text-muted">Reason:</span> {historyItem.reason}
+                              </p>
+                            )}
+                            <p className="text-[10px] text-muted m-0 mt-1">
+                              Changed By: <span className="font-medium text-text/90">{historyItem.changed_by || 'Unknown'}</span>
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted font-medium shrink-0 pt-0.5 text-right whitespace-nowrap">
+                          {formatDateTime(historyItem.timestamp)}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+
+            {activeTab === 'priority' && job.due_date_history && Array.isArray(job.due_date_history) && (
+              <div className="space-y-3">
+                {[...job.due_date_history]
+                  .filter((historyItem: any) =>
+                    historyItem.changes && historyItem.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
+                  )
+                  .reverse().map((historyItem: any, idx: number) => (
                     <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-3">
                       <div className="flex items-start gap-3 flex-1 min-w-0">
-                        <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
-                          {hasChanges && historyItem.changes.length === 1 && historyItem.changes[0].field === 'Due Date' ? (
-                            <Calendar size={14} />
-                          ) : (
-                            <Edit3 size={14} />
-                          )}
+                        <div className="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg shrink-0 mt-0.5">
+                          <Zap size={14} className="fill-amber-500 text-amber-500" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          {hasChanges ? (
-                            <div className="space-y-1.5">
-                              {historyItem.changes.map((change: any, cIdx: number) => (
-                                <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
-                                  <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded border border-border text-[10px] uppercase tracking-wider">
-                                    {change.field}
-                                  </span>
-                                  {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
-                                    <>
-                                      <span className="text-muted line-through">{String(change.old)}</span>
-                                      <span className="text-muted text-[10px]">→</span>
-                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">{String(change.new)}</span>
-                                    </>
-                                  ) : (
-                                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">set to {String(change.new)}</span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-sm font-semibold text-text m-0">
-                              Changed Due Date to: {historyItem.date ? new Date(historyItem.date).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' }) : 'None'}
-                            </p>
-                          )}
+                          <div className="space-y-1.5">
+                            {historyItem.changes.filter((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date').map((change: any, cIdx: number) => (
+                              <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                <span className="font-semibold text-text bg-accent px-1.5 py-0.5 rounded border border-border text-[10px] uppercase tracking-wider">
+                                  {change.field}
+                                </span>
+                                {change.old !== undefined && change.old !== null && change.old !== '' && change.old !== 'None' ? (
+                                  <>
+                                    <span className="text-muted line-through">{String(change.old)}</span>
+                                    <span className="text-muted text-[10px]">→</span>
+                                    <span className="font-semibold text-amber-600 dark:text-amber-400">{String(change.new)}</span>
+                                  </>
+                                ) : (
+                                  <span className="font-semibold text-amber-600 dark:text-amber-400">set to {String(change.new)}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
 
                           {historyItem.reason && (
                             <p className="text-xs text-text/80 mt-1.5 mb-0 break-words">
-                              <span className="text-muted">Reason:</span> {historyItem.reason}
+                              <span className="text-muted">Reason / Note:</span> {historyItem.reason}
                             </p>
                           )}
                           <p className="text-[10px] text-muted m-0 mt-1">
@@ -980,8 +1221,37 @@ export function BodInternalJobPage() {
                         {formatDateTime(historyItem.timestamp)}
                       </div>
                     </div>
-                  );
-                })}
+                  ))}
+              </div>
+            )}
+
+            {activeTab === 'files' && job.file_history && Array.isArray(job.file_history) && job.file_history.length > 0 && (
+              <div className="space-y-3">
+                {[...job.file_history].reverse().map((fItem: any, idx: number) => (
+                  <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-3">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
+                        <FileText size={14} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-text m-0 truncate">
+                          {fItem.new_filename || fItem.original_filename}
+                        </p>
+                        {fItem.backup_filename && (
+                          <p className="text-[10px] text-muted font-mono mt-1 mb-0 break-all">
+                            Backed up as: <span className="text-amber-600 dark:text-amber-400 font-medium">{fItem.backup_filename}</span>
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted m-0 mt-1">
+                          Stage: <span className="font-semibold text-text/90">{fItem.stage || 'QC'}</span> • Uploaded By: <span className="font-medium text-text/90">{fItem.user || 'Unknown'}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-muted font-medium shrink-0 pt-0.5 text-right whitespace-nowrap">
+                      {formatDateTime(fItem.timestamp)}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1086,6 +1356,101 @@ export function BodInternalJobPage() {
                   <span className="flex items-center gap-2"><CheckCircle size={16} /> Complete & Move to Dispatch</span>
                 )}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* History CSV Preview Modal */}
+      {showHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-muted/10">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                  <FileSpreadsheet size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-text m-0">history.csv Preview</h3>
+                  <p className="text-xs text-muted m-0">Generated deliverable metadata record for BOD dispatch</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="p-1 rounded-lg hover:bg-accent text-muted hover:text-text transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4">
+              {historyCsvContent ? (
+                (() => {
+                  const lines = historyCsvContent.trim().split('\n')
+                  const headers = lines[0] ? lines[0].split(',') : []
+                  const values = lines[1] ? lines[1].split(',') : []
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="border border-border/80 rounded-xl overflow-hidden shadow-xs">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-muted/40 text-[10px] uppercase font-bold tracking-wider text-muted border-b border-border/70">
+                              <tr>
+                                {headers.map((h, idx) => (
+                                  <th key={idx} className="px-3 py-2.5 whitespace-nowrap">
+                                    {h.trim()}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/60 bg-background/50 font-mono text-xs">
+                              <tr>
+                                {values.map((v, idx) => (
+                                  <td key={idx} className="px-3 py-2.5 whitespace-nowrap text-text font-medium">
+                                    {v.trim() || <span className="text-muted/50 italic">—</span>}
+                                  </td>
+                                ))}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-1">
+                          Raw CSV Content
+                        </span>
+                        <pre className="p-3 bg-muted/20 border border-border/60 rounded-lg text-xs font-mono text-text whitespace-pre-wrap break-all">
+                          {historyCsvContent}
+                        </pre>
+                      </div>
+                    </div>
+                  )
+                })()
+              ) : (
+                <div className="p-8 text-center text-muted text-sm">
+                  No content found in history.csv
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 border-t border-border flex items-center justify-between bg-muted/5">
+              <span className="text-xs text-muted">Ready for delivery verification</span>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setShowHistoryModal(false)}>
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={downloadHistoryCsv}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                  leftIcon={<Download size={14} />}
+                >
+                  Download CSV
+                </Button>
+              </div>
             </div>
           </div>
         </div>

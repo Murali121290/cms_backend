@@ -4,7 +4,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Search, Trash2
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Truck, Search, Trash2
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -364,8 +364,8 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
                     key={u.id}
                     type="button"
                     className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground hover:bg-muted/40'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-muted/40'
                       }`}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -485,8 +485,8 @@ function FilterAssigneeDropdown({
                     key={u}
                     type="button"
                     className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground hover:bg-muted/40'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-muted/40'
                       }`}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -581,8 +581,8 @@ function StageSelectDropdown({
                   key={s}
                   type="button"
                   className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-foreground hover:bg-muted/40'
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-foreground hover:bg-muted/40'
                     }`}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -893,6 +893,7 @@ export function ProjectWorkflow() {
   const [loadingGroupProceedConfig, setLoadingGroupProceedConfig] = useState(false)
   const [executingGroupProceed, setExecutingGroupProceed] = useState(false)
   const [sendEmailToggle, setSendEmailToggle] = useState(true)
+  const [groupShipmentNotes, setGroupShipmentNotes] = useState('')
 
   const [batchModalType, setBatchModalType] = useState<'word_to_xml' | 'word_to_indesign' | 'style_validation' | 'structuring' | 'xml_to_indesign' | 'indesign_to_xml' | null>(null)
   const [batchSelectedChapterIds, setBatchSelectedChapterIds] = useState<Set<number>>(new Set())
@@ -1267,6 +1268,7 @@ export function ProjectWorkflow() {
         stage_name: groupProceedStage,
         chapter_ids: Array.from(selectedGroupProceedChapterIds),
         send_email: sendEmailToggle,
+        shipment_notes: groupShipmentNotes.trim() || undefined,
       })
       toast.success(`Successfully transitioned ${res.transitioned_count} chapter(s) to their next stage.`)
       setGroupProceedModalOpen(false)
@@ -1699,7 +1701,7 @@ export function ProjectWorkflow() {
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0 shadow-2xs"
             >
               <BookMarked size={13} className="text-primary" />
-              <span>Editorial Standards</span>
+              <span>Editorial Hub</span>
               {activeStylesheet ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -2462,8 +2464,12 @@ export function ProjectWorkflow() {
                       }}
                       className="rounded border-border"
                     />
-                    <span className="font-semibold text-primary text-xs uppercase w-8 flex-shrink-0">{c.chapters}</span>
-                    <span className="truncate text-text flex-1 min-w-0 font-medium">{c.chapter_title || c.chapters}</span>
+                    <span className="font-semibold text-primary text-xs uppercase w-8 flex-shrink-0">
+                      {c.chapters === "00" ? "Book" : c.chapters}
+                    </span>
+                    <span className="truncate text-text flex-1 min-w-0 font-medium">
+                      {(c.chapters === "00" && !c.chapter_title) ? "Book" : (c.chapter_title || c.chapters)}
+                    </span>
                     <span className="text-xs text-muted font-medium bg-surface px-2 py-0.5 rounded border border-border">
                       {c.workflow || 'Default'}
                     </span>
@@ -2492,12 +2498,15 @@ export function ProjectWorkflow() {
                       <th className="px-3 py-2">Workflow</th>
                       <th className="px-3 py-2">Current Stage</th>
                       <th className="px-3 py-2">Next Stage</th>
+                      <th className="px-3 py-2">Target Due Date</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {(groupProceedConfig?.chapters || groupProceedConfig?.preview_items || []).map(item => (
                       <tr key={item.chapter_id} className="hover:bg-accent/20">
-                        <td className="px-3 py-2 font-semibold text-primary uppercase">{item.chapter_number || item.chapter_num}</td>
+                        <td className="px-3 py-2 font-semibold text-primary uppercase">
+                          {(item.chapter_number === "00" || item.chapter_num === "00") ? "Book" : (item.chapter_number || item.chapter_num)}
+                        </td>
                         <td className="px-3 py-2 text-muted">{item.workflow_name}</td>
                         <td className="px-3 py-2 text-text font-medium">{item.current_stage}</td>
                         <td className="px-3 py-2">
@@ -2511,11 +2520,42 @@ export function ProjectWorkflow() {
                             </span>
                           )}
                         </td>
+                        <td className="px-3 py-2 text-text font-medium">
+                          {item.next_stage_due_date || '—'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Shipment Notes Query Section */}
+          {sendEmailToggle && (
+            <div className="border border-border rounded-xl p-3 bg-surface/40 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="bulkShipmentNotes" className="text-xs font-semibold text-text flex items-center gap-1.5">
+                  <Truck size={14} className="text-emerald-600 flex-shrink-0" />
+                  <span>Any shipment notes available?</span>
+                </label>
+                <span className="text-[10px] text-muted font-medium bg-surface px-2 py-0.5 rounded border border-border">
+                  Optional
+                </span>
+              </div>
+              <input
+                id="bulkShipmentNotes"
+                type="text"
+                value={groupShipmentNotes}
+                onChange={e => setGroupShipmentNotes(e.target.value)}
+                placeholder="e.g. Batch 01 priority ingest, Dispatched to client via FTP, etc."
+                className="w-full text-xs px-3 py-2 bg-background border border-border rounded-lg text-text placeholder:text-muted/60 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
+              />
+              <p className="text-[11px] text-muted">
+                {groupShipmentNotes.trim()
+                  ? "✓ Notes will be populated across all transitioned chapters in the notification table."
+                  : 'Leave blank to display as "—" in the email notification table.'}
+              </p>
             </div>
           )}
 

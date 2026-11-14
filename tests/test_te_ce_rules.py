@@ -30,8 +30,13 @@ def _findings(text: str = SAMPLE) -> dict[str, dict]:
 
 def test_catalog_has_all_72_rules():
     rules = ce_rules.load_catalog()
-    assert len(rules) == 72
+    workbook = [r for r in rules if r["sno"] < 92]
+    house_style = [r for r in rules if r["sno"] >= 92]
+    assert len(workbook) == 72
+    assert len(house_style) == 34  # ce_rules_extensions.NEW_RULES (92-125), off by default
+    assert all(not r["default_enabled"] for r in house_style)
     assert all(len(r["options"]) >= 3 for r in rules)
+    assert all(len(r["forms"]) == len(r["options"]) for r in rules)
     assert {r["detectable"] for r in rules} <= {"auto", "flag", "manual"}
 
 
@@ -129,7 +134,7 @@ def test_percentage_multi_options():
     assert opts["3"] is None  # matches surface
     assert opts["4"] == "25 per cent"
     assert opts["5"] == "25 percentage points"
-    assert opts["6"] == "percentage"
+    assert "6" not in opts  # a number never becomes the bare word "percentage"
 
     # On "25%", Option 3 transforms to "25 percent", Option 4 to "25 per cent"
     f_sym = _findings("Yield was 25% in trial.")["25%"]

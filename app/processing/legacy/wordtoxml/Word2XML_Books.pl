@@ -45,11 +45,14 @@ $|=1;
 my $ExePath=abs_path($0);
 $ExePath=~s#[\\\/]([^\/\\]+)$##isg;
 
-my $PYTHON_BIN = "python3";
-for my $candidate ("python3", "python") {
-	`$candidate --version` ;
-	if ($? == 0) { $PYTHON_BIN = $candidate; last; }
+my $PYTHON_BIN = $ENV{'PYTHON_BIN'} || '';
+if (!$PYTHON_BIN) {
+	for my $candidate ("python", "python3") {
+		`$candidate --version` ;
+		if ($? == 0) { $PYTHON_BIN = $candidate; last; }
+	}
 }
+$PYTHON_BIN = "python" if !$PYTHON_BIN;
 
 opendir(my $dh, $ARGV[0]) or die $!;
 my @docx = grep { /\.docx$/i && -f "$ARGV[0]/$_" } readdir($dh);
@@ -64,24 +67,30 @@ foreach my $file (@docx)
 		my $Doc_File=$ARGV[0] . "/" . $file;
 
                 my $commentdocx = $Doc_File;
+                my $recondocx = $Doc_File;
                 
                 $commentdocx=~ s{\.docx}{\_comments\.docx};
+                $recondocx=~ s{\.docx}{\_recon\.docx};
 
 		my $Client_Name="Amazon";
 		
 #=========================== Extract DOCX ==========================#
 		my (@ID,@Label);
 		my $docPath = dirname($commentdocx);
+                my $recondocpath = dirname($recondocx);
 
 		my @suffixes=(".docx",".docx");
 		my $FileName= basename($commentdocx, @suffixes);
+		my $ReconFileName= basename($recondocx, @suffixes);
                 $FileName =~ s{_comments}{};
 		my $zipname = $commentdocx;
 
 		my $File_Path=dirname(abs_path($0));
 
-                system($PYTHON_BIN, "$File_Path/process_comments.py", '-i', $Doc_File, '-o', $commentdocx);
-                
+                system($PYTHON_BIN, "$File_Path/reconcile_styles.py", '-i', $Doc_File, '-o', $recondocx, '-m', 'mismatch_only');
+
+                system($PYTHON_BIN, "$File_Path/process_comments.py", '-i', $recondocx, '-o', $commentdocx);
+
 		# $File_Path=~s#\/#\\#gsi;
 
 		my $Final_File="$docPath/html/$FileName.xml";
@@ -114,6 +123,10 @@ foreach my $file (@docx)
 					my $XML_File="$docPath/$extractName";
 					my $Post_XML="$docPath/html/$FileName.posthtml";
 					$Post_XML =~s/\.xml$/\.postxml/i;
+					#					my $XMLCont=&ReadFile("$XML_File", "HTML");
+					#					$XMLCont =~ s#<w:r ((?:(?!0Hidden|<w:r |<\/w:r>).)*)<w:rStyle w:val="0Hidden"\/>((?:(?!0Hidden|<w:r |<\/w:r>).)*)<\/w:r>##isg;
+					#					$XMLCont =~ s#<w:fldChar w:fldCharType="begin"/>((?:(?!w:fldCharType="begin"|w:fldCharType="end").)*)<w:fldChar w:fldCharType="end"/>##isg;
+					#					&WriteFile("$XML_File", "$XMLCont", "HTML");
 
 					#					system("perl \"$File_Path/Era_WmlCleanup.pl\" \"$XML_File\" \"$Doc_File\"");
 					system("perl \"$File_Path/Era_WmlCleanup.pl\" \"$XML_File\" \"$commentdocx\"");
@@ -175,7 +188,7 @@ foreach my $file (@docx)
 			{
 					$member->extractToFileNamed("$docPath/$extractName");
 					my $XML_File="$docPath/$extractName";
-					my $Cust_XML="$docPath\\Custom1.xml";
+					my $Cust_XML="$docPath/Custom1.xml";
 
 					my ($Editor);
 					my $Tmp=&ReadFile("$Final_File", "HTML");
@@ -196,7 +209,8 @@ foreach my $file (@docx)
 					#					print "\n$Final_File";
 					$Tmp=~ s{(<comment[^>]*>|</comment[^>]*>)}{}gi;
 					$Tmp=~ s{(<comment[^>]*>|</comment[^>]*>)}{}gi;
-					$Tmp=~ s#<p([^>]*)>((?:(?!<tab\/>).)*?)<tab\/>#<p$1>#ig;
+					$Tmp=~ s#<p([^>]*)><tab\/>#<p$1>#ig;
+					$Tmp=~ s#<list-item>(\s*)<p([^>]*)>((?:(?!<tab\/>).)*?)<tab\/>#<list-item><p$2>#ig;
 					$Tmp=~ s#\&lt;LO\&gt;##ig;
 					$Tmp=~ s#\&lt;SH([0-9]*)\&gt;##ig;
 					$Tmp=~ s#\&lt;H([0-9]*)\&gt;##ig;
@@ -208,7 +222,6 @@ foreach my $file (@docx)
 		}
 		copy("$File_Path/epub.css", "$docPath/html/epub.css");
 		rename("$docPath/$FileName.zip",$commentdocx);
-		rename($commentdocx, $Doc_File);
 		unlink("$docPath/document.xml");
 		unlink("$docPath/footnotes.xml");
 		unlink("$docPath/$FileName\_Footnotes.html");
@@ -245,16 +258,88 @@ my $booMeta=<<BKMETA;
 <body>
 BKMETA
 
+
+my $FrontMeta=<<FMMETA;
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE book PUBLIC "-//NLM//DTD BITS Book Interchange DTD v2.0 20130520//EN" "$DTDPath/BITS-Book-1.0-DTD/BITS-book1.dtd">
+<book xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:mml="http://www.w3.org/1998/Math/MathML" xmlns:xlink="http://www.w3.org/1999/xlink" dtd-version="1.0" xml:lang="en">
+<book-meta>
+<book-id book-id-type="publisher-id">&bookisbn;</book-id>
+<book-title-group>
+<book-title>&booktitle;</book-title>
+<subtitle>&subtitle;</subtitle>
+</book-title-group>
+<contrib-group>
+&contrib;
+</contrib-group>
+<pub-date>
+<year>2027</year>
+</pub-date>
+<isbn publication-format="print" content-type="ISBN13">&bookisbn;</isbn>
+<edition>&bookedition;</edition>
+<permissions>
+&bookcopyright;
+</permissions>
+</book-meta>
+<front-matter>
+<front-matter-part book-part-type="authorbio">
+<book-part-meta>
+&authorbiotitle;
+</book-part-meta>
+<named-book-part-body>
+&authorbiocontent;
+</named-book-part-body>
+</front-matter-part>
+<dedication>
+<book-part-meta>
+<title-group><title>&dedicationtitle;</title></title-group>
+</book-part-meta>
+<named-book-part-body>
+&dedicationcontent;
+</named-book-part-body>
+</dedication>
+<toc>
+<title-group>
+<title>&toctitle;</title>
+</title-group>
+&toccontent;
+</toc>
+<front-matter-part book-part-type="Contributors">
+<book-part-meta>
+<title-group><title>&contributorstitle;</title></title-group>
+</book-part-meta>
+<named-book-part-body>
+&contributorscontent;
+</named-book-part-body>
+</front-matter-part>
+<preface>
+<book-part-meta>
+<title-group><title>&prefacetitle;</title></title-group>
+</book-part-meta>
+<named-book-part-body>
+&prefacecontent;
+</named-book-part-body>
+</preface>
+<ack>
+<title>&acktitle;</title>
+&ackcontent;
+</ack>
+</front-matter>
+</book>
+FMMETA
+
 #basic clean up
 
 #$booMeta =~ s#<contrib-group>(\s*)\&contrib;(\s*)</contrib-group>#<contrib-group></contrib-group>#;
 		
 		my $Tmp=&ReadFile("$Final_File", "HTML");
 		$Tmp=~s#(\&\#(\d+);)#"\&\#x".sprintf('%04X', "$2")."\;"#gesi;
-		$Tmp=~s{([^\x00-\x7F])}{sprintf('&#x%04X;', ord($1))}ge;
 		#-- cleanup
 		#		print "\n$Final_File";
-		$Tmp=~s#^.*?<body>##isg;
+
+                
+                #print $Tmp . "\n";
+                $Tmp=~s#^.*?<body>##isg;
 		$Tmp=~s#<\/body>\s*<\/html>#<\/body>\n</book-part>\n</book-body>\n</book>#isg;
 		$Tmp=~s#(<\/?comment(?: [^<>]*)?>|<CommentReference[0-9]+\/>)##isg;
                 $Tmp =~ s{
@@ -269,7 +354,7 @@ BKMETA
 
                     # Convert each EpigraphSource paragraph to an <attrib> element if sources exist
                     if ($sources_block) {
-                        $sources_block =~ s/<p\s+class="EpigraphSource">(.*?)<\/p>/<attrib>$1<\/attrib>/gs;
+                        $sources_block =~ s/<p\s+class="EpigraphSource">((?:(?!<\/p>).)*?)<\/p>/<attrib>$1<\/attrib>/gs;
                     }
 
                     # Reconstruct output block
@@ -278,27 +363,30 @@ BKMETA
                     . $sources_block
                     . "</disp-quote>"
                 }gesx;
-
+                
 		$Tmp=~s# class="Box-01-BulletList1# class="BulletList1#igs;
+		#$Tmp=~s# class="Box-01-TB-BulletList1# class="BulletList1#igs;
+		#$Tmp=~s# class="Box-01-TB-BulletList2# class="BulletList2#igs;
 		$Tmp=~s# class="TB-BulletList1# class="BulletList1#igs;
 		$Tmp=~s# class="TB-BulletList2# class="BulletList2#igs;
 		$Tmp=~s# class="Box-01-BulletList2# class="BulletList2#igs;
 		$Tmp=~s# class="Exhibit-BulletList2# class="BulletList2#igs;
-		$Tmp=~s# class="FE-01-BulletList1# class="BulletList1#igs;
+		#$Tmp=~s# class="FE-01-BulletList1# class="BulletList1#igs;
 		$Tmp=~s# class="Box-01-NumberList1# class="NumberList1#igs;
 		$Tmp=~s# class="TB-NumberList1# class="NumberList1#igs;
-		$Tmp=~s# class="FE-01-NumberList1# class="NumberList1#igs;
+		#$Tmp=~s# class="FE-01-NumberList1# class="NumberList1#igs;
 		$Tmp=~s# class="Box-01-UL-FL1# class="UnNumberList1#igs;
 		$Tmp=~s# class="UL-FL1# class="UnNumberList1#igs;
 		$Tmp=~s# class="TB-UL-FL1# class="UnNumberList1#igs;
                 $Tmp=~s# class="Exhibit-UN-TableSource"# class="TableSource"#igs;
 		$Tmp=~s#<p><Hyperlink/></p>##igs;
 		$Tmp=~s#<a href="http://;">;</a>#;#igs;
-                $Tmp =~ s{((?:<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItem-Para-FL1">(.*?)</p>\s*)?)+)}{
+
+                $Tmp =~ s{((?:<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItemPara-FL1">(.*?)</p>\s*)?)+)}{
                     my $block = $1;
                     my $list_items = "";
 
-                    while ($block =~ m{<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItem-Para-FL1">(.*?)</p>)?}gs) {
+                    while ($block =~ m{<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItemPara-FL1">(.*?)</p>)?}gs) {
                         my $title = $1;
                         my $desc  = $2;
 
@@ -311,12 +399,12 @@ BKMETA
 
                     "<list list-type=\"bullet\">\n" . $list_items . "</list>"
                 }gesx;
-                    
-                $Tmp =~ s{((?:<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItemPara-FL1">(.*?)</p>\s*)?)+)}{
+                
+                $Tmp =~ s{((?:<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItem-Para-FL1">(.*?)</p>\s*)?)+)}{
                     my $block = $1;
                     my $list_items = "";
 
-                    while ($block =~ m{<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItemPara-FL1">(.*?)</p>)?}gs) {
+                    while ($block =~ m{<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItem-Para-FL1">(.*?)</p>)?}gs) {
                         my $title = $1;
                         my $desc  = $2;
 
@@ -359,6 +447,7 @@ BKMETA
 		#Formatting
 		$Tmp=~s#&lt;\/?(bold|ital)&gt;##isg;
 		$Tmp=~s#<span class="italic">((?:(?!</span>|<span ).)*?)</span>#<italic>$1<\/italic>#isg;
+		$Tmp=~s#<span class="bold">((?:(?!</span>|<span ).)*?)</span>#<bold>$1<\/bold>#isg;
 		$Tmp=~s#<span class="superscript">((?:(?!</span>|<span ).)*?)</span>#<sup>$1<\/sup>#isg;
 		$Tmp=~s#<span class="subscript">((?:(?!</span>|<span ).)*?)</span>#<sub>$1<\/sub>#isg;
 		$Tmp=~s#<span class="Underline">((?:(?!</span>|<span ).)*?)</span>#<underline>$1<\/underline>#isg;
@@ -369,27 +458,24 @@ BKMETA
 		$Tmp=~s#<\/(TableNumber|FigureNumber|BoxNumber)>\.#\.<\/$1>#isg;
 		$Tmp=~s#<\/strong>([^<>]*)<\/strong>#$1<\/strong>#isg;
 		$Tmp=~s#<strong>([^<>]*)<strong>#<strong>$1#isg;
-
 		while($Tmp=~s#<\/(strong|italic|citebib|bibchaptertitle|bibtitle|bibjournal|bibarticle|bibpublisher|biburl|bibvolume|bibissue|bibfpage|biblpage|bibsurname|bibfname|TableNumber|TableCitation|FigureCitation|FigureNumber|Box-01-BoxTitle)>(\s*)<\1>#$2#isg){}
-
                 $Tmp=~s#<p[^>]*>(<strong>)?&lt;(\/)?(case study)&gt;(<\/strong>)?<\/p>#<$2casestudy>#isg;
                 $Tmp=~s#<p[^>]*>&lt;(<strong>)?(\/)?(case study)(<\/strong>)?&gt;<\/p>#<$2casestudy>#isg;
                 $Tmp=~s#<p[^>]*>(<strong>)?&lt;(\/)?(metadata)&gt;(<\/strong>)?<\/p>##isg;
                 $Tmp=~s#<p[^>]*>(<strong>)?&lt;(\/)?(original to the au)&gt;(<\/strong>)?<\/p>##isg;
 		#		&WriteFile("$Final_File\.tmp", "$Tmp", "HTML");
-                $Tmp =~ s{&(?!amp;|lt;|gt;|quot;|apos;|#[0-9]+;|#x[0-9a-fA-F]+;|num;|ChLabel;|ChTitle;|contrib;|abstract;|kwd;|KeyTermsHeading;)}{&#x0026;}isg;
-                $Tmp =~ s{&amp;}{\&\#x0026;}isg;
-                
+                $Tmp=~s#&amp;#&\#x0026;#isg;
+
                 my $num = "";
-		if($Tmp=~s#<p class="ChapterNumber">\s*(?:<strong>)?(Chapter)?\s*([0-9]+)\s*(?:</strong>)?\s*</p>##is){
-			my $lab = $1 . " " . $2; $num = $2;
+		if($Tmp=~s#<p class="(ChapterNumber|AppendixNumber)">\s*(?:<strong>)?(Chapter|Appendix)?\s*([0-9|A-z]+)\s*(?:</strong>)?\s*</p>##is){
+			my $lab = $2 . " " . $3; $num = $3;
                         $num =~ s/^\s+|\s+$//g;
                         $lab =~ s/^\s+|\s+$//g;
                         $booMeta=~s#&ChLabel;#$lab#isg;
 			$booMeta=~s#&num;#$num#isg;
 		}
-		if($Tmp=~s#<p class="ChapterTitle">\s*(?:<strong>)?((?:(?!</p>|<p ).)*?)\s*(?:<\/strong>)?\s*</p>##is){
-			my $tit = $1;
+		if($Tmp=~s#<p class="(ChapterTitle|AppendixTitle)">\s*(?:<strong>)?((?:(?!</p>|<p ).)*?)\s*(?:<\/strong>)?\s*</p>##is){
+			my $tit = $2;
 			$tit =~ s#(<strong>|</strong>)##g;
 			$tit =~ s#(<CommentReference1>|</CommentReference1>)##g;
 			$booMeta=~s#&ChTitle;#$tit#isg;
@@ -399,6 +485,12 @@ BKMETA
 			$booMeta=~s#<book-body>#<book-body>\n<book-part id="pt$id" book-part-type="part">\n<book-part-meta>\n<title-group>\n<label>$lab</label>\n<title>$tit</title>\n</title-group>\n</book-part-meta>\n<body>#isg;
 			$Tmp=~s#<\/body>\s*</book-part>\s*</book-body>\s*</book>#</body>\n</book-part>\n</body>\n</book-part>\n</book-body>\n</book>#isg;
 		}
+		if($Tmp=~s#<p class="UnitNumber">\s*(?:<strong>)?((?:Section|Unit) ([0-9A-Z\.\-]+))\s*(?:</strong>)?</p>\s*<p class="UnitTitle">\s*(?:<strong>)?((?:(?!</p>|<p ).)*?)\s*(?:<\/strong>)?\s*</p>##is){
+			my $lab = $1; my $id = $2; my $tit = $3;
+			$booMeta=~s#<book-body>#<book-body>\n<book-part id="pt$id" book-part-type="part">\n<book-part-meta>\n<title-group>\n<label>$lab</label>\n<title>$tit</title>\n</title-group>\n</book-part-meta>\n<body>#isg;
+			$Tmp=~s#<\/body>\s*</book-part>\s*</book-body>\s*</book>#</body>\n</book-part>\n</body>\n</book-part>\n</book-body>\n</book>#isg;
+		}
+                
 		if($Tmp=~s#<p class="ChapterAuthor">((?:(?!<\/p>|<p ).)*?)<\/p>##is){
 			my $chapauth = $1;
 			$chapauth=~s#<[^>]*>##isg;
@@ -431,43 +523,23 @@ BKMETA
                 
 		#casestudy
 		$Tmp=~s#<casestudy>((?:(?!<\/casestudy>|<casestudy>).)*?)<\/casestudy>#caseStudy($&)#isge;
-                $Tmp=~s{((?:<p class=\"CaseStudy-BulletList1(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyBulletList($1,$num)}gesi;
-                $Tmp=~s{((?:<p class=\"CaseStudy-NumberList1(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyBulletList($1,$num)}gesi;
-                $Tmp=~s{((?:<p class=\"CaseStudy-UL-FL1(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyUnNumberList($1,$num)}gesi;
+                #$Tmp=~s{((?:<p class=\"CaseStudy-BulletList1(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyBulletList($1,$num)}gesi;
+                #$Tmp=~s{((?:<p class=\"CaseStudy-NumberList1(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyBulletList($1,$num)}gesi;
+                #$Tmp=~s{((?:<p class=\"CaseStudy-UL-FL1(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyUnNumberList($1,$num)}gesi;
                 $Tmp=~s{<p\s+class="[^"]*Uc-RomanList1[^"]*">(.*?)</p>}{<RL1>$1</RL1>}gsi;
                 $Tmp=~s{<p\s+class="[^"]*BulletList1[^"]*">(.*?)</p>}{<BL1>$1</BL1>}gsi;
                 $Tmp=~s{((?:<(?:RL|BL)1>.*?</(?:RL|BL)1>\s*)+)}{&NestLists($1)}gesx;
                 $Tmp=~s{((?:<p class=\"BulletList2[_]?(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&BulletList($1,$num)}gesi;
                 $Tmp=~s{((?:<p class=\"BulletList1[_]?(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyBulletList($1,$num)}gesi;
                 $Tmp=~s{((?:<p class=\"NumberList1[_]?(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyNumberList($1,$num)}gesi;
-                $Tmp=~s{((?:<p class=\"UL-FL1[_]?(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyNumberList($1,$num)}gesi;
+                #print $Tmp;
+                $Tmp=~s{((?:<p class=\"UL-FL1[_]?(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyUnNumberList($1,$num)}gesi;
                 $Tmp=~s{((?:<p class=\"Exhibit-UL-FL1(?:first|last)?0?\">(?:(?!<\/p>).)*?<\/p>\s*)+)}{&CaseStudyUnNumberList($1,$num)}gesi;
-
+                
 		$Tmp=~s#<p class="(Para-FL|Key-Para-FL|ParaFirstLine-Ind)">#<p>#isg;
 		$Tmp=~s#<p class="EOC-#<p class="#isg;
-		
-		#List Opener
-		$Tmp=~s#<p class="BulletList([1-9])first0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<BL$1><p>$2</p><\/BL$1>#isg;
-		$Tmp=~s#<p class="LearnObj-BulletList([1-9])-first0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<BL$1><p>$2</p><\/BL$1>#isg;
-		#unList Opener
-		$Tmp=~s#<p class="UnNumberList([1-9])first0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<UL$1><p>$2</p><\/UL$1>#isg;
-		$Tmp=~s#<p class="UnNumberList([1-9])0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<UL$1><p>$2</p><\/UL$1>#isg;
-		$Tmp=~s#<p class="UnNumberList([1-9])last0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<UL$1><p>$2</p><\/UL$1>#isg;
-		#BL List body
-		$Tmp=~s#<p class="BulletList([1-9])0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<BL$1><p>$2</p><\/BL$1>#isg;
-		$Tmp=~s#<p class="LearnObj-BulletList([1-9])0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<BL$1><p>$2</p><\/BL$1>#isg;
-		#OL List body
-		$Tmp=~s#<p class="NumberList([1-9])first0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<OL$1><p>$2</p><\/OL$1>#isg;
-		$Tmp=~s#<p class="NumberList([1-9])0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<OL$1><p>$2</p><\/OL$1>#isg;
-		$Tmp=~s#<p class="AlphaListfirst([1-9])0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
-		$Tmp=~s#<p class="AlphaList([1-9])0?">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
-		$Tmp=~s#<p class="Uc-AlphaList([1-9])first">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
-		$Tmp=~s#<p class="Uc-AlphaList([1-9])">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
-		$Tmp=~s#<p class="Uc-AlphatList([1-9])first">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
-		$Tmp=~s#<p class="Uc-AlphatList([1-9])last">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
-		$Tmp=~s#<p class="Uc-AlphatList([1-9])">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
-		$Tmp=~s#<p class="Lc-AlphaList([1-9])">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
-		$Tmp=~s#<p class="Lc-RomanList([1-9])">((?:(?!<\/p>|<p ).)*?)<\/p>#<AL$1><p>$2</p><\/AL$1>#isg;
+		#List conversion (stack based - see ConvertLists)
+		$Tmp = ConvertLists($Tmp);
                 $Tmp=~s{<\/list-item>(\s*)<\/list>(\s*)<list list-type="bullet2">((?:(?!<\/list>).)*?)<\/list>(\s*)<list list-type="([^"]+)">(\s*)<list-item>}{<list list-type="bullet">$3<\/list>$4<\/list-item>\n<list-item>}gs;
                 $Tmp=~s{<\/list-item>(\s*)<\/list>(\s*)<list list-type="bullet2">((?:(?!<\/list>).)*?)<\/list>}{<list list-type="bullet">$3<\/list>\n<\/list-item>\n</list>}gs;
                 $Tmp=~s{ list-type="bullet2"}{ list-type="bullet"}g;
@@ -483,35 +555,6 @@ BKMETA
 		$Tmp=~s#<kt1>#<list list-type="bullet">#isg;
 		my $i = 1;
 		$Tmp=~s#&seq;#$i++#isge;
-		#		$cont=~ s#<p class=\"(NL|UL|BL|OL|TOC-Chapter)([0-9]+)\">((?:(?!<p |<p>|<\/p>).)*)</p>#<$1$2>$3<\/$1$2>#isg;
-		# Tags to be checked for nesting
-		my @tags = qw(UL BL OL AL AU RL RU);
-
-		# Primary nesting within same type
-		foreach my $tag (@tags) {
-		    $Tmp = fix_nesting($Tmp, $tag, $tag);
-		}
-
-		# Cross nesting (e.g., OL inside BL, NL inside UL, etc.)
-		foreach my $outer (@tags) {
-		    foreach my $inner (@tags) {
-			next if $outer eq $inner; # skip same-type (already done)
-			$Tmp = fix_nesting($Tmp, $outer, $inner);
-		    }
-		}
-		
-		$Tmp=~ s#<\/(UL|BL|OL|AL|AU|RL|RU)([0-9]+)>\s*<\1\2>#<\/list-item>\n<list-item>#isg;
-		$Tmp=~ s#<\/(UL|BL|OL|AL|AU|RL|RU)([0-9]+)>#<\/list-item><\/$1$2>#isg;
-
-		$Tmp=~ s#<(UL|BL|OL|AL|AU|RL|RU)([0-9]+)>#<ol class="$1">\n<list-item>#sg;
-		$Tmp=~ s#<ol class="OL">#<list list-type="order">#isg;
-		$Tmp=~ s#<ol class="AL">#<list list-type="lower-alpha">#isg;
-		$Tmp=~ s#<ol class="AU">#<list list-type="upper-alpha">#isg;
-		$Tmp=~ s#<ol class="RL">#<list list-type="lower-roman">#isg;
-		$Tmp=~ s#<ol class="RU">#<list list-type="upper-roman">#isg;
-		$Tmp=~ s#<ol class="BL">#<list list-type="bullet">#isg;
-		$Tmp=~ s#<ol class="UL">#<list list-type="none">#isg;
-		$Tmp=~ s#<\/(UL|BL|OL|AL|AU|RL|RU)([0-9]+)>#\n<\/list>\n#sg;
 		$Tmp=~ s#<list-item><p>\s*<tab/>#<list-item><p>#isg;
 		$Tmp=~ s#<list-item><p>\&\#x[0-9a-z]+;<tab/>#<list-item><p>#isg;
 		$Tmp=~s#<p class="(References?Heading1|KeyTerms?Heading|LearnObjHeading)">((?:(?!<\/p>).)*?)<\/p>#<p class="Head1">$2<\/p>#isg;
@@ -525,6 +568,206 @@ BKMETA
 		$Tmp=~s#<casec #<sec #gsi;
 		$Tmp=~s#<\/boxsec>#<\/sec>#gsi;
 		$Tmp=~s#<boxsec #<sec #gsi;
+
+                # comment for the query
+                #$Tmp =~ s{(<query[0-9]>)((?:(?!<\/query[0-9]>).)*?)<\/query[0-9]>}{
+                #        my $tag = $&;
+                #        $FrontMeta = $FrontMeta . "\n" . $tag;
+                #}gies;
+
+                my $booktitlecont = "";
+                #Book Front Matter Process
+                $Tmp=~s{<p class="HTPBookTitle">((?:(?!</p>).)*?)</p>}{}g;
+                $Tmp=~s{<p class="TPBookTitle">((?:(?!</p>).)*?)</p>}{
+                        my $booktitle = $1;
+                        $booktitlecont = $1;
+                        $FrontMeta=~s{&booktitle;}{$booktitle};
+                }gies;
+                
+                $Tmp=~s{<p class="TPBookSubTitle">((?:(?!</p>).)*?)</p>}{
+                        my $tag = $1;
+                        if ($tag =~ m{ Edition}i)
+                        {
+                                $FrontMeta=~s{&bookedition;}{$tag};
+                                $FrontMeta=~s{<subtitle>&subtitle;</subtitle>}{};
+                        }
+                        else
+                        {
+                                $FrontMeta=~s{&subtitle;}{$1};
+                        }
+                }gies;
+		if($Tmp=~s#<p class="TPAuthor">((?:(?!<\/p>|<p ).)*?)<\/p>##is){
+			my $bookauth = $1;
+			$bookauth=~s#<[^>]*>##isg;
+			$bookauth=~s#( and )#\n#isg;
+			$bookauth=~s#(\s*\,\s*)#\n#isg;
+			$bookauth=~s#^([^<>\n]+) ([^<> \n]+)(\s*)$#<contrib contrib-type="editor">\n<name>\n<surname>$2</surname> <given-names>$1</given-names>\n</name>\n</contrib>#img;
+                        $bookauth = $bookauth . "\n";
+                        $bookauth=~s{\b([A-z]+)\n}{<degrees>$1</degrees>}g;
+                        $bookauth=~ s{</degrees><degrees>}{, }g;
+                        $bookauth=~ s{</contrib>(\s*)(<degrees>[^<]+</degrees>)}{$2</contrib>}g;
+			$FrontMeta=~s#&contrib;#$bookauth#isg;
+		}
+
+                $Tmp =~ s{(<[^>]*>)?ISBN(<[^>]*>)?: ([^<]+)<}{
+                        my $tag = $&;
+                        my $isbn = $3;
+			$FrontMeta=~s#&bookisbn;#$isbn#isg;
+                        qq($tag);
+                }gies;
+                
+                $Tmp =~ s{
+                    ((?:<p\s+class="AuthorBio">.*?</p>\s*)+)
+                }{
+                    my $paragraphs    = $1;
+                    $paragraphs =~ s/<p\s+class="AuthorBio">/<p>/g;
+                    $FrontMeta=~s{&authorbiocontent;}{$paragraphs}isg;
+                }gesx;
+                
+                $Tmp =~ s{
+                    <p\s+class="CopyrightTxt">(.*?)</p>\s*
+                    ((?:(?!<p\s+class="CopyrightTxt1).)*?)
+                    ((?:<p\s+class="CopyrightTxt(?:1[^"]*)?">.*?</p>\s*)+)
+                }{
+                        
+                        my $permission = $&;
+                        $permission =~ s{<p class="[^"]+">Copyright ([^<]+)</p>}{<copyright-statement>Copyright $1</copyright-statement>}i;
+                        $permission =~ s{<p class="CopyrightTxt">}{<license-p>}g;
+                        $permission =~ s{<p class="CopyrightTxt1">}{<license-p content-type="copy1">}g;
+                        $permission =~ s{</p>}{</license-p>}g;
+                        $permission =~ s{<license-p}{<license license-type="ccc">\n<license-p};
+                        $permission = $permission . "</license>";
+                        $FrontMeta =~ s{&bookcopyright;}{$permission}isg;
+                        
+                }gesx;
+
+                $Tmp=~s{<p class="FrontMatterHeading">((?:(?!</p>).)*?)</p>}{
+                        my $toctitle = $&;
+                        if ($toctitle =~ m{(Contents|Table of Contents)})
+                        {
+                                $toctitle=~m{<p class="FrontMatterHeading">((?:(?!</p>).)*?)</p>};
+                                my $toctit = $1;
+                                $FrontMeta =~ s{&toctitle;}{$toctit}isg;
+                        }
+                        qq($toctitle);
+                }gies;
+
+                $Tmp =~ s{
+                    ((?:<p\s+class="TOC(?:FrontMatter|ChapterTitle|ChapterAuthor)(?:[^"]*)?">.*?</p>\s*)+)
+                }{
+                    my $block = $1;
+                    my $out   = "";
+
+                    # Iterate through entries sequentially
+                    while ($block =~ m{<p\s+class="TOC(FrontMatter|ChapterTitle|ChapterAuthor)[^"]*">(.*?)</p>}gsi) {
+                        my $type    = $1;
+                        my $content = $2;
+
+                        if ($type eq 'FrontMatter') {
+                            $out .= "<toc-entry content-type=\"fm\"><title>$content</title></toc-entry>\n";
+                        }
+                        elsif ($type eq 'ChapterTitle') {
+                            # Extract Label (e.g., "Chapter 1.") from Title if present
+                            if ($content =~ s{^(Chapter\s+\d+\.)\s*}{}) {
+                                my $label = $1;
+                                $out .= "<toc-entry content-type=\"chapter\"><label>$label</label> <title>$content</title>";
+                            } else {
+                                $out .= "<toc-entry content-type=\"chapter\"><title>$content</title>";
+                            }
+
+                            # Check if immediately followed by Chapter Author
+                            if ($block =~ m{\G\s*<p\s+class="TOCChapterAuthor[^"]*">(.*?)</p>}gsi) {
+                                my $author = $1;
+                                $out .= "\n<toc-entry content-type=\"author\"><title>$author</title></toc-entry>";
+                            }
+
+                            $out .= "</toc-entry>\n";
+                        }
+                    }
+
+                        $FrontMeta =~ s{&toccontent;}{$out}isg;
+                }gesx;
+                
+                $Tmp=~s{<p class="FrontMatterHeading">Dedication</p>}{
+                        $FrontMeta =~ s{&dedicationtitle;}{Dedication}isg;
+                }gies;
+
+                $Tmp =~ s{
+                    ((?:<p\s+class="Dedication-Para-FL">.*?</p>\s*)+)
+                    ((?:<p\s+class="Dedication-ParaFirstLine-Ind">.*?</p>\s*)+)?
+                }{
+                    my $dedication = $&;
+                    $dedication =~ s/<p\s+class="Dedication-Para-FL">/<p>/g;
+                    $dedication =~ s/<p\s+class="Dedication-ParaFirstLine-Ind">/<p>/g;
+                    $FrontMeta =~ s{&dedicationcontent;}{$dedication}isg;
+                        
+                }gesx;
+
+                $Tmp=~s{<p class="FrontMatterHeading">Contributors([^<]+)</p>}{
+                        $FrontMeta =~ s{&contributorstitle;}{Contributors$1}isg;
+                }gies;
+                
+                $Tmp =~ s{
+                    <p\s+class="Contributor">(.*?)</p>\s*
+                    ((?:(?!<p\s+class="ContributorAffiliation).)*?)
+                    ((?:<p\s+class="(Contributor|PMI)(?:[^"]*)?">.*?</p>\s*)+)
+
+                }{
+                    my $contributor = $&;
+                    $contributor =~ s/<p\s+class="Contributor">/<p content-type="contributor">/g;
+                    $contributor =~ s/<p\s+class="ContributorAffiliation">/<p content-type="contributoraffiliation">/g;
+                    $FrontMeta =~ s{&contributorscontent;}{$contributor}isg;
+                        
+                }gesx;
+
+                $Tmp =~ s{
+                        ((?:<p\s+class="FrontMatterHeading">Preface<\/p>\s*)+)
+                        ((?:(?!<p\s+class="FrontMatterHeading">|<\/body>).)*?)(<p\s+class="FrontMatterHeading">|<\/body>)
+                }{
+                    my $preface = $&;
+                    $preface =~ s{<p class="FrontMatterHeading">Preface</p>}{
+                             my $tag = $&;
+                            $FrontMeta =~ s{&prefacetitle;}{Preface}isg;
+                                qq();
+                        }gies;
+                    $preface=~ s{<p class="ParaFirstLine-Ind">}{<p>};
+                    $preface=~ s{<p class="Para-FL">}{<p>};
+                    $preface=~ s{<p class="FrontMatterHeading">}{};
+                    $FrontMeta =~ s{&prefacecontent;}{$preface}isg;
+                        
+                }gesx;
+
+                $FrontMeta =~ s{<book-part-meta>(\s*)&authorbiotitle;(\s*)</book-part-meta>}{};
+                $FrontMeta =~ s{<title>(\s*)&acktitle;(\s*)</title>}{};
+                $FrontMeta =~ s{<ack([^>]*)>(\s*)&ackcontent;(\s*)</ack>}{};
+                $FrontMeta=~s#<strong>#<bold>#isg;
+                $FrontMeta=~s#</strong>#</bold>#isg;
+                
+                while ($FrontMeta=~ m{\@q([0-9]+)\@})
+                {
+                        my $qnum = $1;
+                        my $query;
+                        if($Tmp=~ m{<query$qnum>((?:(?!<\/query).)*?)</query$qnum>})
+                        {
+                           $query = $&;
+                           $FrontMeta=~ s{<query$qnum>((?:(?!<\/query).)*?)</query$qnum>}{}s;
+                        }
+                        $FrontMeta=~ s{\@q$qnum\@}{$query};
+                }
+
+                $FrontMeta=~ s{\@hi\@}{<!--<highlight>-->}g;
+                $FrontMeta=~ s{\@\/hi\@}{<!--<\/highlight>-->}g;
+                $FrontMeta=~ s{<query([0-9]+)>}{<!--<query>-->}g;
+                $FrontMeta=~ s{</query([0-9]+)>}{<!--</query>-->}g;
+                $FrontMeta=~ s{(<singleunderline>|</singleunderline>)}{}g;
+                $FrontMeta=~ s{<em/>}{}g;
+                $FrontMeta=~ s{</body>(\s*)</named-book-part-body>}{</named-book-part-body>}g;
+                $FrontMeta=~ s{ class="PMI"}{}g;
+                $FrontMeta=~ s{ id="([^"]+)"}{}g;
+                $FrontMeta=~ s{(<MathBSub>|</MathBSub>)}{}g;
+                $FrontMeta=~ s#(\n+)#\n#g;
+                
+                #$Tmp =~ s{<p\s+class="GlossaryHeading">(.*?)</p>\s*((?:<p>(?!<p\s+class="GlossaryTerm">).*?</p>\s*)*)((?:<p\s+class="GlossaryTerm">.*?</p>\s*(?:<p\s+class="GlossaryTermDefinition">.*?</p>\s*)+)+)}
                 #glossary
                 $Tmp =~ s{
                     <p\s+class="GlossaryHeading">(.*?)</p>\s*
@@ -588,7 +831,7 @@ BKMETA
 		$i = 1;
 		$Tmp=~s#&seq3;#$i++#isge;
 
-                # Convert unlinked URLs into <ext-link> tags while excluding trailing quotes/punctuation
+                # Convert unlinked URLs into <ext-link> tags while excluding trailing punctuation
                 $Tmp =~ s{
                     \b(https?://[^\s<>"{}|\\^`]+[^\s<>"{}|\\^`.,;:!])([\.,;:!]?)(?=\s|<|$)
                 }{
@@ -601,7 +844,7 @@ BKMETA
                     "<ext-link ext-link-type=\"$type\" xlink:href=\"$url\">$url</ext-link>$punct";
                 }gexi;
 
-
+                
                 my $figurenumber = $FileName;
                 my @bookid = split('_', $figurenumber);
                 $figurenumber = $bookid[0];
@@ -617,27 +860,27 @@ BKMETA
                 
                 #figure
 		#$Tmp=~s#<p class="FigureLegend">\s*<strong>\s*(Figure)(\s*)([0-9\.\-]+)([0-9]*)((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>(\s*)(<p class="FigureSource">)?((?:(?!<p |<\/p>).)*?)(</p>)?(<p class="FigureNote">)?((?:(?!<p |<\/p>).)*?)(</p>)?#<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$1$2$3$4</label>\n<caption><title>$5</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$3.eps" mime-subtype="jpeg"/>\n$6$7$8\n$9$10$11\n</fig>#isg;
-		$Tmp=~s{<p class="FigureLegend">\s*(<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?<\/p>}{
+		$Tmp=~s{<p class="FigureLegend">\s*(<strong>)?(\@hi\@)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?<\/p>}{
                 my $tag = $&;
-                my $fignum = $5;
+                my $fignum = $6;
                 $fignum =~ s{\.}{}g;
                 if (length($fignum) == 1)
                 {
                         $fignum = "0" . $fignum;
                 }
-                $tag=~ s{<p class="FigureLegend">\s*(<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?<\/p>}{<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$2$3$4$5</label>\n<caption><title>$7</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$fignum.eps" mime-subtype="jpeg"/>\n</fig>}g;
+                $tag=~ s{<p class="FigureLegend">\s*(<strong>)?(\@hi\@)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?<\/p>}{<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$2$3$4$5$6</label>\n<caption><title>$8</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$fignum.eps" mime-subtype="jpeg"/>\n</fig>}g;
                 qq($tag);
 
 }isge;
-		$Tmp=~s{<p class="FigureLegend">\s*<FigureNumber>(?:<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(?:<strong>)?<\/FigureNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>}{
+		$Tmp=~s{<p class="FigureLegend">\s*<FigureNumber>(?:<strong>)?(\@hi\@)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(?:<strong>)?<\/FigureNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>}{
                         my $tag = $&;
-                        my $fignum = $5;
+                        my $fignum = $6;
                         $fignum =~ s{\.}{}g;
                         if (length($fignum) == 1)
                         {
                                 $fignum = "0" . $fignum;
                         }
-                        $tag=~ s{<p class="FigureLegend">\s*<FigureNumber>(?:<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(?:<strong>)?<\/FigureNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>}{<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$1$2$3$4</label>\n<caption><title>$5</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$fignum.eps" mime-subtype="jpeg"/>\n</fig>}g;
+                        $tag=~ s{<p class="FigureLegend">\s*<FigureNumber>(?:<strong>)?(\@hi\@)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(?:<strong>)?<\/FigureNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>}{<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$1$2$3$4$5</label>\n<caption><title>$6</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$fignum.eps" mime-subtype="jpeg"/>\n</fig>}g;
                         qq($tag);
 }isge;
                 while (($Tmp =~ m{<\/fig>(\s*)<p class="FigureSource">}si) || ($Tmp =~ m{<\/fig>(\s*)<p class="FigureNote">}si))
@@ -647,13 +890,31 @@ BKMETA
                 }
 		$i = 1;
 		$Tmp=~s#&seq3;#$i++#isge;
+
 		#table
 		$Tmp=~s#<table(?: [^<>]*)\/>#<table frame="box" rules="all" border="0" cellpadding="1" cellspacing="1">#gsi;
 		$Tmp=~s#<table\/>#<\/table>#gsi;
-		$Tmp=~s#<p class="TableCaption">\s*(<strong>)?(Table)(\s*)([0-9]+)([\.\-0-9]*)\s*(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?</p>#<table-wrap id="tab${num}_&seq3;" position="float" orientation="portrait" content-type="table">\n<label>$2$3$4$5</label>\n<caption>\n<title>$7</title>\n</caption></table-wrap>#isg;
-		$Tmp=~s#<p class="TableCaption">\s*<TableNumber>(?:<strong>)?(Table)(\s*)([0-9]+)([\.\-0-9]*)(?:<\/strong>)?<\/TableNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*</p>#<table-wrap id="tab${num}_&seq3;" position="float" orientation="portrait" content-type="table">\n<label>$1$2$3$4</label>\n<caption>\n<title>$5</title>\n</caption></table-wrap>#isg;
+		$Tmp=~s#<p class="TableCaption">\s*(<strong>)?(\@hi\@)?(Table)(\s*)([0-9]+)([\.\-0-9]*)\s*(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?</p>#<table-wrap id="tab${num}_&seq3;" position="float" orientation="portrait" content-type="table">\n<label>$2$3$4$5$6</label>\n<caption>\n<title>$8</title>\n</caption></table-wrap>#isg;
+		$Tmp=~s#<p class="TableCaption">\s*(<strong>)?(\@hi\@)?(Appendix)(\s*)([0-9]+)([\.\-0-9]*)(:)?\s*(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?</p>#<table-wrap position="float" orientation="portrait" content-type="table">\n<label>$2$3$4$5$6$7</label>\n<caption>\n<title>$9</title>\n</caption></table-wrap>#isg;
+		$Tmp=~s#<p class="TableCaption">\s*<TableNumber>(?:<strong>)?(\@hi\@)?(Table)(\s*)([0-9]+)([\.\-0-9]*)(?:<\/strong>)?<\/TableNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*</p>#<table-wrap id="tab${num}_&seq3;" position="float" orientation="portrait" content-type="table">\n<label>$1$2$3$4$5</label>\n<caption>\n<title>$6</title>\n</caption></table-wrap>#isg;
 		$Tmp=~s#<p class="TableSource">((?:(?!<p |<\/p>).)*?)</p>#<table-wrap><table-wrap-foot>\n<attrib>$1</attrib>\n</table-wrap-foot></table-wrap>#isg;
-                $Tmp=~s#</table>(\s*)<p class="TableNote">((?:(?!<p |<\/p>).)*?)</p>#<fn><p>$2</p></fn></table>#gs;
+                #$Tmp=~s#</table>(\s*)<p class="(TableNote|UN-TableNote)">((?:(?!<p |<\/p>).)*?)</p>#<fn><p>$3</p></fn></table>#gs;
+                $Tmp=~s#((?:<p class="(TableNote|UN-TableNote)">(?:(?!</p>|<p ).)*?</p>\s*)+)#&TableNote($&)#gies;
+
+                sub TableNote
+                {
+                        my ($Items)=@_;
+                        my @List;
+                        while($Items=~m{<p class=\"(TableNote|UN-TableNote)\">((?:(?!<\/p>).)*?)<\/p>}gsi)
+                        {
+                                push(@List,"<fn><p>$2</p></fn>");
+                        }
+                        my $ListItems=join("\n",@List);
+                        return "$ListItems";
+                }
+                $Tmp=~s#</table>(\s*)((?:<fn>(?:(?!</fn>|<fn ).)*?</fn>\s*)+)#$2</table>#gs;
+                #
+                
 		$Tmp=~s#<table( [^<>]*)?>((?:(?!<table |<\/table>).)*?)<\/table>#tableClean($&)#gsie;
 		$Tmp=~s#<\/table-wrap>\s*<table-wrap>#\n#gsi;
 		$i = 1;
@@ -670,7 +931,7 @@ BKMETA
                         $tag=~ s{(<citebib>|<\/citebib>)}{}gs;
                         qq($tag);
                 }gesi;
-                $Tmp=~ s{<span class="([^"]+)">((?:(?!<\/span>).)*)</span>}{$2}g;
+                #$Tmp=~ s{<span class="([^"]+)">((?:(?!<\/span>).)*)</span>}{$2}g;
                 $Tmp=~ s#<p class="ListHeading1">#<p content-type="flushleft">#g;
                 $Tmp=~ s#<citebib>((?:(?!</citebib>).)*)</citebib>#&refLinker($&,$reflist)#isge;
                 $Tmp=~ s#</nocitebib>\(<nocitebib>#\(#g;
@@ -699,6 +960,7 @@ BKMETA
 		push(@ID,"$id");
 		push(@Label,"$Label");
 	}
+
 =cut        
 		while($Tmp=~s#<(FigureCitation|TableCitation|BoxCitation)>([^<>]+)<\/\1>#<TLink label="$2">$2<\/TLink>#isg){
 			
@@ -717,7 +979,8 @@ LOOP:
 		for(my $i = 0; $i<scalar(@Label);$i++){
 			$Tmp=~s#<TLink label="\Q$Label[$i]\E[a-z]">#<TLink href="$ID[$i]">#isg;
 		}
-=cut
+=cut        
+
 		#		print "\nL3";
 		#$Tmp=~s#<xref ref-type="([^"]*)"><TLink href="([^"]*)">((?:(?!<\/TLink>|<Tlink ).)*?)<\/TLink>((?:(?!<\/xref>|<xref ).)*?)</xref>#<xref ref-type="$1" rid="$2">$3$4</xref>#isg;
 		#$Tmp=~s#<TLink href="([^"]*)">((?:(?!<\/TLink>|<Tlink ).)*?)<\/TLink>#<xref ref-type="" rid="$1">$2</xref>#isg;
@@ -726,6 +989,7 @@ LOOP:
 		#$Tmp=~s#<xref ref-type="[^"]*" rid="(box[^"]*)">#<xref ref-type="box" rid="$1">#isg;
                 
                 # usage, per body paragraph, with $num = current chapter number in scope:
+
                 for my $type (qw(fig table box video casestudy exhibit)) {
                     $Tmp = ConvertLabel($Tmp, $type, $num);
                 }
@@ -740,17 +1004,24 @@ LOOP:
                 
 		$Tmp=~s#<p([^>]*)>(\s*)\&lt;BX\&gt;(\s*)</p>#<box>#g;
 		$Tmp=~s#<p([^>]*)>(\s*)\&lt;\/BX\&gt;(\s*)</p>#</box>#g;
+		$Tmp=~s#<p([^>]*)>(\s*)(<bold>)?(\s*)\&lt;BX\&gt;(\s*)(</bold>)?(\s*)</p>#<box>#g;
+		$Tmp=~s#<p([^>]*)>(\s*)(<bold>)?(\s*)\&lt;\/BX\&gt;(\s*)(</bold>)?(\s*)</p>#</box>#g;
                 $Tmp=~s# class="FE-01-Title"# class="FE-01-BoxTitle"#;
 		$Tmp=~s#<p([^>]*)>(\s*)(<bold>)?(\s*)\&lt;box\&gt;(\s*)(</bold>)?(\s*)</p>#<box>#g;
 		$Tmp=~s#<p([^>]*)>(\s*)(<bold>)?(\s*)\&lt;/box\&gt;(\s*)(</bold>)?(\s*)</p>#</box>#g;
-                
+
 		#boxed text process
 		$Tmp=~s{<box>((?:(?!<\/box>).)*?)</box>}{
 
 			my $tag = $&;
-			$tag =~ s{<p class="([^"]*)(BoxTitle|ExhibitCaption)">((?:(?!<\/p>).)*?)</p>}{
+                        my $contenttype;
+			$tag =~ s{<p class="([^"]*)(BoxTitle|Box-01-Title|ExhibitCaption)">((?:(?!<\/p>).)*?)</p>}{
 				my $tagg = $&;
-				$tagg =~ s{<p class="([^"]*)(BoxTitle|ExhibitCaption)">((?:(?!<\/p>).)*?)</p>}{$3};
+                                if ($tagg =~ m{ class="FE-}i)
+                                {
+                                        $contenttype = "fe";
+                                }
+				$tagg =~ s{<p class="([^"]*)(BoxTitle|Box-01-Title|ExhibitCaption)">((?:(?!<\/p>).)*?)</p>}{$3};
 				$tagg =~ s{(<strong>|</strong>)}{}gi;
 				$tagg =~ s{(<xref[^>]*>|</xref>)}{}gi;
                                 if ($tagg =~ m{Box ([0-9]+)(\.)?([0-9]*)?})
@@ -769,10 +1040,19 @@ LOOP:
 				qq ($tagg);
 
 			}gesi;
+                        if ($contenttype eq "fe")
+                        {
+                                $tag =~ s{<boxed-text}{<boxed-text content-type="fe" }g;
+                        }
 			$tag =~ s{(<box>|</box>)}{}g;
 			$tag =~ s{<p class="Box-01-Para-FL">}{<p>}g;
+			$tag =~ s{<p class="Box-01-ParaFirstLine-Ind">}{<p>}g;
 			$tag =~ s{<p class="Exhibit-Para-FL">}{<p>}g;
+                        #$tag =~ s{<p class="Box-01-Head1">((?:(?!<\/p>).)*?)</p>}{<title>$1</title>}g;
+                        $tag =~ s#<p class="FE-01-Answer">#<p content-type="answer">#g;
+                        $tag =~ s#<p class="FE-01-AnswerTxt">#<p content-type="answerTxt">#g;
                         $tag =~ s{<p class="Box-01-Head1"}{<p class="Head1"}g;
+                        $tag =~ s{<p class="Box-01-Head2"}{<p class="Head2"}g;
 			$tag =~ s{<p class="Box-01-Note">((?:(?!<\/p>).)*?)</p>}{<attrib>$1</attrib>}g;
 			$tag =~ s{<p class="Box-01-Source">((?:(?!<\/p>).)*?)</p>}{<attrib>$1</attrib>}g;
 			$tag =~ s{<p class="Box-01-Equation">((?:(?!<\/p>).)*?)</p>}{<disp-formula>$1</disp-formula>}g;
@@ -781,6 +1061,8 @@ LOOP:
                     $tag=~s{<p class="H(?:ead)?(2|3|4|5|6)">((?:(?!<p |<\/p>).)*?)<\/p>}{"<sec$1 disp-level=\"level".($1-1)."\">\n<title>$2<\/title>\n<\/sec$1>"}gsie;
                     $tag=~s{<p class="H(?:ead)?(0|1|2|3|4|5|6)">((?:(?!<p |<\/p>).)*?)<\/p>}{<sec$1 disp-level="level$1">\n<title>$2<\/title>\n<\/sec$1>}gsi;
                     $tag=~s{^(.*?)$}{SecLevel("$&")}gsie;
+                    #$tag=~s{<\/sec>\s*<\/box>}{<\/boxed-text>}isg;
+                    #$tag=~s{<\/box>}{<\/boxed-text>}isg;
                     $tag=~s{<p class="ExhibitNote">((?:(?!<\/p>).)*?)</p>}{<attrib>$1</attrib>}g;
                         $tag = $tag . "</boxed-text>";
 			qq ($tag);
@@ -790,16 +1072,27 @@ LOOP:
 
 		$Tmp =~ s{<space>}{ }ig;
 		$Tmp =~ s{<p class="Exhibit-UN-TableBody">}{<p>}ig;
+		$Tmp =~ s{<p class="Exhibit-UN-TableColumnHead1">}{<p>}ig;
+		$Tmp =~ s{<p class="Box-01-UN-TableBody">}{<p>}ig;
+		$Tmp =~ s{<p class="Box-01-UN-TableColumnHead1">}{<p>}ig;
+		$Tmp =~ s{<p class="Box-01-TableBody">}{<p>}ig;
+		$Tmp =~ s{<p class="Box-01-TableColumnHead1">}{<p>}ig;
+		$Tmp =~ s{<p class="UN-TB-NumberList1">}{<p>}ig;
                 $Tmp =~ s{<p class="BulletList1Source">((?:(?!</p>).)*?)</p>}{\n<p>$1</p>}g;
-                $Tmp =~ s{<ext-link ext-link-type="uri" xlink:href="([^"]+)">(\s*)<ext-link ext-link-type="uri" xlink:href="([^"]+)">((?:(?!</ext-link>).)*?)</ext-link>(\s*)</ext-link>}{<ext-link ext-link-type="uri" xlink:href="$3">$4</ext-link>}g;
-                $Tmp =~ s{<ext-link ext-link-type="doi" xlink:href="([^"]+)">(\s*)<ext-link ext-link-type="doi" xlink:href="([^"]+)">((?:(?!</ext-link>).)*?)</ext-link>(\s*)</ext-link>}{<ext-link ext-link-type="doi" xlink:href="$3">$4</ext-link>}g;
+                $Tmp =~ s{<ext-link ext-link-type="uri" xlink:href="([^"]+)">(\s*)<ext-link ext-link-type="uri" xlink:href="([^"]+)">((?:(?!</ext-link>).)*?)</ext-link>(\s*)</ext-link>}{$2<ext-link ext-link-type="uri" xlink:href="$3">$4</ext-link>$5}g;
+                $Tmp =~ s{<ext-link ext-link-type="doi" xlink:href="([^"]+)">(\s*)<ext-link ext-link-type="doi" xlink:href="([^"]+)">((?:(?!</ext-link>).)*?)</ext-link>(\s*)</ext-link>}{$2<ext-link ext-link-type="doi" xlink:href="$3">$4</ext-link>$5}g;
                 $Tmp =~ s{(<cf21>|</cf21>)}{}g;
                 $Tmp =~ s{<TLink href="([^"]+)">}{}g;
                 $Tmp =~ s{</TLink>}{}g;
                 $Tmp =~ s{(<bibetal>|</bibetal>)}{}g;
                 $Tmp =~ s{(<FigureCitation>|<TableCitation>|<BoxCitation>|</FigureCitation>|</TableCitation>|</BoxCitation>|)}{}g;
-		my $finalCont = "$booMeta$Tmp";
 
+                my $finalCont;
+                if ($booktitlecont eq "")
+                {
+                        $finalCont = "$booMeta$Tmp";
+                }
+                
 		#Final clean up
 		$finalCont=~s#<p([^>]*)>((?:(?!<tab\/>).)*?)<tab\/>#<p$1>#ig;
 		$finalCont=~s#<title>\&lt;LO\&gt;#<title>#isg;
@@ -812,6 +1105,7 @@ LOOP:
 		$finalCont=~s#<p([^>]*)>(<bold>)?\&lt;\/online only\&gt;(<\/bold>)?</p>##isg;
 		$finalCont=~s#<p([^>]*)>(<bold>)?\&lt;e-only\&gt;(<\/bold>)?</p>##isg;
 		$finalCont=~s#<p([^>]*)>(<bold>)?\&lt;\/e-only\&gt;(<\/bold>)?</p>##isg;
+
 		#$finalCont=~s#<p([^>]*)>(<bold>)?\&lt;online only\&gt;(<\/bold>)?</p>#<p>&lt;onlineonly&gt;</p>#isg;
 		#$finalCont=~s#<p([^>]*)>(<bold>)?\&lt;\/online only\&gt;(<\/bold>)?</p>#<p>&lt;/onlineonly&gt;</p>#isg;
 		#$finalCont=~s# class="Reference-Alphabetical">#<p class="ReferenceAlphabetical">#isg;
@@ -881,11 +1175,25 @@ LOOP:
                 $finalCont=~ s{<p>\&lt;\/onlineonly\&gt;</p>(\s*)</([^>]*)>}{</$2>$1<p>\&lt;\/onlineonly\&gt;</p>}gs;
                 $finalCont=~ s{<contrib-group>(\s*)&contrib;(\s*)</contrib-group>}{}g;
                 $finalCont=~ s{&(?:num|ChLabel|ChTitle|contrib|abstract|kwd|KeyTermsHeading);}{}g;
-                #$finalCont=~ s{(<nocitebib>|</nocitebib>)}{}g;
+                $finalCont=~ s{(<nocitebib>|</nocitebib>)}{}g;
 		$finalCont=~ s{&(?!amp;|lt;|gt;|quot;|apos;|#[0-9]+;|#x[0-9a-fA-F]+;)}{&#x0026;}isg;
 		$finalCont=~ s{([^\x00-\x7F])}{sprintf('&#x%04X;', ord($1))}ge;
+                $finalCont=~ s{<title>(\s*)}{<title>}g;
+                $finalCont=~ s{<p></bold>}{<p>}g;
+                $finalCont=~ s{(<bold>)?(\s*)\&lt;coco only\&gt;(\s*)(</bold>)?}{}gi;
+                $finalCont=~ s{(<bold>)?(\s*)\&lt;\/coco only\&gt;(\s*)(</bold>)?}{}gi;
+                $finalCont=~ s{<span class="italic"><italic>((?:(?!</italic>).)*?)</italic></span>}{<italic>$1</italic>}g;
+                $finalCont=~ s{<span class="bold"><bold>((?:(?!</bold>).)*?)</bold></span>}{<bold>$1</bold>}g;
+                $finalCont=~ s{<p>\&lt;Insert Course Connect logo\&gt;</p>}{<p><graphic xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="CourseConnect-logo.ai" mime-subtype="jpeg"/></p>}g;
+                
+                #$finalCont=~ s{(<nocitebib>|</nocitebib>)}{}g;
+                #<book-title-group>
+                if ($booktitlecont ne "")
+                {
+                        $finalCont = $FrontMeta;
+                        #print $booktitlecont . "****\n";
+                }
 		&WriteFile("$Final_File", "$finalCont", "HTML");
-		system($PYTHON_BIN, "$File_Path/utf8_converter.py", "$Final_File");
 
 		&DTDvalidate("$Final_File");
 #========================= Sub Functions =========================#
@@ -1047,10 +1355,12 @@ sub fix_nesting {
     }
     return $text;
 }
+                
 sub ReferenceCode{
     my $text = shift;
     $text=~s#<\/?Untag>##isg;
-    
+    $text=~s{<bibdoi/>}{}g;
+    $text=~s{<bibdoi></bibdoi>}{}g;
     #Authors
     $text=~s#<(\/)?biborganization>#<$1collab>#isg;
     $text=~s#<(bibsurname|bibfname)>((?:(?!<\/\1>|<\1>).)*?)<\/\1>#<pg><strname>$&</strname></pg>#isg;
@@ -1068,7 +1378,7 @@ sub ReferenceCode{
     $text=~s#<pge>#<person-group person-group-type="editor">#isg;
     $text=~s#<\/pge>#<\/person-group>#isg;
     $text=~s#<\/string-name><\/person-group> <person-group person-group-type="editor"><string-name># #ig;
-    $text=~s#<\/person-group> \&\#x0026; <person-group person-group-type="editor"># #g;
+    #$text=~s#<\/person-group> \&\#x0026; <person-group person-group-type="editor"># #g;
     #year
     $text=~s#<bibyear>((?:(?!<\/bibyear>|<bibyear>).)*?)<\/bibyear>#yearFix($1)#isge;
     
@@ -1163,7 +1473,7 @@ sub LearnObjectives
         }
         else
         {
-                return "<sec disp-level=\"LearnObject\" id=\"ch${ChNum}lev1sec&seq1;\"><title>$Title</title>\n${IntroPara}\n<list list-type=\"none\">\n$ListItems\n</list>\n</sec>";
+                return "<sec disp-level=\"LearnObject\" id=\"ch${ChNum}lev1sec&seq1;\"><title>$Title</title>\n${IntroPara}\n<list list-type=\"simple\">\n$ListItems\n</list>\n</sec>";
         }
 }
 
@@ -1188,7 +1498,7 @@ sub CaseStudyBulletList
 sub NestLists {
     my ($block) = @_;
     my @items;
-
+    
     # Extract list type prefix (RL/BL), level number (1/2), and inner content
     while ($block =~ m{<(RL|BL)([1-9])>(.*?)</\1\2>}gsi) {
         push @items, { type => $1, level => $2, text => $3 };
@@ -1213,7 +1523,7 @@ sub NestLists {
         # Same level: close preceding list-item
         if (@stack && $stack[-1]{level} == $level) {
             $out .= "</list-item>\n";
-        }
+        } 
         # Step up: open sub-list inside parent <list-item>
         elsif (!@stack || $stack[-1]{level} < $level) {
             $out .= "\n<list list-type=\"$list_type\">\n";
@@ -1296,28 +1606,28 @@ sub CaseStudyUnNumberList
 		push(@List,"<list-item><p>$1</p></list-item>");
 	}
 	my $ListItems=join("\n",@List);
-
-	return "\n<list list-type=\"none\">\n$ListItems\n</list>\n";
+        
+	return "\n<list list-type=\"simple\">\n$ListItems\n</list>\n";
 }
 
 sub GlossaryUnNumberList {
     my ($Items) = @_;
     my @List;
-
+    
     while ($Items =~ m{<p class=\"GlossaryTermDefinitionUL-FL1[_]?(?:first|last)?0?\">((?:(?!<\/p>).)*?)<\/p>}gsi) {
         push(@List, "<list-item><p>$1</p></list-item>");
     }
-
+    
     my $ListItems = join("\n", @List);
-    return "\n<list list-type=\"none\">\n$ListItems\n</list>\n";
+    return "\n<list list-type=\"simple\">\n$ListItems\n</list>\n";
 }
 
 
 sub caseStudy{
     my $text = shift;
-    $text=~s# class="FE-# class="#isg;
+    #$text=~s# class="FE-# class="#isg;
     #$text=~s# class="CaseStudy-# class="CaseStudy#isg;
-    $text=~s# class="CaseStudyHeading# class="Head#isg;
+    $text=~s# class="CaseStudiesHeading# class="Head1#isg;
     $text=~s#<p class="(CaseStudyTitle)">#<p class="Head0">#isg;
     $text=~s#<p class="CaseStudy-#<p class="#isg;
     $text=~s#<p class="H(?:ead)?(2|3|4|5|6)">((?:(?!<p |<\/p>).)*?)<\/p>#"<sec$1 disp-level=\"level".($1-1)."\" id=\"ch${num}lev$1sec&seq1;\">\n<title>$2<\/title>\n<\/sec$1>"#gsie;
@@ -1325,7 +1635,7 @@ sub caseStudy{
     $text=~s#</casestudy>#</body></casestudy>#isg;
     $text=~s#^(.*?)$#SecLevel("$&")#gsie;
     $text=~s#<\/body>##gsi;
-    if($text=~s#<casestudy>\s*<sec [^<>]*disp-level="level0"[^<>]*>\s*<title>(?:<strong>)*((?:(?!<title>|<\/title>).)*?)(?:<\/strong>)*<\/title>#<boxed-text id="cs${num}_&seq3;" content-type="case study" position="float">\n<caption><title>$1</title></caption>#isg){
+    if($text=~s#<casestudy>\s*<sec [^<>]*disp-level="level0"[^<>]*>\s*<title>(?:<strong>)*((?:(?!<title>|<\/title>).)*?)(?:<\/strong>)*<\/title>#<boxed-text content-type="case study" position="float">\n<caption><title>$1</title></caption>#isg){
     #	    print "$&";
 	    $text=~s#<title>\s*&lt;(KT|H[0-9]+)&gt;#<title>#isg;
 	    $text=~s#<caption><title>\s*(Case Study) ([0-9\.\-]+:?)\s*#<label>$1 $2</label><caption><title>#isg;
@@ -1337,6 +1647,7 @@ sub caseStudy{
     return $text;
 }
 
+                
 sub tableClean{
     my $text = shift;
     $text=~s#<tgroup(\s*)[^<>]*\/>##gsi;
@@ -1353,10 +1664,12 @@ sub tableClean{
     #$text=~s#<\/p>\s*<p class="TableBody[0-9]*">#<br\/>#isg;
     $text=~s#<\/p>\s*<p class="TableBody[0-9]*">#<\/p>\n<p>#isg;
     $text=~s#<p class="TableBody[0-9]*">#<p>#isg;
+    $text=~s#<p class="UN-TableBody[0-9]*">#<p>#isg;
+    $text=~s#<p class="UN-TB-NumberList[0-9]*">#<p>#isg;
     #$text=~s#(<\/p>|<p(?: [^<>]*)?>)##isg;
     $text=~s#\s+<\/t(h|d)>#<\/t$1>#isg;
     $text=~s#</tbody>\s*<tbody>##isg;
-    $text=~s{(<fn>)((?:(?!<fn |<\/fn>).)*?)(</fn>)</table>}{</table>\n<table-wrap-foot>$1$2$3</table-wrap-foot>}g;
+    $text=~s{((?:<fn>(?:(?!</fn>|<fn ).)*?</fn>\s*)+)</table>}{</table>\n<table-wrap-foot>$1</table-wrap-foot>}g;
     $text=~s{ colsep="(0|1)"}{}g;
     $text=~s{ rowsep="(0|1)"}{}g;
     $text=~s{<fn>}{<fn><p>}g;
@@ -1387,7 +1700,6 @@ sub Xref
 {
     my ($chNum, $type, $matchedLabel, $matchedNums) = @_;
     my $info = $LabelMap->{$type};
-
     my @items = ($matchedNums =~ m/(${ITEM})/g);
     my @rids  = map {
         my $t = $_;
@@ -1420,8 +1732,6 @@ sub refLinker{
 	$tmp=~ s#(\,|\)|\(|\.)#&#isg;
 	$tmp=~ s#\##\\\##isg;
 	$tmp=~ s#\-#\\\-#isg;
-	$tmp=~ s#\[#\\\[#isg;
-	$tmp=~ s#\]#\\\]#isg;
 	$tmp=~ s# #&#isg;
 	my $tt = $tmp;
 	my $yr = $1 if($tt=~ m#([0-9][0-9][0-9][0-9][a-z]?)$#img);
@@ -1440,7 +1750,6 @@ sub refLinker{
 			$refCall=~ s#<citebib>#<nocitebib>#isg;
 			$refCall=~ s#<\/citebib>#<\/nocitebib>#isg;
 	}
-	$refCall =~ s{&(?!amp;|lt;|gt;|quot;|apos;|#[0-9]+;|#x[0-9a-fA-F]+;)}{&#x0026;}isg;
 	return $refCall;
 }
 
@@ -1460,13 +1769,11 @@ sub resolve_nocitebib {
         else
         {
                 my $id    = find_ref_id($inner, $by_id);
-                my $inner_xml = $inner;
-                $inner_xml =~ s{&(?!amp;|lt;|gt;|quot;|apos;|#[0-9]+;|#x[0-9a-fA-F]+;)}{&#x0026;}isg;
                 if (defined $id) {
-                    qq{<xref ref-type="bibr" rid="$id">$inner_xml</xref>};
+                    qq{<xref ref-type="bibr" rid="$id">$inner</xref>};
                 } else {
                     push @unresolved, $inner;
-                    "<nocitebib>$inner_xml</nocitebib>";   # leave for manual review
+                    "<nocitebib>$inner</nocitebib>";   # leave for manual review
                 }
         }
     }gesx;
@@ -1564,4 +1871,114 @@ sub find_ref_id {
 #</citebib>
 #<volume><italic>24</italic></volume>
 #ext-link-type="doi"
+}
+
+print "Process Completed Successfully!\n";
+
+#------------------------------------------------------------------------------#
+# List conversion (BITS) - stack based, unlimited depth, any mix of list types
+#   <p class="Uc-AlphaList1first"> ... <p class="NumberList2"> ... <p class="BulletList5">
+#   => <list list-type="alpha-upper"><list-item><label>A.</label><p>..</p><list ...>..</list></list-item>..</list>
+#------------------------------------------------------------------------------#
+# ---- settings (inside the sub on purpose: file-level "my" lines at the bottom of the script
+# ---- are not yet assigned when the main code runs, which silently disables the conversion)
+sub ListSettings
+{
+	my %ListTypeMap = (       # style name part => BITS list-type  (edit values here if your schema wants others)
+		'Bullet'    => 'bullet',
+		'Number'    => 'order',
+		'Uc-Alpha'  => 'alpha-upper',
+		'Lc-Alpha'  => 'alpha-lower',
+		'Alpha'     => 'alpha-lower',
+		'Uc-Roman'  => 'roman-upper',
+		'Lc-Roman'  => 'roman-lower',
+		'UnNumber'  => 'simple',
+		'UL-FL1'  => 'simple',
+	);
+	my $KeepListLabels = 1;   # 1 = keep typed labels (A. / 1. / a. / (1)) as <label>; 0 = drop them
+	my $Prefix = '(?:LearnObj-|Box-01-|Box-01-TB-|TB-|FE-01-|Exhibit-|01-|CaseStudy-)?';
+	my $Kinds  = 'Bullet|Number|Uc-Alpha|Lc-Alpha|Alpha|Uc-Roman|Lc-Roman|UL-FL1|UnNumber';
+	return (\%ListTypeMap, $KeepListLabels, $Prefix, $Kinds);
+}
+
+sub ConvertLists
+{
+	my $text = shift;
+	my (undef, undef, $Prefix, $Kinds) = &ListSettings();
+	my $ListStyleRE = qr/$Prefix(?:$Kinds)t?List(?:first)?[1-9](?:-?(?:first|last))?0?/;
+	$text =~ s{((?:<p class="$ListStyleRE">(?:(?!</p>|<p ).)*?</p>\s*)+)}{&BuildLists($1)}gse;
+	return $text;
+}
+
+sub BuildLists
+{
+	my $block = shift;
+	my ($ListTypeMap, $KeepListLabels, $Prefix, $Kinds) = &ListSettings();
+	my (@items, @stack);
+	my $out = "";
+
+	while ($block =~ m{<p class="($Prefix($Kinds)t?List(first)?([1-9])(?:-?(first|last))?0?)">((?:(?!</p>|<p ).)*?)</p>}gs)
+	{
+		my ($kind, $first, $level, $suffix, $content) = ($2, $3, $4, $5, $6);
+		$first = ($first || (defined $suffix && $suffix eq 'first')) ? 1 : 0;
+		push @items, { type => $ListTypeMap->{$kind}, level => $level, first => $first, text => $content };
+	}
+	while ($block =~ m{<p class="($Prefix($Kinds)t?(first)?([1-9])(?:-?(first|last))?0?)">((?:(?!</p>|<p ).)*?)</p>}gs)
+	{
+		my ($kind, $first, $level, $suffix, $content) = ($2, $3, $4, $5, $6);
+		$first = ($first || (defined $suffix && $suffix eq 'first')) ? 1 : 0;
+		push @items, { type => $ListTypeMap->{$kind}, level => $level, first => $first, text => $content };
+	}
+
+	foreach my $it (@items)
+	{
+		my ($type, $level) = ($it->{type}, $it->{level});
+
+		# step out of deeper lists
+		while (@stack && $stack[-1]{level} > $level) {
+			$out .= "</list-item>\n</list>\n";
+			pop @stack;
+		}
+		# same level: sibling item, or a new list when type changes / "first" restarts it
+		if (@stack && $stack[-1]{level} == $level) {
+			if ($stack[-1]{type} eq $type && !$it->{first}) {
+				$out .= "</list-item>\n";
+			} else {
+				$out .= "</list-item>\n</list>\n";
+				pop @stack;
+			}
+		}
+		# step in (or start): new list inside the open parent <list-item>
+		if (!@stack || $stack[-1]{level} < $level) {
+			$out .= "<list list-type=\"$type\">\n";
+			push @stack, { level => $level, type => $type };
+		}
+
+		my ($label, $content) = &SplitListLabel($it->{text}, $type);
+		$out .= "<list-item>";
+		#$out .= "<label>$label</label>" if ($label ne '' && $KeepListLabels && $type ne 'bullet');
+		$out .= "<p>$content</p>";
+	}
+	while (@stack) {
+		$out .= "</list-item>\n</list>\n";
+		pop @stack;
+	}
+	return $out;
+}
+
+# typed label + tab/space at the start of the item  ->  (label text, remaining content)
+sub SplitListLabel
+{
+	my ($c, $type) = @_;
+	my $label = '';
+	my $LabelRE = qr/\(?[A-Za-z0-9]{1,4}[.)]|&\#x?[0-9A-Fa-f]+;/;
+	my $Sep     = qr/(?:\s|<tab\/>|&\#xA0;|&\#160;)/;
+
+	if    ($c =~ s{^\s*<(strong|bold|italic)>\s*($LabelRE)(?:\s|<tab/>)*</\1>(?=$Sep|<(?:strong|bold|italic)>\s*<tab/>)}{}i) { $label = $2; }
+	elsif ($c =~ s{^\s*($LabelRE)(?=(?:\s|<tab/>)+)}{}i)                                                                        { $label = $1; }
+	else { return ('', $c); }
+
+	$c =~ s{^(?:\s|<tab/>|<(strong|bold|italic)>\s*(?:<tab/>)?\s*</\1>)+}{}i;
+	$label = '' if ($label =~ m{^&\#}i);		# bullet glyph entity - not a real label
+	return ($label, $c);
 }

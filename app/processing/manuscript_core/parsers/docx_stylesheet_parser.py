@@ -80,13 +80,29 @@ class DocxStylesheetParser:
         else:
             doc = docx.Document(file_source)
 
+        from app.processing.manuscript_core.parsers.springer_sheet import is_sectioned_layout
+        if is_sectioned_layout(doc):
+            return self._parse_sectioned(doc)
+
         metadata = self._extract_metadata(doc)
         specs = self._extract_specifications(doc)
         word_list = self._extract_word_list(doc)
 
-        preset_id = self._detect_preset(metadata, specs)
+        preset_id = self._detect_preset(metadata, specs, doc)
         matched_ce_rules = self._match_ce_rules(specs, preset_id)
         matched_ia_rows = self._match_ia_rows(specs, preset_id)
+
+        style_profile: Dict[str, Any] = {}
+        if preset_id == "springer":
+            from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
+            preset = get_springer_preset()
+            self._fill_from_preset(matched_ce_rules, matched_ia_rows, preset)
+            style_profile = preset["style_profile"]
+            seen_words = set(word_list)
+            for w in style_profile["word_list"]:
+                if w not in seen_words:
+                    seen_words.add(w)
+                    word_list.append(w)
 
         # Generate suggested name & description
         book_title = metadata.get("Book Title") or metadata.get("Project") or "Editorial Stylesheet"
@@ -96,7 +112,8 @@ class DocxStylesheetParser:
             "apa": "APA 7th Edition",
             "chicago": "Chicago (CMOS 17th)",
             "oxford": "Oxford / Cambridge (UK)",
-            "nature": "Nature / Springer",
+            "nature": "Nature",
+            "springer": "Springer Publishing House Style (July 2026)",
         }
         preset_label = preset_labels.get(preset_id, "Standard Style")
 
@@ -127,6 +144,103 @@ class DocxStylesheetParser:
             "word_list": word_list,
             "total_specs_scanned": len(specs),
             "matched_rules_count": len(matched_ce_rules),
+            "layout": "lww_3table",
+            "style_profile": style_profile,
+            "unresolved_specs": [],
+        }
+
+    # ------------------------------------------------------------------
+    # Sectioned (Springer) layout
+    # ------------------------------------------------------------------
+    def _rule_entry(self, sno: int, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        from app.processing.manuscript_core.rules.ce_rules import by_sno, option_text
+        info = by_sno().get(sno, {})
+        option = cfg.get("option", 1)
+        return {
+            "sno": sno,
+            "rule_name": info.get("name", f"Rule {sno}"),
+            "option": option,
+            "enabled": cfg.get("enabled", True),
+            "severity": cfg.get("severity") or info.get("severity", "Major"),
+            "confidence": cfg.get("confidence", 1.0),
+            "source_label": cfg.get("source_label", ""),
+            "source_value": cfg.get("source_value", ""),
+            "explanation": cfg.get("explanation") or f"Option {option}: {option_text(sno, option)}",
+            "notes": cfg.get("explanation") or "",
+        }
+
+    def _fill_from_preset(self, matched: Dict[str, Dict[str, Any]], ia_rows: List[Dict[str, Any]],
+                          preset: Dict[str, Any]) -> None:
+        """Rules the document did not resolve take the publisher preset (marked as defaults)."""
+        for sno_str, cfg in preset["ce_rules"].items():
+            if sno_str in matched:
+                continue
+            matched[sno_str] = self._rule_entry(int(sno_str), {
+                **cfg, "confidence": 0.7,
+                "source_label": "Springer default (not stated in the sheet)",
+                "source_value": preset["name"],
+            })
+        existing = {(r.get("element"), r.get("pattern")) for r in ia_rows}
+        for row in preset["selected_ia_rows"]:
+            if (row["element"], row["pattern"]) not in existing:
+                ia_rows.append({**row, "confidence": 0.8, "source_label": "Springer default",
+                                "source_value": preset["name"]})
+
+    def _parse_sectioned(self, doc: docx.Document) -> Dict[str, Any]:
+        from app.processing.manuscript_core.parsers.springer_sheet import parse_sectioned
+        from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
+
+        parsed = parse_sectioned(doc)
+        title = parsed["title"]
+        is_springer = bool(re.search(r"springer|demos", title + " " + json.dumps(parsed["profile"])[:4000], re.IGNORECASE))
+        matched: Dict[str, Dict[str, Any]] = {
+            k: self._rule_entry(int(k), v) for k, v in parsed["rules"].items()
+        }
+        ia_rows: List[Dict[str, Any]] = []
+        profile = dict(parsed["profile"])
+        if is_springer:
+            preset = get_springer_preset()
+            self._fill_from_preset(matched, ia_rows, preset)
+            base = preset["style_profile"]
+            # The document's lists win; the preset fills what the document does not state.
+            for key, val in base.items():
+                if key in ("word_replacements", "org_names"):
+                    have = {e["find"] for e in profile.get(key) or []}
+                    profile[key] = (profile.get(key) or []) + [e for e in val if e["find"] not in have]
+                elif key in ("registered_terms", "acronyms_no_spellout", "word_list"):
+                    have = list(profile.get(key) or [])
+                    profile[key] = have + [v for v in val if v not in have]
+                elif key in ("avoid_words", "ic_preferred", "unit_style", "product_terms"):
+                    merged = dict(val)
+                    merged.update(profile.get(key) or {})
+                    profile[key] = merged
+                elif key == "red_flags":
+                    doc_flags = profile.get("red_flags") or []
+                    have_patterns = {f.get("pattern") for f in doc_flags if isinstance(f, dict)}
+                    profile[key] = doc_flags + [f for f in val if isinstance(f, dict) and f.get("pattern") not in have_patterns]
+                elif not profile.get(key):
+                    profile[key] = val
+            profile.setdefault("publisher", "springer")
+            profile.setdefault("book_type", "standard")
+            profile.setdefault("list_style", "narrative")
+        profile["source_doc"] = {"title": title, "layout": "springer_sectioned"}
+
+        from_sheet = sum(1 for r in matched.values() if not r["source_label"].startswith("Springer default"))
+        return {
+            "metadata": {"Title": title, "Customer": "Springer Publishing" if is_springer else ""},
+            "suggested_name": "Springer Publishing House Style (July 2026)" if is_springer else title,
+            "suggested_description": (f"Imported from '{title}': {from_sheet} rules from the sheet, "
+                                      f"{len(matched) - from_sheet} publisher defaults, "
+                                      f"{len(profile.get('word_list') or [])} word-list terms."),
+            "detected_preset_id": "springer" if is_springer else "chicago",
+            "matched_ce_rules": matched,
+            "matched_ia_rows": ia_rows,
+            "word_list": list(profile.get("word_list") or []),
+            "total_specs_scanned": len(parsed["specs"]),
+            "matched_rules_count": len(matched),
+            "layout": "springer_sectioned",
+            "style_profile": profile,
+            "unresolved_specs": parsed["unresolved"],
         }
 
     def _extract_metadata(self, doc: docx.Document) -> Dict[str, str]:
@@ -196,22 +310,40 @@ class DocxStylesheetParser:
 
         return words
 
-    def _detect_preset(self, meta: Dict[str, str], specs: Dict[str, str]) -> str:
+    def _detect_preset(self, meta: Dict[str, str], specs: Dict[str, str], doc: Optional[docx.Document] = None) -> str:
         """Detects the base house style preset based on metadata and manual references."""
-        combined = " ".join([
+        text_snippets = [
             meta.get("Manual/Previous edition to be followed", ""),
+            meta.get("Customer", ""),
+            meta.get("Project", ""),
+            meta.get("Book Title", ""),
             specs.get("Reference books, dictionaries followed, websites (CMS/AMA)", ""),
             specs.get("Reference books, dictionaries followed, websites", ""),
             specs.get("Level of editing", ""),
-        ])
+        ]
+        if doc:
+            for p in doc.paragraphs[:15]:
+                text_snippets.append(p.text)
+            for k in list(specs.keys())[:25]:
+                text_snippets.append(k)
 
+        combined = " ".join(text_snippets)
+
+        if re.search(r"\b(?:Springer\s+Publishing|Springer\s+House\s+Style|Demos\s+Medical)\b", combined, re.IGNORECASE):
+            return "springer"
+        # The manual named in the metadata decides before labels such as "(CMS/AMA)".
+        manual = meta.get("Manual/Previous edition to be followed", "")
+        for pat, preset in ((r"\bAPA\b", "apa"), (r"\bAMA\b", "ama"), (r"\b(?:Oxford|Cambridge|UK)\b", "oxford"),
+                            (r"\bNature\b", "nature"), (r"\b(?:Chicago|CMOS)\b", "chicago")):
+            if re.search(pat, manual, re.IGNORECASE):
+                return preset
         if re.search(r"\bAMA\b", combined, re.IGNORECASE):
             return "ama"
         if re.search(r"\bAPA\b", combined, re.IGNORECASE):
             return "apa"
         if re.search(r"\b(?:Oxford|Cambridge|UK)\b", combined, re.IGNORECASE):
             return "oxford"
-        if re.search(r"\b(?:Nature|Springer)\b", combined, re.IGNORECASE):
+        if re.search(r"\bNature\b", combined, re.IGNORECASE):
             return "nature"
         if re.search(r"\b(?:Chicago|CMOS)\b", combined, re.IGNORECASE):
             return "chicago"
@@ -260,7 +392,7 @@ class DocxStylesheetParser:
                 elif "degrees celsius" in val_lower or "spelled" in val_lower:
                     opt = 4  # Spelled out
                 else:
-                    opt = 2 if preset_id == "ama" else 1
+                    opt = 2 if preset_id in ("ama", "springer") else 1
                 record(5, opt, 0.95, lbl, val, f"Matched temperature format (opt {opt}) from '{val}'")
 
             # Rule 6: Percentage Formatting
@@ -396,7 +528,7 @@ class DocxStylesheetParser:
 
             # Rule 36: Scientific Name Formatting (Genus & species)
             elif "genus" in lbl_lower or "species" in lbl_lower:
-                if "not full point" in val_lower or "e coli" in val_lower or preset_id == "ama":
+                if "not full point" in val_lower or "e coli" in val_lower or preset_id in ("ama", "springer"):
                     opt = 1  # Italics without full point after initial e.g., E coli
                 else:
                     opt = 2  # Italics with full point e.g., E. coli
@@ -744,7 +876,7 @@ class DocxStylesheetParser:
             if "genus" in lbl_lower or "species" in lbl_lower:
                 if "italic" in val_lower:
                     add("Genus species", "General", "[Genus species]", lbl, val)
-                    if "not full point" in val_lower or "e coli" in val_lower or preset_id == "ama":
+                    if "not full point" in val_lower or "e coli" in val_lower or preset_id in ("ama", "springer"):
                         add("Genus species", "General", "[G species] (no dot)", lbl, val)
                     else:
                         add("Genus species", "General", "[G. species] (abbreviated)", lbl, val)

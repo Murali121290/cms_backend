@@ -4,6 +4,8 @@
   ],
   "view_all_projects": [
     "Admin",
+    "Team Lead - Editorial",
+    "Team Lead - Production",
     "Index Manager",
     "Non-XML Manager",
     "XML Manager",
@@ -17,6 +19,10 @@
   ],
   "view_all_chapters": [
     "Admin",
+    "Team Lead - Editorial",
+    "Team Lead - Production",
+    "Team Lead - Prediting",
+    "Team Lead - Language Editing",
     "Index Manager",
     "Non-XML Manager",
     "XML Manager",
@@ -48,5 +54,16 @@
   "access_post_production": [
     "Admin",
     "Accessibility Team"
+  ],
+  "access_editorial_standards": [
+    "Admin",
+    "Team Lead - Language Editing",
+    "Team Leader - Language Editing",
+    "Team Lead Language Editing",
+    "Team Leader Language Editing",
+    "Team Lead - Editorial",
+    "Team Leader - Editorial",
+    "Editorial Manager",
+    "Technical Editor"
   ]
 }

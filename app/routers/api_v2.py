@@ -149,7 +149,20 @@ def _require_cookie_user(user):
 
 
 def _has_admin_role(user: models.User):
-    return "Admin" in [role.name for role in user.roles]
+    if not user:
+        return False
+    if getattr(user, "access_level", None) == "Admin":
+        return True
+    if getattr(user, "role", None) and "admin" in str(user.role).lower():
+        return True
+    if getattr(user, "designation", None) and "admin" in str(user.designation).lower():
+        return True
+    if hasattr(user, "roles") and user.roles:
+        return any(
+            getattr(role, "name", "") == "Admin" or "admin" in str(getattr(role, "name", "")).lower()
+            for role in user.roles
+        )
+    return False
 
 
 def _has_admin_or_pm_role(user: models.User):
@@ -2740,6 +2753,19 @@ def api_v2_ce_rules(
     return schemas_v2.CERulesResponse(rules=[schemas_v2.CERule(**r) for r in load_catalog()])
 
 
+@router.get("/stylesheets/presets/springer")
+def api_v2_get_springer_preset(
+    book_type: str = "standard",
+    list_style: str = "narrative",
+    user=Depends(get_current_user_from_cookie),
+):
+    """Springer Publishing House Style Sheet (July 2026) preset for a book type
+    (standard | pa | demos | qa) and list style (narrative | outline)."""
+    from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
+    return get_springer_preset(book_type=book_type, list_style=list_style)
+
+
+
 @router.get(
     "/projects/{project_id}/stylesheets",
     response_model=schemas_v2.StylesheetsListResponse,
@@ -3036,7 +3062,7 @@ def api_v2_analyze_files_for_stylesheet(
 
 
 
-def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResponse:
+def _serve_docx_finalized(path: str, filename: str, media_type: str, inline: bool = False) -> FileResponse:
     """Serve `path` after stripping editor round-trip artefacts.
 
     For DOCX files, copies to a temp location and runs
@@ -3052,7 +3078,9 @@ def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResp
         path = resolve_physical_file_path(path, UPLOAD_DIR)
 
     if not filename.lower().endswith(".docx"):
-        return FileResponse(path=path, filename=filename, media_type=media_type)
+        disp = "inline" if (inline or filename.lower().endswith((".html", ".htm", ".pdf"))) else "attachment"
+        fn = None if disp == "inline" else filename
+        return FileResponse(path=path, filename=fn, media_type=media_type, content_disposition_type=disp)
 
     from starlette.background import BackgroundTask
     from app.processing.citation_link_finalizer import finalize_docx_for_export
@@ -3086,6 +3114,7 @@ def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResp
 @router.get("/files/{file_id}/download")
 def api_v2_download_file(
     file_id: int,
+    inline: bool = Query(False),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3117,6 +3146,7 @@ def api_v2_download_file(
         path=physical_path,
         filename=file_record.filename,
         media_type=mime or "application/octet-stream",
+        inline=inline,
     )
 
 
@@ -5306,9 +5336,13 @@ def api_v2_processing_status(
 
     supported_types = (
         "structuring",
+        "structuring_qa",
+        "preediting_qa",
         "reference_validation",
         "reference_structuring",
         "ppd",
+        "manuscript_analysis",
+        "manuscript_analysis_qa",
         "bias_scan",
         "credit_extractor_ai",
         "word_to_xml",
@@ -5830,45 +5864,47 @@ def api_v2_technical_scan(
     except Exception as e:
         logger.warning(f"Failed to generate Collabora launch URL: {e}")
 
-    # Attach active stylesheet for this project
+    # Attach active stylesheet for this project (a Springer client without one gets the
+    # Springer house-style stylesheet created and activated).
     active_stylesheet = None
+    active_ss = None
     if file_record and file_record.project_id:
-        active_ss = stylesheet_service.get_active_stylesheet_for_project(
-            db, project_id=file_record.project_id
-        )
-        if active_ss:
-            active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss, db=db)
+        active_ss = stylesheet_service.ensure_publisher_stylesheet(db, project_id=file_record.project_id)
 
-    # Annotate findings with stylesheet matching if stylesheet_id provided
+    # The chosen (or active) stylesheet decides every finding: the selected option is the
+    # house style, other forms are errors with the selected form as the fix.
     findings = raw_scan.get("findings", [])
-    if stylesheet_id and findings:
-        selected_stylesheet = db.query(ProjectStylesheet).filter(
+    applied_ss = active_ss
+    if stylesheet_id and file_record:
+        applied_ss = db.query(ProjectStylesheet).filter(
             ProjectStylesheet.id == stylesheet_id,
             ProjectStylesheet.project_id == file_record.project_id,
-        ).first()
-
-        if selected_stylesheet:
-            import json
-            from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
-            try:
-                selected_rows = json.loads(selected_stylesheet.selected_ia_rows)
-            except (json.JSONDecodeError, TypeError):
-                selected_rows = []
-            # rule_id_to_ia is embedded in the cached scan result; the helper imports it otherwise.
-            annotate_with_stylesheet(
-                findings, selected_rows, raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
-                ce_rules=stylesheet_service.stylesheet_ce_rules(selected_stylesheet),
-            )
-    elif findings and file_record and file_record.project_id and active_stylesheet:
-        # No stylesheet chosen on the page: the project's active stylesheet decides the
-        # CE checklist options and annotates findings with in_stylesheet matching.
-        from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
-        annotate_with_stylesheet(
-            findings,
-            [row.model_dump() for row in active_stylesheet.selected_ia_rows],
-            raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
-            ce_rules={k: v.model_dump(exclude_none=True) for k, v in active_stylesheet.ce_rules.items()},
+        ).first() or active_ss
+    if applied_ss:
+        active_stylesheet = stylesheet_service._serialize_stylesheet(applied_ss, db=db)
+    if findings and applied_ss is not None:
+        doc_path = None
+        try:
+            from app.domains.review.service import resolve_processed_target
+            doc_path = os.path.abspath(resolve_processed_target(db, file_id=file_id)["processed_path"])
+        except Exception as exc:
+            logger.warning(f"Could not resolve document for style-profile rules: {exc}")
+        findings = stylesheet_service.apply_stylesheet_to_findings(
+            findings, applied_ss,
+            rule_id_to_ia=raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
+            file_path=doc_path if doc_path and os.path.exists(doc_path) else None,
         )
+        # Forms already in house style (the selected option) and rules switched off are not
+        # errors: keep them out of the review list and the "Apply N changes" count.
+        hidden = [f for f in findings if f.get("ce_status") in ("compliant", "off")]
+        findings = [f for f in findings if f.get("ce_status") not in ("compliant", "off")]
+        raw_scan["findings"] = findings
+        from app.domains.processing.technical_editor_service import _map_findings_to_legacy_issues
+        raw_scan["issues"] = _map_findings_to_legacy_issues(findings)
+        stats = dict(raw_scan.get("stats") or {})
+        stats["compliant_hidden"] = sum(1 for f in hidden if f.get("ce_status") == "compliant")
+        stats["rule_off_hidden"] = sum(1 for f in hidden if f.get("ce_status") == "off")
+        raw_scan["stats"] = stats
 
     # Ensure inconsistencies is a dict (convert list to dict if needed)
     inconsistencies_data = raw_scan.get("inconsistencies", {})
@@ -5887,6 +5923,8 @@ def api_v2_technical_scan(
         ia_report=raw_scan.get("ia_report", {}),
         stats=raw_scan.get("stats", {}),
         active_stylesheet=active_stylesheet,
+        engine_version=raw_scan.get("engine_version"),
+        stylesheet_source=stylesheet_service.stylesheet_source(db, applied_ss) if applied_ss is not None else None,
     )
 
 
@@ -8545,6 +8583,7 @@ def api_v2_create_chapter_with_art(
         )
 
     import re as _re
+    from sqlalchemy import or_ as _or
     existing_art_chapters = [
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
         if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
@@ -8845,13 +8884,26 @@ def api_v2_create_chapters_with_art_zip(
         )
 
     import re as _re
+    from sqlalchemy import or_ as _or
+
+    # Check if project has a book manuscript (e.g. 00 or title contains Book)
+    has_book_manuscript = db.query(ChapterInfo).filter(
+        ChapterInfo.project == project.project_code,
+        _or(ChapterInfo.chapters == "00", ChapterInfo.chapter_title.ilike("%Book%"))
+    ).first() is not None
+
     existing_art_chapters = [
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
-        if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+        if ci.chapters and (_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters) or ci.chapters == "Book 00 - Art")
     ]
-    existing_art_by_num: dict[int, ChapterInfo] = {
-        int(_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters).group(1)): ci for ci in existing_art_chapters
-    }
+    existing_art_by_key: dict[str, ChapterInfo] = {}
+    for ci in existing_art_chapters:
+        m = _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+        if m:
+            existing_art_by_key[f"ch_{int(m.group(1)):02d}"] = ci
+        elif ci.chapters == "Book 00 - Art":
+            existing_art_by_key["book_00"] = ci
+
     existing_art_workflow = next((ci.workflow for ci in existing_art_chapters if ci.workflow), None)
 
     created: list = []
@@ -8866,8 +8918,9 @@ def api_v2_create_chapters_with_art_zip(
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(temp_dir)
 
-        # Map to hold temporary files grouped by chapter number
-        ch_files: dict[int, list[tuple[str, str]]] = {}
+        # Map to hold temporary files grouped by chapter key ("book_00" or "ch_01", etc.)
+        # and display info: (chapter_number, chapter_title, files_list)
+        ch_files: dict[str, dict] = {}
 
         for root, _dirs, filenames in os.walk(temp_dir):
             for fname in filenames:
@@ -8876,29 +8929,82 @@ def api_v2_create_chapters_with_art_zip(
 
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, temp_dir)
-                
-                # Determine chapter number
-                number_padded = None
+                rel_lower = rel_path.replace("\\", "/").lower()
                 path_parts = rel_path.replace("\\", "/").split("/")
-                for part in reversed(path_parts[:-1]):
-                    number_padded = file_service.extract_chapter_number_from_filename(part)
-                    if number_padded:
-                        break
-                if not number_padded:
-                    number_padded = file_service.extract_chapter_number_from_filename(fname)
 
-                if not number_padded:
-                    skipped.append({"filename": fname, "reason": "Could not determine a chapter number from the file name or path."})
+        # Determine whole-book vs chapter based ONLY on folder names or zip filename (not individual file names)
+        zip_stem = os.path.splitext(file.filename)[0].strip().lower()
+
+        for root, _dirs, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
                     continue
 
-                new_num = int(number_padded)
-                if new_num not in ch_files:
-                    ch_files[new_num] = []
-                ch_files[new_num].append((fname, full_path))
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, temp_dir)
+                path_parts = rel_path.replace("\\", "/").split("/")
+                dir_parts = path_parts[:-1]  # parent folders only
 
-        for new_num, files_list in sorted(ch_files.items()):
-            art_chapter_name = f"Ch {new_num:02d} - Art"
-            existing_ch = existing_art_by_num.get(new_num)
+                matched_chapter = None
+                matched_book = False
+
+                # 1. Check parent folder names first (from closest folder upwards)
+                for part in reversed(dir_parts):
+                    p_clean = part.strip().lower()
+                    if p_clean in ("art files", "art_files", "artfiles", "art file", "art-files", "book", "book art", "book_art", "common art", "common_art") or "art files" in p_clean:
+                        matched_book = True
+                        break
+                    m = _re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', p_clean)
+                    if m:
+                        matched_chapter = int(m.group(1))
+                        break
+                    m = _re.match(r'^(\d{1,3})$', p_clean)
+                    if m:
+                        matched_chapter = int(m.group(1))
+                        break
+
+                # 2. If not determined by folder name, check zip filename
+                if not matched_book and matched_chapter is None:
+                    if zip_stem in ("art files", "art_files", "artfiles", "art file", "art-files", "book", "book art", "book_art") or "art files" in zip_stem:
+                        matched_book = True
+                    else:
+                        m = _re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', zip_stem)
+                        if m:
+                            matched_chapter = int(m.group(1))
+                        else:
+                            m = _re.match(r'^(\d{1,3})$', zip_stem)
+                            if m:
+                                matched_chapter = int(m.group(1))
+
+                # 3. Assign chapter vs book
+                if matched_chapter is not None and matched_chapter > 0:
+                    key = f"ch_{matched_chapter:02d}"
+                    ch_number = f"Ch {matched_chapter:02d} - Art"
+                    ch_title = f"Chapter {matched_chapter:02d} Art"
+                elif matched_book or has_book_manuscript or not dir_parts:
+                    # e.g. "Art Files.zip" or folder named "Art Files" -> Book 00 - Art
+                    key = "book_00"
+                    ch_number = "Book 00 - Art"
+                    ch_title = "Book 00 Art"
+                else:
+                    key = "book_00"
+                    ch_number = "Book 00 - Art"
+                    ch_title = "Book 00 Art"
+
+                if key not in ch_files:
+                    ch_files[key] = {
+                        "ch_number": ch_number,
+                        "ch_title": ch_title,
+                        "files": []
+                    }
+                ch_files[key]["files"].append((fname, full_path))
+
+        for key, info in sorted(ch_files.items()):
+            art_chapter_name = info["ch_number"]
+            art_chapter_title = info["ch_title"]
+            files_list = info["files"]
+
+            existing_ch = existing_art_by_key.get(key)
             if existing_ch and not allow_revision:
                 for fname, _ in files_list:
                     skipped.append({"filename": fname, "reason": f"Art chapter {art_chapter_name} already exists."})
@@ -8910,7 +9016,7 @@ def api_v2_create_chapters_with_art_zip(
                     project_id=project_id,
                     chapter_id=existing_ch.id,
                     upload_dir=file_service.UPLOAD_DIR,
-                    title=f"Chapter {new_num:02d} Art",
+                    title=art_chapter_title,
                     workflow_name=workflow_name,
                 )
             else:
@@ -8918,7 +9024,7 @@ def api_v2_create_chapters_with_art_zip(
                     db,
                     project_id=project_id,
                     number=art_chapter_name,
-                    title=f"Chapter {new_num:02d} Art",
+                    title=art_chapter_title,
                     upload_dir=file_service.UPLOAD_DIR,
                     status="Received",
                     workflow_name=workflow_name,
@@ -8953,7 +9059,7 @@ def api_v2_create_chapters_with_art_zip(
                     uploaded_by_id=viewer.id,
                 ))
 
-            existing_art_by_num[new_num] = new_chapter
+            existing_art_by_key[key] = new_chapter
             db.commit()
             db.refresh(new_chapter)
             created.append(new_chapter)
@@ -9225,6 +9331,9 @@ class TransitionConfigResponse(BaseModel):
     subject: Optional[str] = None
     body: Optional[str] = None
     from_email: Optional[str] = None
+    next_stage_due_date: Optional[str] = None
+    next_stage_owner_name: Optional[str] = None
+    next_stage_owner_username: Optional[str] = None
 
 class TransitionEmailRequest(BaseModel):
     from_stage: str
@@ -9234,19 +9343,58 @@ class TransitionEmailRequest(BaseModel):
     cc_emails: List[str]
     subject: str
     body: str
+    shipment_notes: Optional[str] = None
 
-def _get_stage_notification_config(client_name: str, stage_name: str) -> Optional[dict]:
+class StageRevertRequest(BaseModel):
+    target_stage: Optional[str] = None
+    remarks: Optional[str] = None
+
+def _get_stage_notification_config(client_name: str, stage_name: str, db=None) -> Optional[dict]:
     import json
     import os
+
+    # 1. Check PostgreSQL DB first for customer override
+    if db and client_name:
+        try:
+            from app.domains.workflow.models import StageTransitionConfig
+            db_rec = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == client_name.strip()).first()
+            if db_rec and db_rec.stages_config:
+                if stage_name in db_rec.stages_config:
+                    cfg = db_rec.stages_config.get(stage_name)
+                    if cfg and cfg.get("enabled", True) is False:
+                        return None
+                    # Ensure stage_owner_email is synced with stage_owner_username if username is provided
+                    u_ident = cfg.get("stage_owner_username") if isinstance(cfg, dict) else None
+                    if u_ident:
+                        try:
+                            from app.domains.auth.models import User
+                            from sqlalchemy import select, or_
+                            u_rec = db.execute(
+                                select(User).where(User.username == str(u_ident).strip())
+                            ).scalars().first()
+                            if u_rec and u_rec.email:
+                                cfg = dict(cfg)
+                                cfg["stage_owner_email"] = u_rec.email.strip()
+                                fn = (u_rec.first_name or "").strip() or (u_rec.last_name or "").strip()
+                                if fn:
+                                    cfg["stage_owner_first_name"] = fn
+                        except Exception:
+                            pass
+                    return cfg
+                else:
+                    return None
+        except Exception as e:
+            print(f"Error reading DB stage notification config for {client_name}: {e}")
+
     config_dir = os.path.join(os.path.dirname(__file__), "..", "config", "stage_transition")
     
-    # 1. Try client config file
+    # 2. Try client config file on disk
     if client_name:
         client_file = f"{client_name.strip()}.json"
         client_config_path = os.path.join(config_dir, client_file)
         if os.path.exists(client_config_path):
             try:
-                with open(client_config_path, "r") as f:
+                with open(client_config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if stage_name in data:
                     stage_cfg = data.get(stage_name)
@@ -9259,12 +9407,26 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
                     return None
             except Exception as e:
                 print(f"Error loading stage notification config for client {client_name}: {e}")
+
+    # 3. Check DB default template
+    if db:
+        try:
+            from app.domains.workflow.models import StageTransitionConfig
+            db_default = db.query(StageTransitionConfig).filter(StageTransitionConfig.client_code == "default").first()
+            if db_default and db_default.stages_config:
+                stage_cfg = db_default.stages_config.get(stage_name)
+                if stage_cfg and stage_cfg.get("enabled", True) is False:
+                    return None
+                if stage_cfg:
+                    return stage_cfg
+        except Exception as e:
+            print(f"Error reading DB default stage notification config: {e}")
                 
-    # 2. Try default config file
+    # 4. Try default config file on disk
     default_config_path = os.path.join(config_dir, "default.json")
     if os.path.exists(default_config_path):
         try:
-            with open(default_config_path, "r") as f:
+            with open(default_config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             stage_cfg = data.get(stage_name)
             if stage_cfg and stage_cfg.get("enabled", True) is False:
@@ -9275,28 +9437,123 @@ def _get_stage_notification_config(client_name: str, stage_name: str) -> Optiona
             
     return None
 
-def _resolve_placeholders(text: str, chapter, project, client, current_stage: str, next_stage: str) -> str:
+def _extract_stage_owner_recipients(stage_cfg: Optional[dict], db=None) -> tuple[list[str], Optional[str], Optional[str], Optional[str]]:
+    """Returns (emails_list, lead_email, group_email, lead_name)."""
+    if not stage_cfg:
+        return [], None, None, None
+    mode = stage_cfg.get("stage_owner_mode", "both") or "both"
+    user_email = (stage_cfg.get("stage_owner_email") or "").strip()
+    group_email = (stage_cfg.get("stage_group_email") or "").strip()
+    user_name = (stage_cfg.get("stage_owner_username") or "").strip()
+
+    if db and user_name:
+        try:
+            from app.domains.auth.models import User
+            from sqlalchemy import select, or_
+            user_rec = db.execute(
+                select(User).where(User.username == user_name)
+            ).scalars().first()
+            if user_rec and user_rec.email:
+                user_email = user_rec.email.strip()
+        except Exception:
+            pass
+
+    emails = []
+    if mode in ("both", "user_only") and user_email:
+        emails.append(user_email)
+    if mode in ("both", "group_only") and group_email:
+        emails.append(group_email)
+    return emails, (user_email or None), (group_email or None), (user_name or None)
+
+def _resolve_placeholders(text: str, chapter, project, client, current_stage: str, next_stage: str, extra_placeholders: Optional[dict] = None) -> str:
+    import re
+    ch_num = chapter.chapters if hasattr(chapter, "chapters") else str(getattr(chapter, "chapter_number", ""))
+    clean_ch_num = str(ch_num).strip()
+    if clean_ch_num.lower().startswith("chapter "):
+        clean_ch_num = clean_ch_num[8:].strip()
+    
+    is_book = clean_ch_num in ("00", "0") or clean_ch_num.lower() == "book"
+    display_ch_name = "Book" if is_book else clean_ch_num
+
+    # Format due date if available
+    raw_due = getattr(chapter, "due_date", None) or (getattr(project, "due_date", None) if project else None)
+    due_str = _format_transition_date(raw_due)
+
+    # Stage flow
+    stage_flow = f"{current_stage} → {next_stage}" if (current_stage and next_stage) else (next_stage or current_stage)
+    client_display = getattr(client, "company", None) or getattr(client, "name_company", None) or (getattr(project, "client_name", "") if project else "") or ""
+
     placeholders = {
-        "{chapter_name}": chapter.chapters,
-        "{chapter_title}": chapter.chapter_title or "",
+        "{chapter_name}": display_ch_name,
+        "{chapter_title}": getattr(chapter, "chapter_title", None) or "",
         "{current_stage}": current_stage,
+        "{current stage}": current_stage,
         "{next_stage}": next_stage,
-        "{project_code}": chapter.project or "",
-        "{client_name}": getattr(client, "company", None) or getattr(client, "name_company", None) or "",
+        "{next stage}": next_stage,
+        "{stage}": stage_flow,
+        "{stage_transition}": stage_flow,
+        "{due_date}": due_str,
+        "{shipment_notes}": getattr(chapter, "remarks", "") or "—",
+        "{project_code}": getattr(chapter, "project", None) or getattr(project, "project_code", "") or "",
+        "{client_name}": client_display,
+        "{customer_name}": client_display,
         "{author_email}": getattr(project, "customer_contact", None) or getattr(client, "email", None) or "author@example.com",
         "{client_email}": getattr(client, "email", None) or "client@example.com",
         "{languageediting_team_email}": "languageediting_team@example.com",
         "{pre_editing_team_email}": "pre_editing_team@example.com",
         "{next_stage_team_email}": f"{next_stage.lower().replace(' ', '_').replace('-', '_').replace('+', '')}_team@example.com",
     }
+    if extra_placeholders:
+        placeholders.update(extra_placeholders)
     resolved = text
     for key, value in placeholders.items():
-        resolved = resolved.replace(key, str(value))
+        if value is not None:
+            resolved = resolved.replace(key, str(value))
+    resolved = re.sub(r"\bChapter\s+Chapter\b", "Chapter", resolved)
+
+    if is_book:
+        resolved = re.sub(r"\bChapter(?:s)?\s+(?:Book|00|0)\b", "Book", resolved, flags=re.IGNORECASE)
+        resolved = re.sub(r"\bChapter\s*:\s*(?:Book|00|0)\b", "Chapter: Book", resolved, flags=re.IGNORECASE)
+        resolved = re.sub(r"\|\s*00\s*\|", "| Book |", resolved)
+
     return resolved
+
+def _format_transition_date(val) -> str:
+    if not val:
+        return "—"
+    if hasattr(val, "strftime"):
+        try:
+            return val.strftime("%d-%b-%Y")
+        except Exception:
+            pass
+    val_str = str(val).strip()
+    if not val_str or val_str == "—" or val_str.lower() in ("none", "null"):
+        return "—"
+    import re
+    from datetime import datetime
+    # Match YYYY-MM-DD (with optional time / timezone)
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", val_str)
+    if m:
+        try:
+            d = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return d.strftime("%d-%b-%Y")
+        except Exception:
+            return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    # Match DD-MM-YYYY or DD-Mon-YYYY
+    m2 = re.match(r"^(\d{1,2})[-/](\d{1,2}|[A-Za-z]{3})[-/](\d{2,4})", val_str)
+    if m2:
+        return m2.group(0)
+    # Strip any trailing time if separated by space or T
+    if " " in val_str:
+        return val_str.split(" ")[0]
+    if "T" in val_str:
+        return val_str.split("T")[0]
+    return val_str
+
 
 def _sort_chapter_key(ch_str: str):
     import re
-    if ch_str == 'FM':
+    if ch_str in ('FM', 'Book'):
         return (0, 0, '')
     if ch_str == 'BM':
         return (2, 0, '')
@@ -9305,23 +9562,396 @@ def _sort_chapter_key(ch_str: str):
         return (1, int(match.group(0)), ch_str)
     return (3, 0, ch_str)
 
-def _format_multi_chapter_email(subject: str, body: str, first_ch_num: str, chapter_numbers: list[str]) -> tuple[str, str]:
+def _resolve_next_stage_due_date(db, project_code: str, chapter_num: str, to_stage: str, chapter_obj=None) -> str:
+    from app.domains.workflow.models import StageDetail, WorkflowMaster
+    from sqlalchemy import select
+    from datetime import datetime, timedelta
+
+    clean_ch = chapter_num.strip() if chapter_num else ""
+    if clean_ch.lower().startswith("chapter "):
+        clean_ch = clean_ch[8:].strip()
+
+    # 1. Check StageDetail for to_stage
+    to_sd = None
+    if project_code and clean_ch and to_stage:
+        try:
+            to_sd = db.execute(
+                select(StageDetail).where(
+                    StageDetail.project == project_code,
+                    StageDetail.chapters == clean_ch,
+                    StageDetail.stage_name == to_stage
+                )
+            ).scalars().first()
+        except Exception:
+            pass
+
+    if to_sd and to_sd.planned_end_date:
+        return _format_transition_date(to_sd.planned_end_date)
+
+    # 2. Check SLA if planned_end_date not yet populated
+    sla_days = getattr(to_sd, "sla", None) if to_sd else None
+    if not sla_days and to_stage:
+        try:
+            wf_name = (to_sd.workflow if to_sd else None) or getattr(chapter_obj, "workflow", None) or "Workflow1"
+            wm = db.execute(
+                select(WorkflowMaster).where(
+                    WorkflowMaster.workflow_name == wf_name,
+                    WorkflowMaster.stage_name == to_stage
+                )
+            ).scalars().first()
+            if wm and wm.sla:
+                sla_days = wm.sla
+        except Exception:
+            pass
+
+    if sla_days and sla_days > 0:
+        base_date = datetime.now()
+        target = base_date + timedelta(days=int(sla_days))
+        return target.strftime("%d-%b-%Y")
+
+    # 3. Fallback to chapter due_date
+    if chapter_obj and getattr(chapter_obj, "due_date", None):
+        return _format_transition_date(getattr(chapter_obj, "due_date", None))
+
+    return "—"
+
+
+def _build_html_table(rows: list[dict], next_stage: Optional[str] = None) -> str:
+    """
+    Generate an HTML table matching the Pathfinder report format.
+    Columns: Chapter | Stage | Due Date ( {next_stage} ) | Shipment Notes
+    Fully compatible with Microsoft Outlook, Gmail, Apple Mail, and webmail.
+    """
+    st_header_name = next_stage
+    if not st_header_name and rows:
+        st_header_name = rows[0].get("to_stage")
+        if not st_header_name:
+            st_raw = rows[0].get("stage", "")
+            if "→" in st_raw:
+                st_header_name = st_raw.split("→")[-1].strip()
+
+    due_col_header = f"Due Date ( {st_header_name} )" if st_header_name else "Due Date"
+
+    html_rows = []
+    for r in rows:
+        ch = r.get("chapter") or "—"
+        if str(ch).strip() in ("00", "0") or str(ch).strip().lower() in ("chapter 00", "chapter 0", "book"):
+            ch = "Book"
+        st = r.get("stage")
+        if not st or st == "—":
+            from_st = r.get("from_stage")
+            to_st = r.get("to_stage")
+            if from_st and to_st:
+                st = f"{from_st} → {to_st}"
+            else:
+                st = to_st or from_st or "—"
+        due = _format_transition_date(r.get("due_date"))
+        notes = r.get("notes") or r.get("shipment_notes") or "—"
+        html_rows.append(
+            f'    <tr>\n'
+            f'      <td style="border: 1px solid #777777; padding: 6px 12px; font-family: Calibri, Arial, sans-serif; font-size: 13px; color: #222222;">{ch}</td>\n'
+            f'      <td style="border: 1px solid #777777; padding: 6px 12px; font-family: Calibri, Arial, sans-serif; font-size: 13px; color: #222222;">{st}</td>\n'
+            f'      <td style="border: 1px solid #777777; padding: 6px 12px; font-family: Calibri, Arial, sans-serif; font-size: 13px; color: #222222;">{due}</td>\n'
+            f'      <td style="border: 1px solid #777777; padding: 6px 12px; font-family: Calibri, Arial, sans-serif; font-size: 13px; color: #222222;">{notes}</td>\n'
+            f'    </tr>'
+        )
+    tbody = "\n".join(html_rows)
+    return (
+        '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; max-width: 720px; margin: 16px 0; border: 1px solid #777777; font-family: Calibri, Arial, sans-serif; font-size: 13px; text-align: left;">\n'
+        '  <thead>\n'
+        '    <tr style="background-color: #f2f2f2; color: #111111;">\n'
+        '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Chapter</th>\n'
+        '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Stage</th>\n'
+        f'      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">{due_col_header}</th>\n'
+        '      <th style="border: 1px solid #777777; padding: 6px 12px; font-weight: bold; font-family: Calibri, Arial, sans-serif;">Shipment Notes</th>\n'
+        '    </tr>\n'
+        '  </thead>\n'
+        '  <tbody>\n'
+        f'{tbody}\n'
+        '  </tbody>\n'
+        '</table>'
+    )
+
+
+def _build_plain_table(rows: list[dict], next_stage: Optional[str] = None) -> str:
+    """
+    Generate clean plain text table fallback with dynamic Due Date ( {next_stage} ) header.
+    """
+    st_header_name = next_stage
+    if not st_header_name and rows:
+        st_header_name = rows[0].get("to_stage")
+        if not st_header_name:
+            st_raw = rows[0].get("stage", "")
+            if "→" in st_raw:
+                st_header_name = st_raw.split("→")[-1].strip()
+
+    due_hdr = f"Due Date ( {st_header_name} )" if st_header_name else "Due Date"
+    col_due_width = max(len(due_hdr), 14)
+    due_hdr_padded = due_hdr.ljust(col_due_width)
+    border_due = "-" * (col_due_width + 2)
+
+    sep = f"+----------------------------+-----------------------------+{border_due}+------------------+"
+    table_lines = [
+        sep,
+        f"| Chapter                    | Stage                       | {due_hdr_padded} | Shipment Notes   |",
+        sep,
+    ]
+    for r in rows:
+        raw_ch = str(r.get("chapter") or "—").strip()
+        if raw_ch in ("00", "0") or raw_ch.lower() in ("chapter 00", "chapter 0", "book"):
+            raw_ch = "Book"
+        ch_val = raw_ch[:26].ljust(26)
+        st_raw = r.get("stage")
+        if not st_raw or st_raw == "—":
+            from_st = r.get("from_stage")
+            to_st = r.get("to_stage")
+            if from_st and to_st:
+                st_raw = f"{from_st} → {to_st}"
+            else:
+                st_raw = to_st or from_st or "—"
+        st_val = str(st_raw)[:27].ljust(27)
+        due_val = str(_format_transition_date(r.get("due_date"))).ljust(col_due_width)
+        notes_val = str(r.get("notes") or r.get("shipment_notes") or "—")[:16].ljust(16)
+        table_lines.append(f"| {ch_val} | {st_val} | {due_val} | {notes_val} |")
+    table_lines.append(sep)
+    return "\n".join(table_lines)
+
+
+def _clean_body_template_tables(body_text: str) -> str:
+    """
+    Safely replace any ASCII box table in the body template with {chapter_table},
+    strip any residual ASCII border or row lines, and ensure {chapter_table}
+    is positioned right before 'Regards,'.
+    """
+    if not body_text:
+        return ""
     import re
-    seen = set()
+    # Match any multi-line ascii table starting and ending with +---+
+    cleaned = re.sub(
+        r'(?:^[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$))(?:[ \t]*[+|][^\r\n]*(?:\r?\n|$))*?[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$)?',
+        '{chapter_table}\n',
+        body_text,
+        flags=re.MULTILINE
+    )
+    # Strip any stray leftover table border or row lines
+    cleaned = re.sub(r'^[ \t]*\|[^\r\n]*\|[ \t]*(?:\r?\n|$)', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'^[ \t]*\+[-+]+\+[ \t]*(?:\r?\n|$)', '', cleaned, flags=re.MULTILINE)
+    # Collapse multiple {chapter_table} placeholders into one
+    cleaned = re.sub(r'(\{chapter_table\}\s*)+', '{chapter_table}\n', cleaned)
+
+    if "{chapter_table}" not in cleaned:
+        if "Regards," in cleaned:
+            parts = cleaned.split("Regards,", 1)
+            cleaned = parts[0].rstrip() + "\n\n{chapter_table}\n\nRegards," + parts[1]
+        else:
+            cleaned = cleaned.rstrip() + "\n\n{chapter_table}"
+
+    return cleaned
+
+
+def _normalize_transition_subject(
+    subject: str,
+    client_name: Optional[str] = None,
+    project_code: Optional[str] = None,
+    stage_transition: Optional[str] = None
+) -> str:
+    """
+    Format transition email subject to the strict standard:
+    {client_name}-- {project_code} - {stage_transition} | Stage Transition Notification
+    - No brackets around client name; followed by '-- '
+    - No brackets around project code
+    - No chapter details in the subject line (chapters are listed in the table)
+    - Separator between project code and stage transition is ' - '
+    """
+    import re
+    clean_client = re.sub(r"^\[|\]$", "", (client_name or "").strip()).strip()
+    clean_proj = re.sub(r"^\[|\]$", "", (project_code or "").strip()).strip()
+    clean_flow = (stage_transition or "").strip()
+
+    s = (subject or "").strip()
+    # Replace leading [Client] with Client-- 
+    s = re.sub(r"^\[([^\]]+)\]\s*", r"\1-- ", s)
+    # Remove brackets around project code if any: -- [Project] -> -- Project
+    s = re.sub(r"--\s*\[([^\]]+)\]", r"-- \1", s)
+    # Remove chapter details: - Chapters? ... or - Book
+    s = re.sub(r"\s*-\s*Chapters?\s+[^|\n]+", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*-\s*Book\b", "", s, flags=re.IGNORECASE)
+    # Normalize separator between project and stage flow to ' - '
+    s = re.sub(r"(--\s*[^\-|]+?)\s*[\|\-]\s*([^|]+?)\s*\|\s*Stage Transition Notification", r"\1 - \2 | Stage Transition Notification", s)
+
+    if not s or s.lower() in ("—", "none", "null") or "stage transition notification" not in s.lower():
+        if clean_client and clean_proj and clean_flow:
+            return f"{clean_client}-- {clean_proj} - {clean_flow} | Stage Transition Notification"
+
+    return s.strip()
+
+
+def _normalize_transition_body_template(
+    body_text: str,
+    client_name: Optional[str] = None,
+    project_code: Optional[str] = None,
+    current_stage: Optional[str] = None
+) -> str:
+    """
+    Ensure the body header places Client Name first, followed by one blank line,
+    then Project Name next (with no enclosing brackets).
+    Both details will be fully bolded when formatted to HTML and rendered in UI.
+    """
+    import re
+    b = (body_text or "").strip()
+    m_client = re.search(r"Client Name:\s*([^\n\r]+)", b, re.IGNORECASE)
+    m_proj = re.search(r"Project Name:\s*([^\n\r]+)", b, re.IGNORECASE)
+
+    c_val = m_client.group(1).strip() if m_client else (client_name or "{client_name}")
+    p_val = m_proj.group(1).strip() if m_proj else (project_code or "{project_code}")
+
+    c_val = re.sub(r"^\[|\]$", "", c_val).strip()
+    p_val = re.sub(r"^\[|\]$", "", p_val).strip()
+
+    header_block = f"Client Name: {c_val}\n\nProject Name: {p_val}"
+
+    # Strip existing Project Name and Client Name lines from anywhere in the body
+    cleaned = re.sub(r"^[ \t]*Project Name:.*(?:\r?\n|$)", "", b, flags=re.MULTILINE | re.IGNORECASE)
+    cleaned = re.sub(r"^[ \t]*Client Name:.*(?:\r?\n|$)", "", cleaned, flags=re.MULTILINE | re.IGNORECASE)
+
+    if "{chapter_table}" in cleaned:
+        parts = cleaned.split("{chapter_table}", 1)
+        res = f"{parts[0].rstrip()}\n\n{header_block}\n\n{{chapter_table}}{parts[1]}"
+    elif "Regards," in cleaned:
+        parts = cleaned.split("Regards,", 1)
+        res = f"{parts[0].rstrip()}\n\n{header_block}\n\n{{chapter_table}}\n\nRegards,{parts[1]}"
+    else:
+        st = current_stage or "{current_stage}"
+        res = (
+            f"Hi,\n\n"
+            f"Below Files are Completed {st} for your review and processing.\n\n"
+            f"{header_block}\n\n"
+            f"{{chapter_table}}\n\n"
+            f"Regards,\n"
+            f"S4C Ninja Inkflow Team\n\n"
+            f"Note : This is an automated mail and please do not reply."
+        )
+
+    res = re.sub(r"\n{3,}", "\n\n", res)
+    return res.strip()
+
+
+def _prepare_transition_email_content(
+    body_template: str,
+    chapter_rows: list[dict],
+    shipment_notes: Optional[str] = None,
+    next_stage: Optional[str] = None
+) -> tuple[str, str]:
+    """
+    Generate both plain text and rich HTML email documents.
+    In the HTML version, {chapter_table} (or ASCII box) is replaced with
+    a genuine <table> with borders, styling, and headers matching Pathfinder.
+    Client Name: and Project Name: lines are fully bolded.
+    """
+    import re
+    import html
+
+    notes_str = (shipment_notes or "").strip() or "—"
+    table_html = _build_html_table(chapter_rows, next_stage=next_stage)
+    table_plain = _build_plain_table(chapter_rows, next_stage=next_stage)
+
+    normalized = body_template or ""
+    if "{shipment_notes}" in normalized:
+        normalized = normalized.replace("{shipment_notes}", notes_str)
+
+    # Normalize ASCII tables and guarantee {chapter_table} placement before Regards,
+    normalized = _clean_body_template_tables(normalized)
+    normalized = _normalize_transition_body_template(normalized)
+
+    # Plain text version
+    if "{chapter_table}" in normalized:
+        plain_body = normalized.replace("{chapter_table}", table_plain)
+    else:
+        plain_body = f"{normalized.rstrip()}\n\n{table_plain}"
+
+    # HTML version
+    if "{chapter_table}" in normalized:
+        parts = normalized.split("{chapter_table}")
+        intro_text = parts[0].strip()
+        outro_text = parts[1].strip() if len(parts) > 1 else ""
+    else:
+        intro_text = normalized.strip()
+        outro_text = ""
+
+    def _format_para_lines(text_block: str) -> str:
+        if not text_block:
+            return ""
+        paras = [p.strip() for p in text_block.split("\n\n") if p.strip()]
+        out = []
+        for p in paras:
+            lines = [html.escape(l.strip()) for l in p.split("\n")]
+            formatted_lines = []
+            for line in lines:
+                if line.startswith("Client Name:") or line.startswith("Project Name:"):
+                    clean_line = re.sub(r"^\[|\]$", "", line)
+                    formatted_lines.append(f"<strong>{clean_line}</strong>")
+                else:
+                    formatted_lines.append(line)
+            p_content = "<br>\n".join(formatted_lines)
+            if "Note :" in p_content:
+                p_content = f"<em>{p_content}</em>"
+            out.append(f'<p style="margin: 0 0 12px 0; font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #222222; line-height: 1.5;">{p_content}</p>')
+        return "\n".join(out)
+
+    intro_html = _format_para_lines(intro_text)
+    outro_html = _format_para_lines(outro_text)
+
+    html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+</head>
+<body style="font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #222222; line-height: 1.5; margin: 0; padding: 12px; background-color: #ffffff;">
+{intro_html}
+{table_html}
+{outro_html}
+</body>
+</html>"""
+
+    return plain_body, html_doc
+
+
+def _format_multi_chapter_email(
+    subject: str,
+    body: str,
+    first_ch_num: str,
+    chapter_rows: list
+) -> tuple[str, str]:
+    import re
+
+    # Extract chapter numbers and metadata
     unique_chs = []
-    for c in chapter_numbers:
-        if c and c not in seen:
-            seen.add(c)
-            unique_chs.append(c)
+    seen = set()
+
+    for item in chapter_rows:
+        if isinstance(item, dict):
+            ch = str(item.get("chapter") or item.get("chapter_number") or "").strip()
+        elif hasattr(item, "chapter_number"):
+            ch = str(item.chapter_number or "").strip()
+        else:
+            ch = str(item).strip()
+
+        if ch and ch not in seen:
+            seen.add(ch)
+            unique_chs.append(ch)
 
     sorted_chs = sorted(unique_chs, key=_sort_chapter_key)
     ch_names_str = ", ".join(sorted_chs)
 
-    new_subject = subject
-    if first_ch_num and first_ch_num in new_subject:
-        new_subject = new_subject.replace(first_ch_num, ch_names_str)
+    # 1. Subject does not include chapter details in the new format:
+    # Target: Client-- Project - Stage Flow | Stage Transition Notification
+    new_subject = _normalize_transition_subject(subject)
 
-    new_body = body
+    # 2. Normalize body to retain clean {chapter_table} token positioned properly
+    new_body = _clean_body_template_tables(body)
+    new_body = _normalize_transition_body_template(new_body)
+
+    # Adapt text phrases
     if first_ch_num and f"Chapter {first_ch_num}" in new_body:
         new_body = new_body.replace(f"Chapter {first_ch_num}", f"Chapters {ch_names_str}")
     elif first_ch_num and first_ch_num in new_body:
@@ -9329,8 +9959,94 @@ def _format_multi_chapter_email(subject: str, body: str, first_ch_num: str, chap
 
     new_body = new_body.replace("The chapter has been moved", "The chapters have been moved")
     new_body = new_body.replace("is now ready for processing", "are now ready for processing")
+    new_body = new_body.replace("The file has been moved", "The files have been moved")
 
     return new_subject, new_body
+
+def _resolve_transition_extra_vars(
+    db,
+    client_identifier: str,
+    current_stage: str,
+    next_stage: str,
+    project,
+    chapter
+) -> dict:
+    from app.domains.auth.models import User
+    from sqlalchemy import select
+
+    # Next Stage Owner and Group DL
+    next_stage_cfg = _get_stage_notification_config(client_identifier, next_stage, db=db)
+    next_emails, next_lead_email, next_group_email, next_lead_username = _extract_stage_owner_recipients(next_stage_cfg, db=db)
+
+    # Current Stage Owner and Group DL
+    curr_stage_cfg = _get_stage_notification_config(client_identifier, current_stage, db=db)
+    curr_emails, curr_lead_email, curr_group_email, curr_lead_username = _extract_stage_owner_recipients(curr_stage_cfg, db=db)
+
+    # Resolve Project Manager
+    pm_email = None
+    pm_name = "Project Manager"
+    pm_username = getattr(project, "project_manager", None) or getattr(chapter, "project_manager_name", None)
+    if pm_username:
+        pm_user = db.execute(select(User).where(User.username == pm_username)).scalars().first()
+        if pm_user:
+            pm_email = pm_user.email
+            full_n = f"{pm_user.first_name or ''} {pm_user.last_name or ''}".strip()
+            pm_name = full_n if full_n else pm_user.username
+
+    # Fallback team email for next stage
+    def_next_team = f"{next_stage.lower().replace(' ', '_').replace('-', '_').replace('+', '')}_team@example.com" if next_stage else "team@example.com"
+    if not next_emails:
+        next_emails = [def_next_team]
+        next_group_email = def_next_team
+
+    # Resolve display names for stage leads
+    curr_owner_display = curr_lead_username or f"{current_stage} Team"
+    if curr_lead_username:
+        u_obj = db.execute(select(User).where(User.username == curr_lead_username)).scalars().first()
+        if u_obj:
+            fn = f"{u_obj.first_name or ''} {u_obj.last_name or ''}".strip()
+            curr_owner_display = fn if fn else u_obj.username
+
+    next_owner_display = next_lead_username or f"{next_stage} Team"
+    if next_lead_username:
+        u_obj = db.execute(select(User).where(User.username == next_lead_username)).scalars().first()
+        if u_obj:
+            fn = f"{u_obj.first_name or ''} {u_obj.last_name or ''}".strip()
+            next_owner_display = fn if fn else u_obj.username
+
+    return {
+        "{next_stage_owner_emails}": ", ".join(next_emails) if next_emails else def_next_team,
+        "{next_stage_owner_email}": next_lead_email or (next_emails[0] if next_emails else def_next_team),
+        "{next_stage_group_email}": next_group_email or (next_emails[-1] if next_emails else def_next_team),
+        "{stage_owner_emails}": ", ".join(curr_emails) if curr_emails else "",
+        "{stage_owner_email}": curr_lead_email or (curr_emails[0] if curr_emails else ""),
+        "{stage_group_email}": curr_group_email or (curr_emails[-1] if curr_emails else ""),
+        "{stage_owner_name}": curr_owner_display,
+        "{next_stage_owner_name}": next_owner_display,
+        "{project_manager_email}": pm_email or "",
+        "{project_manager_name}": pm_name,
+    }
+
+
+def _expand_and_clean_recipients(
+    raw_list: list,
+    chapter,
+    project,
+    client,
+    current_stage: str,
+    next_stage: str,
+    extra_vars: dict
+) -> list[str]:
+    expanded = []
+    for item in raw_list:
+        res = _resolve_placeholders(item, chapter, project, client, current_stage, next_stage, extra_vars)
+        for part in res.split(","):
+            cleaned = part.strip()
+            # Ensure valid email address: has @ and no { }
+            if cleaned and "@" in cleaned and "{" not in cleaned and "}" not in cleaned and cleaned not in expanded:
+                expanded.append(cleaned)
+    return expanded
+
 
 @router.get("/chapters/{chapter_id}/transition-config", response_model=TransitionConfigResponse)
 def api_v2_get_chapter_transition_config(
@@ -9358,16 +10074,72 @@ def api_v2_get_chapter_transition_config(
     client_identifier = client.division if (client and client.division) else client_name
     current_stage = chapter.stage_name or ""
     
-    cfg = _get_stage_notification_config(client_identifier, current_stage)
+    cfg = _get_stage_notification_config(client_identifier, current_stage, db=db)
     if not cfg:
         return TransitionConfigResponse(has_config=False)
-        
-    custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), chapter, project, client, current_stage, next_stage)
-    to_resolved = [_resolve_placeholders(e, chapter, project, client, current_stage, next_stage) for e in cfg.get("to", [])]
-    cc_resolved = [_resolve_placeholders(e, chapter, project, client, current_stage, next_stage) for e in cfg.get("cc", [])]
-    subj_resolved = _resolve_placeholders(cfg.get("subject", ""), chapter, project, client, current_stage, next_stage)
-    body_resolved = _resolve_placeholders(cfg.get("body", ""), chapter, project, client, current_stage, next_stage)
-    
+
+    extra_vars = _resolve_transition_extra_vars(db, client_identifier, current_stage, next_stage, project, chapter)
+    raw_to = cfg.get("to", []) or ["{next_stage_owner_emails}"]
+    to_resolved = _expand_and_clean_recipients(raw_to, chapter, project, client, current_stage, next_stage, extra_vars)
+    raw_cc = cfg.get("cc", [])
+    cc_resolved = _expand_and_clean_recipients(raw_cc, chapter, project, client, current_stage, next_stage, extra_vars)
+
+    custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), chapter, project, client, current_stage, next_stage, extra_vars)
+    subj_resolved = _resolve_placeholders(cfg.get("subject", ""), chapter, project, client, current_stage, next_stage, extra_vars)
+    body_resolved = _resolve_placeholders(cfg.get("body", ""), chapter, project, client, current_stage, next_stage, extra_vars)
+
+    ch_raw = chapter.chapters.strip() if chapter.chapters else ""
+    if ch_raw.lower().startswith("chapter "):
+        ch_raw = ch_raw[8:].strip()
+    if ch_raw in ("00", "0") or ch_raw.lower() == "book":
+        import re
+        subj_resolved = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', subj_resolved, flags=re.IGNORECASE)
+        subj_resolved = re.sub(r'\bChapter(?:s)?\s*:\s*(?:Book|00|0)\b', 'Book', subj_resolved, flags=re.IGNORECASE)
+        body_resolved = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', body_resolved, flags=re.IGNORECASE)
+        body_resolved = re.sub(r'\bChapter(?:s)?\s*:\s*(?:Book|00|0)\b', 'Book', body_resolved, flags=re.IGNORECASE)
+        body_resolved = re.sub(r'\|\s*00\s*\|', '| Book |', body_resolved)
+
+    p_code = (project.project_code if project and project.project_code else (project.code if project else chapter.project)) or ""
+    c_title = client_name or ""
+    proj_code = project.code if project else (chapter.project if chapter else "")
+
+    # Normalize body to match new standard format if using legacy template
+    if not body_resolved or "Below Files are Completed" not in body_resolved:
+        body_resolved = (
+            f"Hi,\n\n"
+            f"Below Files are Completed {current_stage} for your review and processing.\n\n"
+            f"Client Name: {c_title}\n\n"
+            f"Project Name: {p_code}\n\n"
+            f"{{chapter_table}}\n\n"
+            f"Regards,\n"
+            f"S4C Ninja Inkflow Team\n\n"
+            f"Note : This is an automated mail and please do not reply."
+        )
+
+    subj_resolved = _normalize_transition_subject(
+        subj_resolved,
+        client_name=c_title,
+        project_code=p_code or proj_code,
+        stage_transition=f"{current_stage} → {next_stage}" if current_stage and next_stage else None
+    )
+    body_resolved = _normalize_transition_body_template(
+        body_resolved,
+        client_name=c_title,
+        project_code=p_code or proj_code,
+        current_stage=current_stage
+    )
+    body_resolved = _clean_body_template_tables(body_resolved)
+    next_stage_due = _resolve_next_stage_due_date(db, proj_code, chapter.chapters, next_stage, chapter_obj=chapter)
+
+    from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+    owner_user = resolve_stage_owner_by_designation(db, next_stage, project_code=proj_code, client_identifier=client_identifier)
+    owner_name = None
+    owner_uname = None
+    if owner_user:
+        full_n = f"{owner_user.first_name or ''} {owner_user.last_name or ''}".strip()
+        owner_name = full_n if full_n else owner_user.username
+        owner_uname = owner_user.username
+
     return TransitionConfigResponse(
         has_config=True,
         custom_message=custom_msg,
@@ -9375,7 +10147,10 @@ def api_v2_get_chapter_transition_config(
         cc=cc_resolved,
         subject=subj_resolved,
         body=body_resolved,
-        from_email=settings.SMTP_FROM
+        from_email=settings.SMTP_FROM,
+        next_stage_due_date=next_stage_due,
+        next_stage_owner_name=owner_name,
+        next_stage_owner_username=owner_uname
     )
 
 @router.post("/chapters/{chapter_id}/transition-email")
@@ -9402,6 +10177,11 @@ def api_v2_chapter_transition_email(
     project_code = project.code if project else chapter.project
     if not project_code:
         raise HTTPException(status_code=400, detail="Project code not found")
+
+    from app.domains.clients.models import Client
+    client = None
+    if project and project.client_id:
+        client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
         
     # Execute stage transition
     transition_payload = TransitionPayload(
@@ -9414,7 +10194,17 @@ def api_v2_chapter_transition_email(
     
     # Update ChapterInfo table
     chapter.stage_name = payload.to_stage
-    chapter.current_assignee_name = None
+    from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+    client_ident = client.division if (client and client.division) else (project.client_name if project else chapter.client)
+    owner_user = resolve_stage_owner_by_designation(
+        db, payload.to_stage, project_code=project_code, client_identifier=client_ident
+    )
+    if owner_user:
+        chapter.current_assignee_name = owner_user.username
+    else:
+        chapter.current_assignee_name = None
+    if payload.shipment_notes:
+        chapter.remarks = payload.shipment_notes
     
     # Check if last stage — use the chapter's own workflow (Art/Design track)
     # first; fall back to the project's main workflow only if unset.
@@ -9443,46 +10233,264 @@ def api_v2_chapter_transition_email(
     
     # Send transition email via SMTP (log failure but proceed)
     if payload.to_emails:
-        msg = MIMEMultipart()
-        msg['From'] = settings.SMTP_FROM
-        msg['To'] = ", ".join(payload.to_emails)
-        if payload.cc_emails:
-            msg['Cc'] = ", ".join(payload.cc_emails)
-        msg['Subject'] = payload.subject
-        msg.attach(MIMEText(payload.body, 'plain'))
-        
-        print("================== SENDING TRANSITION EMAIL ==================")
-        print(f"TO: {payload.to_emails}")
-        print(f"CC: {payload.cc_emails}")
-        print(f"SUBJECT: {payload.subject}")
-        print(f"BODY:\n{payload.body}")
-        print("==============================================================")
-        
-        try:
-            if settings.SMTP_USE_SSL:
-                server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT)
-            else:
-                server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
-                
-            server.ehlo()
-            if not settings.SMTP_USE_SSL and settings.SMTP_USE_TLS:
-                server.starttls()
-                server.ehlo()
-                
-            if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-                server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-                
-            recipients = payload.to_emails + (payload.cc_emails if payload.cc_emails else [])
-            server.sendmail(msg['From'], recipients, msg.as_string())
-            server.quit()
-        except Exception as e:
-            print(f"SMTP send failed: {e}")
+        from_st = payload.from_stage or getattr(chapter, "stage_name", "") or ""
+        to_st = payload.to_stage or ""
+        st_flow = f"{from_st} → {to_st}" if (from_st and to_st) else (to_st or from_st or "—")
+
+        # Resolve next stage due date specifically for this chapter and target stage
+        next_due_str = _resolve_next_stage_due_date(db, project_code, chapter.chapters, to_st, chapter_obj=chapter)
+
+        clean_ch_num = chapter.chapters.strip() if chapter.chapters else ""
+        if clean_ch_num.lower().startswith("chapter "):
+            clean_ch_num = clean_ch_num[8:].strip()
+        is_book = clean_ch_num in ("00", "0") or clean_ch_num.lower() == "book"
+        display_ch = "Book" if is_book else (clean_ch_num or "01")
+
+        send_subject = _normalize_transition_subject(
+            payload.subject or "",
+            client_name=client_ident,
+            project_code=project_code,
+            stage_transition=st_flow
+        )
+        send_body = _normalize_transition_body_template(
+            payload.body or "",
+            client_name=client_ident,
+            project_code=project_code,
+            current_stage=from_st
+        )
+        if is_book:
+            import re
+            send_subject = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', send_subject, flags=re.IGNORECASE)
+            send_body = re.sub(r'\bChapter(?:s)?\s+(?:Book|00|0)\b', 'Book', send_body, flags=re.IGNORECASE)
+
+        row_item = {
+            "chapter": display_ch,
+            "stage": st_flow,
+            "from_stage": from_st,
+            "to_stage": to_st,
+            "due_date": next_due_str,
+            "notes": payload.shipment_notes or "—"
+        }
+
+        plain_body, html_body = _prepare_transition_email_content(
+            body_template=send_body,
+            chapter_rows=[row_item],
+            shipment_notes=payload.shipment_notes,
+            next_stage=to_st
+        )
+
+        valid_to = [e.strip() for e in payload.to_emails if e and "@" in e and "{" not in e and "}" not in e]
+        valid_cc = [e.strip() for e in payload.cc_emails if e and "@" in e and "{" not in e and "}" not in e]
+        recipients = valid_to + valid_cc
+
+        if not valid_to:
+            print(f"WARNING: No valid recipient email address for transition email (to: {payload.to_emails}, cc: {payload.cc_emails}). Skipping SMTP dispatch.")
+        else:
+            msg = MIMEMultipart('alternative')
+            msg['From'] = settings.SMTP_FROM
+            msg['To'] = ", ".join(valid_to)
+            if valid_cc:
+                msg['Cc'] = ", ".join(valid_cc)
+            msg['Subject'] = send_subject
+            msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
+            msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+            
+            print("================== SENDING TRANSITION EMAIL ==================")
+            print(f"TO: {valid_to}")
+            print(f"CC: {valid_cc}")
+            print(f"SUBJECT: {payload.subject}")
+            print(f"BODY:\n{plain_body}")
+            print("==============================================================")
+            
+            try:
+                from app.domains.notifications.email_service import get_smtp_client
+                server = get_smtp_client()
+                server.sendmail(msg['From'], recipients, msg.as_string())
+                server.quit()
+                logging.info("Successfully sent single transition email to %s", recipients)
+            except Exception as e:
+                logging.error("SMTP send failed: %s", e)
             
     return {"message": "Transition completed and email processed", "chapter": {
         "id": chapter.id,
         "stage_name": chapter.stage_name,
         "status": chapter.status
     }}
+
+
+@router.post("/chapters/{chapter_id}/revert-stage")
+def api_v2_chapter_revert_stage(
+    chapter_id: int,
+    payload: StageRevertRequest = StageRevertRequest(),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    if not _has_admin_role(user):
+        raise HTTPException(status_code=403, detail="Only administrators can revert workflow stages.")
+
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.domains.workflow.models import ChapterInfo, WorkflowMaster, StageDetail
+    from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
+    from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    project = db.execute(select(Project).where(Project.project_code == chapter.project)).scalars().first()
+    project_code = project.code if project else chapter.project
+    if not project_code:
+        raise HTTPException(status_code=400, detail="Project code not found")
+
+    client = None
+    if project and project.client_id:
+        client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
+    client_ident = client.division if (client and client.division) else (project.client_name if project else chapter.client)
+
+    # Resolve workflow and stages
+    chapter_workflow = (chapter.workflow or "").strip() or (project.workflow_name if project else "")
+    wf_stages = []
+    if chapter_workflow:
+        try:
+            wf_stages = db.execute(
+                select(WorkflowMaster)
+                .where(WorkflowMaster.workflow_name == chapter_workflow)
+            ).scalars().all()
+        except Exception:
+            pass
+
+    # Order stages topologically using previous_stage / next_stage
+    ordered_stage_names = []
+    if wf_stages:
+        by_name = {s.stage_name: s for s in wf_stages}
+        first_stage = next((s for s in wf_stages if not s.previous_stage), wf_stages[0] if wf_stages else None)
+        curr = first_stage
+        visited = set()
+        while curr and curr.stage_name not in visited:
+            ordered_stage_names.append(curr.stage_name)
+            visited.add(curr.stage_name)
+            curr = by_name.get(curr.next_stage) if curr.next_stage else None
+        for s in wf_stages:
+            if s.stage_name not in visited:
+                ordered_stage_names.append(s.stage_name)
+                visited.add(s.stage_name)
+
+    current_stage = (chapter.stage_name or "").strip()
+    target_stage = (payload.target_stage or "").strip()
+
+    if not target_stage:
+        if current_stage in ordered_stage_names:
+            curr_idx = ordered_stage_names.index(current_stage)
+            if curr_idx <= 0:
+                raise HTTPException(status_code=400, detail="Already at the first stage; cannot revert.")
+            target_stage = ordered_stage_names[curr_idx - 1]
+        else:
+            raise HTTPException(status_code=400, detail="Target stage not specified and cannot be determined from workflow.")
+
+    if target_stage == current_stage:
+        raise HTTPException(status_code=400, detail="Target stage is the same as current stage.")
+
+    # Find stage details
+    stage_details = db.execute(
+        select(StageDetail).where(
+            StageDetail.project == project_code,
+            StageDetail.chapters == chapter.chapters
+        )
+    ).scalars().all()
+
+    target_idx = ordered_stage_names.index(target_stage) if target_stage in ordered_stage_names else -1
+
+    for sd in stage_details:
+        sd_idx = ordered_stage_names.index(sd.stage_name) if sd.stage_name in ordered_stage_names else -1
+        if sd.stage_name == target_stage:
+            sd.stage_status = "In-progress"
+            sd.actual_end_date = None
+            sd.total_time_taken = None
+            if not sd.actual_start_date:
+                sd.actual_start_date = datetime.now(timezone.utc)
+        elif sd.stage_name == current_stage or (target_idx >= 0 and sd_idx > target_idx):
+            # Reset current and any subsequent stages
+            sd.stage_status = "Pending"
+            sd.actual_end_date = None
+            sd.actual_start_date = None
+            sd.total_time_taken = None
+            sd.delayed = False
+            sd.delay_days = 0
+
+    target_sd = next((sd for sd in stage_details if sd.stage_name == target_stage), None)
+
+    # Build structured JSON revert entry
+    revert_time_iso = datetime.now(timezone.utc).isoformat()
+    revert_user = getattr(user, "username", "admin")
+    revert_entry = {
+        "action": "revert",
+        "from_stage": current_stage,
+        "to_stage": target_stage,
+        "reverted_by": revert_user,
+        "timestamp": revert_time_iso,
+        "reason": (payload.remarks or "").strip()
+    }
+
+    # Update StageDetail history and remarks
+    if target_sd:
+        sd_history = list(target_sd.history) if target_sd.history and isinstance(target_sd.history, list) else []
+        sd_history.append(revert_entry)
+        target_sd.history = sd_history
+        existing_rem = target_sd.remarks or ""
+        revert_human_note = f"[Reverted from {current_stage} by {revert_user} at {revert_time_iso[:19]}]: {payload.remarks or 'No reason provided'}"
+        target_sd.remarks = f"{existing_rem}\n{revert_human_note}".strip() if existing_rem else revert_human_note
+
+    # Update ChapterInfo and append to JSON remarks history
+    chapter.stage_name = target_stage
+    chapter.status = "In-progress"
+
+    remarks_history = []
+    if chapter.remarks:
+        try:
+            parsed = json.loads(chapter.remarks)
+            if isinstance(parsed, list):
+                remarks_history = parsed
+            elif isinstance(parsed, dict):
+                remarks_history = [parsed]
+            else:
+                remarks_history = [{"note": str(chapter.remarks)}]
+        except Exception:
+            remarks_history = [{"note": chapter.remarks}]
+
+    remarks_history.append(revert_entry)
+    import json as _json
+    chapter.remarks = _json.dumps(remarks_history, indent=2)
+
+    owner_user = resolve_stage_owner_by_designation(
+        db, target_stage, project_code=project_code, client_identifier=client_ident
+    )
+    if owner_user:
+        chapter.current_assignee_name = owner_user.username
+    elif target_sd and target_sd.assignee_name:
+        chapter.current_assignee_name = target_sd.assignee_name
+    else:
+        chapter.current_assignee_name = None
+
+    if target_sd and target_sd.planned_end_date:
+        chapter.due_date = target_sd.planned_end_date
+
+    db.commit()
+    db.refresh(chapter)
+
+    return {
+        "message": f"Successfully reverted to {target_stage}",
+        "chapter": {
+            "id": chapter.id,
+            "stage_name": chapter.stage_name,
+            "status": chapter.status,
+            "current_assignee_name": chapter.current_assignee_name,
+            "remarks": chapter.remarks
+        },
+        "revert_entry": revert_entry
+    }
 
 
 @router.post("/chapters/bulk-transition-config", response_model=schemas_v2.BulkTransitionConfigResponse)
@@ -9526,8 +10534,8 @@ def api_v2_bulk_transition_config(
 
         # Check for skipped stages in project
         skipped_set = set()
-        if project and getattr(project, "file_details", None) and isinstance(project.file_details, dict):
-            proj_skipped = project.file_details.get("skipped_stages", {})
+        if ch_project and getattr(ch_project, "file_details", None) and isinstance(ch_project.file_details, dict):
+            proj_skipped = ch_project.file_details.get("skipped_stages", {})
             if isinstance(proj_skipped, dict):
                 for st_list in proj_skipped.values():
                     if isinstance(st_list, list):
@@ -9550,37 +10558,65 @@ def api_v2_bulk_transition_config(
             if active_stages and active_stages[-1].stage_name == (next_stage_name or current_stage):
                 is_last = True
 
+        ch_proj_code = (ch_project.code if (ch_project and ch_project.code) else (ch_project.project_code if ch_project else ch.project)) or ""
+        next_due_date_str = _resolve_next_stage_due_date(db, ch_proj_code, ch.chapters, next_stage_name or "", chapter_obj=ch)
+
+        ch_raw = ch.chapters.strip() if ch.chapters else ""
+        if ch_raw.lower().startswith("chapter "):
+            ch_raw = ch_raw[8:].strip()
+        ch_display = "Book" if (ch_raw in ("00", "0") or ch_raw.lower() == "book") else ch.chapters
+
         previews.append(schemas_v2.BulkTransitionItemPreview(
             chapter_id=ch.id,
-            chapter_number=ch.chapters,
+            chapter_number=ch_display,
             chapter_title=ch.chapter_title,
             current_stage=current_stage,
             next_stage=next_stage_name,
             workflow_name=ch_workflow,
             is_last_stage=is_last,
+            next_stage_due_date=next_due_date_str,
         ))
 
     client_name = first_project.client_name if first_project else first_ch.client
     client_identifier = first_client.division if (first_client and first_client.division) else client_name
     current_stage_label = first_ch.stage_name or ""
     sample_next_stage = previews[0].next_stage or ""
+    sample_due_date = previews[0].next_stage_due_date if previews else None
 
-    cfg = _get_stage_notification_config(client_identifier, current_stage_label)
+    cfg = _get_stage_notification_config(client_identifier, current_stage_label, db=db)
     if not cfg:
-        return schemas_v2.BulkTransitionConfigResponse(has_config=False, chapters=previews)
+        return schemas_v2.BulkTransitionConfigResponse(has_config=False, chapters=previews, next_stage_due_date=sample_due_date)
 
-    custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage)
-    to_resolved = [_resolve_placeholders(e, first_ch, first_project, first_client, current_stage_label, sample_next_stage) for e in cfg.get("to", [])]
-    cc_resolved = [_resolve_placeholders(e, first_ch, first_project, first_client, current_stage_label, sample_next_stage) for e in cfg.get("cc", [])]
-    subj_resolved = _resolve_placeholders(cfg.get("subject", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage)
-    body_resolved = _resolve_placeholders(cfg.get("body", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage)
+    extra_vars = _resolve_transition_extra_vars(db, client_identifier, current_stage_label, sample_next_stage, first_project, first_ch)
+    raw_to = cfg.get("to", []) or ["{next_stage_owner_emails}"]
+    to_resolved = _expand_and_clean_recipients(raw_to, first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
+    raw_cc = cfg.get("cc", [])
+    cc_resolved = _expand_and_clean_recipients(raw_cc, first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
+
+    custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
+    subj_resolved = _resolve_placeholders(cfg.get("subject", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
+    body_resolved = _resolve_placeholders(cfg.get("body", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
+    first_p_code = (first_project.project_code if first_project and first_project.project_code else (first_project.code if first_project else first_ch.project)) or ""
+    subj_resolved = _normalize_transition_subject(
+        subj_resolved,
+        client_name=client_name,
+        project_code=first_p_code,
+        stage_transition=f"{current_stage_label} → {sample_next_stage}" if current_stage_label and sample_next_stage else None
+    )
+    body_resolved = _normalize_transition_body_template(
+        body_resolved,
+        client_name=client_name,
+        project_code=first_p_code,
+        current_stage=current_stage_label
+    )
+    body_resolved = _clean_body_template_tables(body_resolved)
 
     if len(previews) > 1:
         subj_resolved, body_resolved = _format_multi_chapter_email(
             subj_resolved,
             body_resolved,
             first_ch.chapters,
-            [p.chapter_number for p in previews if p.chapter_number]
+            previews
         )
 
     return schemas_v2.BulkTransitionConfigResponse(
@@ -9591,7 +10627,8 @@ def api_v2_bulk_transition_config(
         cc=cc_resolved,
         subject=subj_resolved,
         body=body_resolved,
-        from_email=settings.SMTP_FROM
+        from_email=settings.SMTP_FROM,
+        next_stage_due_date=sample_due_date
     )
 
 
@@ -9668,7 +10705,19 @@ def api_v2_bulk_transition_execute(
             logging.error("Failed internal stage transition for chapter %s: %s", ch.chapters, err)
 
         ch.stage_name = next_stage_name
-        ch.current_assignee_name = None
+        from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+        ch_client_ident = project.client_name if project else ch.client
+        if project and project.client_id:
+            from app.domains.clients.models import Client
+            cl_obj = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
+            if cl_obj and cl_obj.division:
+                ch_client_ident = cl_obj.division
+        owner_user = resolve_stage_owner_by_designation(
+            db, next_stage_name, project_code=project_code, client_identifier=ch_client_ident
+        )
+        ch.current_assignee_name = owner_user.username if owner_user else None
+        if payload.shipment_notes:
+            ch.remarks = payload.shipment_notes
 
         active_stages = [s for s in stages if s.stage_name not in skipped_set]
         if active_stages and active_stages[-1].stage_name == next_stage_name:
@@ -9691,7 +10740,7 @@ def api_v2_bulk_transition_execute(
         subject = payload.subject or ""
         body = payload.body or ""
 
-        if not to_emails and chapters:
+        if chapters:
             first_ch = chapters[0]
             first_project = db.execute(select(Project).where(Project.project_code == first_ch.project)).scalars().first()
             first_client = None
@@ -9704,53 +10753,106 @@ def api_v2_bulk_transition_execute(
             current_stage_label = transitioned_chapters[0]["from_stage"] if transitioned_chapters else (first_ch.stage_name or "")
             sample_next_stage = transitioned_chapters[0]["to_stage"] if transitioned_chapters else ""
 
-            cfg = _get_stage_notification_config(client_identifier, current_stage_label)
+            cfg = _get_stage_notification_config(client_identifier, current_stage_label, db=db)
             if cfg:
-                to_emails = [_resolve_placeholders(e, first_ch, first_project, first_client, current_stage_label, sample_next_stage) for e in cfg.get("to", [])]
-                cc_emails = [_resolve_placeholders(e, first_ch, first_project, first_client, current_stage_label, sample_next_stage) for e in cfg.get("cc", [])]
+                extra_vars = _resolve_transition_extra_vars(db, client_identifier, current_stage_label, sample_next_stage, first_project, first_ch)
 
-                raw_subject = cfg.get("subject", "")
-                raw_body = cfg.get("body", "")
+                raw_to = payload.to_emails if payload.to_emails else (cfg.get("to", []) or ["{next_stage_owner_emails}"])
+                raw_cc = payload.cc_emails if payload.cc_emails else cfg.get("cc", [])
 
-                subject = _resolve_placeholders(raw_subject, first_ch, first_project, first_client, current_stage_label, sample_next_stage)
-                body = _resolve_placeholders(raw_body, first_ch, first_project, first_client, current_stage_label, sample_next_stage)
+                to_emails = _expand_and_clean_recipients(raw_to, first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
+                cc_emails = _expand_and_clean_recipients(raw_cc, first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_vars)
 
+                raw_subject = payload.subject or cfg.get("subject", "")
+                raw_body = payload.body or cfg.get("body", "")
+
+                extra_p = {"{shipment_notes}": payload.shipment_notes or "—"}
+                extra_p.update(extra_vars)
+
+                subject = _resolve_placeholders(raw_subject, first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_placeholders=extra_p)
+                body = _resolve_placeholders(raw_body, first_ch, first_project, first_client, current_stage_label, sample_next_stage, extra_placeholders=extra_p)
+                first_p_code = (first_project.project_code if first_project and first_project.project_code else (first_project.code if first_project else first_ch.project)) or ""
+                subject = _normalize_transition_subject(
+                    subject,
+                    client_name=client_name,
+                    project_code=first_p_code,
+                    stage_transition=f"{current_stage_label} → {sample_next_stage}" if current_stage_label and sample_next_stage else None
+                )
+                body = _normalize_transition_body_template(
+                    body,
+                    client_name=client_name,
+                    project_code=first_p_code,
+                    current_stage=current_stage_label
+                )
+
+                chs_map = {c.id: c for c in chapters}
+                chapter_row_items = []
+                for item in transitioned_chapters:
+                    if item.get("chapter"):
+                        ch_obj = chs_map.get(item.get("id"))
+                        from_st = item.get("from_stage", "")
+                        to_st = item.get("to_stage", "")
+                        st_flow = f"{from_st} → {to_st}" if (from_st and to_st) else (to_st or from_st or "—")
+
+                        clean_ch = item["chapter"].strip()
+                        if clean_ch.lower().startswith("chapter "):
+                            clean_ch = clean_ch[8:].strip()
+                        if clean_ch in ("00", "0") or clean_ch.lower() == "book":
+                            clean_ch = "Book"
+
+                        ch_p_code = ch_obj.project if ch_obj else (first_project.code if first_project else "")
+                        next_due_str = _resolve_next_stage_due_date(db, ch_p_code, item["chapter"], to_st, chapter_obj=ch_obj)
+
+                        chapter_row_items.append({
+                            "chapter": clean_ch or item["chapter"],
+                            "stage": st_flow,
+                            "from_stage": from_st, 
+                            "to_stage": to_st, 
+                            "due_date": next_due_str,
+                            "notes": payload.shipment_notes or "—"
+                        })
+
+                # Sort chapter rows naturally (01, 02, 03... 10, 11, CE support)
+                chapter_row_items.sort(key=lambda r: _sort_chapter_key(r.get("chapter", "")))
                 if len(transitioned_chapters) > 1:
                     subject, body = _format_multi_chapter_email(
                         subject,
                         body,
                         first_ch.chapters,
-                        [item["chapter"] for item in transitioned_chapters if item.get("chapter")]
+                        chapter_row_items
                     )
 
-        if to_emails:
-            msg = MIMEMultipart()
-            msg['From'] = settings.SMTP_FROM
-            msg['To'] = ", ".join(to_emails)
-            if cc_emails:
-                msg['Cc'] = ", ".join(cc_emails)
-            msg['Subject'] = subject or "Bulk Stage Transition Notification"
-            msg.attach(MIMEText(body or "", 'plain'))
+                valid_to = [e.strip() for e in to_emails if e and "@" in e and "{" not in e and "}" not in e]
+                valid_cc = [e.strip() for e in cc_emails if e and "@" in e and "{" not in e and "}" not in e]
+                recipients = valid_to + valid_cc
 
-            try:
-                if settings.SMTP_USE_SSL:
-                    server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT)
+                if not valid_to:
+                    logging.warning("No valid recipient email address resolved for bulk transition notification (to: %s, cc: %s). Skipping SMTP dispatch.", to_emails, cc_emails)
                 else:
-                    server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
+                    plain_body, html_body = _prepare_transition_email_content(
+                        body_template=body or "",
+                        chapter_rows=chapter_row_items,
+                        shipment_notes=payload.shipment_notes,
+                        next_stage=sample_next_stage
+                    )
 
-                server.ehlo()
-                if not settings.SMTP_USE_SSL and settings.SMTP_USE_TLS:
-                    server.starttls()
-                    server.ehlo()
+                    msg = MIMEMultipart('alternative')
+                    msg['From'] = settings.SMTP_FROM
+                    msg['To'] = ", ".join(valid_to)
+                    if valid_cc:
+                        msg['Cc'] = ", ".join(valid_cc)
+                    msg['Subject'] = subject or "Bulk Stage Transition Notification"
+                    msg.attach(MIMEText(plain_body, 'plain', 'utf-8'))
+                    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
-                if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-                    server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-
-                recipients = to_emails + (cc_emails if cc_emails else [])
-                server.sendmail(msg['From'], recipients, msg.as_string())
-                server.quit()
-            except Exception as e:
-                logging.error("SMTP bulk send failed: %s", e)
+                    try:
+                        from app.domains.notifications.email_service import get_smtp_client
+                        server = get_smtp_client()
+                        server.sendmail(msg['From'], recipients, msg.as_string())
+                        server.quit()
+                        logging.info("Successfully sent bulk transition email to %s", recipients)
+                    except Exception as e:
+                        logging.error("SMTP bulk send failed: %s", e)
 
     return {
         "status": "ok",

@@ -40,6 +40,9 @@ class Finding:
     option_replacements: dict = field(default_factory=dict)  # {"1"|"2"|"3": str | None | "QUERY"}
     ce_steps: dict | None = None  # composite unit edit, see ce_rules.choose_replacement
     in_checklist: bool = False
+    # "error" | "compliant" | "query" | "flag" | "off" (see ce_rules.choose_replacement)
+    ce_status: str = ""
+    suggestion: str | None = None  # the selected option's form, also for suggest-only rules
 
     def to_dict(self) -> dict:
         return {
@@ -72,6 +75,8 @@ class Finding:
             "option_replacements": self.option_replacements,
             "ce_steps": self.ce_steps,
             "in_checklist": self.in_checklist,
+            "ce_status": self.ce_status,
+            "suggestion": self.suggestion,
         }
 
 

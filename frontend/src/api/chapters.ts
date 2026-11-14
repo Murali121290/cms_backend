@@ -150,6 +150,7 @@ export interface BulkTransitionItemPreview {
   next_stage: string | null
   is_last_stage?: boolean
   is_final_stage?: boolean
+  next_stage_due_date?: string | null
 }
 
 export interface BulkTransitionEmailDefaults {
@@ -172,6 +173,7 @@ export interface BulkTransitionConfigResponse {
   subject?: string | null
   body?: string | null
   from_email?: string | null
+  next_stage_due_date?: string | null
   email_defaults?: BulkTransitionEmailDefaults | null
 }
 
@@ -179,6 +181,7 @@ export interface BulkTransitionExecutePayload {
   stage_name: string
   chapter_ids: number[]
   send_email: boolean
+  shipment_notes?: string
   email_to?: string
   email_cc?: string
   email_subject?: string

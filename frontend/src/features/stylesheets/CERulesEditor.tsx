@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Eye,
   SlidersHorizontal,
+  Play,
 } from "lucide-react";
 
 import type { CERule, CERuleSettings, CESeverity } from "@/types/api";
@@ -52,7 +53,55 @@ export function CERulesEditor({
   const [activePreviewRuleId, setActivePreviewRuleId] = useState<number>(6);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
 
+  // Live Test Sandbox State
+  const [showSandbox, setShowSandbox] = useState(true);
+  const [sandboxText, setSandboxText] = useState(
+    "Patient presented with Parkinson's disease, experiencing 25 percent tremor reduction at 15 °C. Followed ASKED model."
+  );
+
   const { derived } = useMemo(() => deriveFromRows(selectedRows), [selectedRows]);
+
+  const renderedSandboxDiff = useMemo(() => {
+    let html = sandboxText;
+
+    // Check Rule 6: Percentage
+    const r6 = resolveRule(rules.find((r) => r.sno === 6) || ({} as CERule), derived, settings);
+    if (r6.enabled) {
+      const target = r6.option === 1 ? "25%" : r6.option === 2 ? "25 %" : r6.option === 3 ? "25 percent" : r6.option === 4 ? "25 per cent" : "25 percentage points";
+      html = html.replace(/\b25\s*(?:%|percent|per cent|percentage points|percentage|per|pct\.?)\b/gi, (match) => {
+        if (match.trim() === target) return `<span class="text-emerald-400 font-bold">${match}</span>`;
+        return `<span class="line-through text-rose-400 opacity-80">${match}</span> <span class="text-emerald-400 font-bold underline">${target}</span>`;
+      });
+    }
+
+    // Check Rule 5: Temperature
+    const r5 = resolveRule(rules.find((r) => r.sno === 5) || ({} as CERule), derived, settings);
+    if (r5.enabled) {
+      const target = r5.option === 1 ? "15 °C" : "15°C";
+      html = html.replace(/\b15\s*°C\b/g, (match) => {
+        if (match.trim() === target) return `<span class="text-emerald-400 font-bold">${match}</span>`;
+        return `<span class="line-through text-rose-400 opacity-80">${match}</span> <span class="text-emerald-400 font-bold underline">${target}</span>`;
+      });
+    }
+
+    // Check Rule 124: Eponyms
+    const r124 = resolveRule(rules.find((r) => r.sno === 124) || ({} as CERule), derived, settings);
+    if (r124.enabled) {
+      html = html.replace(/\bParkinson's disease\b/gi, (match) => {
+        return `<span class="line-through text-rose-400 opacity-80">${match}</span> <span class="text-emerald-400 font-bold underline">Parkinson disease</span>`;
+      });
+    }
+
+    // Check Rule 125: Red Flags
+    const r125 = resolveRule(rules.find((r) => r.sno === 125) || ({} as CERule), derived, settings);
+    if (r125.enabled) {
+      html = html.replace(/\b(ASKED model|Campinha-Bacote|DSM-5|Wikipedia)\b/gi, (match) => {
+        return `<mark class="bg-rose-500/30 text-rose-200 border border-rose-500 px-1 py-0.5 rounded font-bold">${match} [AQ Required: Permissions/Sensitivity]</mark>`;
+      });
+    }
+
+    return html;
+  }, [sandboxText, rules, derived, settings]);
 
   // Group rules by domain
   const groups = useMemo(() => {
@@ -240,6 +289,12 @@ export function CERulesEditor({
       }));
     }
 
+    // The catalog's option forms follow the engine's option order: Option N is the form
+    // the Technical Edit writes; every other form in the manuscript is flagged as an error.
+    if (activeRule.forms && activeRule.forms.length > 0) {
+      optionsList = activeRule.forms.map((f, i) => ({ optVal: i + 1, label: f.label, preview: f.preview }));
+    }
+
     // Determine current replacement text
     let currentReplacement = target;
     const matchOpt = optionsList.find((o) => o.optVal === activeResolved.option);
@@ -313,7 +368,7 @@ export function CERulesEditor({
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search 72 checklist rules (e.g. percent, dash, units, date, minus, latin)..."
+          placeholder="Search checklist and house-style rules (e.g. percent, dash, units, date, minus, latin)..."
           className="w-full pl-9 pr-8 py-2 rounded-md border border-slate-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-xs"
         />
         {searchQuery && (
@@ -471,10 +526,112 @@ export function CERulesEditor({
           </div>
         </div>
 
+        {/* Forms flagged as errors under the selected option */}
+        {simulatedFinding.optionsList.length > 1 && (
+          <div className="p-2 bg-white rounded-md border border-slate-200 text-[11px] text-slate-700">
+            <span className="font-bold uppercase tracking-wider text-[10px] text-slate-500 block mb-1">
+              Flagged as errors and replaced with {simulatedFinding.currentReplacement}:
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {simulatedFinding.optionsList
+                .filter((o) => o.optVal !== activeResolved.option && o.preview !== simulatedFinding.currentReplacement && o.preview !== "AQ")
+                .map((o) => (
+                  <span key={String(o.optVal)} className="font-mono bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded line-through decoration-red-300">
+                    {o.preview}
+                  </span>
+                ))}
+              {activeRule.sno === 6 && (
+                <>
+                  <span className="font-mono bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded line-through decoration-red-300">
+                    25 percentage
+                  </span>
+                  <span className="font-mono bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded line-through decoration-red-300">
+                    25 per
+                  </span>
+                  <span className="font-mono bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded line-through decoration-red-300">
+                    25 pct
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Editorial Guideline Tip */}
         <div className="p-2.5 bg-amber-50/50 rounded-md border border-amber-200/80 text-[11px] text-amber-950 flex items-start gap-2">
           <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <p className="leading-snug">{simulatedFinding.styleGuidance}</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  // 4. Live Manuscript Test Sandbox
+  const SandboxCard = (
+    <div className="border border-slate-300 rounded-lg overflow-hidden bg-white shadow-xs">
+      <div className="px-3.5 py-2 bg-slate-900 text-white flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Play className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-[11px] font-bold uppercase tracking-wider">
+            Live Manuscript Test Sandbox
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() =>
+              setSandboxText(
+                "Trials reported 25 percentage in Group A, 25 percent in Group B, 25 per in Group C, 25 % in Group D, and 25% in Group E."
+              )
+            }
+            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+          >
+            % Variants
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setSandboxText(
+                "Patient presented with Parkinson's disease, experiencing 25 percent tremor reduction at 15 °C. Followed ASKED model."
+              )
+            }
+            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+          >
+            Clinical
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setSandboxText(
+                "We will discuss the treatment of the elderly using an iPad as described on Wikipedia."
+              )
+            }
+            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+          >
+            Sensitive &amp; Brands
+          </button>
+        </div>
+      </div>
+      <div className="p-3 space-y-2.5 bg-slate-50/50">
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+            Author Sample Text (Editable):
+          </label>
+          <textarea
+            rows={2}
+            value={sandboxText}
+            onChange={(e) => setSandboxText(e.target.value)}
+            placeholder="Type or paste sample manuscript text..."
+            className="w-full p-2 text-xs font-serif border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 leading-relaxed"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+            Live Transformed Manuscript Output:
+          </label>
+          <div className="p-2.5 bg-slate-950 text-slate-100 rounded-lg text-xs font-serif leading-relaxed min-h-[44px] border border-slate-800 shadow-inner">
+            <div dangerouslySetInnerHTML={{ __html: renderedSandboxDiff }} />
+          </div>
         </div>
       </div>
     </div>
@@ -672,6 +829,7 @@ export function CERulesEditor({
           {/* Right Column (40%): Sticky Studio Live Preview Panel */}
           <div className="lg:col-span-5 space-y-4 sticky top-0">
             {ReviewerCardPreview}
+            {SandboxCard}
           </div>
         </div>
       </div>
@@ -683,41 +841,7 @@ export function CERulesEditor({
     <div className="space-y-3">
       {PresetsBar}
       {SearchAndFilterBar}
-
-      {/* Collapsible Sandbox for Drawer Mode */}
-      <div className="border border-slate-200 rounded-md overflow-hidden bg-white">
-        <button
-          type="button"
-          onClick={() => setShowSandbox(!showSandbox)}
-          className="w-full flex items-center justify-between px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-left border-b border-slate-200"
-        >
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-            <Play className="w-3 h-3 text-emerald-600" />
-            Try-it-Out Live Preview Sandbox
-          </span>
-          <span className="text-[10px] text-slate-500">
-            {showSandbox ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </span>
-        </button>
-        {showSandbox && (
-          <div className="p-3 space-y-2 bg-slate-50/50">
-            <textarea
-              rows={2}
-              value={sandboxText}
-              onChange={(e) => setSandboxText(e.target.value)}
-              placeholder="Type or paste sample text..."
-              className="w-full p-2 text-xs font-serif border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-            />
-            <div className="p-2 bg-slate-900 text-slate-100 rounded text-xs font-serif leading-relaxed">
-              <span className="text-[10px] uppercase font-sans font-bold tracking-wider text-slate-400 block mb-1">
-                Live Transformed Diff:
-              </span>
-              <div dangerouslySetInnerHTML={{ __html: renderedSandboxDiff }} />
-            </div>
-          </div>
-        )}
-      </div>
-
+      {SandboxCard}
       {RulesAccordionList}
     </div>
   );
