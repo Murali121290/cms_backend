@@ -891,7 +891,7 @@ async def export_epub(
     if not epub_dir.is_dir():
         raise HTTPException(status_code=404, detail="EPUB source directory not found.")
 
-    # Base name for filenames (eISBN > project_name > folder_name)
+    # Base name for filenames (eISBN from project > project_name > folder_name)
     project = ev_projects_db.get_project_by_folder(db, folder_name)
     if project and project.eisbn and project.eisbn.strip():
         base_name = project.eisbn.strip()

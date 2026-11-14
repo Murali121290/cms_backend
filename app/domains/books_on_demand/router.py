@@ -1761,11 +1761,12 @@ def sync_job_to_validator(
 
     total_files = sum(len(files) for _, _, files in os.walk(epub_extract_path))
 
-    # Extract eisbn if present in filename
-    eisbn_extracted = None
-    m = re.search(r'(\d{10,13})', job.epub_filename or "")
-    if m:
-        eisbn_extracted = m.group(1)
+    # Priority source: eisbn from bod_jobs table (always synced to EPUB Validator)
+    job_eisbn = (getattr(job, "eisbn", None) or "").strip() or None
+    if not job_eisbn:
+        m = re.search(r'(\d{10,13})', job.epub_filename or "")
+        if m:
+            job_eisbn = m.group(1)
 
     user_id = current_user.get("id") if isinstance(current_user, dict) else getattr(current_user, "id", None)
     username = current_user.get("username") if isinstance(current_user, dict) else getattr(current_user, "username", None)
@@ -1779,8 +1780,8 @@ def sync_job_to_validator(
         existing_proj.updated_at = datetime.now(timezone.utc)
         if assignee_to_set:
             existing_proj.assignee = assignee_to_set
-        if eisbn_extracted:
-            existing_proj.eisbn = eisbn_extracted
+        # Every time EPUB validator is opened/synced, update eisbn from BoD
+        existing_proj.eisbn = job_eisbn
         db.commit()
         db.refresh(existing_proj)
         proj_data = ev_projects_db._serialize(existing_proj)
@@ -1795,7 +1796,7 @@ def sync_job_to_validator(
             total_files=total_files,
             user_id=user_id,
             assignee=assignee_to_set,
-            eisbn=eisbn_extracted,
+            eisbn=job_eisbn,
         )
 
     return {

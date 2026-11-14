@@ -200,6 +200,19 @@
       "category": "Copyright Check"
     },
     {
+      "id": "BOD-COPY-007",
+      "name": "Copyright 13-digit eISBN check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",

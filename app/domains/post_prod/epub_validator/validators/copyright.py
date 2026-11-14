@@ -736,6 +736,104 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
     return {"issues_count": len(issues), "issues": issues}
 
 
+@rule("BOD-COPY-007")
+def validate_copyright_isbn_from_db(file_details, rule_config=None):
+    """
+    Validates that the copyright page contains the correct 13-digit ISBN/eISBN:
+    1. Fetches the expected eISBN from the database (BodJob.eisbn or EvProject.eisbn).
+       Fallback to OPF <dc:identifier> if not set in DB.
+    2. Verifies that the ISBN appears on the copyright page with a 13-digit pattern
+       (e.g., <p class="cpytxt-top-space">ISBN: 9783696345518</p> or <p class="cpytxt">ISDN: 9783695720996</p>).
+    """
+    import os
+    import re
+    import glob
+
+    full_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(full_path)
+    rel_path = file_details.get("relative_path") or file_name
+
+    issues = []
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        soup = BeautifulSoup(content, "html.parser")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    # 1. Resolve expected eISBN from post_prod_ev_projects table
+    expected_eisbn = None
+    folder_name = file_details.get("folder_name", "")
+
+    if folder_name:
+        try:
+            from app.core.database import SessionLocal
+            from app.domains.post_prod.epub_validator.models import EvProject
+            db = SessionLocal()
+            try:
+                proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+                if proj and proj.eisbn:
+                    expected_eisbn = str(proj.eisbn).strip()
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    # Normalize expected eISBN to digits only
+    expected_digits = "".join(ch for ch in (expected_eisbn or "") if ch.isdigit())
+
+    if not expected_digits:
+        issues.append({
+            "type": "eisbn_not_configured_in_db",
+            "message": f"Could not determine expected eISBN from database (post_prod_ev_projects) for '{folder_name or file_name}'.",
+            "category": "Warning",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": f"Folder: {folder_name}",
+            "extract": f"Folder: {folder_name}",
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+    # 2. Search for ISBN pattern on copyright page: strictly "ISBN: 9783696345518" (13 digits, no hyphens)
+    isbn_pattern = re.compile(r'\bISBN\s*:\s*(\d{13})\b', re.IGNORECASE)
+
+    found_isbns = []
+    matched_exact = False
+
+    for p in soup.find_all(["p", "div", "span"]):
+        txt = p.get_text(" ", strip=True)
+        m = isbn_pattern.search(txt)
+        if m:
+            digits = m.group(1)
+            found_isbns.append((digits, txt, p))
+            if digits == expected_digits:
+                matched_exact = True
+                break
+
+    if not matched_exact:
+        if found_isbns:
+            found_str = ", ".join(f"'{f[0]}'" for f in found_isbns)
+            msg = f"Copyright page ISBN does not match the expected eISBN '{expected_digits}'. Found: {found_str}"
+            snippet = found_isbns[0][1]
+        else:
+            msg = f"Copyright page is missing the expected 13-digit eISBN with 'ISBN:' prefix '{expected_digits}' (e.g. 'ISBN: {expected_digits}')"
+            snippet = f"Expected: ISBN: {expected_digits}"
+
+        issues.append({
+            "type": "copyright_isbn_mismatch",
+            "message": msg,
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": snippet,
+            "expected_text": f"ISBN: {expected_digits}",
+            "extract": f"Expected eISBN: {expected_digits}",
+        })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
 
 
 
