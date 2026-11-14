@@ -138,6 +138,25 @@
       "category": "Copyright Check"
     },
     {
+      "id": "BOD-COPY-004",
+      "name": "Copyright statement check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_statement_by_language": {
+          "de": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen gemäß § 44b UrhG („Text und Data Mining“) zu gewinnen, ist untersagt.",
+          "ch": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen („Text und Data Mining“) zu gewinnen, ist untersagt."
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
@@ -646,6 +665,7 @@
   },
   "category_order": [
     "STRUCTURE CHECK",
+    "COPYRIGHT CHECK",
     "METADATA CHECK",
     "CSS CHECK",
     "XHTML CHECK",

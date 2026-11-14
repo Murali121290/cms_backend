@@ -249,5 +249,153 @@ def validate_copyright_single_page(file_details, rule_config=None):
     return {"issues_count": len(issues), "issues": issues}
 
 
+@rule("BOD-COPY-004")
+def validate_copyright_statement_by_language(file_details, rule_config=None):
+    """
+    Validates that the copyright page contains the required legal statement based on language:
+    - German (DE): "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen gemäß § 44b UrhG („Text und Data Mining“) zu gewinnen, ist untersagt."
+    - Swiss (CH): "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen („Text und Data Mining“) zu gewinnen, ist untersagt."
+    
+    Language resolution follows BOD-AUT-001 pattern:
+    1. Checks DB language from EvProject / BodJob
+    2. Fallback to OPF dc:language
+    3. Fallback to HTML lang / xml:lang
+    """
+    import os
+    import glob
+    import unicodedata
+
+    full_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(full_path)
+    rel_path = file_details.get("relative_path") or file_name
+
+    issues = []
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        soup = BeautifulSoup(content, "html.parser")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    # Determine language following the BOD-AUT-001 pattern
+    detected_lang = (file_details.get("language") or "").strip().lower()
+
+    # 1. First check DB language (EvProject.language or BodJob.pdf_language) if not passed directly
+    folder_name = file_details.get("folder_name", "")
+    if not detected_lang and folder_name:
+        try:
+            from app.core.database import SessionLocal
+            from app.domains.post_prod.epub_validator.models import EvProject
+            from app.domains.books_on_demand.models import BodJob
+            db = SessionLocal()
+            try:
+                # Check EvProject table
+                proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+                if proj and proj.language:
+                    detected_lang = proj.language.strip().lower()
+
+                # Also check BodJob table if not yet resolved
+                if not detected_lang:
+                    job = db.query(BodJob).filter(
+                        (BodJob.project_name == folder_name) | (BodJob.pdf_filename.startswith(folder_name))
+                    ).first()
+                    if job and job.pdf_language:
+                        detected_lang = job.pdf_language.strip().lower()
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    # 2. Find OPF to extract dc:language if not found in DB
+    epub_root = file_details.get("epub_root") or file_details.get("epub_path")
+    if not epub_root and full_path:
+        curr = os.path.dirname(os.path.abspath(full_path))
+        while curr and curr != "/":
+            if glob.glob(os.path.join(curr, "*.opf")) or os.path.exists(os.path.join(curr, "mimetype")):
+                epub_root = curr
+                break
+            curr = os.path.dirname(curr)
+
+    if not detected_lang and epub_root:
+        opf_file = find_opf(epub_root)
+        if opf_file and os.path.exists(opf_file):
+            try:
+                with open(opf_file, "r", encoding="utf-8") as opf_f:
+                    opf_soup = BeautifulSoup(opf_f.read(), "xml")
+                    lang_tag = opf_soup.find(["dc:language", "language"])
+                    if lang_tag and lang_tag.get_text(strip=True):
+                        detected_lang = lang_tag.get_text(strip=True).lower()
+            except Exception:
+                pass
+
+    # 3. Fallback language to HTML lang / xml:lang
+    if not detected_lang:
+        html_tag = soup.find("html")
+        if html_tag:
+            detected_lang = (html_tag.get("xml:lang") or html_tag.get("lang") or "").lower()
+
+    # Normalize language code (matching BOD-AUT-001)
+    lang_key = detected_lang.strip().lower()
+    if "-" in lang_key:
+        lang_key = lang_key.split("-")[0]
+    if "_" in lang_key:
+        lang_key = lang_key.split("_")[0]
+
+    lang_map = {
+        "german": "de", "swiss": "ch", "danish": "da", "finnish": "fi", "french": "fr",
+        "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
+        "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
+        "valencian": "va"
+    }
+    if lang_key in lang_map:
+        lang_key = lang_map[lang_key]
+
+    # Read configuration from customer.json (expected_statement_by_language)
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_by_lang = config_dict.get("expected_statement_by_language")
+    if not expected_by_lang or not isinstance(expected_by_lang, dict):
+        return {"issues_count": 1, "issues": [{
+            "type": "configuration_error",
+            "message": "Missing 'expected_statement_by_language' in rule configuration for BOD-COPY-004.",
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": 0,
+        }]}
+
+    # Lookup directly in configuration dictionary using detected language
+    expected_statement = expected_by_lang.get(lang_key) or expected_by_lang.get(detected_lang)
+
+    # If this language has no statement configured in customer.json, this rule does not apply
+    if not expected_statement:
+        return {"issues_count": 0, "issues": []}
+
+    def normalize_str(s: str) -> str:
+        s = unicodedata.normalize("NFKC", s)
+        s = s.replace("„", '"').replace("“", '"').replace("”", '"').replace("»", '"').replace("«", '"')
+        s = s.replace("’", "'").replace("‘", "'")
+        s = re.sub(r"\s+", " ", s)
+        return s.strip().lower()
+
+    body = soup.find("body")
+    page_text = body.get_text(" ", strip=True) if body else content
+    norm_page_text = normalize_str(page_text)
+    norm_expected = normalize_str(expected_statement)
+
+    if norm_expected not in norm_page_text:
+        issues.append({
+            "type": "missing_copyright_statement",
+            "message": "Copyright page is missing the required statement or expected statement is partially present",
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": expected_statement,
+            "expected_text":expected_statement,
+            "extract": f"Expected: {expected_statement}",
+        })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
 
 
