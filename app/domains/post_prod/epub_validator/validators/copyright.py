@@ -346,11 +346,11 @@ def validate_copyright_statement_by_language(file_details, rule_config=None):
         lang_key = lang_key.split("_")[0]
 
     lang_map = {
-        "german": "de", "swiss": "ch", "danish": "da", "finnish": "fi", "french": "fr",
-        "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
-        "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
-        "valencian": "va"
-    }
+            "german": "de", "danish": "da", "finnish": "fi", "french": "fr",
+            "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
+            "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
+            "valencian": "va"
+        }
     if lang_key in lang_map:
         lang_key = lang_map[lang_key]
 
@@ -493,11 +493,11 @@ def validate_copyright_publisher_by_language(file_details, rule_config=None):
         lang_key = lang_key.split("_")[0]
 
     lang_map = {
-        "german": "de", "swiss": "ch", "danish": "da", "finnish": "fi", "french": "fr",
-        "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
-        "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
-        "valencian": "va"
-    }
+            "german": "de", "danish": "da", "finnish": "fi", "french": "fr",
+            "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
+            "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
+            "valencian": "va"
+        }
     if lang_key in lang_map:
         lang_key = lang_map[lang_key]
 
@@ -530,18 +530,24 @@ def validate_copyright_publisher_by_language(file_details, rule_config=None):
     body = soup.find("body")
     page_text = body.get_text(" ", strip=True) if body else content
     norm_page_text = normalize_str(page_text)
-    norm_expected = normalize_str(expected_statement)
 
-    if norm_expected not in norm_page_text:
+    expected_statements = expected_statement if isinstance(expected_statement, list) else [expected_statement]
+    missing_statements = []
+
+    for stmt in expected_statements:
+        if normalize_str(stmt) not in norm_page_text:
+            missing_statements.append(stmt)
+
+    if missing_statements:
         issues.append({
             "type": "missing_copyright_publisher",
             "message": "Copyright page is missing the required publisher sentence or expected sentence is partially present",
             "category": "Error",
             "file_path": rel_path,
             "line_number": 1,
-            "snippet": expected_statement,
-            "expected_text": expected_statement,
-            "extract": f"Expected: {expected_statement}",
+            "snippet": "; ".join(missing_statements),
+            "expected_text": "; ".join(expected_statements),
+            "extract": f"Expected: {'; '.join(expected_statements)}",
         })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -646,11 +652,11 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
         lang_key = lang_key.split("_")[0]
 
     lang_map = {
-        "german": "de", "ge": "de", "swiss": "ch", "danish": "da", "finnish": "fi", "french": "fr",
-        "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
-        "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
-        "valencian": "va"
-    }
+            "german": "de", "danish": "da", "finnish": "fi", "french": "fr",
+            "swedish": "sv", "norwegian": "no", "spanish": "es", "english": "en",
+            "italian": "it", "portuguese": "pt", "dutch": "nl", "catalan": "ca",
+            "valencian": "va"
+        }
     if lang_key in lang_map:
         lang_key = lang_map[lang_key]
 
@@ -697,43 +703,64 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
     norm_expected_url = normalize_url(expected_url)
 
     # Search for matching paragraph on copyright page
-    # First look at <p class="cpytxt">, then fallback to any <p> on copyright page
-    p_tags = soup.find_all("p")
-    matched = False
-    found_address_without_url = False
-    actual_url_found = ""
+    # Allows a single address string OR a list of required address strings (e.g. Forlag + Fremstilling)
+    expected_items = expected_address if isinstance(expected_address, list) else [expected_address]
+    expected_url_items = expected_url if isinstance(expected_url, list) else ([expected_url] if expected_url else [])
 
-    for p in p_tags:
-        p_text_norm = normalize_str(p.get_text(" ", strip=True))
-        if norm_expected_address in p_text_norm:
-            # Check link inside this paragraph
-            a_tag = p.find("a")
-            href = a_tag.get("href", "") if a_tag else ""
-            actual_url_found = href
-            if not expected_url or normalize_url(href) == norm_expected_url:
-                matched = True
+    p_tags = soup.find_all(["p", "div"])
+    missing_items = []
+
+    for item in expected_items:
+        if not item:
+            continue
+        norm_item = normalize_str(item)
+        item_found = False
+        for p in p_tags:
+            p_text_norm = normalize_str(p.get_text(" ", strip=True))
+            if norm_item in p_text_norm:
+                item_found = True
                 break
-            else:
-                found_address_without_url = True
+        if not item_found:
+            missing_items.append(item)
 
-    if not matched:
-        if found_address_without_url:
-            msg = f"Copyright page publisher address URL is incorrect. Expected href='{expected_url}', but found href='{actual_url_found}'"
-            snippet = f"<a href=\"{actual_url_found}\">...</a> (Expected: href=\"{expected_url}\")"
-        else:
-            msg = f"Copyright page is missing the required publisher address or expected address is partially present: \"{expected_address}\""
-            snippet = f"{expected_address} (URL: {expected_url})" if expected_url else expected_address
+    url_matched = True
+    found_urls = []
+    if expected_url_items:
+        url_matched = False
+        for p in p_tags:
+            for a_tag in p.find_all("a"):
+                href = a_tag.get("href", "")
+                if href:
+                    found_urls.append(href)
+                    if any(normalize_url(href) == normalize_url(u) for u in expected_url_items):
+                        url_matched = True
+                        break
+            if url_matched:
+                break
 
+    if missing_items:
         issues.append({
             "type": "missing_copyright_publisher_address",
-            "message": msg,
+            "message": f"Copyright page is missing the required publisher address or expected address is partially present: \"{'; '.join(missing_items)}\"",
             "category": "Error",
             "file_path": rel_path,
             "line_number": 1,
-            "snippet": snippet,
-            "expected_text": expected_address,
-            "expected_url": expected_url,
-            "extract": f"Expected: {snippet}",
+            "snippet": "; ".join(missing_items),
+            "expected_text": "; ".join(expected_items),
+            "extract": f"Expected: {'; '.join(expected_items)}",
+        })
+    elif not url_matched and expected_url_items:
+        expected_url_str = ", ".join(expected_url_items)
+        found_url_str = ", ".join(found_urls) if found_urls else "None"
+        issues.append({
+            "type": "missing_copyright_publisher_address",
+            "message": f"Copyright page publisher address URL is incorrect. Expected href='{expected_url_str}', but found href='{found_url_str}'",
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": f"Found: {found_url_str} (Expected: {expected_url_str})",
+            "expected_text": expected_url_str,
+            "extract": f"Expected URL: {expected_url_str}",
         })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -768,6 +795,7 @@ def validate_copyright_isbn_from_db(file_details, rule_config=None):
     # 1. Resolve expected eISBN from post_prod_ev_projects table
     expected_eisbn = None
     folder_name = file_details.get("folder_name", "")
+    detected_lang = (file_details.get("language") or "").strip().lower()
 
     if folder_name:
         try:
@@ -776,12 +804,23 @@ def validate_copyright_isbn_from_db(file_details, rule_config=None):
             db = SessionLocal()
             try:
                 proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
-                if proj and proj.eisbn:
-                    expected_eisbn = str(proj.eisbn).strip()
+                if proj:
+                    if proj.eisbn:
+                        expected_eisbn = str(proj.eisbn).strip()
+                    if not detected_lang and proj.language:
+                        detected_lang = proj.language.strip().lower()
             finally:
                 db.close()
         except Exception:
             pass
+
+    if not detected_lang:
+        html_tag = soup.find("html")
+        if html_tag:
+            detected_lang = (html_tag.get("xml:lang") or html_tag.get("lang") or "").lower()
+
+    lang_key = detected_lang.split("-")[0].split("_")[0].strip().lower()
+    is_swedish = lang_key in ("sv", "se") or "swedish" in detected_lang
 
     # Normalize expected eISBN to digits only
     expected_digits = "".join(ch for ch in (expected_eisbn or "") if ch.isdigit())
@@ -798,29 +837,58 @@ def validate_copyright_isbn_from_db(file_details, rule_config=None):
         })
         return {"issues_count": len(issues), "issues": issues}
 
-    # 2. Search for ISBN pattern on copyright page: strictly "ISBN: 9783696345518" (13 digits, no hyphens)
-    isbn_pattern = re.compile(r'\bISBN\s*:\s*(\d{13})\b', re.IGNORECASE)
+    # 2. Search for ISBN pattern on copyright page:
+    # Swedish (SE): strictly hyphenated "ISBN: XXX-XX-XXXX-XXX-X" (hyphens mandatory)
+    # All other languages: strictly unhyphenated 13 digits "ISBN: XXXXXXXXXXXXX" (no hyphens allowed)
+    if is_swedish:
+        isbn_pattern = re.compile(r'\bISBN\s*:\s*(\d+-\d+-\d+-\d+-\d+)\b', re.IGNORECASE)
+        expected_format_desc = "hyphenated ISBN (e.g. 'ISBN: 978-XX-XXXX-XXX-X')"
+    else:
+        isbn_pattern = re.compile(r'\bISBN\s*:\s*(\d{13})\b', re.IGNORECASE)
+        expected_format_desc = f"unhyphenated 13-digit ISBN 'ISBN: {expected_digits}'"
 
     found_isbns = []
     matched_exact = False
+    found_unhyphenated_for_swedish = False
+    found_hyphenated_for_others = False
+
+    # Also detect if opposite hyphenation format was used
+    alt_hyphen_pattern = re.compile(r'\bISBN\s*:\s*(\d+-\d+-\d+-\d+-\d+)\b', re.IGNORECASE)
+    alt_plain_pattern = re.compile(r'\bISBN\s*:\s*(\d{13})\b', re.IGNORECASE)
 
     for p in soup.find_all(["p", "div", "span"]):
         txt = p.get_text(" ", strip=True)
         m = isbn_pattern.search(txt)
         if m:
-            digits = m.group(1)
-            found_isbns.append((digits, txt, p))
+            raw_matched = m.group(1)
+            digits = "".join(ch for ch in raw_matched if ch.isdigit())
+            found_isbns.append((digits, raw_matched, txt))
             if digits == expected_digits:
                 matched_exact = True
                 break
+        else:
+            if is_swedish:
+                m_plain = alt_plain_pattern.search(txt)
+                if m_plain and m_plain.group(1) == expected_digits:
+                    found_unhyphenated_for_swedish = True
+            else:
+                m_hyphen = alt_hyphen_pattern.search(txt)
+                if m_hyphen and "".join(ch for ch in m_hyphen.group(1) if ch.isdigit()) == expected_digits:
+                    found_hyphenated_for_others = True
 
     if not matched_exact:
-        if found_isbns:
-            found_str = ", ".join(f"'{f[0]}'" for f in found_isbns)
+        if is_swedish and found_unhyphenated_for_swedish:
+            msg = f"Swedish copyright requires hyphenated ISBN format (e.g. 'ISBN: 978-XX-XXXX-XXX-X'). Found unhyphenated: 'ISBN: {expected_digits}'"
+            snippet = f"Found: ISBN: {expected_digits}"
+        elif not is_swedish and found_hyphenated_for_others:
+            msg = f"Copyright ISBN must be 13 digits without hyphens ('ISBN: {expected_digits}'). Hyphens are only allowed for Swedish."
+            snippet = f"Expected: ISBN: {expected_digits}"
+        elif found_isbns:
+            found_str = ", ".join(f"'{f[1]}'" for f in found_isbns)
             msg = f"Copyright page ISBN does not match the expected eISBN '{expected_digits}'. Found: {found_str}"
-            snippet = found_isbns[0][1]
+            snippet = found_isbns[0][2]
         else:
-            msg = f"Copyright page is missing the expected 13-digit eISBN with 'ISBN:' prefix '{expected_digits}' (e.g. 'ISBN: {expected_digits}')"
+            msg = f"Copyright page is missing the expected {expected_format_desc}"
             snippet = f"Expected: ISBN: {expected_digits}"
 
         issues.append({
@@ -968,6 +1036,88 @@ def validate_copyright_author_notice(file_details, rule_config=None):
         })
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-COPY-009")
+def validate_french_depot_legal(file_details, rule_config=None):
+    """
+    BOD-COPY-009: For French books, verifies that the copyright page contains
+    the Dépôt légal statement in format: "Dépôt légal : [Month] [Year]".
+    Only applies when detected language is French ('fr').
+    """
+    import unicodedata
+
+    full_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(full_path)
+    rel_path = file_details.get("relative_path") or file_name
+    folder_name = file_details.get("folder_name", "")
+
+    if not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        soup = BeautifulSoup(content, "html.parser")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    # Determine language
+    detected_lang = (file_details.get("language") or "").strip().lower()
+    if not detected_lang and folder_name:
+        try:
+            from app.core.database import SessionLocal
+            from app.domains.post_prod.epub_validator.models import EvProject
+            db = SessionLocal()
+            try:
+                proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+                if proj and proj.language:
+                    detected_lang = proj.language.strip().lower()
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    if not detected_lang:
+        html_tag = soup.find("html")
+        if html_tag:
+            detected_lang = (html_tag.get("xml:lang") or html_tag.get("lang") or "").lower()
+
+    lang_key = detected_lang.split("-")[0].split("_")[0].strip().lower()
+    if lang_key != "fr" and "french" not in detected_lang:
+        # Rule only applies to French books
+        return {"issues_count": 0, "issues": []}
+
+    def _normalize(txt: str) -> str:
+        t = unicodedata.normalize("NFKC", txt or "")
+        return re.sub(r"\s+", " ", t).strip()
+
+    body_text = _normalize(soup.get_text(" ", strip=True))
+
+    # Regex for "Dépôt légal : Month Year" (case-insensitive, handles accents e/é)
+    # French months: janvier, février, mars, avril, mai, juin, juillet, août, septembre, octobre, novembre, décembre
+    # Also allows numeric month format or any capitalized month name followed by 4-digit year
+    depot_pattern = re.compile(
+        r"d[eé]p[oô]t\s+l[eé]gal\s*:\s*([a-zA-Z\u00C0-\u017F]+|\d{1,2})\s+(\d{4})",
+        re.IGNORECASE
+    )
+
+    if not depot_pattern.search(body_text):
+        return {
+            "issues_count": 1,
+            "issues": [{
+                "type": "missing_french_depot_legal",
+                "message": "French copyright page is missing the required 'Dépôt légal : Month Year' notice.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": 1,
+                "snippet": "Expected: Dépôt légal : Month Year",
+                "expected_text": "Dépôt légal : Month Year",
+                "extract": "Dépôt légal : Month Year",
+            }]
+        }
+
+    return {"issues_count": 0, "issues": []}
 
 
 
