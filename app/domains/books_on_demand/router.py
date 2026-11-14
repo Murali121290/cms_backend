@@ -34,11 +34,30 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
         query = query.filter(BodJob.status == status)
     
     jobs = query.all()
-    # Serialize to include client_name
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+
+    # Serialize to include client_name and deliverable readiness flags
     result = []
     for job in jobs:
         prod_info = (job.stage_history or {}).get("Production", {})
         pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
+
+        has_epub = bool(job.epub_filepath and os.path.exists(job.epub_filepath))
+        has_ace = bool(job.ace_report_filepath and os.path.exists(job.ace_report_filepath))
+        has_epubcheck = bool(job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath))
+
+        bod_proj_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name) if job.project_name else None
+        history_csv_path = os.path.join(bod_proj_dir, "history.csv") if bod_proj_dir else None
+        has_history_csv = bool(history_csv_path and os.path.exists(history_csv_path))
+        if not has_history_csv and job.epub_filepath:
+            alt_csv = os.path.join(os.path.dirname(job.epub_filepath), "history.csv")
+            has_history_csv = os.path.exists(alt_csv)
+
+        is_dispatchable = bool(
+            has_epub and has_ace and has_epubcheck and has_history_csv
+        )
+
         job_dict = {
             "id": job.id,
             "project_name": job.project_name,
@@ -51,6 +70,11 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "pdf_language": job.pdf_language,
             "epub_filename": job.epub_filename,
             "epub_filepath": job.epub_filepath,
+            "has_epub": has_epub,
+            "has_ace": has_ace,
+            "has_epubcheck": has_epubcheck,
+            "has_history_csv": has_history_csv,
+            "is_dispatchable": is_dispatchable,
             "current_stage_index": job.current_stage_index,
             "current_stage_name": job.current_stage_name,
             "current_assignee": job.current_assignee,

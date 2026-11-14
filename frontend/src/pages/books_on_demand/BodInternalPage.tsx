@@ -1063,8 +1063,8 @@ export function BodInternalPage() {
     setSortDirection('asc')
   }
 
-  // Jobs eligible for dispatch in the currently filtered list
-  const dispatchableJobs = filteredJobs.filter(j => j.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(j))
+  // Jobs eligible for dispatch in the currently filtered list (must be in Ready to Dispatch, not completed, and have completed QC deliverables)
+  const dispatchableJobs = filteredJobs.filter(j => j.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(j) && (j.is_dispatchable !== false))
   const allDispatchableSelected = dispatchableJobs.length > 0 && dispatchableJobs.every(j => selectedJobIds.includes(j.id))
 
   const toggleSelectAllDispatchable = () => {
@@ -1127,11 +1127,20 @@ export function BodInternalPage() {
         toast.success(`All ${data.success_count} job(s) dispatched successfully to FTP!`)
         setSelectedJobIds([])
       } else if (data.success_count === 0) {
-        const errorDetails = data.results.filter((r: any) => !r.success).map((r: any) => `${r.job_name || r.job_id}: ${r.error}`).join('; ')
-        toast.error(`Dispatch failed: ${errorDetails}`)
+        const failedItems = data.results
+          .filter((r: any) => !r.success)
+          .map((r: any) => `Job #${r.job_id}${r.job_name ? ` (${r.job_name})` : ''}: ${r.error}`)
+          .join('\n')
+        toast.error(`Dispatch failed for all jobs:\n${failedItems}`)
       } else {
-        toast.warning(`${data.success_count} job(s) dispatched, ${data.failed_count} failed.`)
         const failedIds = data.results.filter((r: any) => !r.success).map((r: any) => r.job_id)
+        const failedNames = data.results
+          .filter((r: any) => !r.success)
+          .map((r: any) => `Job #${r.job_id}${r.job_name ? ` (${r.job_name})` : ''}`)
+          .join(', ')
+        toast.warning(
+          `${data.success_count} job(s) dispatched, ${data.failed_count} failed. Failed: ${failedNames}`
+        )
         setSelectedJobIds(failedIds)
       }
       fetchJobs()
@@ -2707,16 +2716,49 @@ export function BodInternalPage() {
                     Are you sure you want to dispatch <span className="font-bold text-emerald-600 dark:text-emerald-400">{confirmDispatchModal.jobIds?.length} selected job(s)</span> to the Books on Demand FTP server?
                   </p>
                 )}
-                <div className="bg-muted/15 border border-border/50 rounded-lg p-3 text-[11px] text-muted space-y-1">
-                  <div className="flex items-center gap-1.5 text-foreground font-semibold">
-                    <CheckCircle2 size={13} className="text-emerald-500" /> Deliverables packaged:
-                  </div>
-                  <ul className="list-disc list-inside pl-1 text-[11px] space-y-0.5 text-muted-foreground">
-                    <li>Validated EPUB file</li>
-                    <li>history.csv (with WCAG Conformance Level)</li>
-                    <li>QC verification reports (ACE & EPUBCheck)</li>
-                  </ul>
-                </div>
+
+                {(() => {
+                  const targetJob = confirmDispatchModal.type === 'single'
+                    ? jobs.find(j => j.id === confirmDispatchModal.jobId)
+                    : null;
+                  const hasEpub = targetJob ? Boolean(targetJob.has_epub || targetJob.epub_filepath) : true;
+                  const hasHistory = targetJob ? Boolean(targetJob.has_history_csv) : true;
+                  const hasAce = targetJob ? Boolean(targetJob.has_ace || targetJob.ace_report_filepath) : true;
+                  const hasEpubcheck = targetJob ? Boolean(targetJob.has_epubcheck || targetJob.epubcheck_report_filepath) : true;
+                  const isReady = hasEpub && hasHistory && hasAce && hasEpubcheck;
+
+                  return (
+                    <div className="bg-muted/15 border border-border/50 rounded-lg p-3 text-[11px] text-muted space-y-1.5">
+                      <div className="flex items-center justify-between text-foreground font-semibold">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 size={13} className={isReady ? "text-emerald-500" : "text-amber-500"} />
+                          Deliverables status:
+                        </span>
+                        {!isReady && (
+                          <span className="text-[10px] text-rose-500 font-bold">Missing QC deliverables</span>
+                        )}
+                      </div>
+                      <ul className="space-y-1 pl-1 text-[11px]">
+                        <li className="flex items-center gap-1.5">
+                          {hasEpub ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasEpub ? "text-foreground" : "text-rose-500 font-medium"}>Validated EPUB file</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasHistory ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasHistory ? "text-foreground" : "text-rose-500 font-medium"}>history.csv (with WCAG Conformance Level)</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasAce ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasAce ? "text-foreground" : "text-rose-500 font-medium"}>ACE Accessibility report</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasEpubcheck ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasEpubcheck ? "text-foreground" : "text-rose-500 font-medium"}>EPUBCheck validation log</span>
+                        </li>
+                      </ul>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="pt-2 flex items-center justify-between gap-2.5 border-t border-border/60">
