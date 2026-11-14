@@ -56,6 +56,7 @@ import { isAdvisoryIdentity, isSentenceAdvisory } from '@/features/language_edit
 import { displayCategoryFor } from '@/features/language_edit/findingLabel'
 import { SaveRegexAsRuleDialog, type RegexDraft } from '@/features/language_edit/SaveRegexAsRuleDialog'
 import { buildAbbreviationGroups, isDisplayableGroup, type AbbreviationGroup } from '@/features/language_edit/abbreviationGroups'
+import { referenceHighlightKey } from '@/features/editor/ReferenceHighlight'
 import { AbbreviationGroupCard } from '@/features/language_edit/AbbreviationGroupCard'
 import { computeCategoryWorkflow, isInclusiveFinding, type UnlockCategory } from '@/features/language_edit/categoryWorkflow'
 
@@ -160,6 +161,56 @@ function parseTermMeta(message: string): { listName: string | null; alsoIn: stri
   const listName = m[1]?.trim() || null
   const alsoIn = m[2] ? m[2].split(',').map(s => s.trim()).filter(Boolean) : []
   return { listName, alsoIn }
+}
+
+// Walk up from ``el`` and return the first ancestor that actually
+// scrolls vertically. Used to centre a text range inside the editor's
+// own scroll pane rather than scrolling the page body.
+function findScrollableAncestor(el: HTMLElement | null): HTMLElement | null {
+  let node: HTMLElement | null = el?.parentElement ?? null
+  while (node) {
+    const s = getComputedStyle(node)
+    if (
+      (s.overflowY === 'auto' || s.overflowY === 'scroll') &&
+      node.scrollHeight > node.clientHeight
+    ) {
+      return node
+    }
+    node = node.parentElement
+  }
+  return null
+}
+
+// Scroll the editor's scrollable ancestor so ``rect`` (viewport-space
+// coords from getBoundingClientRect/getClientRects) sits in the
+// vertical centre of the visible area, with the scroller's sticky
+// toolbar excluded from the visible region. No DOM mutation — no
+// highlight, selection, or decoration is applied; the target simply
+// becomes visible, mimicking Word's Find navigation.
+function scrollRectIntoEditorCenter(editorDom: HTMLElement, rect: DOMRect): void {
+  const scroller = findScrollableAncestor(editorDom)
+  if (!scroller) {
+    // No internal scroll pane — fall back to window-level scroll.
+    const docEl = document.documentElement
+    const toolbarH = (document.querySelector('.sticky.top-0') as HTMLElement | null)?.offsetHeight ?? 0
+    const visibleH = window.innerHeight - toolbarH
+    const rectCenterAbs = rect.top + window.scrollY + rect.height / 2
+    const target = rectCenterAbs - toolbarH - visibleH / 2
+    window.scrollTo({ top: Math.max(0, Math.min(target, docEl.scrollHeight)), behavior: 'smooth' })
+    return
+  }
+  const stickyToolbar = scroller.querySelector(':scope > .sticky') as HTMLElement | null
+  const toolbarH = stickyToolbar?.offsetHeight ?? 0
+  const scRect = scroller.getBoundingClientRect()
+  const rectCenterInScroller =
+    rect.top - scRect.top + scroller.scrollTop + rect.height / 2
+  const visibleH = scRect.height - toolbarH
+  const target = rectCenterInScroller - toolbarH - visibleH / 2
+  const max = scroller.scrollHeight - scroller.clientHeight
+  scroller.scrollTo({
+    top: Math.max(0, Math.min(target, max)),
+    behavior: 'smooth',
+  })
 }
 
 interface JobData {
@@ -1082,12 +1133,18 @@ export function LanguageReviewPage() {
   const focusOccurrenceInEditor = useCallback((findingId: number) => {
     const occIdx = findings.findIndex(ff => ff.id === findingId)
     if (occIdx < 0) return
+    // Clicking a finding supersedes the "First Definition · Reference"
+    // highlight — the user is moving focus to a real finding row.
+    const ed: any = editorRef.current?.editor
+    if (ed && !ed.isDestroyed) {
+      ed.view.dispatch(ed.state.tr.setMeta(referenceHighlightKey, null))
+    }
     const tryScroll = () => {
       const editorDom = (editorRef.current?.editor as any)?.view?.dom as HTMLElement | undefined
       if (!editorDom) return false
       const el = editorDom.querySelector<HTMLElement>(`[data-occ-index="${occIdx}"]`)
       if (!el) return false
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      scrollRectIntoEditorCenter(editorDom, el.getBoundingClientRect())
       return true
     }
     // Two RAFs: first lets React commit, second lets ProseMirror re-render decorations.
@@ -1097,52 +1154,93 @@ export function LanguageReviewPage() {
     })
   }, [findings])
 
-  // Scroll the editor to a DOCX paragraph / character position. Used
-  // by the AB04 "First Definition" reference rows — those don't map
-  // to a finding id, so ``focusOccurrenceInEditor`` can't be used.
-  // Instead we walk the TipTap doc for a block whose ``paraIdx``
-  // attribute matches the target DOCX para, compute the matching
-  // ProseMirror position, and scroll its DOM node into view.
-  // ``startOffset`` is optional; when provided it's added to the
-  // block's start position to home in on the exact character range
-  // (improves accuracy on long paragraphs).
-  const scrollEditorToParaIndex = useCallback((paraIndex: number, startOffset?: number) => {
-    const ed: any = editorRef.current?.editor
-    if (!ed || ed.isDestroyed) return
-    const doc = ed.state.doc
-    let targetPos: number | null = null
-    doc.descendants((node: any, pos: number) => {
-      if (targetPos !== null) return false
-      if (
-        node.isBlock &&
-        (node.type.name === 'paragraph' || node.type.name.startsWith('heading'))
-      ) {
-        const raw = node.attrs?.paraIdx
-        const pi = raw != null ? parseInt(String(raw), 10) : NaN
-        if (Number.isFinite(pi) && pi === paraIndex) {
-          const offsetInBlock = Math.max(
-            0,
-            Math.min(node.content.size, startOffset ?? 0),
-          )
-          targetPos = pos + 1 + offsetInBlock
-          return false
+  // Scroll the editor to a DOCX paragraph / character range. Used by
+  // the AB04 "First Definition" reference rows, which carry no finding
+  // id (so ``focusOccurrenceInEditor`` can't be used). We walk the
+  // TipTap doc for a block whose ``paraIdx`` attribute matches the
+  // DOCX para, resolve ProseMirror positions for ``[startOffset,
+  // endOffset)``, build a DOM Range spanning that exact text, and
+  // centre its bounding rect in the editor's scroll container —
+  // emulating Word's Find navigation. No highlight, selection, or
+  // decoration is applied.
+  const scrollEditorToParaIndex = useCallback(
+    (paraIndex: number, startOffset?: number, endOffset?: number) => {
+      const ed: any = editorRef.current?.editor
+      if (!ed || ed.isDestroyed) return
+      const doc = ed.state.doc
+      let blockPos: number | null = null
+      let blockSize = 0
+      doc.descendants((node: any, pos: number) => {
+        if (blockPos !== null) return false
+        if (
+          node.isBlock &&
+          (node.type.name === 'paragraph' || node.type.name.startsWith('heading'))
+        ) {
+          const raw = node.attrs?.paraIdx
+          const pi = raw != null ? parseInt(String(raw), 10) : NaN
+          if (Number.isFinite(pi) && pi === paraIndex) {
+            blockPos = pos
+            blockSize = node.content.size
+            return false
+          }
         }
+        return true
+      })
+      if (blockPos === null) return
+
+      const clampedStart = Math.max(0, Math.min(blockSize, startOffset ?? 0))
+      const clampedEnd =
+        endOffset != null
+          ? Math.max(clampedStart, Math.min(blockSize, endOffset))
+          : clampedStart
+      const fromPos = blockPos + 1 + clampedStart
+      const toPos = blockPos + 1 + clampedEnd
+      const editorDom = ed.view.dom as HTMLElement
+
+      // Paint the reference range with the same visual as a selected
+      // finding (green outline + fill) so clicking the "First Definition
+      // · Reference" row surfaces the exact phrase exactly like clicking
+      // a Repeated Definition row does. ``null`` signals "no target"
+      // and is used by focusOccurrenceInEditor to clear it.
+      if (clampedEnd > clampedStart) {
+        ed.view.dispatch(
+          ed.state.tr.setMeta(referenceHighlightKey, {
+            paraIndex,
+            startOffset: clampedStart,
+            endOffset: clampedEnd,
+          }),
+        )
+      } else {
+        ed.view.dispatch(ed.state.tr.setMeta(referenceHighlightKey, null))
       }
-      return true
-    })
-    if (targetPos === null) return
-    try {
-      const info = ed.view.domAtPos(targetPos)
-      const el: Element | null =
-        info?.node?.nodeType === Node.TEXT_NODE
-          ? info.node.parentElement
-          : (info?.node as Element)
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    } catch {
-      // Positions can briefly fall outside the mapped doc during
-      // re-renders; swallow and try again later if needed.
-    }
-  }, [])
+
+      try {
+        if (clampedEnd > clampedStart) {
+          const fromInfo = ed.view.domAtPos(fromPos)
+          const toInfo = ed.view.domAtPos(toPos)
+          const range = document.createRange()
+          range.setStart(fromInfo.node, fromInfo.offset)
+          range.setEnd(toInfo.node, toInfo.offset)
+          const rects = range.getClientRects()
+          const rect = rects.length > 0 ? rects[0] : range.getBoundingClientRect()
+          if (rect && (rect.width > 0 || rect.height > 0)) {
+            scrollRectIntoEditorCenter(editorDom, rect)
+            return
+          }
+        }
+        const info = ed.view.domAtPos(fromPos)
+        const el: Element | null =
+          info?.node?.nodeType === Node.TEXT_NODE
+            ? info.node.parentElement
+            : (info?.node as Element)
+        if (el) scrollRectIntoEditorCenter(editorDom, el.getBoundingClientRect())
+      } catch {
+        // Positions can briefly fall outside the mapped doc during
+        // re-renders; swallow and let the next click retry.
+      }
+    },
+    [],
+  )
 
   // Close inline popover: clear state + input.
   const closeInlinePopover = useCallback(() => {

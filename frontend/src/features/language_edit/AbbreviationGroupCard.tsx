@@ -61,7 +61,7 @@ export interface AbbreviationGroupCardProps {
    *  Called when the reviewer clicks the "First Definition · Reference"
    *  row at the top of the card. Falls through silently when no
    *  handler is wired (older tests / callers). */
-  onJumpToDocPosition?: (paraIndex: number, startOffset?: number) => void
+  onJumpToDocPosition?: (paraIndex: number, startOffset?: number, endOffset?: number) => void
 }
 
 const STATUS_CHIPS: Record<DecideStatus | 'pending', { label: string; cls: string } | null> = {
@@ -234,9 +234,16 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
           {referenceOccurrence ? (() => {
             const ref = referenceOccurrence
             const canJump = !!onJumpToDocPosition
+            // Backend may omit ``end_offset`` on the first_definition
+            // payload; fall back to ``start_offset + text.length`` so
+            // the editor can still highlight the exact phrase span.
+            const refEndOffset =
+              (ref.end_offset != null && ref.end_offset > ref.start_offset)
+                ? ref.end_offset
+                : ref.start_offset + (ref.text?.length ?? 0)
             const jump = (e: React.MouseEvent | React.KeyboardEvent) => {
               e.stopPropagation()
-              onJumpToDocPosition?.(ref.para_index, ref.start_offset)
+              onJumpToDocPosition?.(ref.para_index, ref.start_offset, refEndOffset)
             }
             return (
               <li
