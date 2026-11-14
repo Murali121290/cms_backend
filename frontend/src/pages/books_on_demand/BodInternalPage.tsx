@@ -533,7 +533,8 @@ export function BodInternalPage() {
     )
   }
 
-  const hasBaseFiltersActive = searchQuery.trim() !== '' || assigneeFilter !== 'all' || isDateFilterActive
+  const effectiveAssigneeFilter = colFilters.assignee !== 'all' ? colFilters.assignee : assigneeFilter
+  const hasBaseFiltersActive = searchQuery.trim() !== '' || effectiveAssigneeFilter !== 'all' || isDateFilterActive
 
   // Base jobs filtered by base filters (Search, Assignee, Date)
   // When 'fastrack' card filter is selected, date filtering is bypassed because Fastrack is independent of the date filter
@@ -544,8 +545,8 @@ export function BodInternalPage() {
       || (j.client_name && j.client_name.toLowerCase().includes(query))
 
     const currentAssignee = j.current_assignee || null
-    const matchesAssignee = assigneeFilter === 'all'
-      || (assigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === assigneeFilter)
+    const matchesAssignee = effectiveAssigneeFilter === 'all'
+      || (effectiveAssigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === effectiveAssigneeFilter)
 
     const matchesDate = cardFilter === 'fastrack' ? true : matchesDateFilter(j)
 
