@@ -860,7 +860,7 @@ export function BodInternalJobPage() {
                     <div className="relative">
                       <input
                         type="file"
-                        accept=".jpg,.jpeg,.png,.tif,.tiff"
+                        accept=".jpg,.jpeg"
                         onChange={uploadCover}
                         disabled={isUploadingCover}
                         className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
@@ -882,7 +882,7 @@ export function BodInternalJobPage() {
                 <div className="relative">
                   <input
                     type="file"
-                    accept=".jpg,.jpeg,.png,.tif,.tiff"
+                    accept=".jpg,.jpeg"
                     onChange={uploadCover}
                     disabled={isUploadingCover}
                     className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"

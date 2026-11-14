@@ -1482,7 +1482,7 @@ def upload_cover(
         raise HTTPException(status_code=404, detail="Job not found")
 
     ext = os.path.splitext(file.filename or "")[1].lower()
-    allowed_exts = ('.jpg', '.jpeg', '.png', '.tif', '.tiff')
+    allowed_exts = ('.jpg', '.jpeg')
     if ext not in allowed_exts:
         raise HTTPException(status_code=400, detail=f"Cover file must be an image ({', '.join(allowed_exts)})")
 
@@ -1626,7 +1626,7 @@ def create_job(
     cover_filepath = None
     if cover_file and cover_file.filename:
         c_ext = os.path.splitext(cover_file.filename)[1].lower()
-        if c_ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff'):
+        if c_ext in ('.jpg', '.jpeg'):
             cover_filename = cover_file.filename
             cover_filepath = os.path.join(project_dir, cover_filename)
             with open(cover_filepath, "wb") as c_buf:

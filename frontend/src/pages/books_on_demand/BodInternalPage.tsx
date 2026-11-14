@@ -2623,19 +2623,19 @@ export function BodInternalPage() {
 
                 <div>
                   <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
-                    Cover Image <span className="text-muted/60 normal-case font-normal">(Optional — .jpg, .png)</span>
+                    Cover Image <span className="text-muted/60 normal-case font-normal">(Optional — .jpg, .jpeg)</span>
                   </label>
                   <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-3 text-center cursor-pointer transition-colors bg-background/50">
                     <input
                       type="file"
-                      accept=".jpg,.jpeg,.png,.tif,.tiff"
+                      accept=".jpg,.jpeg"
                       onChange={e => e.target.files && setCoverFile(e.target.files[0])}
                       className="hidden"
                       id="cover-upload"
                     />
                     <label htmlFor="cover-upload" className="cursor-pointer space-y-1 block">
                       <p className="text-xs font-semibold text-text">Click to choose Cover Image</p>
-                      <p className="text-[9px] text-muted">Supports JPG, PNG, TIFF</p>
+                      <p className="text-[9px] text-muted">Supports JPG, JPEG</p>
                     </label>
                   </div>
                   {coverFile && (
