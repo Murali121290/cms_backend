@@ -30,13 +30,15 @@ def generate_bod_history_csv(job, target_dir: str) -> str:
     Project,Status,Format,Layout,User,Correction Type,Correction Request,File Size,Conformity level WCAG,Level of Complexity,Non-Accessible Elements,Primary Content Type,Content Type
     {eisbn},y,ePub all,Reflowable,,,,{file_size},A,simple,n,textual,textual visual
     """
-    eisbn = ""
-    for candidate in (getattr(job, "pdf_filename", None), getattr(job, "epub_filename", None), getattr(job, "project_name", None)):
-        if candidate:
-            m_isbn = re.search(r'(\d{10,13})', str(candidate))
-            if m_isbn:
-                eisbn = m_isbn.group(1)
-                break
+    # Primary source: bod_jobs.eisbn
+    eisbn = (getattr(job, "eisbn", None) or "").strip()
+    if not eisbn:
+        for candidate in (getattr(job, "pdf_filename", None), getattr(job, "epub_filename", None), getattr(job, "project_name", None)):
+            if candidate:
+                m_isbn = re.search(r'(\d{10,13})', str(candidate))
+                if m_isbn:
+                    eisbn = m_isbn.group(1)
+                    break
 
     if not eisbn:
         if getattr(job, "project_name", None):
