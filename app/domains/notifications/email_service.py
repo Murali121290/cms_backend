@@ -249,6 +249,46 @@ S4Carlisle Inkflow Automated System
     send_email(manager_email, subject, text_body, html_body)
 
 
+def send_bod_ready_to_dispatch_email(manager_email: str, project_name: str, epub_filename: str):
+    subject = f"Books on Demand - Ready to Dispatch [{project_name}]"
+    
+    text_body = f"""Hello,
+
+The Books on Demand project has completed Quality Control (QC) and is now moved to Ready to Dispatch.
+
+Project Details:
+- Project Name: {project_name}
+- EPUB File: {epub_filename}
+
+This job has been automatically assigned to you for final package inspection and FTP dispatch.
+
+Best regards,
+S4Carlisle Inkflow Automated System
+"""
+
+    html_body = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #2c3e50;">Project Ready to Dispatch</h2>
+        <p>Hello,</p>
+        <p>The Books on Demand project has completed Quality Control (QC) and has moved to <strong>Ready to Dispatch</strong>.</p>
+        
+        <div style="background-color: #f8f9fa; border-left: 4px solid #10b981; padding: 15px; margin: 20px 0;">
+            <p style="margin: 0 0 10px 0;"><strong>Project Name:</strong> {project_name}</p>
+            <p style="margin: 0;"><strong>EPUB File:</strong> {epub_filename}</p>
+        </div>
+        
+        <p>This job has been automatically assigned to you for final package inspection and FTP dispatch.</p>
+        
+        <hr style="border: none; border-top: 1px solid #eaeaea; margin: 30px 0 20px 0;">
+        <p style="font-size: 12px; color: #777; margin: 0;">Best regards,<br><strong>S4Carlisle Inkflow Automated System</strong></p>
+      </body>
+    </html>
+    """
+    send_email(manager_email, subject, text_body, html_body)
+
+
+
 def send_bod_fastrack_alert_email(
     manager_email: str,
     project_name: str,

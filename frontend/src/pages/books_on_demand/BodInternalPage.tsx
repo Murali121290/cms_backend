@@ -29,6 +29,7 @@ export function BodInternalPage() {
   // Form states
   const [showAddJobModal, setShowAddJobModal] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [coverFile, setCoverFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
@@ -74,6 +75,14 @@ export function BodInternalPage() {
 
   // Delete Modal states
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null)
+
+  // Dispatch Confirmation Modal states
+  const [confirmDispatchModal, setConfirmDispatchModal] = useState<{
+    type: 'single' | 'bulk';
+    jobId?: number;
+    jobName?: string;
+    jobIds?: number[];
+  } | null>(null)
 
   // Edit Due Date Modal states
   const [showEditDueDateModal, setShowEditDueDateModal] = useState<any>(null)
@@ -133,6 +142,9 @@ export function BodInternalPage() {
     setErrorMsg(null)
     const formData = new FormData()
     formData.append('file', pdfFile)
+    if (coverFile) {
+      formData.append('cover_file', coverFile)
+    }
 
     try {
       await api.post('/bod/jobs', formData, {
@@ -141,6 +153,7 @@ export function BodInternalPage() {
       toast.success("Job created successfully")
 
       setPdfFile(null)
+      setCoverFile(null)
       setShowAddJobModal(false)
       fetchJobs()
     } catch (err: any) {
@@ -525,7 +538,8 @@ export function BodInternalPage() {
     )
   }
 
-  const hasBaseFiltersActive = searchQuery.trim() !== '' || assigneeFilter !== 'all' || isDateFilterActive
+  const effectiveAssigneeFilter = colFilters.assignee !== 'all' ? colFilters.assignee : assigneeFilter
+  const hasBaseFiltersActive = searchQuery.trim() !== '' || effectiveAssigneeFilter !== 'all' || isDateFilterActive
 
   // Base jobs filtered by base filters (Search, Assignee, Date)
   // When 'fastrack' card filter is selected, date filtering is bypassed because Fastrack is independent of the date filter
@@ -536,8 +550,8 @@ export function BodInternalPage() {
       || (j.client_name && j.client_name.toLowerCase().includes(query))
 
     const currentAssignee = j.current_assignee || null
-    const matchesAssignee = assigneeFilter === 'all'
-      || (assigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === assigneeFilter)
+    const matchesAssignee = effectiveAssigneeFilter === 'all'
+      || (effectiveAssigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === effectiveAssigneeFilter)
 
     const matchesDate = cardFilter === 'fastrack' ? true : matchesDateFilter(j)
 
@@ -665,6 +679,35 @@ export function BodInternalPage() {
       fetchJobs()
     } catch (err) {
       toast.error("Failed to download PDF")
+    }
+  }
+
+  // Download dispatch package (ZIP containing EPUB, history.csv, ACE, EPUBCheck)
+  const handleDownloadDispatchPackage = async (e: React.MouseEvent | null, jobId: number, filename?: string) => {
+    if (e) e.stopPropagation()
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-dispatch-package`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      const dlName = filename ? (filename.endsWith('.zip') ? filename : `${filename.replace(/\.[^/.]+$/, "")}.zip`) : `deliverable_${jobId}.zip`
+      link.setAttribute('download', dlName)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+      toast.success("Dispatch package downloaded successfully!")
+    } catch (err: any) {
+      let errMsg = "Failed to download dispatch package"
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text()
+          const json = JSON.parse(text)
+          if (json.detail) errMsg = json.detail
+        } catch (_) {}
+      } else if (err.response?.data?.detail) {
+        errMsg = err.response.data.detail
+      }
+      toast.error(errMsg)
     }
   }
 
@@ -1026,8 +1069,8 @@ export function BodInternalPage() {
     setSortDirection('asc')
   }
 
-  // Jobs eligible for dispatch in the currently filtered list
-  const dispatchableJobs = filteredJobs.filter(j => j.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(j))
+  // Jobs eligible for dispatch in the currently filtered list (must be in Ready to Dispatch, not completed, and have completed QC deliverables)
+  const dispatchableJobs = filteredJobs.filter(j => j.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(j) && (j.is_dispatchable !== false))
   const allDispatchableSelected = dispatchableJobs.length > 0 && dispatchableJobs.every(j => selectedJobIds.includes(j.id))
 
   const toggleSelectAllDispatchable = () => {
@@ -1044,8 +1087,17 @@ export function BodInternalPage() {
     )
   }
 
-  const handleSingleDispatch = async (e: React.MouseEvent, jobId: number) => {
+  const handleSingleDispatch = async (e: React.MouseEvent, jobId: number, jobName?: string) => {
     e.stopPropagation()
+    setConfirmDispatchModal({
+      type: 'single',
+      jobId,
+      jobName: jobName || `Job #${jobId}`
+    })
+  }
+
+  const executeSingleDispatch = async (jobId: number) => {
+    setConfirmDispatchModal(null)
     setDispatchingJobId(jobId)
     try {
       await api.post(`/bod/jobs/${jobId}/dispatch`, {
@@ -1063,21 +1115,38 @@ export function BodInternalPage() {
 
   const handleBulkDispatch = async () => {
     if (selectedJobIds.length === 0) return
+    setConfirmDispatchModal({
+      type: 'bulk',
+      jobIds: [...selectedJobIds]
+    })
+  }
+
+  const executeBulkDispatch = async (jobIds: number[]) => {
+    setConfirmDispatchModal(null)
     setIsBulkDispatching(true)
     try {
       const { data } = await api.post('/bod/jobs/bulk-dispatch', {
-        job_ids: selectedJobIds,
+        job_ids: jobIds,
         dispatched_by: viewer?.username || undefined
       })
       if (data.failed_count === 0) {
         toast.success(`All ${data.success_count} job(s) dispatched successfully to FTP!`)
         setSelectedJobIds([])
       } else if (data.success_count === 0) {
-        const errorDetails = data.results.filter((r: any) => !r.success).map((r: any) => `${r.job_name || r.job_id}: ${r.error}`).join('; ')
-        toast.error(`Dispatch failed: ${errorDetails}`)
+        const failedItems = data.results
+          .filter((r: any) => !r.success)
+          .map((r: any) => `Job #${r.job_id}${r.job_name ? ` (${r.job_name})` : ''}: ${r.error}`)
+          .join('\n')
+        toast.error(`Dispatch failed for all jobs:\n${failedItems}`)
       } else {
-        toast.warning(`${data.success_count} job(s) dispatched, ${data.failed_count} failed.`)
         const failedIds = data.results.filter((r: any) => !r.success).map((r: any) => r.job_id)
+        const failedNames = data.results
+          .filter((r: any) => !r.success)
+          .map((r: any) => `Job #${r.job_id}${r.job_name ? ` (${r.job_name})` : ''}`)
+          .join(', ')
+        toast.warning(
+          `${data.success_count} job(s) dispatched, ${data.failed_count} failed. Failed: ${failedNames}`
+        )
         setSelectedJobIds(failedIds)
       }
       fetchJobs()
@@ -2218,18 +2287,27 @@ export function BodInternalPage() {
                           <td className="px-1 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-center gap-1">
                               {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
-                                <button
-                                  onClick={(e) => handleSingleDispatch(e, job.id)}
-                                  disabled={dispatchingJobId === job.id}
-                                  className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
-                                  title="Dispatch & Deliver to FTP"
-                                >
-                                  {dispatchingJobId === job.id ? (
-                                    <Loader2 size={15} className="animate-spin text-emerald-600" />
-                                  ) : (
-                                    <Send size={15} />
-                                  )}
-                                </button>
+                                <>
+                                  <button
+                                    onClick={(e) => handleSingleDispatch(e, job.id, job.project_name || job.pdf_filename)}
+                                    disabled={dispatchingJobId === job.id}
+                                    className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                                    title="Dispatch & Deliver to FTP"
+                                  >
+                                    {dispatchingJobId === job.id ? (
+                                      <Loader2 size={15} className="animate-spin text-emerald-600" />
+                                    ) : (
+                                      <Send size={15} />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDownloadDispatchPackage(e, job.id, job.project_name || job.pdf_filename)}
+                                    className="p-1 text-muted hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                                    title="Download Deliverables Package (.zip)"
+                                  >
+                                    <Download size={15} />
+                                  </button>
+                                </>
                               )}
                               <button
                                 onClick={(e) => {
@@ -2328,7 +2406,7 @@ export function BodInternalPage() {
                       <div className="flex items-center gap-1 shrink-0">
                         {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
                           <button
-                            onClick={(e) => handleSingleDispatch(e, job.id)}
+                            onClick={(e) => handleSingleDispatch(e, job.id, job.project_name || job.pdf_filename)}
                             disabled={dispatchingJobId === job.id}
                             className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
                             title="Dispatch & Deliver to FTP"
@@ -2543,6 +2621,37 @@ export function BodInternalPage() {
                   )}
                 </div>
 
+                <div>
+                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                    Cover Image <span className="text-muted/60 normal-case font-normal">(Optional — .jpg, .jpeg)</span>
+                  </label>
+                  <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-3 text-center cursor-pointer transition-colors bg-background/50">
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg"
+                      onChange={e => e.target.files && setCoverFile(e.target.files[0])}
+                      className="hidden"
+                      id="cover-upload"
+                    />
+                    <label htmlFor="cover-upload" className="cursor-pointer space-y-1 block">
+                      <p className="text-xs font-semibold text-text">Click to choose Cover Image</p>
+                      <p className="text-[9px] text-muted">Supports JPG, JPEG</p>
+                    </label>
+                  </div>
+                  {coverFile && (
+                    <div className="mt-2 bg-background border border-border rounded-lg p-2 text-xs text-muted flex items-center justify-between">
+                      <span className="truncate max-w-[280px] font-medium text-emerald-600 dark:text-emerald-400">{coverFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setCoverFile(null)}
+                        className="text-red-600 hover:text-red-500 font-bold text-[10px]"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="pt-2 flex justify-end gap-2.5">
                   <button
                     type="button"
@@ -2605,6 +2714,125 @@ export function BodInternalPage() {
                 >
                   Delete Job
                 </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Dispatch to FTP Confirmation Modal */}
+      {
+        confirmDispatchModal !== null && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+            <div className="bg-card border border-border rounded-xl max-w-md w-full p-5 shadow-2xl space-y-4">
+              <div className="flex justify-between items-start border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <Send size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-text m-0">Confirm FTP Dispatch</h3>
+                    <p className="text-[11px] text-muted m-0 mt-0.5">Package deliverables and upload to FTP server</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setConfirmDispatchModal(null)}
+                  className="text-muted hover:text-text transition-colors p-1"
+                >
+                  <XCircle size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-2 text-xs text-text">
+                {confirmDispatchModal.type === 'single' ? (
+                  <p>
+                    Are you sure you want to dispatch <span className="font-bold text-foreground">{confirmDispatchModal.jobName}</span> to the Books on Demand FTP server?
+                  </p>
+                ) : (
+                  <p>
+                    Are you sure you want to dispatch <span className="font-bold text-emerald-600 dark:text-emerald-400">{confirmDispatchModal.jobIds?.length} selected job(s)</span> to the Books on Demand FTP server?
+                  </p>
+                )}
+
+                {(() => {
+                  const targetJob = confirmDispatchModal.type === 'single'
+                    ? jobs.find(j => j.id === confirmDispatchModal.jobId)
+                    : null;
+                  const hasEpub = targetJob ? Boolean(targetJob.has_epub || targetJob.epub_filepath) : true;
+                  const hasHistory = targetJob ? Boolean(targetJob.has_history_csv) : true;
+                  const hasAce = targetJob ? Boolean(targetJob.has_ace || targetJob.ace_report_filepath) : true;
+                  const hasEpubcheck = targetJob ? Boolean(targetJob.has_epubcheck || targetJob.epubcheck_report_filepath) : true;
+                  const isReady = hasEpub && hasHistory && hasAce && hasEpubcheck;
+
+                  return (
+                    <div className="bg-muted/15 border border-border/50 rounded-lg p-3 text-[11px] text-muted space-y-1.5">
+                      <div className="flex items-center justify-between text-foreground font-semibold">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 size={13} className={isReady ? "text-emerald-500" : "text-amber-500"} />
+                          Deliverables status:
+                        </span>
+                        {!isReady && (
+                          <span className="text-[10px] text-rose-500 font-bold">Missing QC deliverables</span>
+                        )}
+                      </div>
+                      <ul className="space-y-1 pl-1 text-[11px]">
+                        <li className="flex items-center gap-1.5">
+                          {hasEpub ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasEpub ? "text-foreground" : "text-rose-500 font-medium"}>Validated EPUB file</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasHistory ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasHistory ? "text-foreground" : "text-rose-500 font-medium"}>history.csv (with WCAG Conformance Level)</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasAce ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasAce ? "text-foreground" : "text-rose-500 font-medium"}>ACE Accessibility report</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          {hasEpubcheck ? <CheckCircle2 size={12} className="text-emerald-500 shrink-0" /> : <XCircle size={12} className="text-rose-500 shrink-0" />}
+                          <span className={hasEpubcheck ? "text-foreground" : "text-rose-500 font-medium"}>EPUBCheck validation log</span>
+                        </li>
+                      </ul>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-2.5 border-t border-border/60">
+                <div>
+                  {confirmDispatchModal.type === 'single' && confirmDispatchModal.jobId && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadDispatchPackage(null, confirmDispatchModal.jobId!, confirmDispatchModal.jobName)}
+                      className="px-3 py-1.5 bg-secondary text-secondary-foreground hover:bg-secondary/80 font-semibold rounded-lg transition-colors flex items-center gap-1.5 text-xs border border-border/60"
+                      title="Download the complete deliverable ZIP before dispatching"
+                    >
+                      <Download size={13} />
+                      Download Package (.zip)
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setConfirmDispatchModal(null)}
+                    className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirmDispatchModal.type === 'single' && confirmDispatchModal.jobId) {
+                        executeSingleDispatch(confirmDispatchModal.jobId)
+                      } else if (confirmDispatchModal.type === 'bulk' && confirmDispatchModal.jobIds) {
+                        executeBulkDispatch(confirmDispatchModal.jobIds)
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1.5 text-xs shadow-xs"
+                  >
+                    <Send size={13} />
+                    Yes, Dispatch to FTP
+                  </button>
+                </div>
               </div>
             </div>
           </div>
