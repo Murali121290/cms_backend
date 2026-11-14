@@ -8,7 +8,7 @@ Endpoints under /api/v2/:
     POST   /term-lists                                 — create empty list
     GET    /term-lists/{id}                            — details
     PUT    /term-lists/{id}                            — update metadata
-    DELETE /term-lists/{id}                            — soft-delete (is_active=False)
+    DELETE /term-lists/{id}                            — hard-delete (cascades to terms & assignments; detaches findings)
     POST   /term-lists/{id}/import                     — multipart Excel upload, parse & append
     GET    /term-lists/{id}/export.xlsx                — download as Excel
     GET    /term-lists/{id}/terms                      — paginated/search terms
@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.domains.auth.security import get_current_user_from_cookie
 from app.domains.processing.service import check_permission
+from app.domains.processing.language_edit_models import LanguageEditFinding
 from app.domains.term_lists.models import TermList, Term, ProjectTermList
 from app.models import User
 from app.services.term_list_service import (
@@ -238,13 +239,63 @@ def delete_term_list(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_from_cookie),
 ):
+    """Hard-delete the TermList and everything it owns.
+
+    * ``Term`` rows cascade via SQLAlchemy ``all, delete-orphan``.
+    * ``ProjectTermList`` assignment rows cascade likewise.
+    * ``LanguageEditFinding.term_list_id`` is detached via DB ``ON DELETE
+      SET NULL`` — findings remain in the review, just unlinked.
+    * The source Excel on disk (if any) is unlinked — missing file is
+      not an error (idempotent cleanup).
+
+    The ``name``, ``term_count`` and other identifying fields are
+    returned in the response so the caller can show "Deleted '<name>'".
+    """
     _require_term_list_editor(current_user)
     tl = db.query(TermList).filter(TermList.id == term_list_id).first()
     if not tl:
         raise HTTPException(status_code=404, detail=f"Term list {term_list_id} not found.")
-    tl.is_active = False
-    db.commit()
-    return {"ok": True, "id": term_list_id}
+
+    # Snapshot identifying fields before the row is gone — returned to
+    # the client for toast messaging and audit logs.
+    snapshot = {
+        "id": tl.id,
+        "name": tl.name,
+        "term_count": int(tl.term_count or 0),
+        "source_file": tl.source_file,
+    }
+    source_file_path = tl.source_file_path
+
+    try:
+        # Explicit detach first — ``ON DELETE SET NULL`` is declared on
+        # the FK (0051_term_lists.py) but SQLite skips FK enforcement
+        # unless the connection enables ``PRAGMA foreign_keys=ON``, so
+        # we null the column up-front for cross-DB consistency.
+        db.query(LanguageEditFinding).filter(
+            LanguageEditFinding.term_list_id == term_list_id
+        ).update({LanguageEditFinding.term_list_id: None}, synchronize_session=False)
+        db.delete(tl)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error("Term list %s delete failed: %s", term_list_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Delete failed: {exc}")
+
+    # Best-effort on-disk cleanup — only after the DB delete committed so
+    # a mid-request failure never leaves orphaned DB rows pointing at a
+    # missing file. Missing file is fine.
+    if source_file_path:
+        try:
+            os.unlink(source_file_path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning(
+                "Term list %s DB row deleted but source file %s unlink failed: %s",
+                term_list_id, source_file_path, exc,
+            )
+
+    return {"ok": True, "deleted": snapshot}
 
 
 @router.post("/term-lists/{term_list_id}/import")
