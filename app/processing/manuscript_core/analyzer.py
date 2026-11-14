@@ -19,9 +19,19 @@ from manuscript_core.rules.bias_and_articles import (
 from manuscript_core.rules.compounds import run_compound_rules
 from manuscript_core.rules.spelling import run_spelling_rules
 from manuscript_core.rules.te_points import run_te_rules, detect_citations, detect_caption_labels, detect_chart_caption_labels
+from manuscript_core.rules.finding_builder import link_ce
+from manuscript_core.rules.house_style import detect_caption_house_style, document_pass
 
 
 _GENERIC_SUB_RULES = {
+    # Single-token detectors refined by the house-style variant detectors
+    # (US$5, 45 degrees, 25 percentage, 15:30, greater than 5).
+    "currency_symbols", "currency_spelled", "degree_symbol_alone", "degree_spelled",
+    "per_word", "percent_percentage", "cmp_gt_words", "cmp_lt_words", "cmp_more_words",
+    "eponym_style", "pronoun_check", "degree_deg_c", "degree_deg_f", "article_an_a_mismatch",
+    "pos_discussed_above", "pos_discussed_below",
+    "ordinal_st", "ordinal_nd", "ordinal_rd", "ordinal_th",  # "8th ed." is the edition rule's
+    "degree_celsius_spelled", "degree_fahrenheit_spelled",
     "num_single_numeral", "num_single_spelled",
     "num_double_numeral", "num_double_spelled",
     "num_zero_numeral", "num_zero_spelled",
@@ -100,6 +110,7 @@ def _run_all_rules(seg: Segment, include_language: bool = False) -> list[Finding
         findings.extend(detect_citations(seg))
         findings.extend(detect_caption_labels(seg))
         findings.extend(detect_chart_caption_labels(seg))
+        findings.extend(detect_caption_house_style(seg))  # figure parts, source and continued lines
 
     # Skip all analysis (TE and ME rules) for front matter and references sections
     if seg.region in ("front", "references"):
@@ -128,6 +139,7 @@ def _run_all_rules(seg: Segment, include_language: bool = False) -> list[Finding
     findings.extend(run_country_style(seg))
     findings.extend(run_subject_terms(seg))
     findings.extend(run_sic_special(seg))
+    link_ce(findings, seg)  # eponyms, a/an: decided by the stylesheet like TE points
     return resolve_finding_overlaps(findings)
 
 
@@ -222,6 +234,7 @@ def analyze_manuscript(chapters: list[dict], include_language: bool = False) -> 
     # --- Document-level CE checks ---
     all_findings.extend(_duplicate_paragraphs(all_segments))
     _unit_majority_options(all_findings)
+    all_findings.extend(document_pass(all_findings, all_segments))
 
     # --- Aggregate by category -> canonical -> list of findings ---
     by_category: dict[str, dict[str, list[Finding]]] = defaultdict(lambda: defaultdict(list))

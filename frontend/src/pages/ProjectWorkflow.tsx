@@ -364,8 +364,8 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
                     key={u.id}
                     type="button"
                     className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground hover:bg-muted/40'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-muted/40'
                       }`}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -485,8 +485,8 @@ function FilterAssigneeDropdown({
                     key={u}
                     type="button"
                     className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground hover:bg-muted/40'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-muted/40'
                       }`}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -581,8 +581,8 @@ function StageSelectDropdown({
                   key={s}
                   type="button"
                   className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-foreground hover:bg-muted/40'
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-foreground hover:bg-muted/40'
                     }`}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -1701,7 +1701,7 @@ export function ProjectWorkflow() {
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0 shadow-2xs"
             >
               <BookMarked size={13} className="text-primary" />
-              <span>Editorial Standards</span>
+              <span>Editorial Hub</span>
               {activeStylesheet ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />

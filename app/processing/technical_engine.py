@@ -68,8 +68,9 @@ class TechnicalEngine:
                 proj = db.query(models.Project).filter(models.Project.id == project_id).first()
                 if proj:
                     project_name = proj.title or "DefaultProject"
-                    client_name = proj.client_name or (proj.client.name if proj.client else "") or "DefaultClient"
-                    active_ss = stylesheet_service.get_active_stylesheet_for_project(db, project_id=project_id)
+                    client_name = stylesheet_service.project_client_name(proj) or "DefaultClient"
+                    # Active stylesheet; a Springer client without one gets the house-style preset activated.
+                    active_ss = stylesheet_service.ensure_publisher_stylesheet(db, project_id=project_id)
 
             chapters = [
                 {
@@ -85,22 +86,17 @@ class TechnicalEngine:
             findings_dict = analyze_manuscript(chapters)
             findings = findings_dict.get("findings", [])
 
-            # Apply stylesheet or Springer rules to findings so replacements reflect house style
-            from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
-            if active_ss:
-                import json
-                from app.services import stylesheet_service
-                try:
-                    selected_rows = json.loads(active_ss.selected_ia_rows or "[]")
-                except Exception:
-                    selected_rows = []
-                ce_rules = stylesheet_service.stylesheet_ce_rules(active_ss)
-                annotate_with_stylesheet(findings, selected_rows, findings_dict.get("ia_report", {}).get("rule_id_to_ia"), ce_rules=ce_rules)
-            elif "springer" in client_name.lower() or "spr" in client_name.lower():
-                from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
-                spr = get_springer_preset()
-                annotate_with_stylesheet(findings, spr["selected_ia_rows"], findings_dict.get("ia_report", {}).get("rule_id_to_ia"), ce_rules=spr["ce_rules"])
-            
+            # Apply the project's stylesheet: the selected option of each rule is the house style,
+            # every other form becomes a fix (or a highlight for suggest-only rules).
+            from app.services import stylesheet_service as _ss_service
+            findings = _ss_service.apply_stylesheet_to_findings(
+                findings, active_ss,
+                rule_id_to_ia=findings_dict.get("ia_report", {}).get("rule_id_to_ia"),
+                file_path=file_path,
+            )
+            # Compliant findings are already in house style: nothing to fix or highlight.
+            findings = [f for f in findings if f.get("ce_status") not in ("compliant", "off")]
+
             selected_findings = []
             highlight_findings = []
             

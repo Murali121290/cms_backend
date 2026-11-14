@@ -8,8 +8,6 @@ import {
   Minimize2,
   ChevronLeft,
   ChevronRight,
-  PanelLeftClose,
-  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
 } from "lucide-react";
@@ -26,8 +24,6 @@ import {
   WysiwygEditor,
   useEditorSave,
   type Occurrence,
-  OnlyOfficeEditor,
-  OnlyOfficeSidePanel,
   type OnlyOfficeEditorHandle,
 } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -42,13 +38,42 @@ import {
   type CommentRecord,
 } from "@/api/comments";
 import { toast } from "@/store/useToastStore";
-import { useStylesheetsQuery } from "@/features/stylesheets/useStylesheetsQuery";
+import { useStylesheetsQuery, useCeRulesQuery } from "@/features/stylesheets/useStylesheetsQuery";
 
 // Subcomponents
 import { TechnicalReviewHeader } from "@/features/technicalReview/components/TechnicalReviewHeader";
-import { UnifiedFindReplaceSidebar } from "@/features/technicalReview/components/UnifiedFindReplaceSidebar";
+import {
+  UnifiedFindReplaceSidebar,
+  type RightDockTab,
+} from "@/features/technicalReview/components/UnifiedFindReplaceSidebar";
 import { TechnicalApplyConfirmModal } from "@/features/technicalReview/components/TechnicalApplyConfirmModal";
 import { OverviewDashboardTab } from "@/features/technicalReview/components/OverviewDashboardTab";
+
+/**
+ * A house-style error the rule may correct by itself (the backend sets `replacement` only
+ * then). Suggest-only findings carry just `suggestion`; queries and flags carry neither.
+ */
+function isAutoFix(f: any): boolean {
+  if (f.ce_rule_no) return f.ce_status === "error" && Boolean(f.replacement);
+  return Boolean(f.replacement);
+}
+
+function isRedFlag(f: any): boolean {
+  return Boolean(
+    f.ce_rule_no === 125 ||
+      f.category === "red_flag" ||
+      f.rule_id === "red_flag" ||
+      f.severity === "critical"
+  );
+}
+
+function isEponym(f: any): boolean {
+  return Boolean(
+    f.ce_rule_no === 124 ||
+      f.rule_id === "eponyms" ||
+      f.category === "eponym"
+  );
+}
 
 export function TechnicalReviewPage() {
   const navigate = useNavigate();
@@ -72,7 +97,9 @@ export function TechnicalReviewPage() {
       : uiPaths.technicalReview(normalizedProjectId!, normalizedChapterId!, id) + query;
   const backHref = journal
     ? journal.backHref
-    : normalizedProjectId && normalizedChapterId ? uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId) : uiPaths.projects;
+    : normalizedProjectId && normalizedChapterId
+      ? uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)
+      : uiPaths.projects;
   const backLabel = journal ? journal.backLabel : "Back to Chapter";
 
   const [selectedStylesheetId, setSelectedStylesheetId] = useState<number | null>(null);
@@ -80,6 +107,7 @@ export function TechnicalReviewPage() {
 
   const technicalReviewQuery = useTechnicalReviewQuery(editorFileId, selectedStylesheetId);
   const stylesheetsQuery = useStylesheetsQuery(normalizedProjectId);
+  const ceRulesQuery = useCeRulesQuery();
   const technicalApply = useTechnicalApply({
     projectId: normalizedProjectId,
     chapterId: normalizedChapterId,
@@ -87,17 +115,21 @@ export function TechnicalReviewPage() {
   });
   const editorSave = useEditorSave(editorFileId);
 
-  const [viewMode, setViewMode] = useState<"onlyoffice" | "collabora" | "local">("local");
+  const [viewMode] = useState<"onlyoffice" | "collabora" | "local">("local");
   const onlyofficeRef = useRef<OnlyOfficeEditorHandle>(null);
-  const collaboraIframeRef = useRef<HTMLIFrameElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const xhtmlQuery = useFileXhtmlQuery(editorFileId);
 
   const [activeTab, setActiveTab] = useState<"dashboard" | "reviewer">("reviewer");
 
-  // Sidebar collapse states for responsive layout
-  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
+  // Right dock collapse state for responsive layout
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
+
+  // Three display modes: "highlights" | "diff" | "clean"
+  const [displayMode, setDisplayMode] = useState<"highlights" | "diff" | "clean">("highlights");
+
+  // Consolidated Right Dock 4-tab switcher
+  const [rightSidebarTab, setRightSidebarTab] = useState<RightDockTab>("findings");
 
   // Search and filters for occurrences sidebar
   const [searchTerm, setSearchTerm] = useState("");
@@ -112,7 +144,6 @@ export function TechnicalReviewPage() {
   const [selectedOccurrenceIndex, setSelectedOccurrenceIndex] = useState<number>(0);
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set());
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
-  const [rightSidebarTab, setRightSidebarTab] = useState<"findings" | "trackedChanges" | "comments">("findings");
 
   // Comments / Author Queries (AQ) state
   const [comments, setComments] = useState<CommentRecord[]>([]);
@@ -141,6 +172,10 @@ export function TechnicalReviewPage() {
       ? "Technical Review — S4 Carlisle CMS"
       : `Technical Review #${normalizedFileId} — S4 Carlisle CMS`,
   );
+
+  const allRules = useMemo(() => {
+    return ceRulesQuery.data?.rules || [];
+  }, [ceRulesQuery.data]);
 
   const findings = useMemo(() => {
     const raw = technicalReviewQuery.data?.findings ?? [];
@@ -174,7 +209,7 @@ export function TechnicalReviewPage() {
       const commentUuid = `cm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await createComment(editorFileId, commentUuid, textToPost.trim());
 
-      if (selectedEditorText && editorRef.current) {
+      if (selectedEditorText && editorRef.current?.addCommentToSelection) {
         editorRef.current.addCommentToSelection(commentUuid);
       }
 
@@ -220,12 +255,17 @@ export function TechnicalReviewPage() {
       try {
         const parser = new DOMParser();
         const doc = parser.parseFromString(xhtmlQuery.data.content, "text/html");
-        const commentNodes = doc.querySelectorAll("span[data-comment-id], span.comment[data-comment], [data-comment-id]");
+        const commentNodes = doc.querySelectorAll(
+          "span[data-comment-id], span.comment[data-comment], [data-comment-id]"
+        );
         const parsedComments: CommentRecord[] = [];
 
         commentNodes.forEach((el, idx) => {
           const uuid = el.getAttribute("data-comment-id") || `xhtml-cm-${idx}`;
-          const commentText = el.getAttribute("data-comment") || el.getAttribute("title") || "Inline XHTML Comment";
+          const commentText =
+            el.getAttribute("data-comment") ||
+            el.getAttribute("title") ||
+            "Inline XHTML Comment";
           const quotedText = el.textContent?.trim() || "";
 
           parsedComments.push({
@@ -252,22 +292,30 @@ export function TechnicalReviewPage() {
     }
   }, [xhtmlQuery.data?.content, editorFileId]);
 
-  // Auto-select the project's active stylesheet on first data load
+  // The backend already applies the project's active stylesheet, so there is no need to
+  // re-fetch with its id: just open on the Stylesheet tab.
   useEffect(() => {
     if (!hasAutoSelectedStylesheet.current && technicalReviewQuery.data?.active_stylesheet?.id) {
-      setSelectedStylesheetId(technicalReviewQuery.data.active_stylesheet.id);
       setStylesheetFilter("in_stylesheet");
       hasAutoSelectedStylesheet.current = true;
     }
   }, [technicalReviewQuery.data?.active_stylesheet?.id]);
 
-  // Reset applied keys when active file changes (file switch — not page reload)
-  // On page reload for the SAME file, appliedKeys is restored from localStorage below.
+  // A draft is only valid for the rules it was made with: key it by rule-engine version and
+  // the active stylesheet's last change, so edited rules start from fresh defaults.
+  const draftStorageKey = useMemo(() => {
+    if (!editorFileId) return null;
+    const data: any = technicalReviewQuery.data;
+    const engine = data?.engine_version ?? "v0";
+    const ss = data?.active_stylesheet;
+    const ssStamp = ss ? `${ss.id}-${ss.updated_at ?? ""}` : "none";
+    return `tr-draft-${editorFileId}-${engine}-${ssStamp}`;
+  }, [editorFileId, technicalReviewQuery.data]);
 
   // Restore draft + appliedKeys + position from localStorage on first load for this file
   useEffect(() => {
     if (findings.length > 0) {
-      const draftKey = editorFileId ? `tr-draft-${editorFileId}` : null;
+      const draftKey = draftStorageKey;
       let draft: any = null;
       if (draftKey) {
         try {
@@ -281,14 +329,9 @@ export function TechnicalReviewPage() {
         setCheckedIds(draft.checkedIds ?? {});
         setActionTypes(draft.actionTypes ?? {});
         setCustomReplacements(draft.customReplacements ?? {});
-        // Restore which items were already processed inline so the user sees remaining only
         const savedApplied: string[] = Array.isArray(draft.appliedKeys) ? draft.appliedKeys : [];
         setAppliedKeys(new Set(savedApplied));
-        // Restore last selected position so the user resumes from where they stopped.
-        // The appliedKeys filter reduces filteredFindings, so clamp the index safely.
         const savedIdx: number = typeof draft.selectedIndex === "number" ? draft.selectedIndex : 0;
-        // We can't clamp to filteredFindings.length here (not yet recomputed), so just restore
-        // the raw value — the clamping useEffect below will correct it if needed.
         setSelectedOccurrenceIndex(Math.max(0, savedIdx));
       } else {
         const initialChecked: Record<string, boolean> = {};
@@ -297,10 +340,15 @@ export function TechnicalReviewPage() {
 
         findings.forEach((f: any) => {
           const key = `${f.para_index}-${f.match_start}-${f.surface}`;
-          initialChecked[key] = true;
+          // Only house-style errors the rule may auto-correct are pre-selected. Suggestions
+          // (suggest-only rules) show their fix but wait for the editor; queries and flags
+          // are highlights for the editor to decide.
+          initialChecked[key] = isAutoFix(f);
           const isTePoint = f.category === "te_point";
-          initialActions[key] = isTePoint && f.replacement ? "fix" : "highlight";
-          initialCustoms[key] = f.replacement ?? "";
+          const isQueryOrFlag = f.ce_status === "query" || f.ce_status === "flag";
+          const initialRep = f.replacement || f.suggestion || "";
+          initialActions[key] = !isQueryOrFlag && (isTePoint || f.suggestion) && initialRep ? "fix" : "highlight";
+          initialCustoms[key] = initialRep;
         });
 
         setCheckedIds(initialChecked);
@@ -310,12 +358,12 @@ export function TechnicalReviewPage() {
         setSelectedOccurrenceIndex(0);
       }
     }
-  }, [findings, editorFileId]);
+  }, [findings, draftStorageKey]);
 
   // Persist draft + appliedKeys + current position to localStorage on every change
   useEffect(() => {
-    if (!editorFileId || Object.keys(checkedIds).length === 0) return;
-    const draftKey = `tr-draft-${editorFileId}`;
+    if (!draftStorageKey || Object.keys(checkedIds).length === 0) return;
+    const draftKey = draftStorageKey;
     try {
       localStorage.setItem(
         draftKey,
@@ -323,16 +371,14 @@ export function TechnicalReviewPage() {
           checkedIds,
           actionTypes,
           customReplacements,
-          // Persist appliedKeys as array (Set is not JSON-serializable)
           appliedKeys: Array.from(appliedKeys),
-          // Persist current position so the user resumes where they stopped
           selectedIndex: selectedOccurrenceIndex,
         }),
       );
     } catch {
       /* ignore */
     }
-  }, [checkedIds, actionTypes, customReplacements, appliedKeys, selectedOccurrenceIndex, editorFileId]);
+  }, [checkedIds, actionTypes, customReplacements, appliedKeys, selectedOccurrenceIndex, draftStorageKey]);
 
   // Filtered occurrences — exclude already applied items so checklist count reduces
   const filteredFindings = useMemo(() => {
@@ -345,10 +391,20 @@ export function TechnicalReviewPage() {
         f.context.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (f.rule_label || "").toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchesCategory =
-        categoryFilter === "all" ||
-        (categoryFilter === "te_point" && f.category === "te_point") ||
-        (categoryFilter === "mechanical" && f.category !== "te_point");
+      let matchesCategory = true;
+      if (categoryFilter === "redflag") {
+        matchesCategory = isRedFlag(f);
+      } else if (categoryFilter === "eponym") {
+        matchesCategory = isEponym(f);
+      } else if (categoryFilter === "style") {
+        matchesCategory = !isRedFlag(f) && !isEponym(f);
+      } else if (categoryFilter === "in_stylesheet") {
+        matchesCategory = f.in_stylesheet === true;
+      } else if (categoryFilter === "te_point") {
+        matchesCategory = f.category === "te_point";
+      } else if (categoryFilter === "mechanical") {
+        matchesCategory = f.category !== "te_point";
+      }
 
       const matchesStylesheet =
         stylesheetFilter === "all" ||
@@ -365,6 +421,17 @@ export function TechnicalReviewPage() {
     });
   }, [findings, searchTerm, categoryFilter, stylesheetFilter, selectedRuleFilter, appliedKeys]);
 
+  // Findings that can be batch-fixed automatically:
+  // Must NOT be Rule 125 Red Flags (which require author query), must have a replacement or suggestion,
+  // and replacement must be different from current surface text.
+  // Suggest-only findings (replacement null, suggestion set) are never batch auto-fixed.
+  const autoFixableFindings = useMemo(() => {
+    return filteredFindings.filter((f: any) => {
+      const rep = (f.replacement || "").trim();
+      return !isRedFlag(f) && isAutoFix(f) && Boolean(rep) && rep !== f.surface.trim();
+    });
+  }, [filteredFindings]);
+
   // Keep selectedOccurrenceIndex within bounds as items are resolved
   useEffect(() => {
     if (filteredFindings.length > 0 && selectedOccurrenceIndex >= filteredFindings.length) {
@@ -372,10 +439,14 @@ export function TechnicalReviewPage() {
     }
   }, [filteredFindings.length, selectedOccurrenceIndex]);
 
-
   const activeOccurrence = filteredFindings[selectedOccurrenceIndex] || null;
 
+  // Occurrences passed to WYSIWYG editor
+  // If in Clean View mode, suppress all highlight marks to show clean preview
   const editorOccurrences = useMemo(() => {
+    if (displayMode === "clean") {
+      return [];
+    }
     return filteredFindings.map(
       (f: any) =>
         ({
@@ -387,7 +458,7 @@ export function TechnicalReviewPage() {
           in_stylesheet: f.in_stylesheet,
         }) as Occurrence,
     );
-  }, [filteredFindings]);
+  }, [filteredFindings, displayMode]);
 
   // Send navigation command to OnlyOffice when occurrence is selected
   useEffect(() => {
@@ -424,57 +495,6 @@ export function TechnicalReviewPage() {
     };
   }, [queryClient]);
 
-  const categoriesList = useMemo(() => {
-    const cats = new Set<string>();
-    findings.forEach((f: any) => {
-      if (f.category) cats.add(f.category);
-    });
-    return Array.from(cats);
-  }, [findings]);
-
-  // Selection helpers
-  const isAllChecked = useMemo(() => {
-    if (filteredFindings.length === 0) return false;
-    return filteredFindings.every((f: any) => {
-      const key = `${f.para_index}-${f.match_start}-${f.surface}`;
-      return checkedIds[key];
-    });
-  }, [filteredFindings, checkedIds]);
-
-  function handleToggleAll() {
-    const newChecked = { ...checkedIds };
-    filteredFindings.forEach((f: any) => {
-      const key = `${f.para_index}-${f.match_start}-${f.surface}`;
-      newChecked[key] = !isAllChecked;
-    });
-    setCheckedIds(newChecked);
-  }
-
-  function handleToggleSingleCheck(key: string) {
-    setCheckedIds((prev) => ({ ...prev, [key]: !prev[key] }));
-  }
-
-  const reviewedCount = useMemo(() => {
-    return filteredFindings.filter((f: any) => {
-      const key = `${f.para_index}-${f.match_start}-${f.surface}`;
-      return key in actionTypes;
-    }).length;
-  }, [filteredFindings, actionTypes]);
-
-  function handleBatchFixCategory(category: string) {
-    const newActions = { ...actionTypes };
-    const newReplacements = { ...customReplacements };
-    findings
-      .filter((f: any) => f.category === category && f.replacement)
-      .forEach((f: any) => {
-        const key = `${f.para_index}-${f.match_start}-${f.surface}`;
-        newActions[key] = "fix";
-        newReplacements[key] = f.replacement;
-      });
-    setActionTypes(newActions);
-    setCustomReplacements(newReplacements);
-  }
-
   function handleBatchFixRule(ruleId: string, rep: string) {
     const newActions = { ...actionTypes };
     const newReplacements = { ...customReplacements };
@@ -483,8 +503,10 @@ export function TechnicalReviewPage() {
       .filter((f: any) => f.rule_id === ruleId)
       .forEach((f: any) => {
         const key = `${f.para_index}-${f.match_start}-${f.surface}`;
+        const value = rep || f.replacement || f.suggestion;
+        if (!value || value === f.surface) return; // never a no-op "fix"
         newActions[key] = "fix";
-        newReplacements[key] = rep || f.replacement || f.surface;
+        newReplacements[key] = value;
         count++;
       });
     setActionTypes(newActions);
@@ -492,57 +514,128 @@ export function TechnicalReviewPage() {
     toast.success(`Updated ${count} occurrence${count !== 1 ? "s" : ""} to "${rep}"`);
   }
 
-  function handleClearDraft() {
-    if (!editorFileId) return;
-    try {
-      localStorage.removeItem(`tr-draft-${editorFileId}`);
-    } catch {
-      /* ignore */
+  const handleReplaceInEditor = useCallback(
+    (occ: any, rep: string, asTrackChanges: boolean, highlightOnly?: boolean) => {
+      if (!editorRef.current?.replaceOccurrence) return;
+      const key = `${occ.para_index}-${occ.match_start}-${occ.surface}`;
+      if (appliedKeys.has(key)) return; // Already applied — prevent duplicate replacement!
+
+      const ok = editorRef.current.replaceOccurrence(occ, rep, { asTrackChanges, highlightOnly });
+      if (ok) {
+        // 1. Mark as applied so it is removed from active findings and cannot be replaced twice
+        setAppliedKeys((prev) => new Set([...prev, key]));
+
+        // 2. Remove from checkedIds so ready-to-apply count reduces immediately
+        setCheckedIds((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+
+        if (!highlightOnly && rep) {
+          setCustomReplacements((prev) => ({ ...prev, [key]: rep }));
+        }
+        if (asTrackChanges) {
+          setActionTypes((prev) => ({ ...prev, [key]: "fix" }));
+        } else if (highlightOnly) {
+          setActionTypes((prev) => ({ ...prev, [key]: "highlight" }));
+        }
+      }
+    },
+    [appliedKeys]
+  );
+
+  // Quick 1-click Fix for a finding
+  const handleQuickFixFinding = useCallback(
+    (finding: any) => {
+      if (!finding) return;
+      const key = `${finding.para_index}-${finding.match_start}-${finding.surface}`;
+      const rep = customReplacements[key] || finding.replacement || finding.suggestion;
+      if (!rep) {
+        toast.error("No house style replacement specified for this finding.");
+        return;
+      }
+      handleReplaceInEditor(finding, rep, true, false);
+      toast.success(`Applied house style fix: "${rep}"`);
+    },
+    [customReplacements, handleReplaceInEditor]
+  );
+
+  // Batch Auto-Fix All Routine House Style Occurrences
+  const handleBatchAutoFix = useCallback(() => {
+    if (!editorRef.current?.replaceOccurrence) {
+      toast.error("Manuscript editor is not ready for batch auto-fix.");
+      return;
     }
-    const newChecked: Record<string, boolean> = {};
-    const newActions: Record<string, "fix" | "highlight"> = {};
-    const newCustoms: Record<string, string> = {};
-    findings.forEach((f: any) => {
+    if (autoFixableFindings.length === 0) {
+      toast.info("No routine auto-fixable occurrences found in current filter.");
+      return;
+    }
+
+    let appliedCount = 0;
+    const newlyAppliedKeys = new Set(appliedKeys);
+    const newChecked = { ...checkedIds };
+    const newActions = { ...actionTypes };
+    const newCustoms = { ...customReplacements };
+
+    autoFixableFindings.forEach((f: any) => {
       const key = `${f.para_index}-${f.match_start}-${f.surface}`;
-      newChecked[key] = true;
-      const isTePoint = f.category === "te_point";
-      newActions[key] = isTePoint && f.replacement ? "fix" : "highlight";
-      newCustoms[key] = f.replacement ?? "";
+      if (newlyAppliedKeys.has(key)) return;
+
+      const replacement = customReplacements[key] || f.replacement || f.suggestion;
+      if (!replacement) return;
+
+      const ok = editorRef.current.replaceOccurrence(f, replacement, {
+        asTrackChanges: true,
+        highlightOnly: false,
+      });
+
+      if (ok) {
+        newlyAppliedKeys.add(key);
+        delete newChecked[key];
+        newActions[key] = "fix";
+        newCustoms[key] = replacement;
+        appliedCount++;
+      }
     });
+
+    setAppliedKeys(newlyAppliedKeys);
     setCheckedIds(newChecked);
     setActionTypes(newActions);
     setCustomReplacements(newCustoms);
-    // Clear persisted progress so all findings appear fresh
-    setAppliedKeys(new Set());
-  }
 
-  function handleReplaceInEditor(occ: any, rep: string, asTrackChanges: boolean, highlightOnly?: boolean) {
-    if (!editorRef.current?.replaceOccurrence) return;
-    const key = `${occ.para_index}-${occ.match_start}-${occ.surface}`;
-    if (appliedKeys.has(key)) return; // Already applied — prevent duplicate replacement!
+    if (appliedCount > 0) {
+      toast.success(
+        `Batch auto-fixed ${appliedCount} house style occurrence${appliedCount !== 1 ? "s" : ""}!`
+      );
+    } else {
+      toast.info("No occurrences were replaced.");
+    }
+  }, [autoFixableFindings, appliedKeys, checkedIds, actionTypes, customReplacements]);
 
-    const ok = editorRef.current.replaceOccurrence(occ, rep, { asTrackChanges, highlightOnly });
-    if (ok) {
-      // 1. Mark as applied so it is removed from active findings and cannot be replaced twice
-      setAppliedKeys((prev) => new Set([...prev, key]));
-
-      // 2. Remove from checkedIds so ready-to-apply count reduces immediately: 1194 -> 1193 -> ...
-      setCheckedIds((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-
-      if (!highlightOnly && rep) {
-        setCustomReplacements((prev) => ({ ...prev, [key]: rep }));
+  // Save changes directly to DOCX file
+  const handleSaveToDocx = useCallback(async () => {
+    if (editorRef.current?.save) {
+      try {
+        await editorRef.current.save();
+        toast.success("Document saved successfully to DOCX!");
+      } catch (err) {
+        toast.error("Failed to save document.");
       }
-      if (asTrackChanges) {
-        setActionTypes((prev) => ({ ...prev, [key]: "fix" }));
-      } else if (highlightOnly) {
-        setActionTypes((prev) => ({ ...prev, [key]: "highlight" }));
+    } else if (editorRef.current?.getHTML) {
+      try {
+        const html = editorRef.current.getHTML();
+        const res = await editorSave.save(html);
+        if (res && res.file_id && res.file_id !== editorFileId) {
+          setEditorFileId(res.file_id);
+          navigate(technicalPath(res.file_id));
+        }
+        toast.success("Document saved successfully to DOCX!");
+      } catch (err) {
+        toast.error("Failed to save document.");
       }
     }
-  }
+  }, [editorSave, editorFileId, navigate, technicalPath]);
 
   function handleApplySelected() {
     const selectedList: any[] = [];
@@ -555,7 +648,7 @@ export function TechnicalReviewPage() {
           para_index: f.para_index,
           match_start: f.match_start,
           surface: f.surface,
-          replacement: customReplacements[key] || f.replacement || "",
+          replacement: customReplacements[key] || f.replacement || f.suggestion || "",
           source: f.source || "body",
           region: f.region || "body",
           rule_id: f.rule_id,
@@ -590,7 +683,6 @@ export function TechnicalReviewPage() {
       );
       setConfirmApply(false);
 
-      // Immediately remove applied findings from local checklist state so they disappear from find tabs
       const batchAppliedKeys = new Set(
         [...pendingApplyLists.selectedList, ...pendingApplyLists.highlightList].map(
           (item: any) => `${item.para_index}-${item.match_start}-${item.surface}`,
@@ -611,21 +703,10 @@ export function TechnicalReviewPage() {
         batchAppliedKeys.forEach((k) => delete next[k]);
         return next;
       });
-      // Also persist bulk-applied keys so they don't re-appear on next page load
       setAppliedKeys((prev) => new Set([...prev, ...batchAppliedKeys]));
-
-      if (editorFileId) {
-        try {
-          // Don't clear the draft — keep it so remaining progress is preserved
-          // The draft save useEffect will persist the updated appliedKeys automatically
-        } catch {
-          /* ignore */
-        }
-      }
 
       setPendingApplyLists(null);
 
-      // Refetch scan findings and fresh XHTML with track changes / highlights
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["technical-review", editorFileId] }),
         queryClient.invalidateQueries({ queryKey: ["file-xhtml", editorFileId] }),
@@ -633,15 +714,12 @@ export function TechnicalReviewPage() {
 
       if (res && res.new_file_id && res.new_file_id !== editorFileId) {
         setEditorFileId(res.new_file_id);
-        navigate(
-          technicalPath(res.new_file_id),
-        );
+        navigate(technicalPath(res.new_file_id));
       }
     } catch (e) {
       console.error(e);
     }
   }
-
 
   // Keyboard navigation shortcuts
   useEffect(() => {
@@ -747,9 +825,6 @@ export function TechnicalReviewPage() {
   }
 
   const file = technicalReviewQuery.data.file;
-  // Restore dynamic check instead of hardcoded false
-  const onlyoffice_available = technicalReviewQuery.data.onlyoffice_available ?? false;
-  const collabora_url = technicalReviewQuery.data.collabora_url;
   const activeStylesheet = technicalReviewQuery.data.active_stylesheet ?? null;
   const activeStylesheetName =
     stylesheetsQuery.data?.stylesheets.find((s) => s.id === selectedStylesheetId)?.name ||
@@ -760,7 +835,11 @@ export function TechnicalReviewPage() {
     ? `${activeOccurrence.para_index}-${activeOccurrence.match_start}-${activeOccurrence.surface}`
     : "";
 
-  const selectedCount = Object.values(checkedIds).filter(Boolean).length;
+  // Count exactly what "Apply" will post (the checked findings in the current filter)
+  const selectedCount = filteredFindings.filter(
+    (f: any) => checkedIds[`${f.para_index}-${f.match_start}-${f.surface}`],
+  ).length;
+  const isTrackChangesActive = displayMode === "diff" || trackChangesEnabled;
 
   return (
     <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden font-sans">
@@ -769,6 +848,8 @@ export function TechnicalReviewPage() {
         filename={file.filename}
         chapterTitle={journal ? `Journal article #${journal.articleId}` : `Chapter #${normalizedChapterId}`}
         activeStylesheetName={activeStylesheetName}
+        compliantHidden={(technicalReviewQuery.data as any)?.stats?.compliant_hidden ?? 0}
+        stylesheetSource={(technicalReviewQuery.data as any)?.stylesheet_source ?? null}
         activeTab={activeTab}
         reviewedCount={appliedKeys.size}
         totalFindings={findings.length}
@@ -786,6 +867,15 @@ export function TechnicalReviewPage() {
         isFullscreen={isFullscreen}
         onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
         onBack={() => navigate(backHref)}
+        displayMode={displayMode}
+        onDisplayModeChange={setDisplayMode}
+        batchFixCount={autoFixableFindings.length}
+        onBatchFix={handleBatchAutoFix}
+        canSave={true}
+        onSave={handleSaveToDocx}
+        isSaving={editorSave.isPending}
+        onToggleRightSidebar={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
+        rightSidebarCollapsed={rightSidebarCollapsed}
       />
 
       {/* No Stylesheet Alert Banner */}
@@ -795,7 +885,9 @@ export function TechnicalReviewPage() {
           <div className="flex-1">
             <p className="text-xs font-bold text-amber-900">Active Stylesheet Required</p>
             <p className="text-xs text-amber-800 mt-0.5">
-              {journal ? "This journal has no IA rules selected yet. Choose them in" : "This project does not have an active editorial stylesheet. Please configure one in"}{" "}
+              {journal
+                ? "This journal has no IA rules selected yet. Choose them in"
+                : "This project does not have an active editorial stylesheet. Please configure one in"}{" "}
               <Link
                 to={journal ? journal.iaRulesHref : `/projects/${normalizedProjectId}/stylesheets`}
                 className="underline font-bold hover:text-amber-950"
@@ -878,13 +970,11 @@ export function TechnicalReviewPage() {
             editorFileId={editorFileId}
             onOpenVersion={(versionId) => {
               setEditorFileId(versionId);
-              navigate(
-                technicalPath(versionId, "?tab=dashboard"),
-              );
+              navigate(technicalPath(versionId, "?tab=dashboard"));
             }}
           />
         ) : (
-          /* Reviewer Workspace: 2-column layout (Expanded Editor + Single Sidebar) */
+          /* Reviewer Workspace: 2-column layout (Expanded Left/Center Editor + Consolidated Right Dock) */
           <div className="flex-1 min-h-0 flex overflow-hidden">
             {/* Left/Center: Manuscript Document Canvas (Takes Full Space) */}
             <main className="flex-1 flex flex-col min-w-0 bg-slate-100 overflow-hidden relative">
@@ -893,7 +983,17 @@ export function TechnicalReviewPage() {
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    <span>Editor Canvas</span>
+                    <span>Manuscript Canvas</span>
+                    {displayMode === "diff" && (
+                      <span className="px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                        Track Changes (Diff)
+                      </span>
+                    )}
+                    {displayMode === "clean" && (
+                      <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                        Clean View
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -902,11 +1002,12 @@ export function TechnicalReviewPage() {
                   {filteredFindings.length > 0 && (
                     <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-md text-xs">
                       <button
-                        onClick={() =>
-                          setSelectedOccurrenceIndex((i) => Math.max(0, i - 1))
-                        }
+                        onClick={() => {
+                          const newIdx = Math.max(0, selectedOccurrenceIndex - 1);
+                          setSelectedOccurrenceIndex(newIdx);
+                        }}
                         disabled={selectedOccurrenceIndex === 0}
-                        className="p-0.5 hover:bg-slate-200 rounded disabled:opacity-30 text-slate-600 transition-colors"
+                        className="p-0.5 hover:bg-slate-200 rounded disabled:opacity-30 text-slate-600 transition-colors cursor-pointer"
                         title="Previous finding"
                       >
                         <ChevronLeft className="w-3.5 h-3.5" />
@@ -915,13 +1016,12 @@ export function TechnicalReviewPage() {
                         {selectedOccurrenceIndex + 1} / {filteredFindings.length}
                       </span>
                       <button
-                        onClick={() =>
-                          setSelectedOccurrenceIndex((i) =>
-                            Math.min(filteredFindings.length - 1, i + 1),
-                          )
-                        }
+                        onClick={() => {
+                          const newIdx = Math.min(filteredFindings.length - 1, selectedOccurrenceIndex + 1);
+                          setSelectedOccurrenceIndex(newIdx);
+                        }}
                         disabled={selectedOccurrenceIndex >= filteredFindings.length - 1}
-                        className="p-0.5 hover:bg-slate-200 rounded disabled:opacity-30 text-slate-600 transition-colors"
+                        className="p-0.5 hover:bg-slate-200 rounded disabled:opacity-30 text-slate-600 transition-colors cursor-pointer"
                         title="Next finding"
                       >
                         <ChevronRight className="w-3.5 h-3.5" />
@@ -933,11 +1033,11 @@ export function TechnicalReviewPage() {
 
                   <button
                     onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
-                    className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors"
-                    title={rightSidebarCollapsed ? "Expand Inspector" : "Collapse Inspector"}
+                    className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                    title={rightSidebarCollapsed ? "Expand Tools Dock" : "Collapse Tools Dock"}
                   >
                     {rightSidebarCollapsed ? (
-                      <PanelRightOpen className="w-4 h-4" />
+                      <PanelRightOpen className="w-4 h-4 text-indigo-600" />
                     ) : (
                       <PanelRightClose className="w-4 h-4" />
                     )}
@@ -976,9 +1076,7 @@ export function TechnicalReviewPage() {
                       const res = await editorSave.save(html);
                       if (res && res.file_id && res.file_id !== editorFileId) {
                         setEditorFileId(res.file_id);
-                        navigate(
-                          technicalPath(res.file_id),
-                        );
+                        navigate(technicalPath(res.file_id));
                       }
                     }}
                     isSaving={editorSave.isPending}
@@ -987,13 +1085,18 @@ export function TechnicalReviewPage() {
                     height="100%"
                     occurrences={editorOccurrences}
                     selectedOccurrenceIndex={selectedOccurrenceIndex}
-                    onOccurrenceClick={(idx) => setSelectedOccurrenceIndex(idx)}
+                    onOccurrenceClick={(idx) => {
+                      setSelectedOccurrenceIndex(idx);
+                      setRightSidebarTab("inspector");
+                      setRightSidebarCollapsed(false);
+                    }}
                     onSelectionChange={(text) => setSelectedEditorText(text)}
                     onCommentClick={(commentId) => {
-                      setRightSidebarTab("comments");
+                      setRightSidebarTab("queries");
                       setSelectedCommentId(commentId);
+                      setRightSidebarCollapsed(false);
                     }}
-                    trackChangesEnabled={trackChangesEnabled}
+                    trackChangesEnabled={isTrackChangesActive}
                     onTrackChangesToggle={setTrackChangesEnabled}
                     currentUser={currentUser}
                     fileId={editorFileId?.toString()}
@@ -1002,13 +1105,15 @@ export function TechnicalReviewPage() {
               </div>
             </main>
 
-            {/* Right: Consolidated Single Find & Replace Sidebar */}
+            {/* Right: Consolidated 4-Tab Right Tools Dock */}
             <UnifiedFindReplaceSidebar
               findings={findings}
               filteredFindings={filteredFindings}
               activeOccurrence={activeOccurrence}
               selectedIndex={selectedOccurrenceIndex}
-              onSelectIndex={setSelectedOccurrenceIndex}
+              onSelectIndex={(idx) => {
+                setSelectedOccurrenceIndex(idx);
+              }}
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
               categoryFilter={categoryFilter}
@@ -1020,6 +1125,7 @@ export function TechnicalReviewPage() {
               }}
               hasActiveStylesheet={Boolean(activeStylesheet || selectedStylesheetId)}
               activeStylesheetName={activeStylesheetName}
+              activeStylesheet={activeStylesheet}
               selectedRuleFilter={selectedRuleFilter}
               onSelectedRuleFilterChange={(rule) => {
                 setSelectedRuleFilter(rule);
@@ -1076,8 +1182,12 @@ export function TechnicalReviewPage() {
               selectedCommentId={selectedCommentId}
               onSelectCommentId={(uuid) => {
                 setSelectedCommentId(uuid);
-                editorRef.current?.scrollToComment(uuid);
+                editorRef.current?.scrollToComment?.(uuid);
               }}
+              activeTab={rightSidebarTab}
+              onActiveTabChange={setRightSidebarTab}
+              rules={allRules}
+              onQuickFixFinding={handleQuickFixFinding}
             />
           </div>
         )}
@@ -1113,4 +1223,5 @@ export function TechnicalReviewPage() {
     </div>
   );
 }
+
 export default TechnicalReviewPage;

@@ -139,6 +139,8 @@ def _normalise_unit(token: str) -> dict:
     elif base == "mcg" or base.lower() == "mcg":
         sym = MICRO + "g"
         out["r9"] = sym
+    elif base == MICRO + "g":
+        out["r9"] = sym  # already μg: still a micro-prefix finding so the mcg option can apply
     elif base == "l":
         sym = "L"
         out["r2"] = sym
@@ -230,10 +232,16 @@ def detect_units(seg: Segment) -> Iterable[Finding]:
             unit_now = target
         if info["r9"]:
             target = info["r9"] if not info["r10"] else info["symbol"]
-            spelled = "microgram" if target.startswith(MICRO + "g") else None
+            is_gram = target.startswith(MICRO + "g")
+            spelled = ("microgram" if um.num in ("1", "1.0") else "micrograms") if is_gram else None
+            mcg_form = "mcg" if is_gram else target
+
+            def _diff(v: str | None) -> str | None:
+                return None if v == um.unit else v
             steps.append({"sno": 9, "part": "unit", "to": {
-                "1": target, "2": None if um.unit.lower() == "mcg" else target, "3": spelled}})
-            rule_ids.append(("micro_lookalike", f"Micro prefix ({um.unit} → {target})"))
+                "1": _diff(target), "2": _diff(mcg_form), "3": _diff(spelled)}})
+            rid = "micro_symbol" if um.unit == target else "micro_lookalike"
+            rule_ids.append((rid, f"Micro prefix ({um.unit})"))
             unit_now = target
         if info["r2"]:
             target = info["r2"] if not info["r10"] else info["symbol"]

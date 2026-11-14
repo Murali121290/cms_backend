@@ -42,6 +42,8 @@ def apply_ce_settings(findings: List[dict], selected_rows: Iterable[dict] = (), 
         f["ce_option"] = choice["option"]
         f["ce_severity"] = choice["severity"]
         f["ce_query"] = choice["query"]
+        f["ce_status"] = choice["status"]
+        f["suggestion"] = choice["suggestion"]
         f["replacement"] = choice["replacement"]
     return findings
 
@@ -73,22 +75,27 @@ def annotate_with_stylesheet(
         patt = ia_row[2] if has_ia else None
 
         # Determine in_stylesheet
+        if has_ia:
+            f["ia_element"] = ia_row[0]
+            f["ia_subtype"] = ia_row[1]
+            f["ia_pattern"] = ia_row[2]
+
         if f.get("ce_rule_no"):
-            if not f.get("ce_enabled", True):
+            # A checklist finding belongs to the stylesheet whenever its rule is enabled and
+            # the stylesheet's option makes it something to act on: an error (auto-fix or
+            # suggestion), a query or a flag. IA rows no longer gate this — house-style
+            # rules (92+) and suggest-only rules have no IA row but are part of the style.
+            status = f.get("ce_status")
+            if not f.get("ce_enabled", True) or status in ("compliant", "off"):
                 f["in_stylesheet"] = False
-            else:
-                # Rule is enabled. It is in stylesheet if it matches an exact row,
-                # or if it has an active replacement / query under the stylesheet option,
-                # or if its element is in the stylesheet.
-                if (has_ia and (ia_row[0], ia_row[1], ia_row[2]) in exact) or f.get("replacement") is not None or f.get("ce_query"):
-                    f["in_stylesheet"] = True
-                elif elem and elem in elements:
-                    f["in_stylesheet"] = True
-                elif has_ia:
-                    f["in_stylesheet"] = False
-                else:
-                    cat = (f.get("category") or "").lower()
-                    f["in_stylesheet"] = bool(cat and cat in subtypes)
+            elif status in ("error", "query", "flag"):
+                f["in_stylesheet"] = True
+            else:  # older findings without a status: previous rule
+                f["in_stylesheet"] = bool(
+                    (has_ia and (ia_row[0], ia_row[1], ia_row[2]) in exact)
+                    or f.get("replacement") is not None or f.get("ce_query")
+                    or (elem and elem in elements)
+                )
         else:
             # Non-checklist finding
             if has_ia:
@@ -107,6 +114,8 @@ def annotate_with_stylesheet(
     # Non-checklist rule replacements based on IA preferred rows
     for f in findings:
         if f.get("ce_rule_no"):
+            if not f.get("suggestion") and f.get("replacement"):
+                f["suggestion"] = f["replacement"]
             continue
         rule_id, surface = f.get("rule_id", ""), f.get("surface", "")
         if rule_id in RANGE_RULES and preferred.get("Ranges"):
@@ -119,6 +128,7 @@ def annotate_with_stylesheet(
                     f["replacement"] = f"{nums[0]}–{nums[1]}"
                 elif "hyphen" in pref:
                     f["replacement"] = f"{nums[0]}-{nums[1]}"
+                f["suggestion"] = f["replacement"]
         elif rule_id in THOUSAND_RULES and preferred.get("Thousand separator (use/non-use)"):
             pref = next(iter(preferred["Thousand separator (use/non-use)"])).lower()
             clean = re.sub(r"[,\s ]", "", surface)
@@ -130,4 +140,12 @@ def annotate_with_stylesheet(
                 f["replacement"] = f"{n:,}"
             elif "no comma" in pref:
                 f["replacement"] = clean
+            f["suggestion"] = f["replacement"]
+
+        # Ensure every finding with replacement or preferred option has suggestion populated
+        if not f.get("suggestion"):
+            if f.get("replacement"):
+                f["suggestion"] = f["replacement"]
+            elif f.get("ia_pattern"):
+                f["suggestion"] = f"Format per pattern: {f['ia_pattern']}"
     return findings

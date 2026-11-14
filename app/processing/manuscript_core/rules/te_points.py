@@ -127,6 +127,7 @@ LATIN_PATTERNS = [
     (re.compile(r"\bie\b(?!\.)", re.IGNORECASE), "latin_ie_nodots"),
     (re.compile(r"\betc\."), "latin_etc_dot"),
     (re.compile(r"\betc\b(?!\.)"), "latin_etc_nodot"),
+    (re.compile(r"\bet al\b(?!\.)"), "latin_etal_nodot"),
 ]
 def detect_latin_abbr(seg: Segment) -> Iterable[Finding]:
     for pat, rule_id in LATIN_PATTERNS:
@@ -472,7 +473,8 @@ TRADEMARK_PATTERNS = [
     (re.compile(r"\u00ae"), "sym_registered_char"),
     (re.compile(r"\(R\)", re.IGNORECASE), "sym_registered_text"),
     (re.compile(r"\u00a9"), "sym_copyright_char"),
-    (re.compile(r"\(C\)", re.IGNORECASE), "sym_copyright_text"),
+    # "(c)" is usually a list marker: only a copyright sign when a year follows
+    (re.compile(r"\(C\)(?=\s*(?:19|20)\d{2}\b)", re.IGNORECASE), "sym_copyright_text"),
 ]
 def detect_trademark(seg: Segment) -> Iterable[Finding]:
     for pat, rule_id in TRADEMARK_PATTERNS:
@@ -532,6 +534,10 @@ DATE_PATTERNS = [
     (re.compile(rf"\b\d{{1,2}}\s+{_MON_ABBR}\s+\d{{4}}\b"), "date_uk_long"),
     # US long form: January 1, 2020
     (re.compile(rf"\b{_MON_FULL}\s+\d{{1,2}},\s+\d{{4}}\b"), "date_us_long"),
+    # US abbreviated: Oct 10, 2026 / Oct. 10, 2026
+    (re.compile(r"\b(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+\d{1,2},\s+\d{4}\b"), "date_us_abbr"),
+    # ISO: 2026-10-10
+    (re.compile(r"\b(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\b"), "date_iso"),
     # Numeric slash D/M/YY or M/D/YY or D/M/YYYY
     (re.compile(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b"), "date_numeric_slash"),
     # Numeric dot D.M.YY
@@ -552,11 +558,11 @@ LIST_MARKER_PATTERNS = [
     (re.compile(r"\([IVX]+\)"), "list_paren_roman_uc"),
     (re.compile(r"\([ivx]+\)"), "list_paren_roman_lc"),
     (re.compile(r"\(\d+\)"), "list_paren_num"),
-    (re.compile(r"\b[A-Z]\)"), "list_alpha_close_uc"),
-    (re.compile(r"\b[a-z]\)"), "list_alpha_close_lc"),
+    (re.compile(r"(?<!\()\b[A-Z]\)"), "list_alpha_close_uc"),
+    (re.compile(r"(?<!\()\b[a-z]\)"), "list_alpha_close_lc"),
     (re.compile(r"\b[IVX]+\)"), "list_roman_close_uc"),
     (re.compile(r"\b[ivx]+\)"), "list_roman_close_lc"),
-    (re.compile(r"(?<![.,\-\s\d])\b\d+\)"), "list_num_close"),
+    (re.compile(r"(?<![.,\-–—\s\d/])\b[1-9]\)"), "list_num_close"),
 ]
 def detect_list_marker(seg: Segment) -> Iterable[Finding]:
     for pat, rule_id in LIST_MARKER_PATTERNS:
@@ -604,7 +610,7 @@ FRACTION_PATTERNS = [
     # Numeric slash fraction
     (re.compile(r"\b\d+/\d+\b"), "fraction_slash"),
     # Spelled fractions
-    (re.compile(r"\b(?:one|two|three)-(?:half|third|quarter|fourth|fifth|sixth|"
+    (re.compile(r"\b(?:one|two|three)[- ](?:half|third|quarter|fourth|fifth|sixth|"
                 r"seventh|eighth|ninth|tenth)s?\b", re.IGNORECASE), "fraction_spelled"),
 ]
 def detect_fraction(seg: Segment) -> Iterable[Finding]:
@@ -1002,10 +1008,17 @@ _COMMON_GENERA = [
     "Trichomonas", "Trypanosoma", "Vibrio", "Yersinia"
 ]
 _GENERA_PAT = "|".join(_COMMON_GENERA)
+# Abbreviated binomials need a Latin-looking epithet, so "A patient" or "U. S. data" are not species.
+_EPITHET = (r"(?:coli|aureus|pneumoniae|pyogenes|epidermidis|aeruginosa|difficile|tuberculosis|albicans|faecalis|"
+            r"faecium|influenzae|meningitidis|gonorrhoeae|typhi|typhimurium|pylori|monocytogenes|jejuni|sapiens|"
+            r"trachomatis|cholerae|fumigatus|neoformans|falciparum|vivax|gondii|pallidum|vaginalis|pertussis|"
+            r"burgdorferi|botulinum|tetani|perfringens|diphtheriae|mutans|pneumophila|mirabilis|marcescens|baumannii|"
+            r"cloacae|agalactiae|anthracis|cereus|subtilis|acidophilus|lactis|enterica|sonnei|flexneri|glabrata|"
+            r"[a-z]{3,}(?:ensis|iae|ii|osa|ella|ans|icus|ica|idis|um|us|is|ae))")
 _GENUS_SPECIES_PATTERNS = [
     (re.compile(rf'\b(?:{_GENERA_PAT})\s+[a-z]{{3,}}\b'), "genus_species_full"),   # Escherichia coli
-    (re.compile(r'\b[A-Z]\.\s+[a-z]{3,}\b'),          "genus_species_abbr"),  # E. coli
-    (re.compile(r'\b[A-Z]\s+[a-z]{3,}\b'),             "genus_species_nodot"), # E coli
+    (re.compile(rf'\b[A-Z]\.\s+{_EPITHET}\b'),          "genus_species_abbr"),  # E. coli
+    (re.compile(rf'\b[A-Z]\s+{_EPITHET}\b'),             "genus_species_nodot"), # E coli
 ]
 def detect_genus_species(seg: Segment) -> Iterable[Finding]:
     for pat, rule_id in _GENUS_SPECIES_PATTERNS:
@@ -1061,7 +1074,8 @@ def detect_wk_terms(seg: Segment) -> Iterable[Finding]:
 # are handled by manuscript_core.rules.units.detect_units.
 # ---------------------------------------------------------------------------
 _GREEK_SPELLED_PAT = re.compile(
-    r"(?<=-)(?:alpha|beta|gamma|delta|kappa)\b|\b(?:alpha|beta|gamma|delta|kappa)(?=-\d)", re.IGNORECASE)
+    r"(?<=-)(?:alpha|beta|gamma|delta|kappa)\b"
+    r"|\b(?:alpha|beta|gamma|delta|kappa|epsilon|theta|lambda|sigma|omega)(?=-(?:\d|[a-z]{3,}))", re.IGNORECASE)
 def detect_greek_spelled(seg: Segment) -> Iterable[Finding]:  # R8
     for m in iter_unmasked_matches(_GREEK_SPELLED_PAT, seg.text, seg.mask):
         yield _f(seg, m, "te_point", "greek_spelled", "Greek letter spelled out", "greek_letter_style")
@@ -1108,8 +1122,9 @@ _STAT_WELL_FORMED = re.compile(r"^[A-Za-z] [<=>≤≥] \S+$")
 def detect_stat_notation(seg: Segment) -> Iterable[Finding]:  # R25
     for pat, rule_id in ((_STAT_P_PAT, "stat_p_value"), (_STAT_SYM_PAT, "stat_symbol")):
         for m in iter_unmasked_matches(pat, seg.text, seg.mask):
-            if _STAT_WELL_FORMED.match(m.group(0)):
-                continue  # spacing is right; italics are checked by the editor
+            if rule_id == "stat_symbol" and _STAT_WELL_FORMED.match(m.group(0)):
+                continue  # n = 30: spacing is right; italics are checked by the editor
+            # p-values are always reported: the selected option decides p/P and the leading zero
             yield _f(seg, m, "te_point", rule_id, "Statistical notation", "stat_style")
 
 _PLUSMINUS_PAT = re.compile(r"\d+(?:\.\d+)?(?:±\s*|\s*±|\s{2,}±\s*)\d+(?:\.\d+)?")
@@ -1173,3 +1188,8 @@ TE_DETECTORS.extend([
     detect_placeholders,
     detect_units_ce,
 ])
+
+# House-style detectors: missing variant forms and checklist rules 92+ (house_style.py)
+from manuscript_core.rules.house_style import HOUSE_STYLE_DETECTORS  # noqa: E402
+
+TE_DETECTORS.extend(HOUSE_STYLE_DETECTORS)

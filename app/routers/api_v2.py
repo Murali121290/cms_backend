@@ -2755,11 +2755,14 @@ def api_v2_ce_rules(
 
 @router.get("/stylesheets/presets/springer")
 def api_v2_get_springer_preset(
+    book_type: str = "standard",
+    list_style: str = "narrative",
     user=Depends(get_current_user_from_cookie),
 ):
-    """Returns the official Springer Publishing House Style Sheet (July 2026) preset."""
+    """Springer Publishing House Style Sheet (July 2026) preset for a book type
+    (standard | pa | demos | qa) and list style (narrative | outline)."""
     from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
-    return get_springer_preset()
+    return get_springer_preset(book_type=book_type, list_style=list_style)
 
 
 
@@ -5861,67 +5864,47 @@ def api_v2_technical_scan(
     except Exception as e:
         logger.warning(f"Failed to generate Collabora launch URL: {e}")
 
-    # Attach active stylesheet for this project
+    # Attach active stylesheet for this project (a Springer client without one gets the
+    # Springer house-style stylesheet created and activated).
     active_stylesheet = None
+    active_ss = None
     if file_record and file_record.project_id:
-        active_ss = stylesheet_service.get_active_stylesheet_for_project(
-            db, project_id=file_record.project_id
-        )
-        if active_ss:
-            active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss, db=db)
-        else:
-            proj = file_record.project if hasattr(file_record, "project") and file_record.project else (
-                db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
-                if file_record.project_id else None
-            )
-            c_name = (proj.client_name if proj and proj.client_name else "") or (proj.client.name if proj and proj.client else "")
-            if c_name and ("springer" in c_name.lower() or "spr" in c_name.lower()):
-                from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
-                spr = get_springer_preset()
-                active_stylesheet = schemas_v2.StylesheetSummary(
-                    id=0,
-                    project_id=file_record.project_id,
-                    name=spr["name"],
-                    description=spr["description"],
-                    selected_ia_rows=[schemas_v2.IARow(**r) for r in spr["selected_ia_rows"]],
-                    ce_rules={k: schemas_v2.CERuleSetting(**v) for k, v in spr["ce_rules"].items()},
-                    analyzed_file_ids=[],
-                    source_files=[],
-                    is_active=True,
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
-                )
+        active_ss = stylesheet_service.ensure_publisher_stylesheet(db, project_id=file_record.project_id)
 
-    # Annotate findings with stylesheet matching if stylesheet_id provided
+    # The chosen (or active) stylesheet decides every finding: the selected option is the
+    # house style, other forms are errors with the selected form as the fix.
     findings = raw_scan.get("findings", [])
-    if stylesheet_id and findings:
-        selected_stylesheet = db.query(ProjectStylesheet).filter(
+    applied_ss = active_ss
+    if stylesheet_id and file_record:
+        applied_ss = db.query(ProjectStylesheet).filter(
             ProjectStylesheet.id == stylesheet_id,
             ProjectStylesheet.project_id == file_record.project_id,
-        ).first()
-
-        if selected_stylesheet:
-            import json
-            from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
-            try:
-                selected_rows = json.loads(selected_stylesheet.selected_ia_rows)
-            except (json.JSONDecodeError, TypeError):
-                selected_rows = []
-            # rule_id_to_ia is embedded in the cached scan result; the helper imports it otherwise.
-            annotate_with_stylesheet(
-                findings, selected_rows, raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
-                ce_rules=stylesheet_service.stylesheet_ce_rules(selected_stylesheet),
-            )
-    elif findings and file_record and file_record.project_id and active_stylesheet:
-        # No stylesheet chosen on the page: the project's active stylesheet decides the
-        # CE checklist options and annotates findings with in_stylesheet matching.
-        from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
-        annotate_with_stylesheet(
-            findings,
-            [row.model_dump() for row in active_stylesheet.selected_ia_rows],
-            raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
-            ce_rules={k: v.model_dump(exclude_none=True) for k, v in active_stylesheet.ce_rules.items()},
+        ).first() or active_ss
+    if applied_ss:
+        active_stylesheet = stylesheet_service._serialize_stylesheet(applied_ss, db=db)
+    if findings and applied_ss is not None:
+        doc_path = None
+        try:
+            from app.domains.review.service import resolve_processed_target
+            doc_path = os.path.abspath(resolve_processed_target(db, file_id=file_id)["processed_path"])
+        except Exception as exc:
+            logger.warning(f"Could not resolve document for style-profile rules: {exc}")
+        findings = stylesheet_service.apply_stylesheet_to_findings(
+            findings, applied_ss,
+            rule_id_to_ia=raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
+            file_path=doc_path if doc_path and os.path.exists(doc_path) else None,
         )
+        # Forms already in house style (the selected option) and rules switched off are not
+        # errors: keep them out of the review list and the "Apply N changes" count.
+        hidden = [f for f in findings if f.get("ce_status") in ("compliant", "off")]
+        findings = [f for f in findings if f.get("ce_status") not in ("compliant", "off")]
+        raw_scan["findings"] = findings
+        from app.domains.processing.technical_editor_service import _map_findings_to_legacy_issues
+        raw_scan["issues"] = _map_findings_to_legacy_issues(findings)
+        stats = dict(raw_scan.get("stats") or {})
+        stats["compliant_hidden"] = sum(1 for f in hidden if f.get("ce_status") == "compliant")
+        stats["rule_off_hidden"] = sum(1 for f in hidden if f.get("ce_status") == "off")
+        raw_scan["stats"] = stats
 
     # Ensure inconsistencies is a dict (convert list to dict if needed)
     inconsistencies_data = raw_scan.get("inconsistencies", {})
@@ -5940,6 +5923,8 @@ def api_v2_technical_scan(
         ia_report=raw_scan.get("ia_report", {}),
         stats=raw_scan.get("stats", {}),
         active_stylesheet=active_stylesheet,
+        engine_version=raw_scan.get("engine_version"),
+        stylesheet_source=stylesheet_service.stylesheet_source(db, applied_ss) if applied_ss is not None else None,
     )
 
 

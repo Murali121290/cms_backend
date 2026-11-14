@@ -1,4 +1,4 @@
-﻿"""
+"""
 Extract structured text from a .docx file.
 
 Returns a list of "segments" â€” each segment is a contiguous block of text with
@@ -392,19 +392,24 @@ def extract_segments(
     # analyzed. Manuscripts that *do* use region tags keep the original
     # "front → body → references" flow driven by the tags themselves.
     body_paragraphs = list(_iter_body_paragraphs(doc))
-    has_region_markers = any(
-        "<front>" in (p.text or "").lower()
-        or "<body>" in (p.text or "").lower()
-        or "<ref-open>" in (p.text or "").lower()
-        for _, p in body_paragraphs
-    )
+    # A manuscript starts in "front" ONLY if an explicit <front> tag is present
+    # at the start of the document (before any <body>, <cn>, <ct>, or <h1>).
+    # Otherwise, chapter files start in "body" by default.
+    starts_with_front = False
+    for _, p in body_paragraphs[:15]:
+        t_low = (p.text or "").lower()
+        if "<front>" in t_low:
+            starts_with_front = True
+            break
+        if "<body>" in t_low or "<cn>" in t_low or "<ct>" in t_low or "<h1" in t_low:
+            break
 
     segments: list[Segment] = []
     current_page = 1
     running_word_count = 0
     in_reference_block = False
     in_extract_tag_block = False
-    current_region = "front" if has_region_markers else "body"
+    current_region = "front" if starts_with_front else "body"
     para_idx = 0
 
     for source, p in body_paragraphs:
@@ -412,13 +417,18 @@ def extract_segments(
         text_lower = text.lower()
         style_name = p.style.name if p.style else ""
 
-        # Update region state based on explicitly typed markup tags
+        # Update region state based on explicitly typed markup tags or chapter headers
         if "<front>" in text_lower:
             current_region = "front"
-        elif "<body>" in text_lower:
-            current_region = "body"
+        elif "<body>" in text_lower or "<cn>" in text_lower or "<ct>" in text_lower or "<chapter-open>" in text_lower:
+            if not in_reference_block:
+                current_region = "body"
         elif "<ref-open>" in text_lower:
+            in_reference_block = True
             current_region = "references"
+        elif current_region == "front" and ("<h1" in text_lower or "<h2" in text_lower):
+            if not in_reference_block:
+                current_region = "body"
             
         # Track tagged extract/quote blocks
         if re.search(r'<(quote|extract|epigraph)>', text_lower):
