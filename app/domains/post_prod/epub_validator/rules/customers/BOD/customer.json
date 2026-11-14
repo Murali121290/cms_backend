@@ -138,6 +138,68 @@
       "category": "Copyright Check"
     },
     {
+      "id": "BOD-COPY-004",
+      "name": "Copyright statement check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_statement_by_language": {
+          "de": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen gemäß § 44b UrhG („Text und Data Mining“) zu gewinnen, ist untersagt.",
+          "ch": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen („Text und Data Mining“) zu gewinnen, ist untersagt."
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-005",
+      "name": "Copyright publisher sentence check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher_by_language": {
+          "de": "Herstellung und Verlag:"
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-006",
+      "name": "Copyright publisher address check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher_address_by_language": {
+          "de": {
+            "address": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg",
+            "url": "http://www.bod.de"
+          },
+          "ch": {
+            "address": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Deutschland",
+            "url": "http://www.bod.ch/"
+          }
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
@@ -646,6 +708,7 @@
   },
   "category_order": [
     "STRUCTURE CHECK",
+    "COPYRIGHT CHECK",
     "METADATA CHECK",
     "CSS CHECK",
     "XHTML CHECK",
