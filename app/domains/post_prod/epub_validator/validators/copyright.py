@@ -786,7 +786,7 @@ def validate_copyright_isbn_from_db(file_details, rule_config=None):
     if not expected_digits:
         issues.append({
             "type": "eisbn_not_configured_in_db",
-            "message": f"Could not determine expected eISBN from database (post_prod_ev_projects) for '{folder_name or file_name}'.",
+            "message": "eISBN value not given. Please update in BoD dashboard.",
             "category": "Warning",
             "file_path": rel_path,
             "line_number": 1,
