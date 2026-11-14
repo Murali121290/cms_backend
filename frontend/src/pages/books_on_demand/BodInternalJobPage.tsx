@@ -1017,7 +1017,9 @@ export function BodInternalJobPage() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-text m-0">
-                          {assignment.action || `Assigned to: ${getUserDisplayName(assignment.user_id)}`}
+                          {assignment.action && assignment.user_id
+                            ? assignment.action.replace(new RegExp(`\\b${assignment.user_id}\\b`, 'g'), getUserDisplayName(assignment.user_id))
+                            : (assignment.action || `Assigned to: ${getUserDisplayName(assignment.user_id)}`)}
                         </p>
                         <p className="text-[10px] text-muted m-0 mt-0.5">
                           Stage: {assignment.stage} {assignment.assigned_by ? `• By: ${getUserDisplayName(assignment.assigned_by)}` : ''}

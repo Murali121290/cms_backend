@@ -16,6 +16,7 @@ from app.domains.notifications.email_service import (
     send_bod_qc_ready_email,
     send_bod_new_job_email,
     send_bod_job_completed_email,
+    send_bod_ready_to_dispatch_email,
     send_bod_fastrack_alert_email
 )
 from pydantic import BaseModel
@@ -954,8 +955,39 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     new_stage_data["start_time"] = now_iso
     
     from sqlalchemy.orm.attributes import flag_modified
-    if new_stage in ("Production", "Ready to Dispatch") or current_stage == "QC":
-        # Unassign assignee when moving to Production or when QC is completed
+    if new_stage == "Ready to Dispatch":
+        # Auto-assign to BOD Manager (resolved via BOD_MANAGER_EMAIL or fallback to manager username/email)
+        from app.domains.auth.models import User
+        manager_email = getattr(settings, "BOD_MANAGER_EMAIL", None)
+        manager_user = None
+        if manager_email:
+            manager_user = db.query(User).filter(User.email.ilike(manager_email.strip())).first()
+        
+        manager_assignee = manager_user.username if manager_user else (manager_email or "System")
+        manager_full_name = ""
+        if manager_user:
+            fn = (manager_user.first_name or "").strip()
+            ln = (manager_user.last_name or "").strip()
+            manager_full_name = f"{fn} {ln}".strip() or manager_assignee
+        else:
+            manager_full_name = manager_assignee
+
+        job.current_assignee = manager_assignee
+        new_stage_data["assignee"] = manager_assignee
+
+        history_list = job.assigned_users if isinstance(job.assigned_users, list) else []
+        new_history = list(history_list)
+        new_history.append({
+            "user_id": manager_assignee,
+            "stage": new_stage,
+            "time": now_iso,
+            "assigned_by": "System",
+            "action": f"Auto-assigned to BOD Manager ({manager_full_name}) on move to Ready to Dispatch"
+        })
+        job.assigned_users = new_history
+        flag_modified(job, "assigned_users")
+    elif new_stage == "Production" or current_stage == "QC":
+        # Unassign assignee when moving to Production
         job.current_assignee = None
         new_stage_data["assignee"] = None
         
@@ -987,9 +1019,11 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     
     manager_email = settings.BOD_MANAGER_EMAIL
     
-    # Send email if moving to QC or Archive
+    # Send email if moving to QC, Ready to Dispatch, or Archive
     if job.current_stage_name == "QC" and manager_email:
         send_bod_qc_ready_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
+    elif job.current_stage_name == "Ready to Dispatch" and manager_email:
+        send_bod_ready_to_dispatch_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
     elif job.current_stage_name == "Archive" and manager_email:
         send_bod_job_completed_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
         
@@ -1774,11 +1808,19 @@ def sync_qc_reports_and_complete(
     db.commit()
     db.refresh(job)
 
-    # 6. Advance stage to Ready to Dispatch if in QC & unassign
+    # 6. Advance stage to Ready to Dispatch if in QC & auto-assign to BOD Manager
     if job.current_stage_name == "QC":
         _advance_job_logic(job, background_tasks, db)
     else:
-        job.current_assignee = None
+        from app.domains.auth.models import User
+        settings = get_settings()
+        manager_email = getattr(settings, "BOD_MANAGER_EMAIL", None)
+        manager_user = None
+        if manager_email:
+            manager_user = db.query(User).filter(User.email.ilike(manager_email.strip())).first()
+        manager_assignee = manager_user.username if manager_user else (manager_email or "System")
+
+        job.current_assignee = manager_assignee
         db.commit()
         db.refresh(job)
 
