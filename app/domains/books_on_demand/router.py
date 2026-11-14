@@ -225,14 +225,100 @@ def download_history_csv(job_id: int, db: Session = Depends(get_db)):
         if job.epub_filepath and os.path.exists(job.epub_filepath):
             history_csv_path = os.path.join(os.path.dirname(job.epub_filepath), "history.csv")
     if not history_csv_path or not os.path.exists(history_csv_path):
-        target_dir = bod_proj_dir or (os.path.dirname(job.epub_filepath) if job.epub_filepath and os.path.exists(job.epub_filepath) else (os.path.dirname(job.pdf_filepath) if job.pdf_filepath and os.path.exists(job.pdf_filepath) else os.path.join(upload_dir, "bod", "BOD", f"bod_job_{job.id}")))
-        try:
-            history_csv_path = generate_bod_history_csv(job, target_dir)
-        except Exception as e:
-            logger.error(f"Error generating history.csv for job {job_id}: {e}")
-    if not history_csv_path or not os.path.exists(history_csv_path):
-        raise HTTPException(status_code=404, detail="history.csv could not be located or generated")
+        raise HTTPException(
+            status_code=404,
+            detail="history.csv not found. Please complete QC to generate history.csv first."
+        )
     return FileResponse(path=history_csv_path, filename="history.csv", media_type="text/csv")
+
+
+@router.get("/jobs/{job_id}/download-dispatch-package")
+def download_dispatch_package(job_id: int, db: Session = Depends(get_db)):
+    """
+    Builds and downloads the full dispatch package ZIP containing:
+      1. ePub file OR ePDF ({eisbn}_ePub_all.epub)
+      2. history.csv (with WCAG Conformance level)
+      3. ACE_report.zip
+      4. EPUB-checker_log.txt
+    Allows the user to inspect the exact archive that will be sent to the FTP server.
+    """
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    settings = get_settings()
+
+    has_epub = bool(job.epub_filepath and os.path.exists(job.epub_filepath))
+    has_pdf = bool(job.pdf_filepath and os.path.exists(job.pdf_filepath))
+    if not (has_epub or has_pdf):
+        raise HTTPException(status_code=400, detail="Cannot build package: ePub file or ePDF is missing.")
+
+    if not (job.ace_report_filepath and os.path.exists(job.ace_report_filepath)):
+        raise HTTPException(status_code=400, detail="Cannot build package: ACE report is missing.")
+
+    if not (job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath)):
+        raise HTTPException(status_code=400, detail="Cannot build package: EPUBCheck log is missing.")
+
+    if job.pdf_filename:
+        zip_filename = job.pdf_filename.replace('.pdf', '.zip')
+    else:
+        zip_filename = (job.epub_filename or f"deliverable_{job.id}").replace('.epub', '.zip')
+
+    if job.epub_filepath and os.path.exists(job.epub_filepath):
+        local_dir = os.path.dirname(job.epub_filepath)
+    elif job.pdf_filepath and os.path.exists(job.pdf_filepath):
+        local_dir = os.path.dirname(job.pdf_filepath)
+    else:
+        upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+        local_dir = os.path.join(upload_dir, "bod")
+    os.makedirs(local_dir, exist_ok=True)
+    zip_filepath = os.path.join(local_dir, zip_filename)
+
+    # Determine eisbn
+    eisbn = ""
+    for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
+        if candidate:
+            m_isbn = re.search(r'(\d{10,13})', candidate)
+            if m_isbn:
+                eisbn = m_isbn.group(1)
+                break
+
+    if not eisbn:
+        if job.pdf_filename:
+            eisbn = job.pdf_filename.rsplit('.', 1)[0].strip()
+        elif job.project_name:
+            eisbn = str(job.project_name).strip()
+        elif job.epub_filename:
+            eisbn = job.epub_filename.rsplit('.', 1)[0].strip()
+
+    target_epub_entry_name = f"{eisbn}_ePub_all.epub" if eisbn else (os.path.basename(job.epub_filepath) if has_epub else os.path.basename(job.pdf_filepath))
+    target_ace_entry_name = "ACE_report.zip"
+    target_epubcheck_entry_name = "EPUB-checker_log.txt"
+
+    # Verify history.csv generated during QC completion exists
+    history_csv_filepath = os.path.join(local_dir, "history.csv")
+    if not os.path.exists(history_csv_filepath):
+        upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+        alt_path = os.path.join(upload_dir, "bod", "BOD", job.project_name or "", "history.csv")
+        if os.path.exists(alt_path):
+            history_csv_filepath = alt_path
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="history.csv not found. Please complete QC to generate history.csv before downloading the dispatch package."
+            )
+
+    import zipfile
+    with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        if has_epub:
+            zipf.write(job.epub_filepath, target_epub_entry_name)
+        elif has_pdf:
+            zipf.write(job.pdf_filepath, target_epub_entry_name)
+        zipf.write(job.ace_report_filepath, target_ace_entry_name)
+        zipf.write(job.epubcheck_report_filepath, target_epubcheck_entry_name)
+        zipf.write(history_csv_filepath, "history.csv")
+
+    return FileResponse(path=zip_filepath, filename=zip_filename, media_type="application/zip")
 
 
 @router.get("/jobs/{job_id}/view-history-csv")
@@ -965,14 +1051,15 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
         target_ace_entry_name = "ACE_report.zip"
         target_epubcheck_entry_name = "EPUB-checker_log.txt"
 
-        # Ensure history.csv exists (or generate it)
+        # Verify history.csv generated during QC completion exists
         history_csv_filepath = os.path.join(local_dir, "history.csv")
         if not os.path.exists(history_csv_filepath):
-            history_csv_filepath = generate_bod_history_csv(job, local_dir)
-
-        # Validate that history.csv was generated
-        if not os.path.exists(history_csv_filepath):
-            return False, "Cannot dispatch: Failed to generate history.csv."
+            upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+            alt_path = os.path.join(upload_dir, "bod", "BOD", job.project_name or "", "history.csv")
+            if os.path.exists(alt_path):
+                history_csv_filepath = alt_path
+            else:
+                return False, "Cannot dispatch: history.csv not found. Please complete QC to generate history.csv first."
 
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # 1. ePub file OR ePDF

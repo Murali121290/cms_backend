@@ -75,6 +75,14 @@ export function BodInternalPage() {
   // Delete Modal states
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null)
 
+  // Dispatch Confirmation Modal states
+  const [confirmDispatchModal, setConfirmDispatchModal] = useState<{
+    type: 'single' | 'bulk';
+    jobId?: number;
+    jobName?: string;
+    jobIds?: number[];
+  } | null>(null)
+
   // Edit Due Date Modal states
   const [showEditDueDateModal, setShowEditDueDateModal] = useState<any>(null)
   const [newDueDate, setNewDueDate] = useState('')
@@ -668,6 +676,35 @@ export function BodInternalPage() {
     }
   }
 
+  // Download dispatch package (ZIP containing EPUB, history.csv, ACE, EPUBCheck)
+  const handleDownloadDispatchPackage = async (e: React.MouseEvent | null, jobId: number, filename?: string) => {
+    if (e) e.stopPropagation()
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-dispatch-package`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      const dlName = filename ? (filename.endsWith('.zip') ? filename : `${filename.replace(/\.[^/.]+$/, "")}.zip`) : `deliverable_${jobId}.zip`
+      link.setAttribute('download', dlName)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+      toast.success("Dispatch package downloaded successfully!")
+    } catch (err: any) {
+      let errMsg = "Failed to download dispatch package"
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text()
+          const json = JSON.parse(text)
+          if (json.detail) errMsg = json.detail
+        } catch (_) {}
+      } else if (err.response?.data?.detail) {
+        errMsg = err.response.data.detail
+      }
+      toast.error(errMsg)
+    }
+  }
+
   const getUserDisplayName = (username: string | null | undefined) => {
     if (!username) return ''
     if (!users || users.length === 0) return username
@@ -1044,8 +1081,17 @@ export function BodInternalPage() {
     )
   }
 
-  const handleSingleDispatch = async (e: React.MouseEvent, jobId: number) => {
+  const handleSingleDispatch = async (e: React.MouseEvent, jobId: number, jobName?: string) => {
     e.stopPropagation()
+    setConfirmDispatchModal({
+      type: 'single',
+      jobId,
+      jobName: jobName || `Job #${jobId}`
+    })
+  }
+
+  const executeSingleDispatch = async (jobId: number) => {
+    setConfirmDispatchModal(null)
     setDispatchingJobId(jobId)
     try {
       await api.post(`/bod/jobs/${jobId}/dispatch`, {
@@ -1063,10 +1109,18 @@ export function BodInternalPage() {
 
   const handleBulkDispatch = async () => {
     if (selectedJobIds.length === 0) return
+    setConfirmDispatchModal({
+      type: 'bulk',
+      jobIds: [...selectedJobIds]
+    })
+  }
+
+  const executeBulkDispatch = async (jobIds: number[]) => {
+    setConfirmDispatchModal(null)
     setIsBulkDispatching(true)
     try {
       const { data } = await api.post('/bod/jobs/bulk-dispatch', {
-        job_ids: selectedJobIds,
+        job_ids: jobIds,
         dispatched_by: viewer?.username || undefined
       })
       if (data.failed_count === 0) {
@@ -2218,18 +2272,27 @@ export function BodInternalPage() {
                           <td className="px-1 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-center gap-1">
                               {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
-                                <button
-                                  onClick={(e) => handleSingleDispatch(e, job.id)}
-                                  disabled={dispatchingJobId === job.id}
-                                  className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
-                                  title="Dispatch & Deliver to FTP"
-                                >
-                                  {dispatchingJobId === job.id ? (
-                                    <Loader2 size={15} className="animate-spin text-emerald-600" />
-                                  ) : (
-                                    <Send size={15} />
-                                  )}
-                                </button>
+                                <>
+                                  <button
+                                    onClick={(e) => handleSingleDispatch(e, job.id, job.project_name || job.pdf_filename)}
+                                    disabled={dispatchingJobId === job.id}
+                                    className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                                    title="Dispatch & Deliver to FTP"
+                                  >
+                                    {dispatchingJobId === job.id ? (
+                                      <Loader2 size={15} className="animate-spin text-emerald-600" />
+                                    ) : (
+                                      <Send size={15} />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDownloadDispatchPackage(e, job.id, job.project_name || job.pdf_filename)}
+                                    className="p-1 text-muted hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
+                                    title="Download Deliverables Package (.zip)"
+                                  >
+                                    <Download size={15} />
+                                  </button>
+                                </>
                               )}
                               <button
                                 onClick={(e) => {
@@ -2328,7 +2391,7 @@ export function BodInternalPage() {
                       <div className="flex items-center gap-1 shrink-0">
                         {job.current_stage_name === 'Ready to Dispatch' && !isJobCompleted(job) && (
                           <button
-                            onClick={(e) => handleSingleDispatch(e, job.id)}
+                            onClick={(e) => handleSingleDispatch(e, job.id, job.project_name || job.pdf_filename)}
                             disabled={dispatchingJobId === job.id}
                             className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded transition-colors"
                             title="Dispatch & Deliver to FTP"
@@ -2605,6 +2668,92 @@ export function BodInternalPage() {
                 >
                   Delete Job
                 </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Dispatch to FTP Confirmation Modal */}
+      {
+        confirmDispatchModal !== null && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+            <div className="bg-card border border-border rounded-xl max-w-md w-full p-5 shadow-2xl space-y-4">
+              <div className="flex justify-between items-start border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <Send size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-text m-0">Confirm FTP Dispatch</h3>
+                    <p className="text-[11px] text-muted m-0 mt-0.5">Package deliverables and upload to FTP server</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setConfirmDispatchModal(null)}
+                  className="text-muted hover:text-text transition-colors p-1"
+                >
+                  <XCircle size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-2 text-xs text-text">
+                {confirmDispatchModal.type === 'single' ? (
+                  <p>
+                    Are you sure you want to dispatch <span className="font-bold text-foreground">{confirmDispatchModal.jobName}</span> to the Books on Demand FTP server?
+                  </p>
+                ) : (
+                  <p>
+                    Are you sure you want to dispatch <span className="font-bold text-emerald-600 dark:text-emerald-400">{confirmDispatchModal.jobIds?.length} selected job(s)</span> to the Books on Demand FTP server?
+                  </p>
+                )}
+                <div className="bg-muted/15 border border-border/50 rounded-lg p-3 text-[11px] text-muted space-y-1">
+                  <div className="flex items-center gap-1.5 text-foreground font-semibold">
+                    <CheckCircle2 size={13} className="text-emerald-500" /> Deliverables packaged:
+                  </div>
+                  <ul className="list-disc list-inside pl-1 text-[11px] space-y-0.5 text-muted-foreground">
+                    <li>Validated EPUB file</li>
+                    <li>history.csv (with WCAG Conformance Level)</li>
+                    <li>QC verification reports (ACE & EPUBCheck)</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-2.5 border-t border-border/60">
+                <div>
+                  {confirmDispatchModal.type === 'single' && confirmDispatchModal.jobId && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadDispatchPackage(null, confirmDispatchModal.jobId!, confirmDispatchModal.jobName)}
+                      className="px-3 py-1.5 bg-secondary text-secondary-foreground hover:bg-secondary/80 font-semibold rounded-lg transition-colors flex items-center gap-1.5 text-xs border border-border/60"
+                      title="Download the complete deliverable ZIP before dispatching"
+                    >
+                      <Download size={13} />
+                      Download Package (.zip)
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setConfirmDispatchModal(null)}
+                    className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirmDispatchModal.type === 'single' && confirmDispatchModal.jobId) {
+                        executeSingleDispatch(confirmDispatchModal.jobId)
+                      } else if (confirmDispatchModal.type === 'bulk' && confirmDispatchModal.jobIds) {
+                        executeBulkDispatch(confirmDispatchModal.jobIds)
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1.5 text-xs shadow-xs"
+                  >
+                    <Send size={13} />
+                    Yes, Dispatch to FTP
+                  </button>
+                </div>
               </div>
             </div>
           </div>
