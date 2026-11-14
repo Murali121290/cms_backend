@@ -1,6 +1,9 @@
+import os
 import re
 
 from bs4 import BeautifulSoup
+
+from app.core.config import get_settings
 
 from ..engine.registry import rule
 
@@ -829,6 +832,139 @@ def validate_copyright_isbn_from_db(file_details, rule_config=None):
             "snippet": snippet,
             "expected_text": f"ISBN: {expected_digits}",
             "extract": f"Expected eISBN: {expected_digits}",
+        })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-COPY-008")
+def validate_copyright_author_notice(file_details, rule_config=None):
+    """
+    BOD-COPY-008: Verifies copyright notice (© Year Author) on the copyright page.
+    Extracts author from OPF <dc:creator> and year from OPF <dc:date>.
+    Expected format: © {Year} {Author} (e.g. '© 2026 Terra Fox').
+    """
+    issues = []
+    file_path = file_details.get("full_path", "")
+    epub_root = file_details.get("epub_root", "")
+    rel_path = file_details.get("relative_path", "")
+    folder_name = file_details.get("folder_name", "")
+
+    if not os.path.exists(file_path):
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        soup = BeautifulSoup(content, "html.parser")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    # 1. Locate OPF and extract dc:creator and dc:date
+    opf_path = find_opf(epub_root)
+    if not opf_path and folder_name:
+        settings = get_settings()
+        for candidate_root in [
+            os.path.join("/opt/cms_runtime/data/uploads", folder_name, "extract", "epub"),
+            os.path.join(getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads"), folder_name, "extract", "epub"),
+            os.path.join(os.getcwd(), "uploads", folder_name, "extract", "epub"),
+        ]:
+            if os.path.isdir(candidate_root):
+                opf_path = find_opf(candidate_root)
+                if opf_path:
+                    break
+
+    author_name = None
+    pub_year = None
+
+    if opf_path and os.path.isfile(opf_path):
+        try:
+            with open(opf_path, "r", encoding="utf-8") as opf_file:
+                opf_soup = BeautifulSoup(opf_file.read(), "xml")
+
+            # Extract dc:creator (author)
+            creator_tag = opf_soup.find(["dc:creator", "creator"])
+            if creator_tag:
+                author_name = creator_tag.get_text(" ", strip=True)
+
+            # Extract dc:date (year)
+            date_tag = opf_soup.find(["dc:date", "date"])
+            if date_tag:
+                date_val = date_tag.get_text(strip=True)
+                m_year = re.search(r'\b(\d{4})\b', date_val)
+                if m_year:
+                    pub_year = m_year.group(1)
+        except Exception:
+            pass
+
+    # Validate prerequisites from OPF
+    if not author_name or not pub_year:
+        missing_parts = []
+        if not author_name:
+            missing_parts.append("<dc:creator>")
+        if not pub_year:
+            missing_parts.append("<dc:date>")
+        issues.append({
+            "type": "copyright_metadata_missing",
+            "message": f"Could not determine {' and '.join(missing_parts)} from OPF metadata for copyright statement check.",
+            "category": "Warning",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": f"OPF: {os.path.basename(opf_path) if opf_path else 'Not found'}",
+            "extract": "Metadata check",
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+    expected_notice = f"© {pub_year} {author_name}"
+
+    # 2. Check copyright file text for expected copyright notice
+    # Normalize unicode spaces, non-breaking spaces, and (c) / ©
+    def _normalize(txt: str) -> str:
+        t = (txt or "").replace("\u00a0", " ").replace("&copy;", "©").replace("(c)", "©").replace("(C)", "©")
+        return " ".join(t.split())
+
+    norm_expected = _normalize(expected_notice).lower()
+
+    # Search in paragraph / heading / div tags or full body
+    matched = False
+    matching_snippet = ""
+    for elem in soup.find_all(["p", "div", "span", "h1", "h2", "h3", "h4", "h5", "h6"]):
+        elem_text = elem.get_text(" ", strip=True)
+        norm_elem = _normalize(elem_text).lower()
+        if norm_expected in norm_elem:
+            matched = True
+            break
+        # Also check with flexible whitespace between ©, year, and author
+        esc_year = re.escape(pub_year)
+        esc_author = re.escape(" ".join(author_name.split()))
+        regex_pattern = re.compile(rf"(?:©|\(c\))\s*{esc_year}\s+{esc_author}", re.IGNORECASE)
+        if regex_pattern.search(_normalize(elem_text)):
+            matched = True
+            break
+
+    if not matched:
+        full_text = soup.get_text(" ", strip=True)
+        norm_full = _normalize(full_text).lower()
+        if norm_expected in norm_full:
+            matched = True
+        else:
+            esc_year = re.escape(pub_year)
+            esc_author = re.escape(" ".join(author_name.split()))
+            regex_pattern = re.compile(rf"(?:©|\(c\))\s*{esc_year}\s+{esc_author}", re.IGNORECASE)
+            if regex_pattern.search(_normalize(full_text)):
+                matched = True
+
+    if not matched:
+        body_snippet = soup.get_text(" ", strip=True)[:150]
+        issues.append({
+            "type": "copyright_author_notice_missing",
+            "message": f"Copyright notice '{expected_notice}' is missing or incorrect in copyright page.",
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": body_snippet or f"Expected: {expected_notice}",
+            "expected_text": expected_notice,
+            "extract": f"Expected: {expected_notice}",
         })
 
     return {"issues_count": len(issues), "issues": issues}
