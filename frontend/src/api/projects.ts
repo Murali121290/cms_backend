@@ -250,6 +250,16 @@ export const projectsApi = {
   getDocumentViewUrl: (projectId: number, relPath: string): string => {
     return `/api/v2/projects/${projectId}/documents/view?path=${encodeURIComponent(relPath)}`
   },
+
+  getBookmap: async (projectId: number): Promise<{ project_id: number; project_code: string; bookmap: any }> => {
+    const r = await api.get<{ project_id: number; project_code: string; bookmap: any }>(`/projects/${projectId}/bookmap`)
+    return r.data
+  },
+
+  updateBookmap: async (projectId: number, bookmap: any): Promise<{ message: string; project_id: number; bookmap: any }> => {
+    const r = await api.put<{ message: string; project_id: number; bookmap: any }>(`/projects/${projectId}/bookmap`, { bookmap })
+    return r.data
+  },
 }
 
 export interface ProjectDocument {
@@ -277,5 +287,7 @@ export const previewZip = projectsApi.previewZip
 export const resumeMapping = projectsApi.resumeMapping
 export const finalizeMapping = projectsApi.finalizeMapping
 export const getProjectDocuments = projectsApi.getDocuments
+export const getBookmap = projectsApi.getBookmap
+export const updateBookmap = projectsApi.updateBookmap
 
 

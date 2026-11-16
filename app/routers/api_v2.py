@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from jose import JWTError, jwt
@@ -11466,6 +11466,89 @@ def api_v2_chapter_bulk_download(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{safe_filename}_bulk.zip"'}
     )
+
+
+# ── Project Book Map ─────────────────────────────────────────────────────────
+
+@router.get("/projects/{project_id}/bookmap")
+def api_v2_get_project_bookmap(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    bookmap_data = getattr(project, "bookmap_details", None)
+    if not bookmap_data and project.file_details and isinstance(project.file_details, dict):
+        bookmap_data = project.file_details.get("bookmap")
+    return {"project_id": project.id, "project_code": project.project_code, "bookmap": bookmap_data}
+
+
+@router.put("/projects/{project_id}/bookmap")
+def api_v2_update_project_bookmap(
+    project_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    # Access control: Managers and Admins only
+    user_role_str = ""
+    if hasattr(viewer, "roles") and viewer.roles:
+        user_role_str += " " + " ".join(getattr(r, "name", str(r)) for r in viewer.roles)
+    if hasattr(viewer, "role") and viewer.role:
+        user_role_str += " " + str(viewer.role)
+    if hasattr(viewer, "designation") and viewer.designation:
+        user_role_str += " " + str(viewer.designation)
+    if hasattr(viewer, "access_level") and viewer.access_level:
+        user_role_str += " " + str(viewer.access_level)
+
+    user_role_str = user_role_str.lower()
+    is_manager_or_admin = any(k in user_role_str for k in ["admin", "manager", "lead", "gm"])
+    if not is_manager_or_admin:
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            message="Only managers and administrators can edit project book map."
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    from sqlalchemy.orm.attributes import flag_modified
+    bookmap_payload = payload.get("bookmap")
+
+    # Store in dedicated bookmap_details column
+    project.bookmap_details = bookmap_payload
+    flag_modified(project, "bookmap_details")
+
+    # Keep file_details['bookmap'] in sync as well
+    if project.file_details is None:
+        project.file_details = {}
+    elif not isinstance(project.file_details, dict):
+        project.file_details = dict(project.file_details)
+    project.file_details["bookmap"] = bookmap_payload
+    flag_modified(project, "file_details")
+
+    db.commit()
+    db.refresh(project)
+
+    return {
+        "message": "Book map saved successfully.",
+        "project_id": project.id,
+        "bookmap": project.bookmap_details
+    }
+
 
 
 

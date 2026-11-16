@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Search, FolderOpen, BookOpen,
+  ArrowLeft, Search, FolderOpen, BookOpen, BookMarked,
   Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle, Trash2, User as UserIcon,
   History, ArrowRight, Calendar, AlertTriangle
 } from 'lucide-react'
@@ -20,6 +20,7 @@ import { Badge, statusToBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
 import { ProjectInfoModal } from './ProjectInfoModal'
+import { ProjectBookMapModal } from './ProjectBookMapModal'
 import { useUsersStore } from '@/stores/usersStore'
 import { formatDate, formatDateTime } from '@/utils/dateUtils'
 
@@ -258,11 +259,12 @@ interface ProjectCardProps {
   onEditInfo: () => void
   onOpenWorkflow: () => void
   onOpenPlanning: () => void
+  onOpenBookMap: () => void
   onOpenHistory: () => void
   onDelete: (id: number) => void
 }
 
-function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning, onOpenHistory, onDelete }: ProjectCardProps) {
+function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning, onOpenBookMap, onOpenHistory, onDelete }: ProjectCardProps) {
   const { canAccess } = useRBAC()
   const canEdit = canAccess(['admin', 'manager'])
   const isFastTrack = project.priority === 'Fast Track'
@@ -474,6 +476,13 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
               >
                 <CalendarDays size={12} />
               </button>
+              <button
+                onClick={e => { e.stopPropagation(); onOpenBookMap() }}
+                title="Book Map"
+                className="text-muted hover:text-primary transition-colors flex-shrink-0"
+              >
+                <BookMarked size={12} />
+              </button>
               {canAccess(['admin']) && (
                 <button
                   onClick={e => { e.stopPropagation(); onDelete(project.id) }}
@@ -620,69 +629,73 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
 
             {/* Manuscript delays */}
             {consolidatedDelaysByTrack.manuscript.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-[10px] font-bold text-red-700 dark:text-red-300 min-w-[72px]">
+              <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
+                <span className="text-[10px] font-bold text-red-700 dark:text-red-300 w-[72px] shrink-0 pt-0.5">
                   Manuscript:
                 </span>
-                {consolidatedDelaysByTrack.manuscript.map((st, idx) => {
-                  const tooltipText = st.items
-                    .map(i => `${i.chLabel} (${i.type} ${i.days}d)`)
-                    .join(', ')
+                <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                  {consolidatedDelaysByTrack.manuscript.map((st, idx) => {
+                    const tooltipText = st.items
+                      .map(i => `${i.chLabel} (${i.type} ${i.days}d)`)
+                      .join(', ')
 
-                  const hasOverdue = st.overdueCount > 0
-                  const badgeLabel = hasOverdue
-                    ? `${st.overdueCount} overdue in ${st.stageName}`
-                    : `${st.delayedCount} delayed in ${st.stageName}`
+                    const hasOverdue = st.overdueCount > 0
+                    const badgeLabel = hasOverdue
+                      ? `${st.overdueCount} overdue in ${st.stageName}`
+                      : `${st.delayedCount} delayed in ${st.stageName}`
 
-                  return (
-                    <span
-                      key={idx}
-                      title={`Manuscript - ${st.stageName}:\n${tooltipText}`}
-                      className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${
-                        hasOverdue
-                          ? 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/25 hover:bg-red-500/15'
-                          : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/15'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasOverdue ? 'bg-red-500' : 'bg-amber-500'}`} />
-                      <span>{badgeLabel}</span>
-                    </span>
-                  )
-                })}
+                    return (
+                      <span
+                        key={idx}
+                        title={`Manuscript - ${st.stageName}:\n${tooltipText}`}
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${
+                          hasOverdue
+                            ? 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/25 hover:bg-red-500/15'
+                            : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/15'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasOverdue ? 'bg-red-500' : 'bg-amber-500'}`} />
+                        <span>{badgeLabel}</span>
+                      </span>
+                    )
+                  })}
+                </div>
               </div>
             )}
 
             {/* Art track delays */}
             {consolidatedDelaysByTrack.art.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-[10px] font-bold text-orange-700 dark:text-orange-300 min-w-[72px]">
+              <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
+                <span className="text-[10px] font-bold text-orange-700 dark:text-orange-300 w-[72px] shrink-0 pt-0.5">
                   Art Track:
                 </span>
-                {consolidatedDelaysByTrack.art.map((st, idx) => {
-                  const tooltipText = st.items
-                    .map(i => `${i.chLabel} (${i.type} ${i.days}d)`)
-                    .join(', ')
+                <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                  {consolidatedDelaysByTrack.art.map((st, idx) => {
+                    const tooltipText = st.items
+                      .map(i => `${i.chLabel} (${i.type} ${i.days}d)`)
+                      .join(', ')
 
-                  const hasOverdue = st.overdueCount > 0
-                  const badgeLabel = hasOverdue
-                    ? `${st.overdueCount} overdue in ${st.stageName}`
-                    : `${st.delayedCount} delayed in ${st.stageName}`
+                    const hasOverdue = st.overdueCount > 0
+                    const badgeLabel = hasOverdue
+                      ? `${st.overdueCount} overdue in ${st.stageName}`
+                      : `${st.delayedCount} delayed in ${st.stageName}`
 
-                  return (
-                    <span
-                      key={idx}
-                      title={`Art Track - ${st.stageName}:\n${tooltipText}`}
-                      className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${
-                        hasOverdue
-                          ? 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/25 hover:bg-orange-500/15'
-                          : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/15'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasOverdue ? 'bg-orange-500' : 'bg-amber-500'}`} />
-                      <span>{badgeLabel}</span>
-                    </span>
-                  )
-                })}
+                    return (
+                      <span
+                        key={idx}
+                        title={`Art Track - ${st.stageName}:\n${tooltipText}`}
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${
+                          hasOverdue
+                            ? 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/25 hover:bg-orange-500/15'
+                            : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/15'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasOverdue ? 'bg-orange-500' : 'bg-amber-500'}`} />
+                        <span>{badgeLabel}</span>
+                      </span>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -720,6 +733,7 @@ export function ClientProjects() {
   const [infoProject, setInfoProject] = useState<Project | null>(null)
   const [editProject, setEditProject] = useState<Project | null>(null)
   const [historyProject, setHistoryProject] = useState<Project | null>(null)
+  const [bookmapProject, setBookmapProject] = useState<Project | null>(null)
 
 
   const [viewMode, setViewMode] = useViewMode('view:client-projects', 'large')
@@ -907,6 +921,24 @@ export function ClientProjects() {
         }}
       />
 
+      {/* Book Map Modal */}
+      {bookmapProject && (
+        <ProjectBookMapModal
+          isOpen={bookmapProject !== null}
+          onClose={() => setBookmapProject(null)}
+          project={bookmapProject}
+          onSuccess={() => {
+            // refresh project if needed
+            projectsApi.getById(bookmapProject.id).then(res => {
+              const updated = (res as any)?.project || res
+              if (updated?.id) {
+                setProjects(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))
+              }
+            }).catch(() => {})
+          }}
+        />
+      )}
+
       {/* Due Date History Modal */}
       <Modal
         isOpen={historyProject !== null}
@@ -992,6 +1024,9 @@ export function ClientProjects() {
                       return
                     }
                     navigate(`/projects/${project.id}/planning`)
+                  }}
+                  onOpenBookMap={() => {
+                    setBookmapProject(project)
                   }}
                   onDelete={(id) => setProjectToDelete(id)}
                 />

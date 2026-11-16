@@ -24,6 +24,7 @@ import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { uiPaths } from '@/utils/appPaths'
 import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
 import { ProjectInfoModal } from './ProjectInfoModal'
+import { ProjectBookMapModal } from './ProjectBookMapModal'
 import { Modal } from '@/components/ui/Modal'
 import { UploadZone } from '@/components/ui/UploadZone'
 import { getApiErrorMessage } from '@/api/client'
@@ -944,6 +945,7 @@ export function ProjectWorkflow() {
 
   const [isInfoOpen, setIsInfoOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
+  const [isBookMapOpen, setIsBookMapOpen] = useState(false)
 
 
   const stylesheetsQuery = useStylesheetsQuery(id || null)
@@ -1755,6 +1757,13 @@ export function ProjectWorkflow() {
                 >
                   <Calendar size={14} />
                 </button>
+                <button
+                  onClick={() => setIsBookMapOpen(true)}
+                  title="Book Map"
+                  className="p-1 rounded text-muted hover:text-primary hover:bg-surface transition-colors"
+                >
+                  <BookMarked size={14} />
+                </button>
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 mt-0.5 truncate text-xs text-muted">
@@ -2358,6 +2367,23 @@ export function ProjectWorkflow() {
           setIsEditOpen(false)
         }}
       />
+
+      {/* Book Map Modal */}
+      {project && (
+        <ProjectBookMapModal
+          isOpen={isBookMapOpen}
+          onClose={() => setIsBookMapOpen(false)}
+          project={project}
+          onSuccess={() => {
+            if (id) {
+              projectsApi.getById(id).then(res => {
+                const updated = (res as any)?.project || res
+                if (updated?.id) setProject(updated)
+              }).catch(() => {})
+            }
+          }}
+        />
+      )}
 
       {/* Chapter Delay Summary Modal */}
       {delayModalChapter && (
