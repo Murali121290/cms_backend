@@ -545,6 +545,44 @@ describe('AbbreviationGroupCard — first-occurrence marker', () => {
     expect((ids as number[]).sort()).toEqual([1, 2])
   })
 
+  it('renders the reference row with "First Occurrence · Reference" label when an AB02 finding carries first_definition', () => {
+    // AB02 Repeated Expansion: later bare-expansion mentions of a
+    // term the author already defined. Each AB02 finding carries the
+    // same first_definition payload the AB04 card uses, so the group
+    // card must render the SAME reference row. The label is generic
+    // ("First Occurrence · Reference") because the row now covers
+    // both AB02 and AB04.
+    const findings = [
+      mkFinding({
+        id: 1, rule_id: 'AB02', para_index: 15,
+        original_text: 'intensive care unit',
+        suggestion: 'ICU',
+        problem_label: 'Repeated expansion',
+        abbreviation: 'ICU', expansion: 'intensive care unit',
+        first_definition: {
+          para_index: 40, start_offset: 4, end_offset: 30,
+          text: 'intensive care units (ICUs)',
+        },
+      }),
+    ]
+    const group = buildAbbreviationGroups(findings)[0]
+    render(<AbbreviationGroupCard group={group} collapsed={false} {...defaultHandlers()} />)
+    const ref = screen.getByTestId('abbr-reference-row')
+    expect(ref).toBeTruthy()
+    // Label now reads "First Occurrence" (scope widened from AB04
+    // only to AB02 + AB04).
+    expect(ref.textContent).toContain('First Occurrence')
+    expect(ref.textContent).not.toContain('First Definition')
+    // Para 41 label (para_index 40 + 1) and the first-definition
+    // surface text both appear.
+    expect(ref.textContent).toContain('Para 41')
+    expect(screen.getByTestId('abbr-reference-text').textContent).toContain(
+      'intensive care units (ICUs)',
+    )
+    // Still non-interactive.
+    expect(within(ref).queryByTestId('action-accept')).toBeNull()
+  })
+
   it('suppresses the reference row when an existing group item already covers that span', () => {
     // An AB04 item whose first_definition's span EQUALS one of the
     // group's own rows (the engine would normally skip this case,

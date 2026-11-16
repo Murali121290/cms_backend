@@ -792,6 +792,12 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
                 data["document_variant"] = _reconcile_document_variant(
                     data.get("document_variant"), data.get("profile_keys"),
                 )
+                # Signals that this config was loaded from a real saved
+                # file (the reviewer / project manager explicitly chose
+                # it), as opposed to the fallback default below. The
+                # Language Review page uses this to decide whether to
+                # render the editorial-style badge next to the filename.
+                data["is_user_selected"] = True
                 return data
             except Exception as exc:
                 logger.warning("Error reading language rules JSON at %s: %s", file_path, exc)
@@ -811,6 +817,11 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
     default_data["custom_rules"] = []
     default_data["medical_style_profile"] = DEFAULT_MEDICAL_STYLE_PROFILE
     default_data["document_variant"] = _default_document_variant_for(default_data.get("profile_keys"))
+    # Fallback path — no sidecar JSON exists. The engine still needs a
+    # profile to compute rules against ("uk" is the documented default),
+    # but the reviewer has not explicitly selected a style, so the
+    # Language Review page must NOT render a misleading badge.
+    default_data["is_user_selected"] = False
     return default_data
 
 

@@ -1,10 +1,11 @@
 // ReferenceHighlight — paints a single "selected"-style decoration over
-// the First Definition · Reference range when the user clicks the
+// the First Occurrence · Reference range when the user clicks the
 // reference row in an abbreviation group. Uses the exact same CSS
 // classes as a selected abbreviation finding (``occurrence-highlight
 // occurrence-highlight-selected occurrence-abbreviations
 // occurrence-abbreviations-selected``) so the green outline + fill is
-// visually identical to the Repeated Definition row's highlight.
+// visually identical to the Repeated Definition / Repeated Expansion
+// row's highlight.
 //
 // A reference target is identified by (paraIdx, startOffset, endOffset)
 // against the editor's DOCX paragraph indexing. Set via a transaction
