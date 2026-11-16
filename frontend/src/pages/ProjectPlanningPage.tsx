@@ -154,35 +154,41 @@ function buildTrackSchedules(
   const result = new Map<number, StageSchedule[]>()
   if (trackChapters.length === 0 || orderedStages.length === 0) return result
 
-  // Track the due date of the first stage across chapters so due dates stagger progressively
-  // Track the due date of the first stage across planned chapters so due dates stagger progressively
-  let prevFirstStageDue: Date | null = null
-  // Separate stagger tracker for unplanned/new/revised chapters added after project creation
-  let prevUnplannedFirstStageDue: Date | null = null
   const sorted = [...trackChapters].sort(sortChapters)
 
-  for (const ch of sorted) {
-    const isUnplanned = alreadyApproved && plannedChapterNumbers && !plannedChapterNumbers.has(ch.chapters)
-    // Any chapter pending planning (unapproved / revised) starts fresh on the day planning is being reviewed/approved (today)
-    const anchor = isUnplanned
-      ? new Date().toISOString()
-      : (alreadyApproved && !isAdjusting ? (projectCreatedAt || effectiveAnchor) : effectiveAnchor)
+  // Track the operator work finish date per stage across chapters
+  const plannedStagePrevDue = new Map<string, Date>()
+  const unplannedStagePrevDue = new Map<string, Date>()
 
-    const cursor = validDate(anchor)
-    const chOverrides = cellSlas[ch.id] ?? {}
-    const chPages = ch.manuscript_pages != null
-      ? ch.manuscript_pages
-      : (ch.word_count ? Math.ceil(ch.word_count / 250) : null)
+  // Running cumulative pages allocated per stage
+  const plannedCumulativePages = new Map<string, number>()
+  const unplannedCumulativePages = new Map<string, number>()
 
-    const chSched: StageSchedule[] = []
+  // Also maintain chapter's previous stage due date: chapterId -> due date of previous stage
+  const chapterPrevStageDue = new Map<number, Date>()
 
-    for (let stageIdx = 0; stageIdx < orderedStages.length; stageIdx++) {
-      const ws = orderedStages[stageIdx]
+  for (let stageIdx = 0; stageIdx < orderedStages.length; stageIdx++) {
+    const ws = orderedStages[stageIdx]
+    const pageNorm = pageNormMap ? pageNormMap.get(ws.stage_name) : null
+
+    for (const ch of sorted) {
+      const isUnplanned = alreadyApproved && plannedChapterNumbers && !plannedChapterNumbers.has(ch.chapters)
+      const stageTracker = isUnplanned ? unplannedStagePrevDue : plannedStagePrevDue
+      const cumPagesTracker = isUnplanned ? unplannedCumulativePages : plannedCumulativePages
+
+      const anchor = isUnplanned
+        ? new Date().toISOString()
+        : (alreadyApproved && !isAdjusting ? (projectCreatedAt || effectiveAnchor) : effectiveAnchor)
+
       const isCompleted = checkCompleted ? checkCompleted(ch, ws.stage_name) : false
       const dbKey = `${ch.chapters}||${ws.stage_name}`
-      const pageNorm = pageNormMap ? pageNormMap.get(ws.stage_name) : null
 
-      // Individual chapter SLA based on page norm or master SLA
+      const chOverrides = cellSlas[ch.id] ?? {}
+      const chPages = ch.manuscript_pages != null
+        ? ch.manuscript_pages
+        : (ch.word_count ? Math.ceil(ch.word_count / 250) : null)
+
+      // Chapter-level standalone page SLA
       const pageBasedSla = (pageNorm && chPages != null && chPages > 0)
         ? Math.max(1, Math.ceil(chPages / pageNorm))
         : null
@@ -198,40 +204,65 @@ function buildTrackSchedules(
         start = new Date(dbDates[dbKey].start)
         due = new Date(dbDates[dbKey].due)
       } else {
+        // Determine start date:
+        // For Stage 0, starts on the project anchor date.
+        // For Stage > 0, starts the day after this chapter's preceding stage is due.
         if (stageIdx === 0) {
-          // Stage 1 (Job Initiation):
-          // ALL chapters start on Day 1 (anchor date)
-          start = new Date(cursor)
-          const prevStagger = isUnplanned ? prevUnplannedFirstStageDue : prevFirstStageDue
-          if (pageNorm != null && pageNorm > 0 && prevStagger) {
-            // Due date staggers progressively after the previous chapter finishes
-            due = new Date(prevStagger)
-            if (slaDays) due.setDate(due.getDate() + slaDays)
-          } else {
-            due = new Date(start)
-            if (slaDays) due.setDate(due.getDate() + slaDays)
-          }
-          if (isUnplanned) {
-            prevUnplannedFirstStageDue = new Date(due)
-          } else {
-            prevFirstStageDue = new Date(due)
-          }
+          start = validDate(anchor)
         } else {
-          // Subsequent stages:
-          // Starts immediately the day after THIS chapter's preceding stage is due
-          start = new Date(cursor)
+          const prevDue = chapterPrevStageDue.get(ch.id) ?? validDate(anchor)
+          start = new Date(prevDue)
+          start.setDate(start.getDate() + 1)
+        }
+
+        if (ws.stage_name in chOverrides) {
+          // Manual override explicitly set by user for this cell
           due = new Date(start)
-          if (slaDays) due.setDate(due.getDate() + slaDays)
+          if (slaDays != null) due.setDate(due.getDate() + slaDays)
+          stageTracker.set(ws.stage_name, new Date(due))
+        } else if (pageNorm != null && pageNorm > 0 && chPages != null && chPages > 0) {
+          // Continuous cumulative page pooling:
+          const totalPrevPages = cumPagesTracker.get(ws.stage_name) ?? 0
+          const newTotalPages = totalPrevPages + chPages
+          cumPagesTracker.set(ws.stage_name, newTotalPages)
+
+          // Calculate cumulative days needed from the baseline start
+          const totalDaysNeeded = Math.max(1, Math.ceil(newTotalPages / pageNorm))
+          
+          // Stage 0 calculates directly from the anchor start
+          // Subsequent stages also ensure due date is >= start date + chapter's minimal days
+          const baseAnchor = stageIdx === 0 ? validDate(anchor) : start
+          const calculatedDue = new Date(baseAnchor)
+          calculatedDue.setDate(calculatedDue.getDate() + totalDaysNeeded)
+
+          const prevDue = stageTracker.get(ws.stage_name)
+          if (prevDue && calculatedDue < prevDue) {
+            // Due date must never go backwards
+            due = new Date(prevDue)
+          } else {
+            due = calculatedDue
+          }
+
+          stageTracker.set(ws.stage_name, new Date(due))
+        } else {
+          // Standard SLA calculation (no pageNorm or no page count, e.g. Job Initiation with default 1d SLA)
+          // Every chapter simply starts at 'start' and finishes after slaDays (start + slaDays)
+          due = new Date(start)
+          if (slaDays != null) due.setDate(due.getDate() + slaDays)
+          stageTracker.set(ws.stage_name, new Date(due))
         }
       }
 
-      chSched.push({ stageName: ws.stage_name, start, due, slaDays, pageNorm })
-      // Next stage for THIS chapter starts the day after this stage is due
-      cursor.setTime(due.getTime())
-      cursor.setDate(cursor.getDate() + 1)
-    }
+      // Record this chapter's due date for the stage
+      chapterPrevStageDue.set(ch.id, new Date(due))
 
-    result.set(ch.id, chSched)
+      let chSched = result.get(ch.id)
+      if (!chSched) {
+        chSched = []
+        result.set(ch.id, chSched)
+      }
+      chSched.push({ stageName: ws.stage_name, start, due, slaDays, pageNorm })
+    }
   }
 
   return result
