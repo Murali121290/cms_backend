@@ -384,7 +384,7 @@ export function ProjectPlanningPage() {
   const [isAdjusting, setIsAdjusting] = useState(false)
   const [previewComposition, setPreviewComposition] = useState<string | null>(null)
   const [cellSlas, setCellSlas] = useState<Record<number, Record<string, number | null>>>({})
-  const [delayMap, setDelayMap] = useState<Map<string, number>>(new Map())
+  const [delayMap, setDelayMap] = useState<Map<string, { days: number; isOverdue: boolean }>>(new Map())
   const [actualFinalDue, setActualFinalDue] = useState<Date | null>(null)
   const [dbDates, setDbDates] = useState<Record<string, { start: Date; due: Date }>>({})
   const [completedStages, setCompletedStages] = useState<Set<string>>(new Set())
@@ -454,7 +454,7 @@ export function ProjectPlanningPage() {
       setWfStagesMap(wfMapObj)
 
       let loaded: Record<number, Record<string, number | null>> = {}
-      let dMap = new Map<string, number>()
+      let dMap = new Map<string, { days: number; isOverdue: boolean }>()
       let datesMap: Record<string, { start: Date; due: Date }> = {}
       let compStages = new Set<string>()
       let histMap = new Map<string, StageHistoryEntry[]>()
@@ -490,15 +490,55 @@ export function ProjectPlanningPage() {
               }
             }
           }
-          if (d.delayed && d.delay_days != null && d.delay_days > 0) {
-            const existing = dMap.get(key) ?? 0
-            if (d.delay_days > existing) dMap.set(key, d.delay_days)
-          }
           if (d.planned_end_date) {
             const due = new Date(d.planned_end_date)
             if (!maxDue || due > maxDue) maxDue = due
           }
         }
+
+        // Calculate delays & overdue days per chapter stage matching workflow logic
+        const todayStr = new Date().toISOString().split('T')[0]
+        const byChMap = new Map<string, any[]>()
+        stageDetails.forEach((d: any) => {
+          if (!byChMap.has(d.chapters)) byChMap.set(d.chapters, [])
+          byChMap.get(d.chapters)!.push(d)
+        })
+
+        byChMap.forEach((chDetails, chName) => {
+          const chSorted = [...chDetails].sort((a: any, b: any) => (a.id || 0) - (b.id || 0))
+          const chObj = chsRaw.find(c => c.chapters === chName)
+          let activeIdx = -1
+          if (chObj?.stage_name) {
+            activeIdx = chSorted.findIndex(s => s.stage_name?.trim().toLowerCase() === chObj.stage_name?.trim().toLowerCase())
+          }
+          if (activeIdx === -1) {
+            activeIdx = chSorted.findIndex(s => {
+              const st = (s.stage_status || '').toLowerCase()
+              return st !== 'completed' && st !== 'complete' && !s.actual_end_date
+            })
+          }
+          if (activeIdx === -1) {
+            activeIdx = chSorted.length - 1
+          }
+
+          chSorted.forEach((s, idx) => {
+            if (idx > activeIdx) return
+            const sEnd = s.planned_end_date ? s.planned_end_date.split('T')[0] : ''
+            const aEnd = s.actual_end_date ? s.actual_end_date.split('T')[0] : ''
+            const isCompleted = Boolean(aEnd || (s.stage_status || '').toLowerCase() === 'completed')
+            const cellKey = `${chName}||${s.stage_name}`
+
+            if (isCompleted && sEnd && aEnd && aEnd > sEnd) {
+              const diff = Math.floor((new Date(aEnd).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+              dMap.set(cellKey, { days: Math.max(1, diff), isOverdue: false })
+            } else if (!isCompleted && idx === activeIdx && sEnd && sEnd < todayStr) {
+              const diff = Math.floor((new Date(todayStr).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+              dMap.set(cellKey, { days: Math.max(1, diff), isOverdue: true })
+            } else if (s.delayed && s.delay_days != null && s.delay_days > 0) {
+              dMap.set(cellKey, { days: s.delay_days, isOverdue: false })
+            }
+          })
+        })
       }
       setCompletedStages(compStages)
       setStageHistoryMap(histMap)
@@ -1014,8 +1054,9 @@ export function ProjectPlanningPage() {
         )}
         {chSched.map(s => {
           const isCellEdited = s.slaDays !== (baseSlaMap.get(s.stageName) ?? null)
-          const delayDays = delayMap.get(`${ch.chapters}||${s.stageName}`)
-            ?? (ch.delayed_stages?.[s.stageName] ?? 0)
+          const delayInfo = delayMap.get(`${ch.chapters}||${s.stageName}`)
+          const delayDays = delayInfo ? delayInfo.days : (ch.delayed_stages?.[s.stageName] ?? 0)
+          const isOverdue = delayInfo ? delayInfo.isOverdue : false
           const dbKey = `${ch.chapters}||${s.stageName}`
           const isCompleted = isStageCompleted(ch, s.stageName)
           const isCellEditable = editable && !isCompleted
@@ -1039,19 +1080,37 @@ export function ProjectPlanningPage() {
                 <div className="flex items-center gap-2 text-xs">
                   <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Due</span>
                   {isCompleted ? (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-text font-medium">{fmt(displayDue)}</span>
                       <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50">
                         <CheckCircle2 size={10} className="text-emerald-600 flex-shrink-0" />
                       </span>
+                      {delayDays > 0 && (
+                        <span
+                          className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-red-50 text-red-700 border border-red-200"
+                          title={`Completed with ${delayDays} day${delayDays > 1 ? 's' : ''} delay`}
+                        >
+                          +{delayDays}d delayed
+                        </span>
+                      )}
                     </div>
                   ) : !isCellEditable ? (
-                    <span className={`font-medium ${cellExceedsDue ? 'text-red-600 font-bold' : isCellEdited ? 'text-primary font-bold' : 'text-text'}`}>
-                      {fmt(displayDue)}
-                      {cellExceedsDue && (
-                        <span className="text-[10px] ml-1 text-red-500 font-bold" title={`Exceeds project due date (${projectDueDateStr})`}>⚠️</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`font-medium ${cellExceedsDue ? 'text-red-600 font-bold' : isCellEdited ? 'text-primary font-bold' : 'text-text'}`}>
+                        {fmt(displayDue)}
+                        {cellExceedsDue && (
+                          <span className="text-[10px] ml-1 text-red-500 font-bold" title={`Exceeds project due date (${projectDueDateStr})`}>⚠️</span>
+                        )}
+                      </span>
+                      {delayDays > 0 && (
+                        <span
+                          className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-red-50 text-red-700 border border-red-200"
+                          title={isOverdue ? `${delayDays} day${delayDays > 1 ? 's' : ''} overdue` : `Delayed by ${delayDays} day${delayDays > 1 ? 's' : ''}`}
+                        >
+                          {isOverdue ? `${delayDays}d overdue` : `+${delayDays}d delayed`}
+                        </span>
                       )}
-                    </span>
+                    </div>
                   ) : (
                     <div className="flex items-center gap-1">
                       <input
@@ -1087,11 +1146,6 @@ export function ProjectPlanningPage() {
                           title={`${chEffectivePages} pages ÷ ${s.pageNorm} pgs/day norm = ${Math.ceil(chEffectivePages / s.pageNorm)}d`}
                         >
                           ({chEffectivePages}p ÷ {s.pageNorm})
-                        </span>
-                      )}
-                      {delayDays > 0 && (
-                        <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 ml-1">
-                          +{delayDays}d
                         </span>
                       )}
                     </>
