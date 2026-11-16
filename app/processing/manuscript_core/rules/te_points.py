@@ -897,9 +897,43 @@ def detect_currency(seg: Segment) -> Iterable[Finding]:  # type: ignore[no-redef
 # Rule 36: Abbreviations (2+ consecutive uppercase letters)
 # ---------------------------------------------------------------------------
 _ABBREV_PAT = re.compile(r'\b[A-Z]{2,}\b')
+_HEADING_TAG_PREFIX_RE = re.compile(r'^\s*</?(?:H[1-6]|Title|ChapterTitle|PartTitle|CN|CT)\b', re.IGNORECASE)
+
+_COMMON_UPPER_STOP_WORDS = {
+    'A', 'AN', 'THE', 'AND', 'OR', 'BUT', 'NOR', 'FOR', 'YET', 'SO',
+    'IN', 'ON', 'AT', 'TO', 'BY', 'WITH', 'FROM', 'OF', 'AS', 'INTO',
+    'LIKE', 'THROUGH', 'AFTER', 'OVER', 'BETWEEN', 'OUT', 'AGAINST',
+    'DURING', 'WITHOUT', 'BEFORE', 'UNDER', 'AROUND', 'AMONG',
+    'IS', 'AM', 'ARE', 'WAS', 'WERE', 'BE', 'BEEN', 'BEING',
+    'HAVE', 'HAS', 'HAD', 'DO', 'DOES', 'DID', 'WILL', 'WOULD',
+    'SHALL', 'SHOULD', 'CAN', 'COULD', 'MAY', 'MIGHT', 'MUST',
+    'NOT', 'NO', 'WHY', 'WHAT', 'HOW', 'WHEN', 'WHERE', 'WHO', 'WHICH',
+    'THAT', 'THIS', 'THESE', 'THOSE', 'IT', 'ITS', 'HE', 'SHE', 'THEY',
+    'WE', 'YOU', 'I', 'ME', 'HIM', 'HER', 'US', 'THEM',
+}
+
+_ADDITIONAL_KNOWN_ACRONYMS = {
+    'DNA', 'RNA', 'COVID', 'COVID-19', 'AIDS', 'USEPA', 'TBD', 'N/A', 'FAQ', 'IQ',
+    'STEM', 'EPA', 'EBP', 'EHR', 'EMR', 'QI', 'DNP', 'AACN', 'CDC', 'IRB', 'HRSA',
+    'SUNY', 'AMEE', 'BMJ', 'MMWR', 'CFIR', 'CIPP', 'PDSA', 'PRISM', 'ROI', 'NNE', 'AIM'
+}
+
+def is_heading_segment(seg: Segment) -> bool:
+    style_lower = (seg.style or "").lower().replace(" ", "").replace("_", "").replace("-", "")
+    if any(k in style_lower for k in ("head", "title", "chaptertitle", "chapternumber", "parttitle")):
+        return True
+    if _HEADING_TAG_PREFIX_RE.match(seg.text):
+        return True
+    return False
+
+def _is_all_caps_segment(text: str) -> bool:
+    stripped = re.sub(r'</?[A-Za-z][\w.-]*>', '', text).strip()
+    letters = [c for c in stripped if c.isalpha()]
+    return len(letters) >= 4 and sum(1 for c in letters if c.isupper()) / len(letters) >= 0.75
+
 def detect_abbreviations(seg: Segment) -> Iterable[Finding]:
-    style_lower = (seg.style or "").lower()
-    if style_lower.startswith("heading") or "title" in style_lower:
+    is_head = is_heading_segment(seg)
+    if is_head:
         rule_id, label = "abbrev_heading", "Abbreviations in heading"
     elif seg.source == "table":
         rule_id, label = "abbrev_table", "Abbreviations in CT/TC"
@@ -907,7 +941,30 @@ def detect_abbreviations(seg: Segment) -> Iterable[Finding]:
         rule_id, label = "abbrev_caption", "Abbreviations in FC/TC"
     else:
         rule_id, label = "abbrev_body", "Abbreviations"
+
+    is_all_caps = _is_all_caps_segment(seg.text)
+
+    try:
+        from app.processing.language_editing.abbreviations import _abbr_entries_by_abbr
+        dict_abbrs = _abbr_entries_by_abbr()
+    except Exception:
+        dict_abbrs = {}
+
     for m in iter_unmasked_matches(_ABBREV_PAT, seg.text, seg.mask):
+        word = m.group(0)
+        if word in _COMMON_UPPER_STOP_WORDS:
+            continue
+
+        if is_head or is_all_caps:
+            if word not in dict_abbrs and word not in _ADDITIONAL_KNOWN_ACRONYMS:
+                start, end = m.start(), m.end()
+                is_parenthetical = (
+                    (start > 0 and seg.text[start-1] in '([') and
+                    (end < len(seg.text) and seg.text[end] in ')]')
+                )
+                if not is_parenthetical:
+                    continue
+
         yield _f(seg, m, "te_point", rule_id, label, "abbreviation_style", pat=_ABBREV_PAT)
 # ---------------------------------------------------------------------------
 # Rule 37: Latin terms (editorial flag — italics check is manual)

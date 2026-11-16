@@ -42,7 +42,7 @@ def get_te_replacement(rule_id: str, m: re.Match) -> str | None:
         return "B.C."
     # 9. Centuries numeric
     cent_map = {"21st": "twenty-first", "20th": "twentieth", "19th": "nineteenth", "18th": "eighteenth"}
-    if rule_id == "century_numeric":
+    if rule_id.startswith("century_"):
         for n, w in cent_map.items():
             if n in surface.lower():
                 return f"{w} century"

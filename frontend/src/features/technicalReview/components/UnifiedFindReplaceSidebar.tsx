@@ -814,7 +814,10 @@ export function UnifiedFindReplaceSidebar({
                 const setting = (activeStylesheet?.ce_rules as any)?.[String(rule.sno)] || (activeStylesheet?.ce_rules as any)?.[rule.sno];
                 const isEnabled = setting ? setting.enabled !== false : rule.default_enabled !== false;
                 const activeOptIdx = setting?.option ?? 1;
-                const activeOptionLabel = rule.options?.[activeOptIdx - 1] || `Option ${activeOptIdx}`;
+                const form = rule.forms?.[activeOptIdx - 1];
+                const activeOptionLabel = form?.label || rule.options?.[activeOptIdx - 1] || `Option ${activeOptIdx}`;
+                const activePreview = form?.preview;
+                const patternCount = rule.ia_patterns?.length ?? 0;
                 const violationCount = findings.filter((f: any) => f.ce_rule_no === rule.sno).length;
 
                 return (
@@ -865,15 +868,27 @@ export function UnifiedFindReplaceSidebar({
 
                     {/* Active House Style Option from Stylesheet */}
                     {activeStylesheet && (
-                      <div className="p-2 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between text-[11px]">
-                        <span className="text-slate-500 font-medium">House Style Choice:</span>
-                        <span className={`font-semibold px-2 py-0.5 rounded ${
-                          isEnabled
-                            ? "bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[10.5px]"
-                            : "bg-slate-200 text-slate-600"
-                        }`}>
-                          {isEnabled ? activeOptionLabel : "Disabled in Stylesheet"}
-                        </span>
+                      <div className="p-2 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between text-[11px] gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-slate-500 font-medium shrink-0">House Style Choice:</span>
+                          <span className={`font-semibold px-2 py-0.5 rounded truncate ${
+                            isEnabled
+                              ? "bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[10.5px]"
+                              : "bg-slate-200 text-slate-600"
+                          }`}>
+                            {isEnabled ? activeOptionLabel : "Disabled in Stylesheet"}
+                          </span>
+                          {isEnabled && activePreview && (
+                            <span className="font-mono text-[10px] bg-slate-200 text-slate-800 px-1 rounded shrink-0">
+                              {activePreview}
+                            </span>
+                          )}
+                        </div>
+                        {patternCount > 0 && (
+                          <span className="text-[10px] text-slate-400 font-medium shrink-0">
+                            {patternCount} pattern{patternCount === 1 ? "" : "s"}
+                          </span>
+                        )}
                       </div>
                     )}
 

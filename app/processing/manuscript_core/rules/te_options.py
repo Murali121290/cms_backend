@@ -543,10 +543,90 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         label_dot = "B.C." if is_bc else "A.D."
         return _unless_same(_opts(label_nodot, label_dot, QUERY), s)
 
-    # Quotation marks: curly vs straight
+    # Quotation marks: curly vs straight (R131)
     if rule_id.startswith("quote_"):
         inside = s.strip('\"\'\u201c\u201d\u2018\u2019')
-        return _unless_same(_opts(f"“{inside}”", f'\"{inside}\"', QUERY), s)
+        return _unless_same(_opts(f"“{inside}”", f'\"{inside}\"', f"‘{inside}’"), s)
+
+    # R126 Other Element References
+    if any(rule_id.startswith(p) for p in ("ref_box_", "cap_box_", "ref_chart", "cap_chart", "ref_section", "ref_chapter", "ref_diagram", "ref_image", "ref_illustration")):
+        parts = s.split()
+        if len(parts) >= 2:
+            cap = f"{parts[0].capitalize()} {' '.join(parts[1:])}"
+            low = f"{parts[0].lower()} {' '.join(parts[1:])}"
+            return _unless_same(_opts(cap, low, QUERY), s)
+        return _unless_same(_opts(s.capitalize(), s.lower(), QUERY), s)
+
+    # R127 Auxiliary Verbs in Headings and Captions
+    if rule_id.startswith("aux_verb_"):
+        return _opts(QUERY, None, QUERY)
+
+    # R128 Century Style
+    if rule_id.startswith("century_"):
+        plural = "centuries" if "centuries" in s.lower() else "century"
+        _ORD_WORDS = {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth",
+                      7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth", 11: "eleventh", 12: "twelfth",
+                      13: "thirteenth", 14: "fourteenth", 15: "fifteenth", 16: "sixteenth",
+                      17: "seventeenth", 18: "eighteenth", 19: "nineteenth", 20: "twentieth",
+                      21: "twenty-first", 22: "twenty-second"}
+        if nums:
+            n = int(nums[0])
+            suff = "st" if n % 10 == 1 and n % 100 != 11 else "nd" if n % 10 == 2 and n % 100 != 12 else "rd" if n % 10 == 3 and n % 100 != 13 else "th"
+            num_form = f"{n}{suff} {plural}"
+            spelled_form = f"{_ORD_WORDS.get(n, f'{n}{suff}')} {plural}"
+            return _unless_same(_opts(num_form, spelled_form, QUERY), s)
+        for num_val, word_val in _ORD_WORDS.items():
+            if word_val in s.lower():
+                suff = "st" if num_val % 10 == 1 and num_val % 100 != 11 else "nd" if num_val % 10 == 2 and num_val % 100 != 12 else "rd" if num_val % 10 == 3 and num_val % 100 != 13 else "th"
+                return _unless_same(_opts(f"{num_val}{suff} {plural}", f"{word_val} {plural}", QUERY), s)
+        return _opts(s, s, QUERY)
+
+    # R129 "-fold" Style
+    if rule_id.startswith("fold_"):
+        _FOLD_WORDS = {1: "onefold", 2: "twofold", 3: "threefold", 4: "fourfold", 5: "fivefold",
+                       6: "sixfold", 7: "sevenfold", 8: "eightfold", 9: "ninefold", 10: "tenfold"}
+        if nums:
+            n = int(nums[0])
+            o1 = _FOLD_WORDS.get(n, f"{n}-fold") if n < 10 else f"{n}-fold"
+            o2 = f"{n}-fold"
+            return _unless_same(_opts(o1, o2, QUERY), s)
+        return _opts(s, s, QUERY)
+
+    # R130 "times" Style
+    if rule_id.startswith("times_"):
+        if nums:
+            n = int(nums[0])
+            word = _ONES[n] if n < 10 else str(n)
+            return _unless_same(_opts(f"{n} times", f"{word} times", QUERY), s)
+        if "twice" in s.lower():
+            return _unless_same(_opts("2 times", "two times", QUERY), s)
+        return _opts(s, s, QUERY)
+
+    # R132 Paragraph End Punctuation
+    if rule_id == "para_no_full_stop":
+        return _opts(QUERY, None, QUERY)
+
+    # R133 "per" and Slash
+    if rule_id in ("per_word", "virgule_slash"):
+        if rule_id == "per_word":
+            return _unless_same(_opts(None, "/", QUERY), s)
+        return _unless_same(_opts(None, "/", QUERY), s)
+
+    # R134 Spaced Hyphens
+    if rule_id == "spaced_hyphens":
+        return _unless_same(_opts("—", " – ", QUERY), s)
+
+    # R135 Spelling Variety
+    if rule_id in ("spelling_uk", "spelling_us"):
+        return _opts(get_te_replacement(rule_id, m), None, QUERY)
+
+    # R136 Wrong Usage and Typos
+    if rule_id == "wrong_usage":
+        return _opts(get_te_replacement(rule_id, m), None, QUERY)
+
+    # R137 Clinical Jargon and Euphemisms
+    if rule_id in ("clinical_jargon", "death_euphemism", "subject_terms"):
+        return _opts(get_te_replacement(rule_id, m), None, QUERY)
 
     # R70 Heading Capitalisation:
     # Option 1: Sentence case

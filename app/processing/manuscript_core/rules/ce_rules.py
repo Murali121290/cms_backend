@@ -151,7 +151,102 @@ def load_catalog() -> list[dict]:
         rule = dict(nr)
         rule["forms"] = [{"label": label, "preview": preview} for label, preview in nr["forms"]]
         rules.append(rule)
+
+    # Attach ia_patterns: [{element, subtype, pattern, option}] to each rule
+    from ..ia_mapping import IA_TEMPLATE_ROWS, RULE_ID_TO_IA
+    patterns_by_sno: dict[int, list[dict]] = {r["sno"]: [] for r in rules}
+
+    # 1. Option-level mappings from IA_ROW_TO_CE
+    for (el, pat), (sno, opt) in IA_ROW_TO_CE.items():
+        matching_subs = [sub for e, sub, p, _ in IA_TEMPLATE_ROWS if e == el and p == pat]
+        if not matching_subs:
+            matching_subs = ["General"]
+        for sub in matching_subs:
+            target_sno = sno
+            if el == "Table" and "caption" in sub.lower():
+                target_sno = 75
+            elif el == "Table" and "citation" in sub.lower():
+                target_sno = 71
+            elif el == "Figure" and "caption" in sub.lower():
+                target_sno = 76
+            elif el == "Figure" and "citation" in sub.lower():
+                target_sno = 72
+            if target_sno in patterns_by_sno:
+                item = {"element": el, "subtype": sub, "pattern": pat, "option": opt}
+                if item not in patterns_by_sno[target_sno]:
+                    patterns_by_sno[target_sno].append(item)
+
+    # 2. Detector-level mappings
+    for rid, (el, sub, pat) in RULE_ID_TO_IA.items():
+        matched_sno = None
+        for r in rules:
+            for pattern_id in r.get("te_rule_ids", []):
+                if pattern_id.endswith("*"):
+                    if rid.startswith(pattern_id[:-1]):
+                        matched_sno = r["sno"]
+                        break
+                elif rid == pattern_id:
+                    matched_sno = r["sno"]
+                    break
+            if matched_sno is not None:
+                break
+        if matched_sno and matched_sno in patterns_by_sno:
+            already = any(p["element"] == el and p["pattern"] == pat and p["subtype"] == sub for p in patterns_by_sno[matched_sno])
+            if not already:
+                patterns_by_sno[matched_sno].append({"element": el, "subtype": sub, "pattern": pat, "option": None})
+
+    for r in rules:
+        r["ia_patterns"] = patterns_by_sno.get(r["sno"], [])
+
     return rules
+
+
+@lru_cache(maxsize=1)
+def _ia_row_resolver_map() -> dict[tuple[str, str, str], tuple[int, int | None]]:
+    """Cached map (element, subtype, pattern) -> (sno, option | None)."""
+    from ..ia_mapping import IA_TEMPLATE_ROWS, RULE_ID_TO_IA
+    out: dict[tuple[str, str, str], tuple[int, int | None]] = {}
+
+    # 1. Option level with Caption vs Citation routing
+    for (el, pat), (sno, opt) in IA_ROW_TO_CE.items():
+        matching_subs = [sub for e, sub, p, _ in IA_TEMPLATE_ROWS if e == el and p == pat]
+        if not matching_subs:
+            matching_subs = ["General"]
+        for sub in matching_subs:
+            target_sno = sno
+            if el == "Table" and "caption" in sub.lower():
+                target_sno = 75
+            elif el == "Table" and "citation" in sub.lower():
+                target_sno = 71
+            elif el == "Figure" and "caption" in sub.lower():
+                target_sno = 76
+            elif el == "Figure" and "citation" in sub.lower():
+                target_sno = 72
+            out[(el, sub, pat)] = (target_sno, opt)
+
+    # 2. Detector reverse lookup
+    for rid, (el, sub, pat) in RULE_ID_TO_IA.items():
+        if (el, sub, pat) not in out:
+            s = sno_for_rule_id(rid)
+            if s is not None:
+                out[(el, sub, pat)] = (s, None)
+
+    return out
+
+
+def ia_row_to_rule(element: str, subtype: str | None, pattern: str) -> tuple[int, int | None] | None:
+    """Shared resolver replacing both derive_from_ia_rows and frontend deriveFromRows.
+
+    Returns (sno, option | None) or None if row does not map to a CE rule.
+    """
+    sub = subtype or "General"
+    mapping = _ia_row_resolver_map()
+    if (element, sub, pattern) in mapping:
+        return mapping[(element, sub, pattern)]
+    for (e, s, p), res in mapping.items():
+        if e == element and p == pattern:
+            return res
+    return None
 
 
 def option_count(sno: int) -> int:
@@ -245,8 +340,12 @@ def derive_from_ia_rows(selected_rows: Iterable[dict]) -> tuple[dict[int, dict],
 
 def resolve_ce_config(selected_rows: Iterable[dict] | None = None, ce_rules: dict | None = None) -> dict[int, dict]:
     """Resolved settings for every catalog rule: {sno: {enabled, option, severity, source}}."""
-    derived, _ = derive_from_ia_rows(selected_rows or [])
     explicit = {int(k): v for k, v in (ce_rules or {}).items() if str(k).isdigit()}
+    # Single source in storage: settings resolve Catalog Default -> Stylesheet ce_rules.
+    # Backward compatibility for journals: derive from selected_rows only when ce_rules is empty.
+    derived = {}
+    if selected_rows:
+        derived, _ = derive_from_ia_rows(selected_rows)
     out: dict[int, dict] = {}
     for sno, rule in by_sno().items():
         cfg = {"enabled": rule.get("default_enabled", True), "option": 1, "severity": rule["severity"],

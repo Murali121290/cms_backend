@@ -92,6 +92,25 @@ class DocxStylesheetParser:
         matched_ce_rules = self._match_ce_rules(specs, preset_id)
         matched_ia_rows = self._match_ia_rows(specs, preset_id)
 
+        # Single source in storage: feed matched IA rows into ia_row_to_rule to enrich matched_ce_rules
+        from app.processing.manuscript_core.rules.ce_rules import ia_row_to_rule
+        for row in matched_ia_rows:
+            el = row.get("element") or ""
+            sub = row.get("subtype") or "General"
+            pat = row.get("pattern") or ""
+            res = ia_row_to_rule(el, sub, pat)
+            if res:
+                sno, opt = res
+                if sno not in matched_ce_rules:
+                    matched_ce_rules[sno] = {
+                        "option": opt or 1,
+                        "enabled": True,
+                        "severity": "Major",
+                        "basis": f"From IA pattern '{pat}'",
+                    }
+                elif opt is not None and "option" not in matched_ce_rules[sno]:
+                    matched_ce_rules[sno]["option"] = opt
+
         style_profile: Dict[str, Any] = {}
         if preset_id == "springer":
             from app.processing.manuscript_core.rules.presets.springer import get_springer_preset

@@ -950,6 +950,8 @@ class CERule(BaseModel):
     forms: list[dict[str, str]] = Field(default_factory=list)
     # Rules 92+ (house-style points) are off until a stylesheet turns them on
     default_enabled: bool = True
+    # Projected IA patterns detected by this rule: [{"element", "subtype", "pattern", "option"}]
+    ia_patterns: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CERulesResponse(BaseModel):
@@ -973,9 +975,25 @@ class TriggeredIARule(BaseModel):
     ce_option: int | None = None
 
 
+class TriggeredCERuleOption(BaseModel):
+    option: int
+    label: str
+    count: int
+    examples: list[str] = Field(default_factory=list)
+
+
+class TriggeredCERule(BaseModel):
+    sno: int
+    name: str
+    dominant_option: int
+    conflict: bool = False
+    options: list[TriggeredCERuleOption] = Field(default_factory=list)
+
+
 class AnalyzeFilesForStylesheetResponse(BaseModel):
     analyzed_files: list[dict]
     triggered_rules: list[TriggeredIARule]
+    triggered_ce_rules: list[TriggeredCERule] = Field(default_factory=list)
     total_findings: int
 
 

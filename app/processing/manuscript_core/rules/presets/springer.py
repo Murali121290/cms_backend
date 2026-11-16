@@ -108,6 +108,18 @@ SPRINGER_CE_RULES: Dict[int, Dict[str, Any]] = {
     121: _off(),        # MCQ rules: Q&A overlay
     124: _on(1),        # Seventh Edition
     125: _on(1),        # Editorial Red Flags (DSM quotes, Campinha-Bacote, Wikipedia)
+    126: _off(),        # Other Element References
+    127: _off(),        # Auxiliary Verbs in Headings and Captions
+    128: _on(1),        # 21st century (Springer word list)
+    129: _off(),        # -fold Style
+    130: _off(),        # times Style
+    131: _off(),        # Quotation Marks
+    132: _off(),        # Paragraph End Punctuation
+    133: _on(1),        # per in text, slash in units (6 mg/hr)
+    134: _off(),        # Spaced Hyphens
+    135: _off(),        # Spelling Variety
+    136: _off(),        # Wrong Usage and Typos
+    137: _off(),        # Clinical Jargon and Euphemisms
 }
 
 # ── 2. IA rows (kept for the IA report and the Stylesheet card) ────────────────

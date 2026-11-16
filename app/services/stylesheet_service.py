@@ -141,6 +141,93 @@ def _template_dir(project) -> str:
     )
 
 
+def migrate_ia_rows_to_ce_rules(selected_ia_rows: list[dict | schemas_v2.IARow] | None, ce_rules: dict | None) -> tuple[dict, list[str]]:
+    """Convert incoming selected_ia_rows into ce_rules with conflict warnings.
+
+    Single source of truth in storage:
+    - Explicit settings in ce_rules take precedence.
+    - Each IA row with an option-level mapping sets ce_rules[sno]["option"] = opt.
+      If multiple rows target the same sno with different options, first row wins and a warning is logged.
+    - If a row maps to structural/new rules 126-137, rule is enabled: ce_rules[sno]["enabled"] = True.
+    """
+    from app.processing.manuscript_core.rules.ce_rules import ia_row_to_rule
+
+    rules = dict(_clean_ce_rules(ce_rules) if ce_rules else {})
+    warnings: list[str] = []
+    seen_options: dict[int, int] = {}
+
+    rows = selected_ia_rows or []
+    for r in rows:
+        if hasattr(r, "model_dump"):
+            r = r.model_dump()
+        if not isinstance(r, dict):
+            continue
+        el = r.get("element") or ""
+        sub = r.get("subtype") or "General"
+        pat = r.get("pattern") or ""
+        if not (el and pat):
+            continue
+
+        mapping = ia_row_to_rule(el, sub, pat)
+        if not mapping:
+            continue
+        sno, opt = mapping
+        sno_key = str(sno)
+
+        if sno_key not in rules:
+            rules[sno_key] = {"enabled": True}
+
+        if opt is not None:
+            existing_opt = rules[sno_key].get("option")
+            if existing_opt is None:
+                if sno in seen_options and seen_options[sno] != opt:
+                    warnings.append(f"Conflict on Rule {sno}: pattern '{pat}' implies option {opt}, keeping option {seen_options[sno]}")
+                else:
+                    rules[sno_key]["option"] = opt
+                    seen_options[sno] = opt
+        else:
+            rules[sno_key]["enabled"] = True
+
+    return rules, warnings
+
+
+def project_ia_rows(ce_rules: dict | None) -> list[dict]:
+    """Derive the selected_ia_rows projection strictly from active ce_rules."""
+    from app.processing.manuscript_core.rules.ce_rules import by_sno
+
+    rules_dict = by_sno()
+    clean_rules = _clean_ce_rules(ce_rules) if ce_rules else {}
+    projected: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for sno_str, setting in clean_rules.items():
+        try:
+            sno = int(sno_str)
+        except (ValueError, TypeError):
+            continue
+        if not setting.get("enabled", True):
+            continue
+        rule_meta = rules_dict.get(sno)
+        if not rule_meta:
+            continue
+
+        opt = setting.get("option", 1)
+        ia_patterns = rule_meta.get("ia_patterns") or []
+        for p in ia_patterns:
+            p_opt = p.get("option")
+            if p_opt is None or p_opt == opt:
+                key = (p["element"], p.get("subtype") or "General", p["pattern"])
+                if key not in seen:
+                    seen.add(key)
+                    projected.append({
+                        "element": p["element"],
+                        "subtype": p.get("subtype") or "General",
+                        "pattern": p["pattern"]
+                    })
+
+    return projected
+
+
 def _normalised_content(name, ce_rules, selected_ia_rows, style_profile) -> dict:
     """The parts of a stylesheet that drive the Technical Edit, in a stable form for hashing."""
     def _rows(rows):
@@ -168,10 +255,30 @@ def _normalised_content(name, ce_rules, selected_ia_rows, style_profile) -> dict
     }
 
 
-def content_hash(name, ce_rules, selected_ia_rows, style_profile) -> str:
+def legacy_content_hash(name, ce_rules, selected_ia_rows, style_profile) -> str:
     import hashlib
     payload = json.dumps(_normalised_content(name, ce_rules, selected_ia_rows, style_profile),
                          sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def content_hash(name, ce_rules, selected_ia_rows=None, style_profile=None) -> str:
+    import hashlib
+    def _load(v, default):
+        if isinstance(v, str):
+            try:
+                return json.loads(v or "null") or default
+            except Exception:
+                return default
+        return v or default
+
+    clean_ce = _clean_ce_rules(_load(ce_rules, {}))
+    clean_prof = _load(style_profile, {})
+    payload = json.dumps({
+        "name": (name or "").strip(),
+        "ce_rules": clean_ce,
+        "style_profile": clean_prof,
+    }, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -325,13 +432,18 @@ def create_stylesheet(
     ce_rules: dict | None = None,
     style_profile: dict | None = None,
 ) -> ProjectStylesheet:
+    # Single source in storage: migrate IA rows to CE rules, project IA rows for read-only use
+    merged_ce_rules, _ = migrate_ia_rows_to_ce_rules(selected_ia_rows, ce_rules)
+    clean_ce = _clean_ce_rules(merged_ce_rules)
+    projected_rows = project_ia_rows(clean_ce)
+
     ss = ProjectStylesheet(
         project_id=project_id,
         name=name,
         description=description,
-        selected_ia_rows=json.dumps([r.model_dump() for r in selected_ia_rows]),
+        selected_ia_rows=json.dumps(projected_rows),
         analyzed_file_ids=json.dumps(analyzed_file_ids or []),
-        ce_rules=json.dumps(_clean_ce_rules(ce_rules)),
+        ce_rules=json.dumps(clean_ce),
         style_profile=json.dumps(style_profile or {}),
         is_active=False,
         created_at=datetime.now(timezone.utc),
@@ -370,12 +482,18 @@ def update_stylesheet(
         ss.name = name
     if description is not None:
         ss.description = description
-    if selected_ia_rows is not None:
-        ss.selected_ia_rows = json.dumps([r.model_dump() for r in selected_ia_rows])
+
+    existing_ce = _deserialize_dict(ss.ce_rules)
+    target_ce = ce_rules if ce_rules is not None else existing_ce
+    if selected_ia_rows is not None and ce_rules is None:
+        target_ce, _ = migrate_ia_rows_to_ce_rules(selected_ia_rows, target_ce)
+
+    clean_ce = _clean_ce_rules(target_ce)
+    ss.ce_rules = json.dumps(clean_ce)
+    ss.selected_ia_rows = json.dumps(project_ia_rows(clean_ce))
+
     if analyzed_file_ids is not None:
         ss.analyzed_file_ids = json.dumps(analyzed_file_ids)
-    if ce_rules is not None:
-        ss.ce_rules = json.dumps(_clean_ce_rules(ce_rules))
     if style_profile is not None:
         ss.style_profile = json.dumps(style_profile)
     db.commit()
@@ -627,23 +745,25 @@ def sync_stylesheet_from_ce_support(db: Session, *, project_id: int) -> ProjectS
     if file_id is not None:
         if active is not None and file_id == active.id:
             stored_hash = data.get("content_hash")
-            file_hash = content_hash(data.get("name"), data.get("ce_rules"), data.get("selected_ia_rows"),
-                                     data.get("style_profile"))
-            hand_edited = bool(stored_hash) and file_hash != stored_hash
+            file_hash = content_hash(data.get("name"), data.get("ce_rules"), style_profile=data.get("style_profile"))
+            legacy_hash = legacy_content_hash(data.get("name"), data.get("ce_rules"), data.get("selected_ia_rows"), data.get("style_profile"))
+            hand_edited = bool(stored_hash) and (stored_hash != file_hash and stored_hash != legacy_hash)
             if hand_edited and file_hash != _stylesheet_hash(active):
                 clean = _validated_disk_data(data, file_path)
                 if clean is not None:
                     logger.info("Updating active stylesheet %s from hand-edited %s", active.id, file_path)
-                    active.ce_rules = json.dumps(_clean_ce_rules(clean["ce_rules"]))
-                    active.selected_ia_rows = json.dumps([r.model_dump() for r in clean["selected_ia_rows"]])
+                    merged_ce, _ = migrate_ia_rows_to_ce_rules(clean["selected_ia_rows"], clean["ce_rules"])
+                    clean_ce = _clean_ce_rules(merged_ce)
+                    active.ce_rules = json.dumps(clean_ce)
+                    active.selected_ia_rows = json.dumps(project_ia_rows(clean_ce))
                     active.style_profile = json.dumps(clean["style_profile"])
                     if clean["name"]:
                         active.name = clean["name"]
                     db.commit()
                     db.refresh(active)
                     _save_stylesheet_to_disk(db, active)
-            elif not stored_hash or os.path.basename(file_path) != CANONICAL_STYLESHEET_JSON:
-                _save_stylesheet_to_disk(db, active)  # legacy file or missing canonical: rewrite with hash
+            elif not stored_hash or os.path.basename(file_path) != CANONICAL_STYLESHEET_JSON or stored_hash == legacy_hash:
+                _save_stylesheet_to_disk(db, active)  # rewrite with new format
             return active
 
         exists = db.query(ProjectStylesheet).filter(

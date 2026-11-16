@@ -677,6 +677,8 @@ export interface CERule {
   forms?: CERuleForm[];
   /** House-style rules 92+ are off until a stylesheet enables them. */
   default_enabled?: boolean;
+  /** Projected IA patterns detected by this rule */
+  ia_patterns?: { element: string; subtype: string; pattern: string; option: number | null }[];
 }
 
 export interface CERuleForm {
@@ -728,7 +730,7 @@ export interface StylesheetsListResponse {
 export interface StylesheetCreateRequest {
   name: string;
   description?: string | null;
-  selected_ia_rows: IARow[];
+  selected_ia_rows?: IARow[];
   analyzed_file_ids?: number[];
   ce_rules?: CERuleSettings;
   style_profile?: Record<string, unknown>;
@@ -777,9 +779,25 @@ export interface TriggeredIARule {
   ce_option?: number | null;
 }
 
+export interface TriggeredCERuleOption {
+  option: number;
+  label: string;
+  count: number;
+  examples: string[];
+}
+
+export interface TriggeredCERule {
+  sno: number;
+  name: string;
+  dominant_option: number;
+  conflict: boolean;
+  options: TriggeredCERuleOption[];
+}
+
 export interface AnalyzeFilesForStylesheetResponse {
   analyzed_files: { id: number; filename: string }[];
   triggered_rules: TriggeredIARule[];
+  triggered_ce_rules?: TriggeredCERule[];
   total_findings: number;
 }
 

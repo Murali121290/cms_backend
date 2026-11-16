@@ -37,12 +37,7 @@ interface StylesheetFormDrawerProps {
     create: { mutate: (payload: StylesheetCreateRequest) => void; isPending: boolean };
     update: { mutate: (params: { id: number; payload: StylesheetUpdateRequest }) => void; isPending: boolean };
   };
-  iaTemplate: IATemplateRow[];
-}
-
-interface ElementGroup {
-  element: string;
-  rows: IATemplateRow[];
+  iaTemplate?: IATemplateRow[];
 }
 
 export function StylesheetFormDrawer({
@@ -56,10 +51,8 @@ export function StylesheetFormDrawer({
   const [isFullPage, setIsFullPage] = useState(true);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedRows, setSelectedRows] = useState<IATemplateRow[]>([]);
-  const [expandedElements, setExpandedElements] = useState<Set<string>>(new Set());
   const [ceRules, setCeRules] = useState<CERuleSettings>({});
-  const [section, setSection] = useState<"ce" | "profile" | "ia">("ce");
+  const [section, setSection] = useState<"ce" | "profile">("ce");
   const [styleProfile, setStyleProfile] = useState<StyleProfile>({});
   const [isUploadingDocx, setIsUploadingDocx] = useState(false);
   const [isLoadingSpringer, setIsLoadingSpringer] = useState(false);
@@ -69,8 +62,6 @@ export function StylesheetFormDrawer({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const ceRulesQuery = useCeRulesQuery();
-  const fallbackIaQuery = useIATemplateQuery();
-  const effectiveIaTemplate = iaTemplate.length > 0 ? iaTemplate : (fallbackIaQuery.data?.rows || []);
 
   // Total style profile items count for badge
   const totalProfileItems = useMemo(() => {
@@ -85,29 +76,12 @@ export function StylesheetFormDrawer({
     if (editingStylesheet) {
       setName(editingStylesheet.name);
       setDescription(editingStylesheet.description || "");
-      setSelectedRows(
-        editingStylesheet.selected_ia_rows.map((row) => ({
-          ...row,
-          example: null,
-        }))
-      );
-      setExpandedElements(
-        new Set(editingStylesheet.selected_ia_rows.map((row) => row.element))
-      );
       setCeRules(editingStylesheet.ce_rules ?? {});
       setStyleProfile((editingStylesheet.style_profile as StyleProfile) ?? {});
-      if (editingStylesheet.ce_rules && Object.keys(editingStylesheet.ce_rules).length > 0) {
-        setSection("ce");
-      } else if (editingStylesheet.selected_ia_rows?.length > 0) {
-        setSection("ia");
-      } else {
-        setSection("ce");
-      }
+      setSection("ce");
     } else {
       setName("");
       setDescription("");
-      setSelectedRows([]);
-      setExpandedElements(new Set());
       setCeRules({});
       setStyleProfile({});
       setSection("ce");
@@ -116,60 +90,6 @@ export function StylesheetFormDrawer({
     setDocxImportData(null);
     setShowDocxDetails(false);
   }, [editingStylesheet, isOpen]);
-
-  const linkedSelectedRows = useMemo(() => {
-    const link = new Map(effectiveIaTemplate.map((r) => [`${r.element}|${r.subtype}|${r.pattern}`, r]));
-    return selectedRows.map((r) => ({ ...r, ...link.get(`${r.element}|${r.subtype}|${r.pattern}`) }));
-  }, [effectiveIaTemplate, selectedRows]);
-
-  const groupedRows = groupByElement(effectiveIaTemplate);
-
-  const toggleElement = (element: string) => {
-    const newExpanded = new Set(expandedElements);
-    if (newExpanded.has(element)) {
-      newExpanded.delete(element);
-    } else {
-      newExpanded.add(element);
-    }
-    setExpandedElements(newExpanded);
-  };
-
-  const normalizePattern = (p: string) => p.replace(/[\u2013\u2014–—]/g, "-").trim().toLowerCase();
-
-  const toggleRowSelection = (row: IATemplateRow) => {
-    setSelectedRows((prev) => {
-      const exists = prev.some(
-        (r) =>
-          r.element.toLowerCase() === row.element.toLowerCase() &&
-          (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
-            normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
-          (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
-      );
-      if (exists) {
-        return prev.filter(
-          (r) =>
-            !(
-              r.element.toLowerCase() === row.element.toLowerCase() &&
-              (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
-                normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
-              (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
-            )
-        );
-      } else {
-        return [...prev, row];
-      }
-    });
-  };
-
-  const isRowSelected = (row: IATemplateRow) => {
-    return selectedRows.some(
-      (r) =>
-        r.element.toLowerCase() === row.element.toLowerCase() &&
-        (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
-          normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
-        (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
-    );
-  };
 
   const handleDocxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -196,59 +116,7 @@ export function StylesheetFormDrawer({
       setCeRules(newCeRules);
       setStyleProfile(res.style_profile ?? {});
 
-      // Auto-match IA rows from template
-      const newSelectedRows: IATemplateRow[] = [];
-      const newExpanded = new Set<string>(expandedElements);
-      for (const matchedIa of res.matched_ia_rows) {
-        const found =
-          effectiveIaTemplate.find(
-            (t) => t.element === matchedIa.element && t.pattern === matchedIa.pattern &&
-              (!matchedIa.subtype || t.subtype === matchedIa.subtype),
-          ) ||
-          effectiveIaTemplate.find(
-            (t) =>
-              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
-              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
-                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern)) &&
-              (!matchedIa.subtype || t.subtype.toLowerCase() === matchedIa.subtype.toLowerCase())
-          ) ||
-          effectiveIaTemplate.find(
-            (t) =>
-              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
-              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
-                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern))
-          ) ||
-          effectiveIaTemplate.find(
-            (t) =>
-              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
-              (normalizePattern(t.pattern).includes(normalizePattern(matchedIa.pattern)) ||
-                normalizePattern(matchedIa.pattern).includes(normalizePattern(t.pattern)))
-          );
-
-        const matchedRow: IATemplateRow = found || {
-          element: matchedIa.element,
-          subtype: matchedIa.subtype || "General",
-          pattern: matchedIa.pattern,
-          example: matchedIa.source_value || null,
-        };
-
-        if (
-          !newSelectedRows.some(
-            (r) =>
-              r.element.toLowerCase() === matchedRow.element.toLowerCase() &&
-              (r.pattern.toLowerCase() === matchedRow.pattern.toLowerCase() ||
-                normalizePattern(r.pattern) === normalizePattern(matchedRow.pattern)) &&
-              (!matchedRow.subtype || !r.subtype || r.subtype.toLowerCase() === matchedRow.subtype.toLowerCase())
-          )
-        ) {
-          newSelectedRows.push(matchedRow);
-          newExpanded.add(matchedRow.element);
-        }
-      }
-      setSelectedRows(newSelectedRows);
-      setExpandedElements(newExpanded);
-
-      // Switch to CE tab so user immediately sees imported rules
+      // Switch to Editorial Rules tab so user immediately sees imported rules
       setSection("ce");
     } catch (err: any) {
       console.error("Failed to parse DOCX stylesheet:", err);
@@ -312,32 +180,6 @@ export function StylesheetFormDrawer({
       setCeRules(newCeRules);
       setStyleProfile(res.style_profile ?? {});
 
-      const newSelectedRows: IATemplateRow[] = [];
-      const newExpanded = new Set<string>(expandedElements);
-      for (const matchedIa of (res.selected_ia_rows || [])) {
-        const found =
-          effectiveIaTemplate.find(
-            (t) => t.element === matchedIa.element && t.pattern === matchedIa.pattern &&
-              (!matchedIa.subtype || t.subtype === matchedIa.subtype),
-          ) ||
-          effectiveIaTemplate.find(
-            (t) =>
-              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
-              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
-                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern)) &&
-              (!matchedIa.subtype || t.subtype.toLowerCase() === matchedIa.subtype.toLowerCase())
-          ) || {
-            element: matchedIa.element,
-            subtype: matchedIa.subtype || "General",
-            pattern: matchedIa.pattern,
-            example: matchedIa.example || null,
-          };
-        newSelectedRows.push(found);
-        newExpanded.add(found.element);
-      }
-      setSelectedRows(newSelectedRows);
-      setExpandedElements(newExpanded);
-
       const matchedMap: Record<string, any> = {};
       for (const [sno, r] of Object.entries(res.ce_rules || {})) {
         const item = r as any;
@@ -384,7 +226,6 @@ export function StylesheetFormDrawer({
     const payload = {
       name: name.trim(),
       description: description.trim() || null,
-      selected_ia_rows: selectedRows,
       ce_rules: ceRules,
       style_profile: styleProfile,
     };
@@ -395,7 +236,6 @@ export function StylesheetFormDrawer({
         payload: {
           name: payload.name,
           description: payload.description,
-          selected_ia_rows: payload.selected_ia_rows,
           ce_rules: payload.ce_rules,
           style_profile: payload.style_profile,
         },
@@ -520,7 +360,7 @@ export function StylesheetFormDrawer({
                     : "text-slate-600 hover:text-slate-900"
                   }`}
               >
-                CE Rules ({ceRulesQuery.data?.rules.length ?? 106})
+                Editorial Rules ({ceRulesQuery.data?.rules.length ?? 118})
               </button>
               <button
                 type="button"
@@ -538,29 +378,6 @@ export function StylesheetFormDrawer({
                     {totalProfileItems}
                   </span>
                 )}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={section === "ia"}
-                onClick={() => setSection("ia")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${section === "ia"
-                    ? "bg-white text-slate-900 shadow-xs font-semibold"
-                    : "text-slate-600 hover:text-slate-900"
-                  }`}
-              >
-                <span>IA Rules</span>
-                <span
-                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                    selectedRows.length > 0
-                      ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
-                      : "bg-slate-200 text-slate-700"
-                  }`}
-                >
-                  {selectedRows.length > 0
-                    ? `${selectedRows.length} active`
-                    : `${effectiveIaTemplate.length} available`}
-                </span>
               </button>
             </div>
 
@@ -695,92 +512,20 @@ export function StylesheetFormDrawer({
               onBookTypeChange={handleBookTypeChange}
               isApplyingBookType={isApplyingBookType}
             />
-          ) : section === "ce" ? (
+          ) : (
             <div>
               {ceRulesQuery.isPending ? (
-                <div className="p-12 text-center text-sm text-muted">Loading checklist rules…</div>
+                <div className="p-12 text-center text-sm text-muted">Loading editorial rules catalog…</div>
               ) : ceRulesQuery.isError ? (
-                <div className="p-12 text-center text-sm text-red-600">The checklist rules could not be loaded. Close and reopen to try again.</div>
+                <div className="p-12 text-center text-sm text-red-600">The editorial rules catalog could not be loaded. Close and reopen to try again.</div>
               ) : (
                 <CERulesEditor
                   rules={ceRulesQuery.data.rules}
-                  selectedRows={linkedSelectedRows}
                   settings={ceRules}
                   onChange={setCeRules}
                   isFullPage={true}
                 />
               )}
-            </div>
-          ) : (
-            <div className="max-w-5xl mx-auto space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-text">Legacy Style Rules from IA Analysis</h3>
-                  <p className="text-xs text-muted">Select specific patterns to enforce from previous publication analyses ({effectiveIaTemplate.length} available).</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
-                    {selectedRows.length} of {effectiveIaTemplate.length} rules selected
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (selectedRows.length === effectiveIaTemplate.length) {
-                        setSelectedRows([]);
-                      } else {
-                        setSelectedRows([...effectiveIaTemplate]);
-                      }
-                    }}
-                    className="text-xs font-semibold px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors cursor-pointer"
-                  >
-                    {selectedRows.length === effectiveIaTemplate.length ? "Clear All" : "Select All 357 Rules"}
-                  </button>
-                </div>
-              </div>
-              <div className="border border-border rounded-lg bg-white overflow-hidden shadow-xs divide-y divide-border">
-                {groupedRows.map((group) => (
-                  <div key={group.element} className="divide-y divide-border">
-                    <button
-                      type="button"
-                      onClick={() => toggleElement(group.element)}
-                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors text-left"
-                    >
-                      <span className="text-xs font-bold text-text uppercase tracking-wider">{group.element}</span>
-                      <div className="flex items-center gap-2 text-xs text-muted">
-                        <span>{group.rows.length} patterns</span>
-                        {expandedElements.has(group.element) ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </div>
-                    </button>
-                    {expandedElements.has(group.element) && (
-                      <div className="px-4 py-3 bg-slate-50/50 grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {group.rows.map((row, i) => (
-                          <label key={i} className="flex items-start gap-2 p-2 bg-white rounded border border-slate-200 text-xs cursor-pointer hover:border-amber-400 transition-colors">
-                            <input
-                              type="checkbox"
-                              checked={isRowSelected(row)}
-                              onChange={() => toggleRowSelection(row)}
-                              className="mt-0.5 rounded border-border"
-                            />
-                            <div className="min-w-0 flex-1">
-                              <span className="font-mono text-text block truncate">{row.pattern}</span>
-                              {row.subtype && <span className="text-[10px] text-muted block">{row.subtype}</span>}
-                            </div>
-                            {row.ce_rule_no && (
-                              <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
-                                R{row.ce_rule_no} · Opt {row.ce_option}
-                              </span>
-                            )}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>
@@ -891,7 +636,7 @@ export function StylesheetFormDrawer({
                 className={`px-3 py-1 rounded-full text-xs font-medium border ${section === "ce" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
                   }`}
               >
-                CE rules ({ceRulesQuery.data?.rules.length ?? 106})
+                Editorial Rules ({ceRulesQuery.data?.rules.length ?? 118})
               </button>
               <button
                 type="button"
@@ -908,16 +653,6 @@ export function StylesheetFormDrawer({
                   </span>
                 )}
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={section === "ia"}
-                onClick={() => setSection("ia")}
-                className={`px-3 py-1 rounded-full text-xs font-medium border ${section === "ia" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
-                  }`}
-              >
-                IA Rules ({selectedRows.length > 0 ? `${selectedRows.length} active` : `${effectiveIaTemplate.length} available`})
-              </button>
             </div>
 
             {section === "profile" ? (
@@ -928,69 +663,20 @@ export function StylesheetFormDrawer({
                 onBookTypeChange={handleBookTypeChange}
                 isApplyingBookType={isApplyingBookType}
               />
-            ) : section === "ce" ? (
+            ) : (
               <div className="space-y-2">
-                <p className="text-[11px] text-muted">
-                  Options tagged &ldquo;From IA row&rdquo; follow the ticked IA rows. Choosing a different option here overrides that.
-                  &ldquo;Query author&rdquo; options and rules 12, 26 and 28 are never applied automatically.
-                </p>
                 {ceRulesQuery.isPending ? (
-                  <p className="text-xs text-muted">Loading checklist rules…</p>
+                  <p className="text-xs text-muted">Loading editorial rules…</p>
                 ) : ceRulesQuery.isError ? (
-                  <p className="text-xs text-red-600">The checklist rules could not be loaded. Close and reopen the stylesheet to try again.</p>
+                  <p className="text-xs text-red-600">The editorial rules could not be loaded. Close and reopen the stylesheet to try again.</p>
                 ) : (
                   <CERulesEditor
                     rules={ceRulesQuery.data.rules}
-                    selectedRows={linkedSelectedRows}
                     settings={ceRules}
                     onChange={setCeRules}
                     isFullPage={false}
                   />
                 )}
-              </div>
-            ) : (
-              <div>
-                <label className="block text-xs font-semibold text-text mb-2 uppercase tracking-wide">
-                  Style Rules ({selectedRows.length} selected)
-                </label>
-                <div className="border border-border rounded-md bg-sidebar/3 overflow-hidden">
-                  {groupedRows.map((group) => (
-                    <div key={group.element} className="border-b border-border last:border-b-0">
-                      <button
-                        type="button"
-                        onClick={() => toggleElement(group.element)}
-                        className="w-full flex items-center justify-between px-3 py-2 hover:bg-sidebar/5 transition-colors text-left"
-                      >
-                        <span className="text-xs font-semibold text-text">{group.element}</span>
-                        {expandedElements.has(group.element) ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
-                      {expandedElements.has(group.element) && (
-                        <div className="px-3 pb-2 bg-white space-y-1.5 border-t border-border">
-                          {group.rows.map((row, i) => (
-                            <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={isRowSelected(row)}
-                                onChange={() => toggleRowSelection(row)}
-                                className="mt-0.5 rounded border-border"
-                              />
-                              <span className="flex-1 font-mono text-text">{row.pattern}</span>
-                              {row.ce_rule_no && (
-                                <span className="text-[10px] text-muted shrink-0">
-                                  R{row.ce_rule_no} · Opt {row.ce_option}
-                                </span>
-                              )}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
           </div>
@@ -1017,17 +703,4 @@ export function StylesheetFormDrawer({
       </div>
     </div>
   );
-}
-
-function groupByElement(rows: IATemplateRow[]): ElementGroup[] {
-  const grouped = new Map<string, IATemplateRow[]>();
-  for (const row of rows) {
-    if (!grouped.has(row.element)) {
-      grouped.set(row.element, []);
-    }
-    grouped.get(row.element)!.push(row);
-  }
-  return Array.from(grouped.entries())
-    .map(([element, items]) => ({ element, rows: items }))
-    .sort((a, b) => a.element.localeCompare(b.element));
 }

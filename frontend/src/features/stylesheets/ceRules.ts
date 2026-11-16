@@ -49,14 +49,14 @@ export interface ResolvedRule {
   custom_template?: string;
 }
 
-/** Catalog default, then IA-row option, then the stylesheet's explicit setting. */
+/** Catalog default, then IA-row option (if any), then the stylesheet's explicit setting. */
 export function resolveRule(
   rule: CERule,
-  derived: Record<number, DerivedOption>,
-  settings: CERuleSettings,
+  derived?: Record<number, DerivedOption>,
+  settings?: CERuleSettings,
 ): ResolvedRule {
-  const explicit = settings[String(rule.sno)] ?? {};
-  const fromRow = derived[rule.sno];
+  const explicit = settings?.[String(rule.sno)] ?? {};
+  const fromRow = derived?.[rule.sno];
   return {
     enabled: explicit.enabled ?? rule.default_enabled ?? true,
     option: explicit.option ?? fromRow?.option ?? 1,
@@ -70,13 +70,13 @@ export function resolveRule(
 export function updateSetting(
   settings: CERuleSettings,
   rule: CERule,
-  derived: Record<number, DerivedOption>,
+  derived: Record<number, DerivedOption> | undefined,
   field: keyof CERuleSetting,
   value: boolean | number | string,
 ): CERuleSettings {
   const inherited: Record<string, unknown> = {
     enabled: rule.default_enabled ?? true,
-    option: derived[rule.sno]?.option ?? 1,
+    option: derived?.[rule.sno]?.option ?? 1,
     severity: rule.severity,
   };
   const key = String(rule.sno);
@@ -123,6 +123,8 @@ export const HOUSE_STYLE_PRESETS: HouseStylePreset[] = [
       112: { option: 1, enabled: true }, // future to present tense
       124: { option: 1, enabled: true }, // nonpossessive medical eponyms
       125: { option: 1, enabled: true }, // editorial red flags & permissions
+      128: { option: 1, enabled: true }, // 21st century
+      133: { option: 1, enabled: true }, // 6 mg/hr
     },
   },
   {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -29,7 +29,7 @@ import {
 
 interface CERulesEditorProps {
   rules: CERule[];
-  selectedRows: CELinkedRow[];
+  selectedRows?: CELinkedRow[];
   settings: CERuleSettings;
   onChange: (settings: CERuleSettings) => void;
   isFullPage?: boolean;
@@ -38,7 +38,7 @@ interface CERulesEditorProps {
 
 export function CERulesEditor({
   rules,
-  selectedRows,
+  selectedRows = [],
   settings,
   onChange,
   isFullPage = true,
@@ -320,6 +320,63 @@ export function CERulesEditor({
     onChange(updateSetting(settings, rule, derived, field, value));
   };
 
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = (document.activeElement?.tagName || "").toLowerCase();
+      const isInput =
+        activeTag === "input" ||
+        activeTag === "textarea" ||
+        (document.activeElement as HTMLElement)?.isContentEditable;
+
+      // "/" focuses search box
+      if (e.key === "/" && !isInput) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (isInput) return;
+
+      // "j" navigates to next rule, "k" navigates to previous rule
+      if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        const currentIdx = rules.findIndex((r) => r.sno === activePreviewRuleId);
+        if (currentIdx < rules.length - 1) {
+          setActivePreviewRuleId(rules[currentIdx + 1].sno);
+        }
+      } else if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        const currentIdx = rules.findIndex((r) => r.sno === activePreviewRuleId);
+        if (currentIdx > 0) {
+          setActivePreviewRuleId(rules[currentIdx - 1].sno);
+        }
+      } else if (e.key >= "1" && e.key <= "6") {
+        // "1"-"6" select options on active preview rule
+        const optNum = Number(e.key);
+        const curRule = rules.find((r) => r.sno === activePreviewRuleId);
+        if (curRule && optNum <= (curRule.options?.length || 5)) {
+          e.preventDefault();
+          setRuleField(curRule, "option", optNum);
+          showNotification(`R${curRule.sno} option set to ${optNum}`);
+        }
+      } else if (e.key === " ") {
+        // Space toggles on/off on active preview rule
+        e.preventDefault();
+        const curRule = rules.find((r) => r.sno === activePreviewRuleId);
+        if (curRule) {
+          const res = resolveRule(curRule, derived, settings);
+          setRuleField(curRule, "enabled", !res.enabled);
+          showNotification(`R${curRule.sno} ${!res.enabled ? "enabled" : "disabled"}`);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [rules, activePreviewRuleId, settings, derived]);
+
   /* -------------------------------------------------------------------------- */
   /* Reusable Sub-Components                                                    */
   /* -------------------------------------------------------------------------- */
@@ -365,6 +422,7 @@ export function CERulesEditor({
       <div className="relative">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
+          ref={searchInputRef}
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -382,44 +440,54 @@ export function CERulesEditor({
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
-        <button
-          type="button"
-          onClick={() => setActiveCategory("all")}
-          className={`px-2.5 py-1 rounded border whitespace-nowrap font-medium transition-colors ${
-            activeCategory === "all"
-              ? "bg-slate-800 text-white border-slate-800 font-semibold"
-              : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
-          }`}
-        >
-          All ({rules.length})
-        </button>
-        {categories.map((cat) => (
+      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 text-[11px]">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
           <button
-            key={cat}
             type="button"
-            onClick={() => setActiveCategory(cat)}
+            onClick={() => setActiveCategory("all")}
             className={`px-2.5 py-1 rounded border whitespace-nowrap font-medium transition-colors ${
-              activeCategory === cat
+              activeCategory === "all"
                 ? "bg-slate-800 text-white border-slate-800 font-semibold"
                 : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
             }`}
           >
-            {cat}
+            All ({rules.length})
           </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setShowCustomOnly(!showCustomOnly)}
-          className={`ml-auto px-2.5 py-1 rounded border whitespace-nowrap font-medium text-[11px] transition-colors ${
-            showCustomOnly
-              ? "bg-amber-100 text-amber-900 border-amber-300 font-semibold"
-              : "bg-white text-slate-500 hover:bg-slate-100 border-slate-200"
-          }`}
-        >
-          <Filter className="w-3 h-3 inline mr-1" />
-          Modified Only ({totalModified})
-        </button>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setActiveCategory(cat)}
+              className={`px-2.5 py-1 rounded border whitespace-nowrap font-medium transition-colors ${
+                activeCategory === cat
+                  ? "bg-slate-800 text-white border-slate-800 font-semibold"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setShowCustomOnly(!showCustomOnly)}
+            className={`px-2.5 py-1 rounded border whitespace-nowrap font-medium text-[11px] transition-colors ${
+              showCustomOnly
+                ? "bg-amber-100 text-amber-900 border-amber-300 font-semibold"
+                : "bg-white text-slate-500 hover:bg-slate-100 border-slate-200"
+            }`}
+          >
+            <Filter className="w-3 h-3 inline mr-1" />
+            Modified Only ({totalModified})
+          </button>
+        </div>
+
+        <div className="hidden xl:flex items-center gap-2 text-[10px] text-slate-400 shrink-0 select-none">
+          <span className="font-semibold text-slate-500">Shortcuts:</span>
+          <span><kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">/</kbd> Search</span>
+          <span><kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">J</kbd>/<kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">K</kbd> Prev/Next</span>
+          <span><kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">1-6</kbd> Option</span>
+          <span><kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">Space</kbd> Toggle</span>
+        </div>
       </div>
     </div>
   );
@@ -785,10 +853,54 @@ export function CERulesEditor({
                           </div>
                         </div>
 
-                        {resolved.fromIaRow && (
-                          <p className="text-[11px] text-amber-700 font-medium">
-                            From IA row: {resolved.fromIaRow}
-                          </p>
+                        {/* Expandable IA Patterns detected by this rule */}
+                        {rule.ia_patterns && rule.ia_patterns.length > 0 && (
+                          <div onClick={(e) => e.stopPropagation()} className="pt-1">
+                            <details className="text-[11px] text-slate-500 group/pat">
+                              <summary className="cursor-pointer select-none hover:text-slate-800 font-medium inline-flex items-center gap-1">
+                                <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded border border-slate-200">
+                                  {rule.ia_patterns.length} pattern{rule.ia_patterns.length === 1 ? "" : "s"} detected
+                                </span>
+                              </summary>
+                              <div className="mt-1.5 p-2 bg-slate-50 border border-slate-200 rounded text-[11px] font-mono space-y-1 max-h-36 overflow-y-auto">
+                                {rule.ia_patterns.map((p, pIdx) => {
+                                  const isMatchedOption =
+                                    p.option !== null &&
+                                    p.option !== undefined &&
+                                    p.option === resolved.option;
+                                  return (
+                                    <div
+                                      key={pIdx}
+                                      className={`flex items-center justify-between px-1.5 py-0.5 rounded ${
+                                        isMatchedOption
+                                          ? "bg-emerald-50 text-emerald-800 font-semibold border border-emerald-200"
+                                          : "text-slate-600"
+                                      }`}
+                                    >
+                                      <span className="truncate pr-2">
+                                        {p.element} &gt; {p.pattern}
+                                      </span>
+                                      {p.option ? (
+                                        <span
+                                          className={`text-[10px] px-1 rounded shrink-0 ${
+                                            isMatchedOption
+                                              ? "bg-emerald-200 text-emerald-900"
+                                              : "bg-slate-200 text-slate-700"
+                                          }`}
+                                        >
+                                          Opt {p.option}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] text-slate-400 shrink-0">
+                                          detect-only
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </details>
+                          </div>
                         )}
                       </div>
                     );

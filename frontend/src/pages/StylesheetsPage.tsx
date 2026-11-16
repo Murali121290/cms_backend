@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
-import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronUp, GripVertical, Loader, FileSpreadsheet, Table2, Globe, Download } from "lucide-react";
+import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronUp, GripVertical, Loader, FileSpreadsheet, Table2, Globe, Download, AlertCircle } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
@@ -14,7 +14,7 @@ import { useStylesheetsQuery, useIATemplateQuery, useStylesheetMutations, useAna
 import { useProjectChaptersQuery } from "@/features/projects/useProjectChaptersQuery";
 import { getChapterFiles } from "@/api/projects";
 import { StylesheetFormDrawer } from "@/features/stylesheets/StylesheetFormDrawer";
-import type { StylesheetSummary, TriggeredIARule, FileRecord, IATemplateRow } from "@/types/api";
+import type { StylesheetSummary, TriggeredIARule, FileRecord, IATemplateRow, AnalyzeFilesForStylesheetResponse, TriggeredCERule } from "@/types/api";
 import { deriveFromRows, resolveRule } from "@/features/stylesheets/ceRules";
 import { formatDateTime as formatUtcDateTime } from "@/utils/dateUtils";
 
@@ -42,8 +42,9 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
   // Workflow state
   const [workflowStep, setWorkflowStep] = useState<WorkflowStep>("select-files");
   const [selectedFileIds, setSelectedFileIds] = useState<Set<number>>(new Set());
-  const [analyzeResult, setAnalyzeResult] = useState<{ triggered_rules: TriggeredIARule[]; analyzed_files: any[]; total_findings: number } | null>(null);
+  const [analyzeResult, setAnalyzeResult] = useState<AnalyzeFilesForStylesheetResponse | null>(null);
   const [selectedRuleKeys, setSelectedRuleKeys] = useState<Set<string>>(new Set());
+  const [selectedCeRules, setSelectedCeRules] = useState<Record<number, { enabled: boolean; option: number }>>({});
   const [workflowName, setWorkflowName] = useState("");
   const [workflowDescription, setWorkflowDescription] = useState("");
 
@@ -152,6 +153,15 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
           data.triggered_rules.map(r => `${r.element}|${r.subtype}|${r.pattern}`)
         );
         setSelectedRuleKeys(allRuleKeys);
+
+        // Pre-configure CE rules with dominant options
+        const ceMap: Record<number, { enabled: boolean; option: number }> = {};
+        if (data.triggered_ce_rules) {
+          for (const cr of data.triggered_ce_rules) {
+            ceMap[cr.sno] = { enabled: true, option: cr.dominant_option };
+          }
+        }
+        setSelectedCeRules(ceMap);
         setWorkflowStep("review-rules");
       },
       onError: (error: any) => {
@@ -166,20 +176,29 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
   };
 
   const handleSaveStylesheet = () => {
-    if (!workflowName.trim() || selectedRuleKeys.size === 0) {
-      alert("Please enter a name and select at least one rule");
-      return;
+    const cePayload: Record<string, { enabled: boolean; option: number }> = {};
+    for (const [snoStr, item] of Object.entries(selectedCeRules)) {
+      if (item.enabled) {
+        cePayload[snoStr] = { enabled: true, option: item.option };
+      }
     }
 
+    const hasCeRules = Object.keys(cePayload).length > 0;
     const selectedRuleList = analyzeResult!.triggered_rules.filter(
       r => selectedRuleKeys.has(`${r.element}|${r.subtype}|${r.pattern}`)
     );
+
+    if (!workflowName.trim() || (!hasCeRules && selectedRuleList.length === 0)) {
+      alert("Please enter a name and select at least one rule");
+      return;
+    }
 
     setWorkflowStep("saving");
     mutations.create.mutate(
       {
         name: workflowName.trim(),
         description: workflowDescription.trim() || null,
+        ce_rules: cePayload,
         selected_ia_rows: selectedRuleList.map(r => ({
           element: r.element,
           subtype: r.subtype,
@@ -194,6 +213,7 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
           setSelectedFileIds(new Set());
           setAnalyzeResult(null);
           setSelectedRuleKeys(new Set());
+          setSelectedCeRules({});
           setWorkflowName("");
           setWorkflowDescription("");
           setActiveTab("manage");
@@ -354,6 +374,19 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
                   return next;
                 });
               }}
+              selectedCeRules={selectedCeRules}
+              onToggleCeRule={(sno) => {
+                setSelectedCeRules(prev => {
+                  const curr = prev[sno] || { enabled: true, option: 1 };
+                  return { ...prev, [sno]: { ...curr, enabled: !curr.enabled } };
+                });
+              }}
+              onChangeCeRuleOption={(sno, option) => {
+                setSelectedCeRules(prev => {
+                  const curr = prev[sno] || { enabled: true, option: 1 };
+                  return { ...prev, [sno]: { ...curr, option } };
+                });
+              }}
               onNext={() => setWorkflowStep("saving")}
               projectId={normalizedProjectId}
             />
@@ -505,16 +538,16 @@ function StylesheetCard({
               value={formatDateTime(stylesheet.updated_at || stylesheet.created_at)}
             />
             <MetaField
-              label="IA Rows"
-              value={`${ruleCount} rule${ruleCount === 1 ? "" : "s"}`}
-            />
-            <MetaField
-              label="CE Rules Active"
+              label="Editorial Rules Active"
               value={
                 ceCatalog.length
                   ? `${activeCeCount} of ${ceCatalog.length} (${setCeCount || ceRuleCount} set by this stylesheet)`
                   : `${ceRuleCount} set by this stylesheet`
               }
+            />
+            <MetaField
+              label="Projected Patterns"
+              value={`${ruleCount} pattern${ruleCount === 1 ? "" : "s"}`}
             />
             {wordListCount > 0 && (
               <MetaField label="Word List Fixes" value={`${wordListCount} find → replace pairs`} />
@@ -531,32 +564,13 @@ function StylesheetCard({
             />
           </dl>
 
-          <div className="flex items-center gap-1 mb-2" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tableView === "ce"}
-              onClick={() => setTableView("ce")}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
-                tableView === "ce" ? "bg-navy-900 text-white border-navy-900" : "bg-white text-navy-600 border-navy-100 hover:bg-navy-50"
-              }`}
-            >
-              Enabled CE Rules ({enabledCeRules.length})
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tableView === "ia"}
-              onClick={() => setTableView("ia")}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
-                tableView === "ia" ? "bg-navy-900 text-white border-navy-900" : "bg-white text-navy-600 border-navy-100 hover:bg-navy-50"
-              }`}
-            >
-              IA Rows ({ruleCount})
-            </button>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-navy-900 uppercase tracking-wide">
+              Enabled Editorial Rules ({enabledCeRules.length})
+            </span>
           </div>
 
-          {tableView === "ce" && enabledCeRules.length > 0 && (
+          {enabledCeRules.length > 0 && (
             <div className="overflow-x-auto">
               <table className="text-xs border-collapse w-full">
                 <thead>
@@ -565,6 +579,7 @@ function StylesheetCard({
                     <th className="py-1.5 px-2 text-left">Name</th>
                     <th className="py-1.5 px-2 text-left">Group</th>
                     <th className="py-1.5 px-2 text-left">Selected Option</th>
+                    <th className="py-1.5 px-2 text-left">Patterns</th>
                     <th className="py-1.5 px-2 text-left">Severity</th>
                     <th className="py-1.5 px-2 text-left">Set By</th>
                   </tr>
@@ -588,6 +603,15 @@ function StylesheetCard({
                           {opt.label}
                           {opt.preview && opt.preview !== opt.label && (
                             <span className="ml-1.5 font-mono text-[11px] bg-navy-50 text-navy-800 px-1 rounded">{opt.preview}</span>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-2 text-navy-500 whitespace-nowrap">
+                          {rule.ia_patterns?.length ? (
+                            <span className="font-mono text-[10.5px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                              {rule.ia_patterns.length} pat
+                            </span>
+                          ) : (
+                            "—"
                           )}
                         </td>
                         <td className="py-1.5 px-2 text-navy-600 whitespace-nowrap">{resolved.severity}</td>
@@ -624,57 +648,6 @@ function StylesheetCard({
                     <>
                       <ChevronDown className="w-3.5 h-3.5" />
                       Show all {enabledCeRules.length} enabled rules
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-          )}
-
-          {tableView === "ia" && ruleCount > 0 && (
-            <div className="overflow-x-auto">
-              <table className="text-xs border-collapse w-full">
-                <thead>
-                  <tr className="border-b border-navy-100 text-navy-400 uppercase tracking-wide text-[10px]">
-                    <th className="py-1.5 px-2 text-left">Element</th>
-                    <th className="py-1.5 px-2 text-left">Subtype</th>
-                    <th className="py-1.5 px-2 text-left">Pattern</th>
-                    <th className="py-1.5 px-2 text-left">CE Rule</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleRules.map((row, i) => {
-                    const link = linkOf(row);
-                    return (
-                      <tr key={i} className="border-b border-navy-50">
-                        <td className="py-1.5 px-2 font-medium text-navy-800">{row.element}</td>
-                        <td className="py-1.5 px-2 text-navy-600">{row.subtype}</td>
-                        <td className="py-1.5 px-2 font-mono text-navy-600 truncate">{row.pattern}</td>
-                        <td className="py-1.5 px-2 text-navy-600 whitespace-nowrap">
-                          {link?.ce_rule_no
-                            ? `R${link.ce_rule_no} · Option ${effectiveOption(link.ce_rule_no, link.ce_option)}`
-                            : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {ruleCount > previewLimit && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllRules((v) => !v)}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 mt-2"
-                >
-                  {showAllRules ? (
-                    <>
-                      <ChevronUp className="w-3.5 h-3.5" />
-                      Show less
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown className="w-3.5 h-3.5" />
-                      Show {ruleCount - previewLimit} more rule{ruleCount - previewLimit === 1 ? "" : "s"}
                     </>
                   )}
                 </button>
@@ -990,6 +963,9 @@ interface ReviewRulesStepProps {
   analyzeResult: any;
   selectedRuleKeys: Set<string>;
   onToggleRule: (key: string) => void;
+  selectedCeRules: Record<number, { enabled: boolean; option: number }>;
+  onToggleCeRule: (sno: number) => void;
+  onChangeCeRuleOption: (sno: number, option: number) => void;
   onNext: () => void;
   projectId: number;
 }
@@ -998,14 +974,21 @@ function ReviewRulesStep({
   analyzeResult,
   selectedRuleKeys,
   onToggleRule,
+  selectedCeRules,
+  onToggleCeRule,
+  onChangeCeRuleOption,
   onNext,
   projectId,
 }: ReviewRulesStepProps) {
+  const triggeredCe = (analyzeResult.triggered_ce_rules || []) as TriggeredCERule[];
+  const hasTriggeredCe = triggeredCe.length > 0;
+
   return (
     <div className="bg-white rounded-lg shadow-card p-6">
       <h3 className="text-sm font-semibold text-navy-900 mb-2">Review Results</h3>
       <p className="text-xs text-navy-500 mb-4">
-        Analyzed {analyzeResult.analyzed_files.length} files · {analyzeResult.total_findings} findings · {analyzeResult.triggered_rules.length} unique rules triggered
+        Analyzed {analyzeResult.analyzed_files.length} files · {analyzeResult.total_findings} findings ·{" "}
+        {hasTriggeredCe ? `${triggeredCe.length} editorial rules detected` : `${analyzeResult.triggered_rules.length} unique rules triggered`}
       </p>
 
       {/* Consolidated export — all files merged into one download */}
@@ -1098,110 +1081,242 @@ function ReviewRulesStep({
         </div>
       </div>
 
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-xs font-medium text-navy-700">Select Rules to Include</span>
-        <div className="space-x-2">
-          <button
-            onClick={() => {
-              const allKeys = new Set(
-                analyzeResult.triggered_rules.map((r: TriggeredIARule) => `${r.element}|${r.subtype}|${r.pattern}`)
-              );
-              onToggleRule("__select_all__");
-              // Toggle all
-              if (selectedRuleKeys.size === analyzeResult.triggered_rules.length) {
-                // Deselect all
-                analyzeResult.triggered_rules.forEach((r: TriggeredIARule) => {
-                  const key = `${r.element}|${r.subtype}|${r.pattern}`;
-                  if (selectedRuleKeys.has(key)) {
-                    onToggleRule(key);
+      {/* Dominant-form Editorial Rules view */}
+      {hasTriggeredCe ? (
+        <div className="space-y-4 mb-6">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-navy-900 uppercase tracking-wide">
+              Detected Editorial Rules ({triggeredCe.length})
+            </span>
+            <div className="space-x-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const allActive = triggeredCe.every((r) => selectedCeRules[r.sno]?.enabled);
+                  for (const r of triggeredCe) {
+                    if (Boolean(selectedCeRules[r.sno]?.enabled) === allActive) {
+                      onToggleCeRule(r.sno);
+                    }
                   }
-                });
-              } else {
-                // Select all
-                analyzeResult.triggered_rules.forEach((r: TriggeredIARule) => {
-                  const key = `${r.element}|${r.subtype}|${r.pattern}`;
-                  if (!selectedRuleKeys.has(key)) {
-                    onToggleRule(key);
-                  }
-                });
-              }
-            }}
-            className="text-xs text-gold-700 hover:text-gold-800 font-medium"
-          >
-            {selectedRuleKeys.size === analyzeResult.triggered_rules.length ? "Deselect All" : "Select All"}
-          </button>
-        </div>
-      </div>
-
-      {(() => {
-        const ticked = analyzeResult.triggered_rules.filter((r: TriggeredIARule) =>
-          selectedRuleKeys.has(`${r.element}|${r.subtype}|${r.pattern}`),
-        );
-        const { conflicts } = deriveFromRows(ticked);
-        if (conflicts.length === 0) return null;
-        return (
-          <div className="mb-4 p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-900">
-            <span className="font-semibold">Conflict:</span> two different forms are ticked for checklist rule
-            {conflicts.length === 1 ? " " : "s "}
-            {conflicts.map((n) => `R${n}`).join(", ")}. The first ticked row is used. Untick one so the stylesheet
-            records the form you want.
+                }}
+                className="text-xs text-gold-700 hover:text-gold-800 font-medium cursor-pointer"
+              >
+                {triggeredCe.every((r) => selectedCeRules[r.sno]?.enabled) ? "Deselect All" : "Select All"}
+              </button>
+            </div>
           </div>
-        );
-      })()}
 
-      <div className="overflow-x-auto mb-6">
-        <table className="text-xs border-collapse w-full border border-navy-100">
-          <thead>
-            <tr className="bg-navy-50 border-b border-navy-100">
-              <th className="py-2 px-3 text-left font-medium text-navy-700">
-                <input
-                  type="checkbox"
-                  checked={selectedRuleKeys.size === analyzeResult.triggered_rules.length && analyzeResult.triggered_rules.length > 0}
-                  onChange={() => {}}
-                  className="rounded border-navy-300"
-                />
-              </th>
-              <th className="py-2 px-3 text-left font-medium text-navy-700">Element</th>
-              <th className="py-2 px-3 text-left font-medium text-navy-700">Subtype</th>
-              <th className="py-2 px-3 text-left font-medium text-navy-700">Pattern</th>
-              <th className="py-2 px-3 text-right font-medium text-navy-700">Count</th>
-              <th className="py-2 px-3 text-left font-medium text-navy-700">CE Rule</th>
-            </tr>
-          </thead>
-          <tbody>
-            {analyzeResult.triggered_rules.map((rule: TriggeredIARule, i: number) => {
-              const key = `${rule.element}|${rule.subtype}|${rule.pattern}`;
-              return (
-                <tr key={i} className="border-b border-navy-100 hover:bg-navy-50">
-                  <td className="py-2 px-3">
+          {(() => {
+            const conflicted = triggeredCe.filter((r) => r.conflict);
+            if (conflicted.length === 0) return null;
+            return (
+              <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-900 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold">Manuscript Variation Detected:</span> The manuscript contains conflicting forms for{" "}
+                  <strong>{conflicted.length} rules</strong> ({conflicted.map((c) => `R${c.sno}`).join(", ")}). The most frequently used (dominant) form has been pre-selected. Click any option button below to adjust.
+                </div>
+              </div>
+            );
+          })()}
+
+          <div className="overflow-x-auto rounded-lg border border-navy-100">
+            <table className="text-xs border-collapse w-full">
+              <thead>
+                <tr className="bg-navy-50 border-b border-navy-100 text-navy-700 font-semibold text-[11px]">
+                  <th className="py-2.5 px-3 text-left w-10">
                     <input
                       type="checkbox"
-                      checked={selectedRuleKeys.has(key)}
-                      onChange={() => onToggleRule(key)}
+                      checked={triggeredCe.every((r) => selectedCeRules[r.sno]?.enabled)}
+                      onChange={(e) => {
+                        const allOn = e.target.checked;
+                        for (const r of triggeredCe) {
+                          if (Boolean(selectedCeRules[r.sno]?.enabled) !== allOn) {
+                            onToggleCeRule(r.sno);
+                          }
+                        }
+                      }}
                       className="rounded border-navy-300"
                     />
-                  </td>
-                  <td className="py-2 px-3 font-medium text-navy-800">{rule.element}</td>
-                  <td className="py-2 px-3 text-navy-600">{rule.subtype}</td>
-                  <td className="py-2 px-3 font-mono text-navy-600">{rule.pattern}</td>
-                  <td className="py-2 px-3 text-right">
-                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gold-100 text-gold-700 text-xs font-semibold">
-                      {rule.count}
-                    </span>
-                  </td>
-                  <td className="py-2 px-3 text-navy-600 whitespace-nowrap">
-                    {rule.ce_rule_no ? `R${rule.ce_rule_no} · Option ${rule.ce_option}` : "—"}
-                  </td>
+                  </th>
+                  <th className="py-2.5 px-3 text-left">Editorial Rule</th>
+                  <th className="py-2.5 px-3 text-left">Manuscript Usage &amp; House Style Choice</th>
+                  <th className="py-2.5 px-3 text-right">Status</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody className="divide-y divide-navy-50 bg-white">
+                {triggeredCe.map((rule) => {
+                  const currentSetting = selectedCeRules[rule.sno] || { enabled: true, option: rule.dominant_option };
+                  return (
+                    <tr key={rule.sno} className={`hover:bg-slate-50 transition-colors ${!currentSetting.enabled ? "opacity-50" : ""}`}>
+                      <td className="py-3 px-3 align-top">
+                        <input
+                          type="checkbox"
+                          checked={currentSetting.enabled}
+                          onChange={() => onToggleCeRule(rule.sno)}
+                          className="rounded border-navy-300 mt-1"
+                        />
+                      </td>
+                      <td className="py-3 px-3 align-top min-w-[200px]">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="font-mono font-bold text-xs bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded border border-slate-200">
+                            R{rule.sno}
+                          </span>
+                          <span className="font-semibold text-slate-900 text-xs">{rule.name}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wide block">
+                          {rule.group}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 align-top">
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          {rule.options.map((opt) => {
+                            const isSelected = currentSetting.option === opt.option;
+                            const isDominant = opt.option === rule.dominant_option;
+                            return (
+                              <button
+                                key={opt.option}
+                                type="button"
+                                disabled={!currentSetting.enabled}
+                                onClick={() => onChangeCeRuleOption(rule.sno, opt.option)}
+                                className={`px-2.5 py-1 rounded-md text-xs border text-left transition-all flex items-center gap-1.5 ${
+                                  isSelected
+                                    ? "bg-amber-100 text-amber-950 border-amber-400 font-semibold shadow-2xs ring-1 ring-amber-300"
+                                    : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
+                                } disabled:opacity-40`}
+                                title={opt.examples?.length ? `Examples in doc: ${opt.examples.join(", ")}` : undefined}
+                              >
+                                <span>{opt.label}</span>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                                  isDominant
+                                    ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}>
+                                  {opt.count}
+                                </span>
+                                {isDominant && (
+                                  <span className="text-[9px] font-bold uppercase text-emerald-700 tracking-wider">
+                                    ★ Dominant
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {(() => {
+                          const activeOpt = rule.options.find((o) => o.option === currentSetting.option);
+                          if (!activeOpt || !activeOpt.examples || activeOpt.examples.length === 0) return null;
+                          return (
+                            <p className="text-[10px] text-slate-400 mt-1 font-mono truncate max-w-xl">
+                              Manuscript examples: {activeOpt.examples.slice(0, 4).join(" · ")}
+                            </p>
+                          );
+                        })()}
+                      </td>
+                      <td className="py-3 px-3 align-top text-right whitespace-nowrap">
+                        {rule.conflict ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                            Conflict ({rule.options.filter(o => o.count > 0).length} forms)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Uniform
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        /* Legacy IA fallback table */
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-xs font-medium text-navy-700">Select Rules to Include</span>
+            <div className="space-x-2">
+              <button
+                onClick={() => {
+                  if (selectedRuleKeys.size === analyzeResult.triggered_rules.length) {
+                    analyzeResult.triggered_rules.forEach((r: TriggeredIARule) => {
+                      const key = `${r.element}|${r.subtype}|${r.pattern}`;
+                      if (selectedRuleKeys.has(key)) onToggleRule(key);
+                    });
+                  } else {
+                    analyzeResult.triggered_rules.forEach((r: TriggeredIARule) => {
+                      const key = `${r.element}|${r.subtype}|${r.pattern}`;
+                      if (!selectedRuleKeys.has(key)) onToggleRule(key);
+                    });
+                  }
+                }}
+                className="text-xs text-gold-700 hover:text-gold-800 font-medium"
+              >
+                {selectedRuleKeys.size === analyzeResult.triggered_rules.length ? "Deselect All" : "Select All"}
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto mb-6">
+            <table className="text-xs border-collapse w-full border border-navy-100">
+              <thead>
+                <tr className="bg-navy-50 border-b border-navy-100">
+                  <th className="py-2 px-3 text-left font-medium text-navy-700">
+                    <input
+                      type="checkbox"
+                      checked={selectedRuleKeys.size === analyzeResult.triggered_rules.length && analyzeResult.triggered_rules.length > 0}
+                      onChange={() => {}}
+                      className="rounded border-navy-300"
+                    />
+                  </th>
+                  <th className="py-2 px-3 text-left font-medium text-navy-700">Element</th>
+                  <th className="py-2 px-3 text-left font-medium text-navy-700">Subtype</th>
+                  <th className="py-2 px-3 text-left font-medium text-navy-700">Pattern</th>
+                  <th className="py-2 px-3 text-right font-medium text-navy-700">Count</th>
+                  <th className="py-2 px-3 text-left font-medium text-navy-700">CE Rule</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analyzeResult.triggered_rules.map((rule: TriggeredIARule, i: number) => {
+                  const key = `${rule.element}|${rule.subtype}|${rule.pattern}`;
+                  return (
+                    <tr key={i} className="border-b border-navy-100 hover:bg-navy-50">
+                      <td className="py-2 px-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedRuleKeys.has(key)}
+                          onChange={() => onToggleRule(key)}
+                          className="rounded border-navy-300"
+                        />
+                      </td>
+                      <td className="py-2 px-3 font-medium text-navy-800">{rule.element}</td>
+                      <td className="py-2 px-3 text-navy-600">{rule.subtype}</td>
+                      <td className="py-2 px-3 font-mono text-navy-600">{rule.pattern}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gold-100 text-gold-700 text-xs font-semibold">
+                          {rule.count}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-navy-600 whitespace-nowrap">
+                        {rule.ce_rule_no ? `R${rule.ce_rule_no} · Option ${rule.ce_option}` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <button
         onClick={onNext}
-        disabled={selectedRuleKeys.size === 0}
+        disabled={
+          hasTriggeredCe
+            ? Object.values(selectedCeRules).every((r) => !r.enabled)
+            : selectedRuleKeys.size === 0
+        }
         className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-[color:var(--color-primary-hover)] border border-primary shadow-subtle transition-all duration-150 disabled:opacity-50"
       >
         Next: Name & Save

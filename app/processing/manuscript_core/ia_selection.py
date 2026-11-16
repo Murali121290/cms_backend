@@ -143,9 +143,6 @@ def annotate_with_stylesheet(
             f["suggestion"] = f["replacement"]
 
         # Ensure every finding with replacement or preferred option has suggestion populated
-        if not f.get("suggestion"):
-            if f.get("replacement"):
-                f["suggestion"] = f["replacement"]
-            elif f.get("ia_pattern"):
-                f["suggestion"] = f"Format per pattern: {f['ia_pattern']}"
+        if not f.get("suggestion") and f.get("replacement"):
+            f["suggestion"] = f["replacement"]
     return findings

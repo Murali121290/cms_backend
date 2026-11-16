@@ -3039,7 +3039,7 @@ def api_v2_analyze_files_for_stylesheet(
                     triggered_rules_map[key]["example_surfaces"].append(surface)
 
     # Convert to list of TriggeredIARule, sorted by count DESC
-    from app.processing.manuscript_core.rules.ce_rules import IA_ROW_TO_CE
+    from app.processing.manuscript_core.rules.ce_rules import IA_ROW_TO_CE, sno_for_rule_id, by_sno, option_text
     triggered_rules = [
         schemas_v2.TriggeredIARule(
             element=key[0],
@@ -3054,9 +3054,68 @@ def api_v2_analyze_files_for_stylesheet(
     ]
     triggered_rules.sort(key=lambda x: x.count, reverse=True)
 
+    # Build triggered_ce_rules with dominant options, occurrence counts and conflict detection (Phase C4)
+    catalog = by_sno()
+    ce_rule_findings: dict[int, list[dict]] = {}
+    for f in all_findings:
+        sno = f.get("ce_rule_no") or sno_for_rule_id(f.get("rule_id", ""))
+        if sno:
+            ce_rule_findings.setdefault(sno, []).append(f)
+
+    triggered_ce_rules = []
+    for sno, findings_list in ce_rule_findings.items():
+        rule_meta = catalog.get(sno, {})
+        rule_name = rule_meta.get("name", f"Rule {sno}")
+        forms = rule_meta.get("forms") or []
+        num_options = max(3, len(forms), len(rule_meta.get("options") or []))
+
+        option_counts: dict[int, int] = {i: 0 for i in range(1, num_options + 1)}
+        option_examples: dict[int, list[str]] = {i: [] for i in range(1, num_options + 1)}
+
+        for f in findings_list:
+            surf = f.get("surface", "")
+            opt_repls = f.get("option_replacements") or {}
+            matched_option = None
+            for opt_idx in range(1, num_options + 1):
+                rep = opt_repls.get(str(opt_idx))
+                if rep is None or rep == surf:
+                    matched_option = opt_idx
+                    break
+            if matched_option is None:
+                matched_option = f.get("ce_option") or 1
+            if matched_option in option_counts:
+                option_counts[matched_option] += 1
+                if surf and surf not in option_examples[matched_option] and len(option_examples[matched_option]) < 5:
+                    option_examples[matched_option].append(surf)
+
+        dominant_opt = max(option_counts.items(), key=lambda t: t[1])[0]
+        active_options_count = sum(1 for c in option_counts.values() if c > 0)
+        has_conflict = active_options_count > 1
+
+        options_models = []
+        for opt_idx in range(1, num_options + 1):
+            lbl = option_text(sno, opt_idx) or f"Option {opt_idx}"
+            options_models.append(schemas_v2.TriggeredCERuleOption(
+                option=opt_idx,
+                label=lbl,
+                count=option_counts[opt_idx],
+                examples=option_examples[opt_idx],
+            ))
+
+        triggered_ce_rules.append(schemas_v2.TriggeredCERule(
+            sno=sno,
+            name=rule_name,
+            dominant_option=dominant_opt,
+            conflict=has_conflict,
+            options=options_models,
+        ))
+
+    triggered_ce_rules.sort(key=lambda r: sum(o.count for o in r.options), reverse=True)
+
     return schemas_v2.AnalyzeFilesForStylesheetResponse(
         analyzed_files=analyzed_files,
         triggered_rules=triggered_rules,
+        triggered_ce_rules=triggered_ce_rules,
         total_findings=len(all_findings),
     )
 
