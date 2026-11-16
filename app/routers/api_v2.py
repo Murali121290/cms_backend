@@ -271,16 +271,21 @@ def _serialize_project_summary(project: Project):
     uat = project.updated_at.isoformat() if getattr(project, "updated_at", None) else None
 
     is_delayed = False
-    for ch in project.chapters:
-        if ch.status != "complete" and ch.due_date:
-            due_dt = ch.due_date
-            if due_dt.tzinfo is not None:
-                now = datetime.now(due_dt.tzinfo)
-            else:
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
-            if due_dt < now:
-                is_delayed = True
-                break
+    # Projects in 'Planning' status have not had their schedule approved/started, so they should not be marked delayed
+    if (getattr(project, "status", None) or "").lower() != "planning":
+        for ch in project.chapters:
+            # Exclude CE support from triggering delay
+            if ch.chapters == "CE support":
+                continue
+            if ch.status != "complete" and ch.due_date:
+                due_dt = ch.due_date
+                if due_dt.tzinfo is not None:
+                    now = datetime.now(due_dt.tzinfo)
+                else:
+                    now = datetime.now(timezone.utc).replace(tzinfo=None)
+                if due_dt < now:
+                    is_delayed = True
+                    break
 
     return schemas_v2.ProjectSummary(
         id=project.id,
@@ -837,16 +842,19 @@ def api_v2_dashboard(
     delayed_count = 0
     for p in projects_list:
         is_delayed = False
-        for ch in p.chapters:
-            if ch.status != "complete" and ch.due_date:
-                due_dt = ch.due_date
-                if due_dt.tzinfo is not None:
-                    now = _dt.now(due_dt.tzinfo)
-                else:
-                    now = _dt.now()
-                if due_dt < now:
-                    is_delayed = True
-                    break
+        if (getattr(p, "status", None) or "").lower() != "planning":
+            for ch in p.chapters:
+                if ch.chapters == "CE support":
+                    continue
+                if ch.status != "complete" and ch.due_date:
+                    due_dt = ch.due_date
+                    if due_dt.tzinfo is not None:
+                        now = _dt.now(due_dt.tzinfo)
+                    else:
+                        now = _dt.now()
+                    if due_dt < now:
+                        is_delayed = True
+                        break
         if is_delayed:
             delayed_count += 1
 
