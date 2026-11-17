@@ -66,6 +66,16 @@ class LanguageEditFinding(Base):
     edited_text = Column(Text, nullable=True)
     reviewer = Column(String, nullable=True)
     decided_at = Column(DateTime, nullable=True)
+    # Added by migration 0067_langedit_ignore_scope. Populated only when
+    # status == 'rejected'. 'once' = ignore this single occurrence (default
+    # for a bare rejection). 'always' = ignore every pending finding in the
+    # same job that shares (rule_id, original_text) — the decide endpoint
+    # cascades the rejection across siblings and the re-analyze suppression
+    # set grows a second, para-independent bucket for always-ignored tuples
+    # so the rule/term never resurfaces for THIS document. NULL on every
+    # non-rejected row and on legacy rejected rows written before this
+    # column existed (those keep the pre-column "once" semantics).
+    ignore_scope = Column(String(16), nullable=True)
     # Added by migration 0047_term_lists. 'rule' = grammar/spelling/sentence
     # rule finding; 'term' = highlight from a project-assigned term list.
     source = Column(String(16), nullable=False, default="rule", server_default="rule", index=True)

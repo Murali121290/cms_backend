@@ -16,6 +16,16 @@ declare module '@tiptap/core' {
 // ── Define Ins Mark ──────────────────────────────────────────────────────────
 export const Ins = Mark.create({
   name: "ins",
+  // Non-inclusive: the mark must NOT extend to typing that happens at its
+  // left/right boundary. ProseMirror's default (``inclusive: true``) causes
+  // ``storedMarks`` to carry the mark when the caret sits at the boundary,
+  // so the next keystroke would inherit the previous insertion's attrs. For
+  // Track Changes that would double-mark new typing (the appendTransaction
+  // below adds its own fresh ins mark), and when the caret sits adjacent to
+  // a <del> run it would render typed characters as strikethrough-red AND
+  // underline-green at the same time. Setting ``inclusive: false`` on both
+  // sides is what Word-style track changes expect.
+  inclusive: false,
   addAttributes() {
     return {
       author: {
@@ -49,6 +59,12 @@ export const Ins = Mark.create({
 // ── Define Del Mark ──────────────────────────────────────────────────────────
 export const Del = Mark.create({
   name: "del",
+  // Same rationale as ``Ins`` — the caret sitting at the end of a <del> run
+  // (e.g. right after the user Backspace-deletes a word) must not inherit
+  // the del mark onto the next typed character. Default ``inclusive: true``
+  // would make the first replacement character render as strikethrough on
+  // top of its green insertion styling.
+  inclusive: false,
   addAttributes() {
     return {
       author: {
@@ -80,6 +96,50 @@ export const Del = Mark.create({
 });
 
 const trackChangesKey = new PluginKey<DecorationSet>("trackChanges");
+
+// Look for an existing ins/del mark from the same author on the character
+// immediately before `from` or immediately after `to`. When one is found we
+// reuse its (author, date, changeId) so the new mark merges with it in
+// ProseMirror's mark set — otherwise every keystroke would carry a fresh
+// UUID and the DOM would fragment into one <ins>/<del> element per
+// character. With per-element CSS padding on ``.tc-delete`` that fragmentation
+// shows up as visible gaps between letters ("T H E  S T U D Y"); on the
+// insertion side it causes discontinuous underlining and jittery kerning.
+// Collapsing runs into a single DOM element also makes Accept/Reject operate
+// on the whole edit session (one logical change) the way Word does.
+export function findSessionChangeAttrs(
+  doc: any,
+  from: number,
+  to: number,
+  markName: "ins" | "del",
+  author: string,
+): { author: string; date: string; changeId: string } | null {
+  const pickMark = (node: any) => {
+    if (!node || !node.marks) return null;
+    const m = node.marks.find(
+      (mk: any) => mk.type.name === markName && mk.attrs.author === author,
+    );
+    if (!m) return null;
+    return {
+      author: m.attrs.author,
+      date: m.attrs.date,
+      changeId: m.attrs.changeId,
+    };
+  };
+  try {
+    if (from > 0) {
+      const attrs = pickMark(doc.resolve(from).nodeBefore);
+      if (attrs) return attrs;
+    }
+  } catch { /* position may be invalid mid-transaction; fall through */ }
+  try {
+    if (to < doc.content.size) {
+      const attrs = pickMark(doc.resolve(to).nodeAfter);
+      if (attrs) return attrs;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
 
 export function collectChanges(doc: any) {
   const changes: {
@@ -301,11 +361,17 @@ export const TrackChanges = Extension.create({
 
             if (event.key === "Backspace") {
               const author = extension.storage.author || "Unknown";
-              const date = new Date().toISOString();
-              const changeId = crypto.randomUUID();
+              const freshAttrs = () => ({
+                author,
+                date: new Date().toISOString(),
+                changeId: crypto.randomUUID(),
+              });
 
               if (!empty) {
-                const tr = state.tr.addMark(from, to, state.schema.marks.del.create({ author, date, changeId }));
+                const attrs =
+                  findSessionChangeAttrs(state.doc, from, to, "del", author) ??
+                  freshAttrs();
+                const tr = state.tr.addMark(from, to, state.schema.marks.del.create(attrs));
                 tr.setSelection(Selection.near(tr.doc.resolve(to)));
                 tr.setMeta("preventTrackChanges", true);
                 dispatch(tr);
@@ -313,7 +379,10 @@ export const TrackChanges = Extension.create({
               } else {
                 if (from > 1) {
                   const charFrom = from - 1;
-                  const tr = state.tr.addMark(charFrom, from, state.schema.marks.del.create({ author, date, changeId }));
+                  const attrs =
+                    findSessionChangeAttrs(state.doc, charFrom, from, "del", author) ??
+                    freshAttrs();
+                  const tr = state.tr.addMark(charFrom, from, state.schema.marks.del.create(attrs));
                   tr.setSelection(Selection.near(tr.doc.resolve(charFrom)));
                   tr.setMeta("preventTrackChanges", true);
                   dispatch(tr);
@@ -324,11 +393,17 @@ export const TrackChanges = Extension.create({
 
             if (event.key === "Delete") {
               const author = extension.storage.author || "Unknown";
-              const date = new Date().toISOString();
-              const changeId = crypto.randomUUID();
+              const freshAttrs = () => ({
+                author,
+                date: new Date().toISOString(),
+                changeId: crypto.randomUUID(),
+              });
 
               if (!empty) {
-                const tr = state.tr.addMark(from, to, state.schema.marks.del.create({ author, date, changeId }));
+                const attrs =
+                  findSessionChangeAttrs(state.doc, from, to, "del", author) ??
+                  freshAttrs();
+                const tr = state.tr.addMark(from, to, state.schema.marks.del.create(attrs));
                 tr.setSelection(Selection.near(tr.doc.resolve(from)));
                 tr.setMeta("preventTrackChanges", true);
                 dispatch(tr);
@@ -336,7 +411,10 @@ export const TrackChanges = Extension.create({
               } else {
                 if (from < state.doc.content.size - 1) {
                   const charTo = from + 1;
-                  const tr = state.tr.addMark(from, charTo, state.schema.marks.del.create({ author, date, changeId }));
+                  const attrs =
+                    findSessionChangeAttrs(state.doc, from, charTo, "del", author) ??
+                    freshAttrs();
+                  const tr = state.tr.addMark(from, charTo, state.schema.marks.del.create(attrs));
                   tr.setSelection(Selection.near(tr.doc.resolve(charTo)));
                   tr.setMeta("preventTrackChanges", true);
                   dispatch(tr);
@@ -361,10 +439,14 @@ export const TrackChanges = Extension.create({
                 event.clipboardData?.setData("text/plain", text);
 
                 const author = extension.storage.author || "Unknown";
-                const date = new Date().toISOString();
-                const changeId = crypto.randomUUID();
+                const attrs =
+                  findSessionChangeAttrs(state.doc, from, to, "del", author) ?? {
+                    author,
+                    date: new Date().toISOString(),
+                    changeId: crypto.randomUUID(),
+                  };
 
-                const tr = state.tr.addMark(from, to, state.schema.marks.del.create({ author, date, changeId }));
+                const tr = state.tr.addMark(from, to, state.schema.marks.del.create(attrs));
                 tr.setMeta("preventTrackChanges", true);
                 dispatch(tr);
 
@@ -392,8 +474,21 @@ export const TrackChanges = Extension.create({
             }
 
             const author = extension.storage.author || "Unknown";
-            const date = new Date().toISOString();
-            const changeId = crypto.randomUUID();
+            // Per-transaction default used only when no adjacent ins run
+            // exists to extend. Keeping it per-transaction (rather than
+            // per-step) preserves the previous behaviour where multiple
+            // simultaneous inserts in one transaction share a changeId.
+            let defaultAttrs: { author: string; date: string; changeId: string } | null = null;
+            const takeDefaultAttrs = () => {
+              if (!defaultAttrs) {
+                defaultAttrs = {
+                  author,
+                  date: new Date().toISOString(),
+                  changeId: crypto.randomUUID(),
+                };
+              }
+              return defaultAttrs;
+            };
 
             transaction.steps.forEach((step) => {
               const map = step.getMap();
@@ -402,7 +497,14 @@ export const TrackChanges = Extension.create({
                   const mappedFrom = tr.mapping.map(newFrom);
                   const mappedTo = tr.mapping.map(newTo);
 
-                  tr.addMark(mappedFrom, mappedTo, newState.schema.marks.ins.create({ author, date, changeId }));
+                  // Reuse an adjacent ins run's attrs when the caret is
+                  // continuing the same author's insertion. This makes
+                  // consecutive keystrokes collapse into a single <ins>
+                  // DOM element instead of one <ins> per character.
+                  const attrs =
+                    findSessionChangeAttrs(tr.doc, mappedFrom, mappedTo, "ins", author) ??
+                    takeDefaultAttrs();
+                  tr.addMark(mappedFrom, mappedTo, newState.schema.marks.ins.create(attrs));
                   modified = true;
                 }
               });

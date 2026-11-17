@@ -124,6 +124,17 @@ const splitCombo = (combo: string): string[] => {
   return combo.split("+").map((p) => macMap[p] || p);
 };
 
+// Explicit-platform variant used by the shortcuts dialog's Mac / Windows
+// toggle. Takes the platform as an argument so the dialog can render both
+// bindings regardless of which platform the browser detected. Kept separate
+// from ``splitCombo`` so toolbar tooltips (which should always follow the
+// user's real platform) are not affected.
+const splitComboFor = (combo: string, isMac: boolean): string[] => {
+  if (!isMac) return combo.split("+");
+  const macMap: Record<string, string> = { Ctrl: "⌘", Shift: "⇧", Alt: "⌥", Enter: "⏎" };
+  return combo.split("+").map((p) => macMap[p] || p);
+};
+
 // Tailwind palette tokens used to tint each shortcut category. Kept in
 // expanded form so Tailwind's JIT picks them up.
 type SectionAccent = {
@@ -460,6 +471,14 @@ export interface WysiwygEditorProps {
   occurrences?: Occurrence[];
   selectedOccurrenceIndex?: number;
   onOccurrenceClick?: (index: number) => void;
+  // Whitelist of occurrence categories whose highlights should remain
+  // visible. ``null`` / omitted ⇒ no filter (every occurrence paints,
+  // preserving the historical "show all" behaviour). An empty array ⇒
+  // every finding highlight is hidden. Used by the Language Review
+  // page to let the category badge filter the in-document decorations
+  // without re-running the Language Editing engine. Decoration-only —
+  // never mutates document content, finding state, or click targets.
+  allowedOccurrenceCategories?: string[] | null;
   onContentChange?: () => void;
   styles?: string[];
   onAddStyle?: (newStyle: string) => void;
@@ -572,6 +591,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       occurrences = [],
       selectedOccurrenceIndex = -1,
       onOccurrenceClick,
+      allowedOccurrenceCategories = null,
       onContentChange,
       styles,
       onAddStyle,
@@ -630,6 +650,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     // Keyboard shortcuts dialog
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [shortcutQuery, setShortcutQuery] = useState("");
+    // Which OS's bindings the Shortcuts dialog displays. Defaults to the
+    // browser's detected platform so the first open feels native, but the
+    // header tabs let a Mac user preview Windows combos (and vice versa)
+    // without changing the toolbar tooltip behaviour, which continues to
+    // follow the real platform via ``kbd()`` / ``splitCombo()``.
+    const [shortcutsOs, setShortcutsOs] = useState<"mac" | "win">(IS_MAC ? "mac" : "win");
     // Review-mode toggle (eye icon): when ON, swap the editor for a read-only
     // inline diff of the originally-loaded content vs the user's current edits.
     // Turning it OFF restores the editable HTML the user was last working with.
@@ -765,16 +791,18 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             store.occurrences = occurrences;
             store.selectedIndex = selectedOccurrenceIndex;
             store.onOccurrenceClick = onOccurrenceClick ?? null;
+            store.allowedCategories = allowedOccurrenceCategories;
           }
           const tr = editor.state.tr.setMeta("occurrenceHighlight", {
             occurrences,
             selectedIndex: selectedOccurrenceIndex,
             onOccurrenceClick,
+            allowedCategories: allowedOccurrenceCategories,
           });
           editor.view.dispatch(tr);
         }
       }
-    }, [editor, initialContent, occurrences, selectedOccurrenceIndex, onOccurrenceClick]);
+    }, [editor, initialContent, occurrences, selectedOccurrenceIndex, onOccurrenceClick, allowedOccurrenceCategories]);
 
     // Eye toggle: switch between editable current view and read-only diff view.
     // setContent uses { emitUpdate: false } so the toggle never flags the
@@ -900,12 +928,14 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           store.occurrences = occurrences;
           store.selectedIndex = selectedOccurrenceIndex;
           store.onOccurrenceClick = onOccurrenceClick ?? null;
+          store.allowedCategories = allowedOccurrenceCategories;
         }
 
         const tr = editor.state.tr.setMeta("occurrenceHighlight", {
           occurrences,
           selectedIndex: selectedOccurrenceIndex,
           onOccurrenceClick,
+          allowedCategories: allowedOccurrenceCategories,
         });
         editor.view.dispatch(tr);
 
@@ -983,7 +1013,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           }
         }
       }
-    }, [editor, occurrences, selectedOccurrenceIndex, onOccurrenceClick]);
+    }, [editor, occurrences, selectedOccurrenceIndex, onOccurrenceClick, allowedOccurrenceCategories]);
 
     // Keyboard shortcut: Ctrl+F for Find
     useEffect(() => {
@@ -2258,13 +2288,53 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                         </p>
                       </div>
                     </div>
-                    <button
-                      onClick={close}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
-                      aria-label="Close"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {/* OS toggle — lets Mac users preview the Windows
+                          combos (and vice versa) directly in the dialog.
+                          Defaults to the detected platform. */}
+                      <div
+                        role="tablist"
+                        aria-label="Shortcut platform"
+                        className="inline-flex p-0.5 rounded-lg border border-white/15 bg-white/5 backdrop-blur-sm"
+                        data-testid="shortcuts-os-toggle"
+                      >
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={shortcutsOs === "mac"}
+                          onClick={() => setShortcutsOs("mac")}
+                          data-testid="shortcuts-os-mac"
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                            shortcutsOs === "mac"
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-300 hover:text-white"
+                          }`}
+                        >
+                          macOS
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={shortcutsOs === "win"}
+                          onClick={() => setShortcutsOs("win")}
+                          data-testid="shortcuts-os-win"
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                            shortcutsOs === "win"
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-300 hover:text-white"
+                          }`}
+                        >
+                          Windows
+                        </button>
+                      </div>
+                      <button
+                        onClick={close}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                        aria-label="Close"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Search */}
@@ -2318,7 +2388,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                             </header>
                             <ul className="space-y-1">
                               {group.items.map((item) => {
-                                const parts = splitCombo(item.combo);
+                                const isMacView = shortcutsOs === "mac";
+                                const parts = splitComboFor(item.combo, isMacView);
                                 return (
                                   <li
                                     key={item.label}
@@ -2330,7 +2401,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                                     <span className="inline-flex items-center gap-1 shrink-0">
                                       {parts.map((p, i) => (
                                         <span key={i} className="inline-flex items-center gap-1">
-                                          {i > 0 && !IS_MAC && (
+                                          {i > 0 && !isMacView && (
                                             <span className="text-[10px] text-slate-400 font-medium">+</span>
                                           )}
                                           <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 bg-gradient-to-b from-white to-slate-50 border border-slate-300 rounded-md text-[10.5px] font-mono font-semibold text-slate-700 shadow-[0_1px_0_rgba(15,23,42,0.08),inset_0_-1px_0_rgba(15,23,42,0.04)]">
@@ -2357,8 +2428,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                     <kbd className="inline-flex items-center justify-center px-1.5 h-[20px] bg-slate-100 border border-slate-300 rounded text-[10px] font-mono font-semibold text-slate-700">Esc</kbd>
                     <span>to close</span>
                   </div>
-                  <div className="flex items-center gap-1.5 text-slate-400">
-                    <span>{IS_MAC ? "macOS" : "Windows / Linux"} bindings</span>
+                  <div className="flex items-center gap-1.5 text-slate-400" data-testid="shortcuts-os-label">
+                    <span>{shortcutsOs === "mac" ? "macOS" : "Windows / Linux"} bindings</span>
                   </div>
                 </div>
               </div>
@@ -2853,8 +2924,14 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           text-decoration: line-through !important;
           text-decoration-color: rgb(220, 38, 38) !important;
           color: rgba(127, 29, 29, 0.8) !important;
-          padding: 2px 4px !important;
-          border-radius: 2px !important;
+          /* No per-element padding: when TipTap's Del mark fragments into
+             multiple adjacent spans (e.g. a run of Backspace keystrokes),
+             padding would add visible gaps between every character and
+             render "THE STUDY" as "T H E  S T U D Y". The mark-merge
+             logic in TrackChanges.ts collapses same-session runs into a
+             single <del>, but this rule has to stay padding-free so any
+             genuinely-separate adjacent deletions still read as one
+             continuous word. */
         }
         del:hover, .tc-delete:hover {
           background-color: transparent !important;

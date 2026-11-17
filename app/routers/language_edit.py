@@ -26,6 +26,7 @@ from app.models import User
 from app.processing.language_editing import (
     abbreviations,
     abbreviations_metadata,
+    ambiguous_scan,
     basic_grammar,
     custom_dict,
     docx_io,
@@ -152,9 +153,15 @@ class CustomRuleRequest(BaseModel):
 
 
 class DecisionRequest(BaseModel):
-    status: str  # accepted | edited | rejected
+    status: str  # accepted | edited | rejected | highlighted
     edited_text: Optional[str] = None
     reviewer: Optional[str] = "editor"
+    # Populated only when status == 'rejected'. 'once' ignores this single
+    # occurrence; 'always' cascades the rejection across every pending
+    # finding in the same job that shares (rule_id, original_text). Null /
+    # omitted on a reject payload defaults to 'once' server-side so legacy
+    # single-button Ignore clients stay compatible.
+    ignore_scope: Optional[str] = None
 
 
 class BatchDecisionItem(BaseModel):
@@ -171,6 +178,9 @@ class BatchDecideRequest(BaseModel):
     status: str  # accepted | edited | rejected | highlighted
     reviewer: Optional[str] = "editor"
     decisions: list[BatchDecisionItem]
+    # Mirrors the single-finding endpoint. Applies to every item when the
+    # batch status is 'rejected'; ignored for other statuses.
+    ignore_scope: Optional[str] = None
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -1438,6 +1448,101 @@ def _resolve_file_path(stored_path: str) -> Optional[str]:
     return None
 
 
+def _build_ambiguous_scan_map(
+    job: LanguageEditJob,
+    db: Session,
+    findings: list[LanguageEditFinding],
+) -> dict[int, list[dict]]:
+    """Per-finding ``ambiguous_scan`` payload for AB07 rows whose
+    reviewer has picked a canonical meaning.
+
+    An AB07 finding stores the reviewer's chosen expansion in
+    ``edited_text`` once Accept fires with a meaning selected (see the
+    LanguageReview card flow). This helper reads each such finding,
+    runs ``ambiguous_scan.scan_for_chosen_expansion`` across the whole
+    manuscript, and returns a ``{finding_id: list-of-occurrences}`` map
+    the serializer attaches as ``ambiguous_scan`` on the row.
+
+    One DOCX read per request amortises the cost across every AB07
+    finding in the job — mirrors ``_build_first_definition_map``. The
+    scan respects the same exclusion predicate the AB re-analyse
+    helper applies (``_EXCLUDED_ROLES`` + ``_EXCLUDED_REGION_FLAGS``)
+    so headings / references / tables / abstract / extract / src are
+    never surfaced.
+
+    Returns an empty map when the DOCX cannot be read or there are no
+    AB07 edits — the serializer then simply omits the field.
+    """
+    # Collect candidate findings before touching the filesystem — skip the
+    # DOCX read entirely when no AB07 has been resolved yet.
+    ab07_edited = [
+        f for f in findings
+        if f.rule_id == "AB07"
+        and f.status == "edited"
+        and (f.edited_text or "").strip()
+    ]
+    if not ab07_edited:
+        return {}
+
+    file_record = db.query(models.File).filter(models.File.id == job.file_id).first()
+    if not file_record:
+        return {}
+    resolved = _resolve_file_path(file_record.path or "")
+    if not resolved:
+        return {}
+    try:
+        doc_obj, paragraphs = docx_io.read_paragraphs(resolved)
+    except Exception as exc:
+        logger.warning("ambiguous-scan: read_paragraphs failed: %s", exc)
+        return {}
+    try:
+        para_roles = docx_io.classify_paragraphs(doc_obj)
+    except Exception:
+        para_roles = {}
+
+    excluded_roles = {"heading", "title", "reference", "caption", "extract"}
+    excluded_flags = (
+        "in_table", "in_figure", "in_abstract", "in_epigraph", "in_src",
+        "in_extract", "in_references",
+    )
+
+    def _skip(pi: int) -> bool:
+        roles = (para_roles or {}).get(pi) or {}
+        if roles.get("role") in excluded_roles:
+            return True
+        return any(roles.get(flag) for flag in excluded_flags)
+
+    out: dict[int, list[dict]] = {}
+    for f in ab07_edited:
+        abbr = abbreviations_metadata.extract_abbreviation(
+            f.rule_id, f.original_text, f.suggestion,
+        )
+        if not abbr:
+            continue
+        # ``alt_suggestions`` carries every candidate meaning the engine
+        # offered at analyse time. The chosen one lives in ``edited_text``;
+        # the rest are passed as ``other_expansions`` so matches of
+        # different possible meanings are flagged as inconsistent rather
+        # than silently included.
+        candidates = list(f.alt_suggestions or [])
+        other = [c for c in candidates if (c or "").strip().lower()
+                 != (f.edited_text or "").strip().lower()]
+        try:
+            hits = ambiguous_scan.scan_for_chosen_expansion(
+                paragraphs,
+                abbreviation=abbr,
+                chosen_expansion=f.edited_text or "",
+                other_expansions=other,
+                skip_para=_skip,
+            )
+        except Exception as exc:
+            logger.warning("ambiguous-scan: scan failed for finding %s: %s", f.id, exc)
+            continue
+        if hits:
+            out[f.id] = hits
+    return out
+
+
 def _build_first_definition_map(job: LanguageEditJob, db: Session) -> dict[str, dict]:
     """Per-abbreviation first-definition lookup, computed once per
     GET/decide response so the serializer can attach a reference
@@ -1520,6 +1625,7 @@ def get_job_findings(
     )
 
     first_def_map = _build_first_definition_map(job, db)
+    ambiguous_scan_map = _build_ambiguous_scan_map(job, db, findings)
 
     return {
         "job": {
@@ -1532,17 +1638,29 @@ def get_job_findings(
             "edited_count": job.edited_count,
             "rejected_count": job.rejected_count,
         },
-        "findings": [_serialize_finding_row(f, first_def_map) for f in findings],
+        "findings": [
+            _serialize_finding_row(f, first_def_map, ambiguous_scan_map)
+            for f in findings
+        ],
     }
 
 
 def _serialize_finding_row(
-    f: LanguageEditFinding, first_def_map: Optional[dict[str, dict]] = None,
+    f: LanguageEditFinding,
+    first_def_map: Optional[dict[str, dict]] = None,
+    ambiguous_scan_map: Optional[dict[int, list[dict]]] = None,
 ) -> dict:
     """Row-shape helper for the GET /findings serializer AND the
     decide endpoint's refreshed-findings bundle. Keeps the two paths
     emitting IDENTICAL shape so the frontend has a single model for
-    a finding whether it arrives via list or decision response."""
+    a finding whether it arrives via list or decision response.
+
+    ``ambiguous_scan_map`` is populated only for AB07 rows whose
+    reviewer has picked a canonical meaning (see
+    ``_build_ambiguous_scan_map``). ``None`` / omitted keeps the row
+    shape identical to the legacy response — the field is left absent
+    for every non-AB07 finding and for AB07 findings that have no
+    chosen meaning yet."""
     return {
         "id": f.id,
         "para_index": f.para_index,
@@ -1584,7 +1702,12 @@ def _serialize_finding_row(
             if f.decided_at and f.decided_at.tzinfo is None
             else (f.decided_at.isoformat() if f.decided_at else None)
         ),
+        "ignore_scope": getattr(f, "ignore_scope", None),
         "first_definition": _first_definition_for(f, first_def_map),
+        "ambiguous_scan": (
+            (ambiguous_scan_map or {}).get(f.id)
+            if f.rule_id == "AB07" else None
+        ),
     }
 
 
@@ -1825,6 +1948,18 @@ def _reanalyze_abbreviations_for_job(
         (f.para_index, f.rule_id, f.original_text)
         for f in ab_decided
     }
+    # Second suppression bucket keyed by (rule_id, original_text) only.
+    # Populated from findings the reviewer resolved with Ignore Always —
+    # that scope must suppress every occurrence of the same rule+term,
+    # not just the original paragraph. The ``ab_decided`` iterable is
+    # already filtered by job + status; we further filter by
+    # ``ignore_scope == 'always'`` so plain 'once' rejections keep their
+    # existing per-paragraph scope.
+    always_suppressed_keys: set[tuple[str, str]] = {
+        (f.rule_id, f.original_text)
+        for f in ab_decided
+        if getattr(f, "ignore_scope", None) == "always"
+    }
 
     # Produce the fresh pending-AB set from the virtual document.
     # Each entry is a tuple describing what SHOULD be in the DB after
@@ -1849,6 +1984,8 @@ def _reanalyze_abbreviations_for_job(
             if not fd.rule_id or not fd.rule_id.startswith("AB"):
                 continue
             if (pi, fd.rule_id, fd.original) in suppressed_keys:
+                continue
+            if (fd.rule_id, fd.original) in always_suppressed_keys:
                 continue
             dedup_key = (pi, fd.start, fd.end, fd.rule_id, fd.original)
             if dedup_key in seen:
@@ -2001,11 +2138,50 @@ def decide_finding(
     if body.status not in ("accepted", "edited", "rejected", "highlighted"):
         raise HTTPException(status_code=400, detail="Invalid status. Must be accepted, edited, rejected, or highlighted.")
 
+    # Validate ignore_scope when supplied — tolerated only on reject payloads.
+    requested_scope: Optional[str] = None
+    if body.status == "rejected":
+        requested_scope = (body.ignore_scope or "once").strip().lower()
+        if requested_scope not in ("once", "always"):
+            raise HTTPException(
+                status_code=400,
+                detail="ignore_scope must be 'once' or 'always'.",
+            )
+
     old_status = finding.status
     finding.status = body.status
     finding.edited_text = body.edited_text if body.status == "edited" else None
     finding.reviewer = (get_user_full_name(current_user) if current_user else None) or body.reviewer or "editor"
     finding.decided_at = datetime.datetime.now(datetime.timezone.utc)
+    # Track the scope only for rejections; every other transition clears it
+    # so a finding re-ignored as 'once' after a prior 'always' doesn't leak
+    # the old semantic.
+    finding.ignore_scope = requested_scope if body.status == "rejected" else None
+
+    # Cascade for Ignore Always — flip every OTHER pending finding in this
+    # job that shares (rule_id, original_text) to rejected / always. This is
+    # what makes the "always" scope stick across siblings; the re-analyze
+    # suppression (below) keeps it sticky across future re-analyses. 'once'
+    # never cascades — the clicked row is the only row written.
+    cascaded_ids: list[int] = []
+    if body.status == "rejected" and requested_scope == "always" and finding.rule_id and finding.original_text:
+        cascade_q = (
+            db.query(LanguageEditFinding)
+            .filter(
+                LanguageEditFinding.job_id == finding.job_id,
+                LanguageEditFinding.id != finding.id,
+                LanguageEditFinding.rule_id == finding.rule_id,
+                LanguageEditFinding.original_text == finding.original_text,
+                LanguageEditFinding.status == "pending",
+            )
+        )
+        for sibling in cascade_q.all():
+            sibling.status = "rejected"
+            sibling.edited_text = None
+            sibling.reviewer = finding.reviewer
+            sibling.decided_at = finding.decided_at
+            sibling.ignore_scope = "always"
+            cascaded_ids.append(sibling.id)
 
     # Update counters on parent job
     job = db.query(LanguageEditJob).filter(LanguageEditJob.job_id == finding.job_id).first()
@@ -2025,6 +2201,10 @@ def decide_finding(
             job.edited_count += 1
         elif body.status == "rejected":
             job.rejected_count += 1
+
+        # Cascade flipped N sibling pending rows to rejected — count them too.
+        if cascaded_ids:
+            job.rejected_count += len(cascaded_ids)
 
     db.commit()
 
@@ -2091,10 +2271,142 @@ def decide_finding(
         # rebuild once so the reference row attached to any AB04
         # finding in the refreshed bundle stays accurate.
         first_def_map = _build_first_definition_map(job, db) if job else {}
+        ambiguous_scan_map = (
+            _build_ambiguous_scan_map(job, db, refreshed_rows) if job else {}
+        )
         response["findings"] = [
-            _serialize_finding_row(f, first_def_map) for f in refreshed_rows
+            _serialize_finding_row(f, first_def_map, ambiguous_scan_map)
+            for f in refreshed_rows
         ]
         response["reanalyzed"] = True
+    elif cascaded_ids and job is not None:
+        # Ignore Always cascade — re-fetch the full job finding set so the
+        # frontend can replace its local state in one shot (same contract
+        # as the AB re-analyze path above). The cascaded rows already live
+        # in the DB with their new status after the commit above.
+        first_def_map = _build_first_definition_map(job, db)
+        refreshed_all = (
+            db.query(LanguageEditFinding)
+            .filter(LanguageEditFinding.job_id == job.job_id)
+            .order_by(LanguageEditFinding.para_index, LanguageEditFinding.start_offset)
+            .all()
+        )
+        ambiguous_scan_map = _build_ambiguous_scan_map(job, db, refreshed_all)
+        response["findings"] = [
+            _serialize_finding_row(f, first_def_map, ambiguous_scan_map)
+            for f in refreshed_all
+        ]
+        response["cascaded_ids"] = cascaded_ids
+    # Expose the scope on the single-finding payload so the UI can style the
+    # finding card (Once vs Always badge) without a second fetch.
+    response["finding"]["ignore_scope"] = finding.ignore_scope
+    return response
+
+
+@router.post("/language-edit/findings/{finding_id}/restore")
+def restore_finding(
+    finding_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_from_cookie),
+):
+    """Restore an ignored finding back to the pending list.
+
+    Reverses the decide_finding('rejected', …) call. Only rejected
+    findings can be restored — accepted / edited / highlighted rows
+    are no-ops (the Ignored Terms panel never offers Restore for them,
+    but the guard keeps a stray POST safe). When the finding being
+    restored was ignored with scope='always', every other finding in
+    the same job that shares (rule_id, original_text) AND is also
+    'rejected' with scope='always' is restored too — that's the
+    semantic partner to the decide-endpoint's always cascade. 'once'
+    restores affect a single row.
+
+    Response mirrors decide_finding on shape so the frontend can
+    reuse its atomic-replace flow (``findings`` payload when the
+    restore affected more than just the clicked row).
+    """
+    _require_language_user(current_user)
+    finding = db.query(LanguageEditFinding).filter(LanguageEditFinding.id == finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail=f"Finding ID {finding_id} not found.")
+
+    if finding.status != "rejected":
+        raise HTTPException(
+            status_code=400,
+            detail="Only ignored findings can be restored.",
+        )
+
+    job = db.query(LanguageEditJob).filter(LanguageEditJob.job_id == finding.job_id).first()
+    was_always = (finding.ignore_scope or "").lower() == "always"
+
+    restored_rows: list[LanguageEditFinding] = [finding]
+    if was_always and finding.rule_id and finding.original_text:
+        siblings = (
+            db.query(LanguageEditFinding)
+            .filter(
+                LanguageEditFinding.job_id == finding.job_id,
+                LanguageEditFinding.id != finding.id,
+                LanguageEditFinding.rule_id == finding.rule_id,
+                LanguageEditFinding.original_text == finding.original_text,
+                LanguageEditFinding.status == "rejected",
+                LanguageEditFinding.ignore_scope == "always",
+            )
+            .all()
+        )
+        restored_rows.extend(siblings)
+
+    for row in restored_rows:
+        row.status = "pending"
+        row.edited_text = None
+        row.reviewer = None
+        row.decided_at = None
+        row.ignore_scope = None
+
+    if job is not None:
+        job.rejected_count = max(0, job.rejected_count - len(restored_rows))
+
+    db.commit()
+
+    response: dict = {
+        "ok": True,
+        "finding_id": finding.id,
+        "status": finding.status,
+        "restored_ids": [row.id for row in restored_rows],
+        "cascade_scope": "always" if was_always else "once",
+        "job": {
+            "job_id": job.job_id,
+            "total_findings": job.total_findings,
+            "accepted_count": job.accepted_count,
+            "edited_count": job.edited_count,
+            "rejected_count": job.rejected_count,
+        } if job else None,
+    }
+
+    if len(restored_rows) > 1 and job is not None:
+        # Return the full findings list for atomic client-side replace,
+        # matching the decide_finding cascade response shape.
+        first_def_map = _build_first_definition_map(job, db)
+        refreshed_all = (
+            db.query(LanguageEditFinding)
+            .filter(LanguageEditFinding.job_id == job.job_id)
+            .order_by(LanguageEditFinding.para_index, LanguageEditFinding.start_offset)
+            .all()
+        )
+        ambiguous_scan_map = _build_ambiguous_scan_map(job, db, refreshed_all)
+        response["findings"] = [
+            _serialize_finding_row(f, first_def_map, ambiguous_scan_map)
+            for f in refreshed_all
+        ]
+    else:
+        # Single-row restore — compact payload matching the single-finding
+        # decide shape so the UI can patch state in place.
+        first_def_map = _build_first_definition_map(job, db) if job else {}
+        ambiguous_scan_map = (
+            _build_ambiguous_scan_map(job, db, [finding]) if job else {}
+        )
+        response["finding"] = _serialize_finding_row(
+            finding, first_def_map, ambiguous_scan_map,
+        )
     return response
 
 
@@ -2133,6 +2445,15 @@ def batch_decide_findings(
         )
     if not body.decisions:
         raise HTTPException(status_code=400, detail="decisions must be non-empty.")
+
+    batch_scope: Optional[str] = None
+    if body.status == "rejected":
+        batch_scope = (body.ignore_scope or "once").strip().lower()
+        if batch_scope not in ("once", "always"):
+            raise HTTPException(
+                status_code=400,
+                detail="ignore_scope must be 'once' or 'always'.",
+            )
 
     job = db.query(LanguageEditJob).filter(LanguageEditJob.job_id == job_id).first()
     if not job:
@@ -2184,6 +2505,7 @@ def batch_decide_findings(
         row.edited_text = edited_lookup.get(fid) if body.status == "edited" else None
         row.reviewer = reviewer
         row.decided_at = decided_at
+        row.ignore_scope = batch_scope if body.status == "rejected" else None
         processed.append(fid)
         if (
             body.status in ("accepted", "edited")
@@ -2242,8 +2564,12 @@ def batch_decide_findings(
         # rebuild once so the reference row attached to any AB04
         # finding in the refreshed bundle stays accurate.
         first_def_map = _build_first_definition_map(job, db) if job else {}
+        ambiguous_scan_map = (
+            _build_ambiguous_scan_map(job, db, refreshed_rows) if job else {}
+        )
         response["findings"] = [
-            _serialize_finding_row(f, first_def_map) for f in refreshed_rows
+            _serialize_finding_row(f, first_def_map, ambiguous_scan_map)
+            for f in refreshed_rows
         ]
         response["reanalyzed"] = True
     return response

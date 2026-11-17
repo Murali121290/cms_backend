@@ -1227,6 +1227,92 @@ def _detect_definitions(
     return out
 
 
+def _resolve_ambiguity_via_in_document_definition(
+    paragraphs: list[tuple[int, str]],
+    abbr: str,
+    entries: list[_AbbrEntry],
+) -> tuple[Optional[_AbbrEntry], list[tuple[int, int, int, str, str]]]:
+    """Second-chance disambiguator for ambiguous abbreviations.
+
+    The main detector only sees ``chosen_entry.expansion`` (the entry
+    picked by ``_pick_entry``). When the author's document actually
+    uses a DIFFERENT candidate expansion as the first-use definition
+    the detector silently misses it, which then forces the Context_Rules
+    scorer to guess — and for widely-shared abbreviations (ACS, PA,
+    CBT, …) the scorer often returns both candidates tied at zero.
+
+    This helper rescans every candidate entry for the pattern
+    ``<expansion> (abbr)`` / ``<expansion> [abbr]`` across all
+    paragraphs. Returns:
+
+      * ``(entry, definitions)`` when EXACTLY one candidate's expansion
+        is defined inline — the author has explicitly disambiguated.
+      * ``(None, [])`` when no candidate matches or more than one does
+        (genuinely inconsistent — caller falls back to cue-word scoring
+        and AB07 may fire).
+
+    The definitions it returns use the same shape ``_detect_definitions``
+    emits (``(para_idx, def_s, def_e, surface, kind)``) so the caller can
+    assign them directly to ``_AbbrState.definitions``.
+
+    Purely read-only — no text is mutated.
+    """
+    matches_per_entry: dict[str, list[tuple[int, int, int, str, str]]] = {}
+    for entry in entries:
+        if not entry.expansion:
+            continue
+        exp = entry.expansion
+        entry_hits: list[tuple[int, int, int, str, str]] = []
+        for pi, text in paragraphs:
+            if not text:
+                continue
+            entry_hits.extend(
+                _find_definition_patterns_in_text(text, exp, abbr, pi)
+            )
+        if entry_hits:
+            matches_per_entry[entry.id] = entry_hits
+    if len(matches_per_entry) != 1:
+        return None, []
+    (winner_id, winner_defs) = next(iter(matches_per_entry.items()))
+    winner = next((e for e in entries if e.id == winner_id), None)
+    return winner, winner_defs
+
+
+def _find_definition_patterns_in_text(
+    text: str, expansion: str, abbr: str, para_idx: int,
+) -> list[tuple[int, int, int, str, str]]:
+    """Locate every ``<expansion> (abbr)`` / ``<expansion> [abbr]``
+    occurrence in a single paragraph. Case-insensitive on the expansion,
+    case-sensitive on the abbreviation (matches ``_detect_definitions``
+    conventions). The surface text is quoted verbatim from the paragraph
+    so downstream code never sees altered characters."""
+    if not text or not expansion or not abbr:
+        return []
+    # Split-on-whitespace + re.escape so a workbook entry like
+    # "acute coronary syndrome" matches even when the author used a
+    # non-breaking space between tokens. Boundaries use
+    # ``(?<![A-Za-z0-9])`` / ``(?![A-Za-z0-9])`` to tolerate adjoining
+    # punctuation while blocking mid-word splices.
+    tokens = [t for t in re.split(r"\s+", expansion.strip()) if t]
+    if not tokens:
+        return []
+    body = r"\s+".join(re.escape(t) for t in tokens)
+    pat_paren = re.compile(
+        rf"(?<![A-Za-z0-9]){body}\s*\(\s*{re.escape(abbr)}\s*\)",
+        re.IGNORECASE,
+    )
+    pat_square = re.compile(
+        rf"(?<![A-Za-z0-9]){body}\s*\[\s*{re.escape(abbr)}\s*\]",
+        re.IGNORECASE,
+    )
+    out: list[tuple[int, int, int, str, str]] = []
+    for m in pat_paren.finditer(text):
+        out.append((para_idx, m.start(), m.end(), text[m.start():m.end()], "exp_paren_abbr"))
+    for m in pat_square.finditer(text):
+        out.append((para_idx, m.start(), m.end(), text[m.start():m.end()], "exp_paren_abbr"))
+    return out
+
+
 def build_document_state(
     paragraphs: list[tuple[int, str]],
     *,
@@ -1441,6 +1527,35 @@ def build_document_state(
     for abbr, s in state.items():
         if s.chosen_entry is not None and s.chosen_entry.ambiguity != "ambiguous":
             continue
+
+        # Fast path 1 — in-document definition captured by the detector.
+        # ``_detect_definitions`` only emits spans whose expansion matches
+        # the pre-selected ``chosen_entry.expansion`` (see line ~1192), so
+        # a non-empty ``s.definitions`` means the author has written out
+        # the abbreviation's expansion inline — an explicit
+        # disambiguation that MUST win over the fragile cue-word scorer.
+        # Keep ``chosen_entry`` as-is (it already matches the definition
+        # by construction) and short-circuit AB07.
+        if s.definitions:
+            s.context_resolved = True
+            continue
+
+        # Fast path 2 — detector missed the in-document definition because
+        # ``_pick_entry`` picked a different ambiguous meaning first. Scan
+        # every candidate's expansion across the whole manuscript for the
+        # ``<expansion> (abbr)`` / ``<expansion> [abbr]`` pattern. If
+        # exactly one candidate matches, the author has disambiguated —
+        # switch to that entry and populate ``s.definitions`` so the
+        # downstream AB01/AB04 checks see the author's definition too.
+        alt_chosen, alt_defs = _resolve_ambiguity_via_in_document_definition(
+            paragraphs, abbr, s.entries,
+        )
+        if alt_chosen is not None:
+            s.chosen_entry = alt_chosen
+            s.definitions = sorted(alt_defs)
+            s.context_resolved = True
+            continue
+
         first_abbr = s.first_abbr_position()
         if first_abbr is None:
             # Only expansion mentions? Fall back to the first entry
