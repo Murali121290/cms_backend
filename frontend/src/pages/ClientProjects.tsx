@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Search, FolderOpen, BookOpen,
+  ArrowLeft, Search, FolderOpen, BookOpen, BookMarked,
   Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle, Trash2, User as UserIcon,
-  History, ArrowRight, Calendar
+  History, ArrowRight, Calendar, AlertTriangle
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
@@ -11,6 +11,7 @@ import { useViewMode } from '@/hooks/useViewMode'
 import { clientsApi, type Client } from '@/api/clients'
 import { projectsApi, type Project } from '@/api/projects'
 import { chaptersApi, type Chapter } from '@/api/chapters'
+import { stageDetailsApi, type StageDetail } from '@/api/stageDetails'
 import { usersApi, type User } from '@/api/users'
 import { toast } from '@/store/useToastStore'
 import { useRBAC } from '@/hooks/useRBAC'
@@ -19,6 +20,7 @@ import { Badge, statusToBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
 import { ProjectInfoModal } from './ProjectInfoModal'
+import { ProjectBookMapModal } from './ProjectBookMapModal'
 import { useUsersStore } from '@/stores/usersStore'
 import { formatDate, formatDateTime } from '@/utils/dateUtils'
 
@@ -257,11 +259,12 @@ interface ProjectCardProps {
   onEditInfo: () => void
   onOpenWorkflow: () => void
   onOpenPlanning: () => void
+  onOpenBookMap: () => void
   onOpenHistory: () => void
   onDelete: (id: number) => void
 }
 
-function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning, onOpenHistory, onDelete }: ProjectCardProps) {
+function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning, onOpenBookMap, onOpenHistory, onDelete }: ProjectCardProps) {
   const { canAccess } = useRBAC()
   const canEdit = canAccess(['admin', 'manager'])
   const isFastTrack = project.priority === 'Fast Track'
@@ -270,6 +273,7 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
   const [chLoading, setChLoading] = useState(true)
   const [ftLoading, setFtLoading] = useState(false)
   const [pmLoading, setPmLoading] = useState(false)
+  const [stageDetails, setStageDetails] = useState<StageDetail[]>([])
 
   useEffect(() => {
     if (!project.project_code) { setChLoading(false); return }
@@ -281,7 +285,116 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
       )))
       .catch(() => { })
       .finally(() => setChLoading(false))
+
+    // Fetch stage details to compute consolidated delayed/overdue breakdown
+    stageDetailsApi.listByProject(project.project_code)
+      .then(details => setStageDetails(Array.isArray(details) ? details : []))
+      .catch(() => setStageDetails([]))
   }, [project.project_code])
+
+  // Consolidated delay summary by track (Manuscript vs Art) across all chapters
+  // e.g. Manuscript Delay: 7 overdue in Pre-editing (10d max)
+  //      Art Delay: 6 overdue in Manuscript Analysis (14d max)
+  const consolidatedDelaysByTrack = useMemo(() => {
+    if (!stageDetails || stageDetails.length === 0) return { manuscript: [], art: [] }
+    const todayStr = new Date().toISOString().split('T')[0]
+
+    // Group details by chapter
+    const chGroups = new Map<string, StageDetail[]>()
+    for (const d of stageDetails) {
+      const ch = d.chapters || 'Main'
+      if (!chGroups.has(ch)) chGroups.set(ch, [])
+      chGroups.get(ch)!.push(d)
+    }
+
+    type DelayItem = { chLabel: string; type: 'delayed' | 'overdue'; days: number; sortNum: number }
+    // Separate maps for manuscript and art tracks
+    const msStageMap = new Map<string, DelayItem[]>()
+    const artStageMap = new Map<string, DelayItem[]>()
+    const msStageOrder: string[] = []
+    const artStageOrder: string[] = []
+
+    chGroups.forEach((items, chName) => {
+      const lowerCh = chName.toLowerCase()
+      // Skip Design if not relevant or treat as art / separate
+      if (lowerCh === 'design') return
+      const isArt = lowerCh.includes('art')
+
+      const sorted = [...items].sort((a, b) => (a.id || 0) - (b.id || 0))
+      const active = sorted.find(s => {
+        const st = (s.stage_status || '').toLowerCase()
+        return st !== 'completed' && st !== 'complete' && !s.actual_end_date
+      }) || sorted[sorted.length - 1]
+      const activeIdx = active ? sorted.indexOf(active) : sorted.length - 1
+
+      const chLabel = chName === 'FM' ? 'Front matter' : chName === 'BM' ? 'Back matter' : /^\d+$/.test(chName) ? `Chapter ${chName}` : chName
+      const numMatch = chName.match(/\d+/)
+      const sortNum = chName === 'FM' ? -1 : chName === 'BM' ? 9999 : numMatch ? parseInt(numMatch[0], 10) : 500
+
+      const targetMap = isArt ? artStageMap : msStageMap
+      const targetOrder = isArt ? artStageOrder : msStageOrder
+
+      sorted.forEach((s, idx) => {
+        // Only previous completed stages and current active stage (ignore future stages)
+        if (idx > activeIdx) return
+
+        const sEnd = s.planned_end_date ? s.planned_end_date.split('T')[0] : ''
+        const aEnd = s.actual_end_date ? s.actual_end_date.split('T')[0] : ''
+        const isCompleted = Boolean(aEnd || (s.stage_status || '').toLowerCase() === 'completed')
+
+        const stageName = s.stage_name || 'Stage'
+        if (!targetMap.has(stageName)) {
+          targetMap.set(stageName, [])
+          targetOrder.push(stageName)
+        }
+
+        if (isCompleted && sEnd && aEnd && aEnd > sEnd) {
+          const diff = Math.floor((new Date(aEnd).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+          targetMap.get(stageName)!.push({
+            chLabel,
+            type: 'delayed',
+            days: Math.max(1, diff),
+            sortNum,
+          })
+        } else if (!isCompleted && idx === activeIdx && sEnd && sEnd < todayStr) {
+          const diff = Math.floor((new Date(todayStr).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+          targetMap.get(stageName)!.push({
+            chLabel,
+            type: 'overdue',
+            days: Math.max(1, diff),
+            sortNum,
+          })
+        }
+      })
+    })
+
+    function buildList(stageOrder: string[], stageMap: Map<string, DelayItem[]>) {
+      const result: {
+        stageName: string
+        overdueCount: number
+        delayedCount: number
+        maxDays: number
+        items: { chLabel: string; type: 'delayed' | 'overdue'; days: number }[]
+      }[] = []
+
+      for (const st of stageOrder) {
+        const items = stageMap.get(st) || []
+        if (items.length > 0) {
+          items.sort((a, b) => a.sortNum - b.sortNum)
+          const overdueCount = items.filter(i => i.type === 'overdue').length
+          const delayedCount = items.filter(i => i.type === 'delayed').length
+          const maxDays = Math.max(...items.map(i => i.days))
+          result.push({ stageName: st, overdueCount, delayedCount, maxDays, items })
+        }
+      }
+      return result
+    }
+
+    return {
+      manuscript: buildList(msStageOrder, msStageMap),
+      art: buildList(artStageOrder, artStageMap),
+    }
+  }, [stageDetails])
 
   const completed = chapters.filter(c => c.status === 'complete').length
   const total = chapters.length
@@ -362,6 +475,13 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
                 className="text-muted hover:text-primary transition-colors flex-shrink-0"
               >
                 <CalendarDays size={12} />
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); onOpenBookMap() }}
+                title="Book Map"
+                className="text-muted hover:text-primary transition-colors flex-shrink-0"
+              >
+                <BookMarked size={12} />
               </button>
               {canAccess(['admin']) && (
                 <button
@@ -497,6 +617,89 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
         ) : (
           <StageBreakdown chapters={chapters} />
         )}
+
+        {/* Executive Delay Metric Pills - Separated by Manuscript & Art */}
+        {(consolidatedDelaysByTrack.manuscript.length > 0 || consolidatedDelaysByTrack.art.length > 0) && (
+          <div className="mt-3 pt-2.5 border-t border-border/70 space-y-2">
+            {/* Main Delay Heading */}
+            <div className="flex items-center gap-1.5 text-xs font-bold text-red-600 dark:text-red-400">
+              <AlertTriangle size={13} className="shrink-0" />
+              <span>Delay Summary</span>
+            </div>
+
+            {/* Manuscript delays */}
+            {consolidatedDelaysByTrack.manuscript.length > 0 && (
+              <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
+                <span className="text-[10px] font-bold text-red-700 dark:text-red-300 w-[72px] shrink-0 pt-0.5">
+                  Manuscript:
+                </span>
+                <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                  {consolidatedDelaysByTrack.manuscript.map((st, idx) => {
+                    const tooltipText = st.items
+                      .map(i => `${i.chLabel} (${i.type} ${i.days}d)`)
+                      .join(', ')
+
+                    const hasOverdue = st.overdueCount > 0
+                    const badgeLabel = hasOverdue
+                      ? `${st.overdueCount} overdue in ${st.stageName}`
+                      : `${st.delayedCount} delayed in ${st.stageName}`
+
+                    return (
+                      <span
+                        key={idx}
+                        title={`Manuscript - ${st.stageName}:\n${tooltipText}`}
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${
+                          hasOverdue
+                            ? 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/25 hover:bg-red-500/15'
+                            : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/15'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasOverdue ? 'bg-red-500' : 'bg-amber-500'}`} />
+                        <span>{badgeLabel}</span>
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Art track delays */}
+            {consolidatedDelaysByTrack.art.length > 0 && (
+              <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
+                <span className="text-[10px] font-bold text-orange-700 dark:text-orange-300 w-[72px] shrink-0 pt-0.5">
+                  Art Track:
+                </span>
+                <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                  {consolidatedDelaysByTrack.art.map((st, idx) => {
+                    const tooltipText = st.items
+                      .map(i => `${i.chLabel} (${i.type} ${i.days}d)`)
+                      .join(', ')
+
+                    const hasOverdue = st.overdueCount > 0
+                    const badgeLabel = hasOverdue
+                      ? `${st.overdueCount} overdue in ${st.stageName}`
+                      : `${st.delayedCount} delayed in ${st.stageName}`
+
+                    return (
+                      <span
+                        key={idx}
+                        title={`Art Track - ${st.stageName}:\n${tooltipText}`}
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${
+                          hasOverdue
+                            ? 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/25 hover:bg-orange-500/15'
+                            : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/15'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasOverdue ? 'bg-orange-500' : 'bg-amber-500'}`} />
+                        <span>{badgeLabel}</span>
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Footer: pages */}
@@ -530,6 +733,7 @@ export function ClientProjects() {
   const [infoProject, setInfoProject] = useState<Project | null>(null)
   const [editProject, setEditProject] = useState<Project | null>(null)
   const [historyProject, setHistoryProject] = useState<Project | null>(null)
+  const [bookmapProject, setBookmapProject] = useState<Project | null>(null)
 
 
   const [viewMode, setViewMode] = useViewMode('view:client-projects', 'large')
@@ -588,7 +792,7 @@ export function ClientProjects() {
     const planning = projects.filter(p => p.status === 'Planning').length
     const completed = projects.filter(p => p.status === 'Completed').length
     const fastTrack = projects.filter(p => p.priority === 'Fast Track').length
-    const delayed = projects.filter(p => p.is_delayed).length
+    const delayed = projects.filter(p => p.is_delayed && p.status !== 'Planning').length
     return { total, active, planning, completed, fastTrack, delayed }
   }, [projects])
 
@@ -603,7 +807,8 @@ export function ClientProjects() {
           !(p.project_code ?? '').toLowerCase().includes(q)) return false
         if (filterWorkflow && p.workflow_name !== filterWorkflow) return false
         if (filterStatus === '__delayed__') {
-          if (!p.is_delayed) return false
+          // Projects in Planning should not be included in Delayed filter
+          if (!p.is_delayed || p.status === 'Planning') return false
         } else if (filterStatus && p.status !== filterStatus) {
           return false
         }
@@ -716,6 +921,24 @@ export function ClientProjects() {
         }}
       />
 
+      {/* Book Map Modal */}
+      {bookmapProject && (
+        <ProjectBookMapModal
+          isOpen={bookmapProject !== null}
+          onClose={() => setBookmapProject(null)}
+          project={bookmapProject}
+          onSuccess={() => {
+            // refresh project if needed
+            projectsApi.getById(bookmapProject.id).then(res => {
+              const updated = (res as any)?.project || res
+              if (updated?.id) {
+                setProjects(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))
+              }
+            }).catch(() => {})
+          }}
+        />
+      )}
+
       {/* Due Date History Modal */}
       <Modal
         isOpen={historyProject !== null}
@@ -801,6 +1024,9 @@ export function ClientProjects() {
                       return
                     }
                     navigate(`/projects/${project.id}/planning`)
+                  }}
+                  onOpenBookMap={() => {
+                    setBookmapProject(project)
                   }}
                   onDelete={(id) => setProjectToDelete(id)}
                 />

@@ -40,6 +40,7 @@ class Project(Base):
     due_date         = Column(Date,        nullable=True)
     due_date_history = Column(JSON,        nullable=False, server_default='[]', default=list)
     file_details     = Column(JSON,        nullable=True)
+    bookmap_details  = Column(JSON,        nullable=True)
     created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     is_deleted       = Column(Boolean, default=False, nullable=False)
