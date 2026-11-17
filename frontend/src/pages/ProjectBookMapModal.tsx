@@ -15,8 +15,8 @@ export interface BookMapItem {
   art_count: number | ''
   keystroke_count: number | ''
   cast_off_pages: number | ''
-  start_page_act: number | ''
-  end_page_act: number | ''
+  start_page_act: string | number
+  end_page_act: string | number
   blanks_act: number | ''
   total_pages: number | ''
   cast_off_diff: number | ''
@@ -68,7 +68,7 @@ function formatComponentName(raw: string | null | undefined): string {
 // Order: Front matter -> Body (Book, Chapters in numeric order) -> Back matter (Appendix, References, Index, BM, etc.)
 function getComponentOrderScore(comp: string): { type: number; val: number; str: string } {
   const c = (comp || '').trim().toLowerCase()
-  
+
   // 1. Front Matter
   if (c === 'fm' || c.startsWith('front') || c.startsWith('preface') || c.startsWith('intro')) {
     return { type: 1, val: 0, str: c }
@@ -123,15 +123,6 @@ function sortComponents<T extends { component: string }>(items: T[]): T[] {
     if (oA.val !== oB.val) return oA.val - oB.val
     return oA.str.localeCompare(oB.str)
   })
-}
-
-function computeTotalPages(start: number | '', end: number | ''): number | '' {
-  if (start !== '' && end !== '' && !isNaN(Number(start)) && !isNaN(Number(end))) {
-    const s = Number(start)
-    const e = Number(end)
-    return e >= s ? (e - s + 1) : ''
-  }
-  return ''
 }
 
 function computeCastOffDiff(total: number | '', castOff: number | ''): number | '' {
@@ -271,15 +262,7 @@ export function ProjectBookMapModal({ isOpen, onClose, project, onSuccess }: Pro
       const updated = [...prev]
       const current = { ...updated[index], [field]: value }
 
-      // Auto compute total_pages and cast_off_diff if start/end page changes
-      if (field === 'start_page_act' || field === 'end_page_act') {
-        const tot = computeTotalPages(
-          field === 'start_page_act' ? value : current.start_page_act,
-          field === 'end_page_act' ? value : current.end_page_act
-        )
-        current.total_pages = tot
-        current.cast_off_diff = computeCastOffDiff(tot, current.cast_off_pages)
-      } else if (field === 'cast_off_pages') {
+      if (field === 'cast_off_pages') {
         current.cast_off_diff = computeCastOffDiff(current.total_pages, value)
       } else if (field === 'total_pages') {
         current.cast_off_diff = computeCastOffDiff(value, current.cast_off_pages)
@@ -380,7 +363,7 @@ export function ProjectBookMapModal({ isOpen, onClose, project, onSuccess }: Pro
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-      <div 
+      <div
         className="bg-card w-full max-w-6xl max-h-[92vh] rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden text-text"
         onClick={e => e.stopPropagation()}
       >
@@ -475,7 +458,7 @@ export function ProjectBookMapModal({ isOpen, onClose, project, onSuccess }: Pro
               )}
             </div>
           ) : (
-            <div className="border border-border rounded-xl overflow-hidden shadow-sm bg-card">
+            <div className="border border-border rounded-xl overflow-hidden shadow-sm bg-card bookmap-no-spin">
               <table className="w-full text-xs text-left border-collapse">
                 <thead>
                   <tr className="bg-surface/80 border-b border-border font-semibold text-muted tracking-wider uppercase text-[11px]">
@@ -585,9 +568,9 @@ export function ProjectBookMapModal({ isOpen, onClose, project, onSuccess }: Pro
                       <td className="py-2 px-3 text-right">
                         {isEditing ? (
                           <input
-                            type="number"
+                            type="text"
                             value={row.start_page_act}
-                            onChange={e => handleCellChange(idx, 'start_page_act', e.target.value === '' ? '' : Number(e.target.value))}
+                            onChange={e => handleCellChange(idx, 'start_page_act', e.target.value)}
                             className="w-full bg-surface border border-border rounded px-2 py-1 text-xs text-right focus:ring-1 focus:ring-primary outline-none"
                           />
                         ) : (
@@ -599,9 +582,9 @@ export function ProjectBookMapModal({ isOpen, onClose, project, onSuccess }: Pro
                       <td className="py-2 px-3 text-right">
                         {isEditing ? (
                           <input
-                            type="number"
+                            type="text"
                             value={row.end_page_act}
-                            onChange={e => handleCellChange(idx, 'end_page_act', e.target.value === '' ? '' : Number(e.target.value))}
+                            onChange={e => handleCellChange(idx, 'end_page_act', e.target.value)}
                             className="w-full bg-surface border border-border rounded px-2 py-1 text-xs text-right focus:ring-1 focus:ring-primary outline-none"
                           />
                         ) : (
@@ -638,13 +621,12 @@ export function ProjectBookMapModal({ isOpen, onClose, project, onSuccess }: Pro
                       </td>
 
                       {/* Cast-Off Diff */}
-                      <td className={`py-2 px-3 text-right font-medium ${
-                        row.cast_off_diff !== '' && Number(row.cast_off_diff) < 0
-                          ? 'text-red-500 font-bold'
-                          : row.cast_off_diff !== '' && Number(row.cast_off_diff) > 0
-                            ? 'text-emerald-500 font-bold'
-                            : 'text-muted'
-                      }`}>
+                      <td className={`py-2 px-3 text-right font-medium ${row.cast_off_diff !== '' && Number(row.cast_off_diff) < 0
+                        ? 'text-red-500 font-bold'
+                        : row.cast_off_diff !== '' && Number(row.cast_off_diff) > 0
+                          ? 'text-emerald-500 font-bold'
+                          : 'text-muted'
+                        }`}>
                         {isEditing ? (
                           <input
                             type="number"
@@ -700,9 +682,8 @@ export function ProjectBookMapModal({ isOpen, onClose, project, onSuccess }: Pro
                     <td className="py-2.5 px-3 text-right"></td>
                     <td className="py-2.5 px-3 text-right font-mono">{totals.blanks || '—'}</td>
                     <td className="py-2.5 px-3 text-right font-mono text-primary">{totals.totalAct || '—'}</td>
-                    <td className={`py-2.5 px-3 text-right font-mono ${
-                      totals.diff < 0 ? 'text-red-500' : totals.diff > 0 ? 'text-emerald-500' : ''
-                    }`}>
+                    <td className={`py-2.5 px-3 text-right font-mono ${totals.diff < 0 ? 'text-red-500' : totals.diff > 0 ? 'text-emerald-500' : ''
+                      }`}>
                       {totals.diff !== 0 ? (totals.diff > 0 ? `+${totals.diff}` : totals.diff) : '—'}
                     </td>
                     <td className="py-2.5 px-3"></td>

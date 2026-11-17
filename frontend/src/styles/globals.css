@@ -150,3 +150,15 @@ h1, h2, h3, h4, h5, h6 {
   background-color: #fafaf9;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* ── Hide spin buttons / arrows on number inputs inside Book Map modal only ── */
+.bookmap-no-spin input[type="number"]::-webkit-outer-spin-button,
+.bookmap-no-spin input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.bookmap-no-spin input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
