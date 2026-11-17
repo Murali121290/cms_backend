@@ -8,7 +8,10 @@ from app.database import SessionLocal
 from app.domains.books_on_demand.models import BodJob, BodCsvEntry
 from app.domains.books_on_demand.services.ftp_service import BodFtpService
 from app.domains.books_on_demand.utils import calculate_bod_due_date
-from app.domains.notifications.email_service import send_bod_new_job_email
+from app.domains.notifications.email_service import (
+    send_bod_new_job_email,
+    send_bod_daily_receipt_summary_email,
+)
 from app.core.config import get_settings
 
 logger = logging.getLogger("app.worker.bod")
@@ -462,3 +465,224 @@ def watch_ftp_for_new_pdfs():
             logger.error(f"Error processing FTP for BOD: {str(e)}")
     finally:
         db.close()
+
+
+@celery_app.task(acks_late=True)
+def send_bod_daily_receipt_summary(target_date_str: str | None = None):
+    """
+    Daily task scheduled at 6:30 PM (or manually triggered) to send
+    BOD Job Receipt Summary to BOD_MANAGER_EMAIL.
+    
+    Includes:
+    1. CSV entries received today (matched with arriving PDFs/covers).
+    2. Any PDFs received directly today that were not listed in the CSV.
+    
+    Remarks:
+    - 'File Not received' (ISBN in CSV, but PDF has not arrived on FTP)
+    - 'File received but cover missing' (PDF arrived, but cover image was not found)
+    - 'File and cover received' (Both PDF and cover image arrived)
+    - 'file received not in csv' (PDF received on FTP, but not in today's CSV)
+    """
+    logger.info("Generating BOD daily receipt summary...")
+    db = SessionLocal()
+    settings = get_settings()
+
+    manager_email = getattr(settings, "BOD_MANAGER_EMAIL", None)
+    if not manager_email:
+        logger.warning("BOD_MANAGER_EMAIL is not configured. Skipping daily summary email.")
+        db.close()
+        return
+
+    try:
+        now_utc = datetime.now(timezone.utc)
+        # Determine target date window (in Asia/Kolkata timezone: UTC+5:30)
+        from zoneinfo import ZoneInfo
+        kolkata_tz = ZoneInfo("Asia/Kolkata")
+        now_local = datetime.now(kolkata_tz)
+
+        if target_date_str:
+            try:
+                ref_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+            except Exception:
+                ref_date = now_local.date()
+        else:
+            ref_date = now_local.date()
+
+        display_date = ref_date.strftime("%m/%d/%Y")
+
+        # Start and end of today in local time, converted to UTC
+        start_of_day_local = datetime(ref_date.year, ref_date.month, ref_date.day, 0, 0, 0, tzinfo=kolkata_tz)
+        end_of_day_local = datetime(ref_date.year, ref_date.month, ref_date.day, 23, 59, 59, tzinfo=kolkata_tz)
+        start_utc = start_of_day_local.astimezone(timezone.utc)
+        end_utc = end_of_day_local.astimezone(timezone.utc)
+
+        # 1. Fetch CSV entries to report:
+        # - Any CSV entry received on target date
+        # - OR any older CSV entry that is STILL pending (matched_job_id is None / File Not received)
+        # - OR any older CSV entry whose matching PDF arrived today!
+        all_csv_entries = db.query(BodCsvEntry).order_by(BodCsvEntry.id.asc()).all()
+
+        # 2. Fetch BodJobs ingested today
+        jobs_today = db.query(BodJob).filter(
+            BodJob.is_deleted == False,
+            BodJob.created_at >= start_utc,
+            BodJob.created_at <= end_utc
+        ).order_by(BodJob.id.asc()).all()
+        jobs_today_ids = {j.id for j in jobs_today}
+
+        summary_rows = []
+        matched_job_ids = set()
+
+        def extract_title_from_pdf(pdf_path: str) -> str:
+            if not pdf_path or not os.path.isfile(pdf_path):
+                return "-"
+            try:
+                import fitz
+                doc = fitz.open(pdf_path)
+                meta_title = (doc.metadata.get("title") or "").strip()
+                doc.close()
+                if meta_title and not meta_title.lower().startswith("microsoft word -"):
+                    return meta_title
+                elif meta_title:
+                    return meta_title.replace("Microsoft Word -", "").strip()
+            except Exception:
+                pass
+            return "-"
+
+        def get_file_size_kb(file_path: str) -> str:
+            if file_path and os.path.isfile(file_path):
+                try:
+                    size_bytes = os.path.getsize(file_path)
+                    return f"{round(size_bytes / 1024)}"
+                except Exception:
+                    pass
+            return "-"
+
+        # Filter relevant CSV entries according to Option 1:
+        # - Entry was received today
+        # - OR Entry was received earlier, but is STILL pending (File Not received)
+        # - OR Entry was received earlier, but its file arrived today!
+        for entry in all_csv_entries:
+            entry_created_local = entry.created_at.astimezone(kolkata_tz) if entry.created_at else None
+            is_entry_today = bool(entry.created_at and start_utc <= entry.created_at <= end_utc)
+
+            extra = entry.extra_data or {}
+            
+            # Find Title Name in CSV row
+            title_val = None
+            for k, v in extra.items():
+                if re.search(r'\b(?:title|book\s*title|title\s*name)\b', k, re.IGNORECASE) and v:
+                    title_val = str(v).strip()
+                    break
+
+            # Find matching BodJob
+            matched_job = None
+            if entry.matched_job_id:
+                matched_job = db.query(BodJob).filter(BodJob.id == entry.matched_job_id).first()
+
+            if not matched_job and entry.isbn:
+                matched_job = db.query(BodJob).filter(
+                    BodJob.is_deleted == False,
+                    BodJob.eisbn == entry.isbn
+                ).first()
+
+            if not matched_job and entry.raw_filename:
+                matched_job = db.query(BodJob).filter(
+                    BodJob.is_deleted == False,
+                    BodJob.pdf_filename == entry.raw_filename
+                ).first()
+
+            is_job_today = bool(matched_job and matched_job.id in jobs_today_ids)
+
+            # Inclusion criteria for Option 1:
+            # 1) Entry arrived today
+            # 2) Older entry whose file arrived today
+            # 3) Older entry that still has no file arrived
+            if not (is_entry_today or is_job_today or matched_job is None):
+                # Older entry whose file already arrived on a previous day -> skip
+                continue
+
+            # Display date: if job arrived today, show today's date; otherwise show entry's original receipt date
+            if matched_job and matched_job.created_at:
+                row_date_display = matched_job.created_at.astimezone(kolkata_tz).strftime("%m/%d/%Y")
+            elif entry_created_local:
+                row_date_display = entry_created_local.strftime("%m/%d/%Y")
+            else:
+                row_date_display = display_date
+
+            isbn_display = entry.isbn or extra.get("ISBN") or extra.get("PISBN") or "-"
+            pages_display = str(entry.pages) if entry.pages else (str(matched_job.pdf_page_count) if matched_job and matched_job.pdf_page_count else "-")
+            type_display = entry.pdf_type or (matched_job.pdf_type if matched_job else "-") or "-"
+            lang_display = entry.language or (matched_job.pdf_language if matched_job and matched_job.pdf_language != "None" else "-") or "-"
+            alt_text_display = extra.get("Alt Text Available?") or extra.get("Alt Text") or "No"
+
+            if matched_job:
+                matched_job_ids.add(matched_job.id)
+                has_cover = bool(matched_job.cover_filename and matched_job.cover_filepath and os.path.exists(matched_job.cover_filepath))
+                cover_display = "Yes" if has_cover else "No"
+                file_size_display = get_file_size_kb(matched_job.pdf_filepath)
+
+                if not title_val:
+                    title_val = extract_title_from_pdf(matched_job.pdf_filepath)
+
+                if has_cover:
+                    remarks = "File and cover received"
+                else:
+                    remarks = "File received but cover missing"
+            else:
+                cover_display = "No"
+                file_size_display = "-"
+                remarks = "File Not received"
+
+            summary_rows.append({
+                "date": row_date_display,
+                "isbn": isbn_display,
+                "title": title_val or "-",
+                "pages": pages_display,
+                "input_type": type_display,
+                "cover": cover_display,
+                "language": lang_display,
+                "file_size_kb": file_size_display,
+                "alt_text": alt_text_display,
+                "remarks": remarks
+            })
+
+        # Process any standalone PDFs received today that were NOT in any CSV entry
+        for job in jobs_today:
+            if job.id in matched_job_ids:
+                continue
+
+            title_val = extract_title_from_pdf(job.pdf_filepath)
+            has_cover = bool(job.cover_filename and job.cover_filepath and os.path.exists(job.cover_filepath))
+            cover_display = "Yes" if has_cover else "No"
+            file_size_display = get_file_size_kb(job.pdf_filepath)
+            job_date_str = job.created_at.astimezone(kolkata_tz).strftime("%m/%d/%Y") if job.created_at else display_date
+
+            summary_rows.append({
+                "date": job_date_str,
+                "isbn": job.eisbn or job.project_name or "-",
+                "title": title_val or "-",
+                "pages": str(job.pdf_page_count) if job.pdf_page_count else "-",
+                "input_type": job.pdf_type or "-",
+                "cover": cover_display,
+                "language": job.pdf_language if job.pdf_language and job.pdf_language != "None" else "-",
+                "file_size_kb": file_size_display,
+                "alt_text": "No",
+                "remarks": "file received not in csv"
+            })
+
+        logger.info(f"Sending BOD daily receipt summary to {manager_email} with {len(summary_rows)} rows...")
+        send_bod_daily_receipt_summary_email(
+            manager_email=manager_email,
+            report_date_str=display_date,
+            summary_rows=summary_rows
+        )
+        logger.info("BOD daily receipt summary email sent successfully!")
+        return {"status": "sent", "rows_count": len(summary_rows), "date": display_date}
+
+    except Exception as e:
+        logger.error(f"Failed to generate and send BOD daily receipt summary email: {e}")
+        raise
+    finally:
+        db.close()
+

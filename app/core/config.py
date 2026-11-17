@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     BOD_FTP_PRODUCTION_PATH: str = "Production"
     BOD_FTP_DELIVERY_PATH: str = "Delivery"
     BOD_MANAGER_EMAIL: str = ""
+    BOD_DAILY_SUMMARY_TIME: Optional[str] = None
     BOD_CUSTOM_STAGES: str = "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
 
     def __init__(self, **values):

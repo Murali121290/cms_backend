@@ -337,3 +337,143 @@ S4Carlisle Inkflow Automated System
     """
     send_email(manager_email, subject, text_body, html_body)
 
+
+def send_bod_daily_receipt_summary_email(
+    manager_email: str,
+    report_date_str: str,
+    summary_rows: list[dict]
+):
+    """
+    Sends the daily BOD Job Receipt Summary email (e.g. at 6:30 PM).
+    Columns:
+    S. No. | Date | ISBN | Title Name | Pages | Input Type | Cover | Language | File Size (KB) | Alt Text Available? | Remarks
+    """
+    subject = f"BOD JOB RECEIPT SUMMARY - {report_date_str}"
+
+    text_rows = []
+    text_rows.append(f"BOD JOB RECEIPT SUMMARY - Report Generated: {report_date_str}\n")
+    text_rows.append("S. No. | Date | ISBN | Title Name | Pages | Input Type | Cover | Language | File Size (KB) | Alt Text Available? | Remarks")
+    text_rows.append("-" * 135)
+
+    html_table_rows = ""
+    for idx, r in enumerate(summary_rows, start=1):
+        s_no = idx
+        row_date = r.get("date") or report_date_str
+        isbn_val = r.get("isbn") or r.get("pisbn") or "-"
+        title = r.get("title") or "-"
+        pages = r.get("pages") or "-"
+        input_type = r.get("input_type") or "-"
+        cover = r.get("cover") or "-"
+        language = r.get("language") or "-"
+        file_size_kb = r.get("file_size_kb") or "-"
+        alt_text = r.get("alt_text") or "No"
+        remarks = r.get("remarks") or "-"
+
+        remarks_lower = remarks.lower()
+        if "not received" in remarks_lower:
+            badge_style = "background-color: #fee2e2; color: #991b1b; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
+        elif "cover missing" in remarks_lower:
+            badge_style = "background-color: #fef3c7; color: #92400e; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
+        elif "and cover received" in remarks_lower:
+            badge_style = "background-color: #d1fae5; color: #065f46; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
+        elif "not in csv" in remarks_lower:
+            badge_style = "background-color: #e0e7ff; color: #3730a3; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
+        else:
+            badge_style = "background-color: #f3f4f6; color: #374151; padding: 3px 8px; border-radius: 4px; font-size: 11px;"
+
+        row_bg = "#ffffff" if idx % 2 != 0 else "#f9fafb"
+
+        text_rows.append(
+            f"{s_no} | {row_date} | {isbn_val} | {title} | {pages} | {input_type} | {cover} | {language} | {file_size_kb} | {alt_text} | {remarks}"
+        )
+
+        html_table_rows += f"""
+        <tr style="background-color: {row_bg}; border-bottom: 1px solid #e5e7eb;">
+          <td style="padding: 10px 12px; text-align: center; font-size: 12px; color: #4b5563;">{s_no}</td>
+          <td style="padding: 10px 12px; text-align: center; font-size: 12px; color: #4b5563; white-space: nowrap;">{row_date}</td>
+          <td style="padding: 10px 12px; font-size: 12px; font-weight: 600; color: #111827;">{isbn_val}</td>
+          <td style="padding: 10px 12px; font-size: 12px; color: #1f2937;">{title}</td>
+          <td style="padding: 10px 12px; text-align: center; font-size: 12px; color: #4b5563;">{pages}</td>
+          <td style="padding: 10px 12px; font-size: 12px; color: #4b5563;">{input_type}</td>
+          <td style="padding: 10px 12px; text-align: center; font-size: 12px; color: #4b5563;">{cover}</td>
+          <td style="padding: 10px 12px; font-size: 12px; color: #4b5563;">{language}</td>
+          <td style="padding: 10px 12px; text-align: right; font-size: 12px; color: #4b5563;">{file_size_kb}</td>
+          <td style="padding: 10px 12px; text-align: center; font-size: 12px; color: #4b5563;">{alt_text}</td>
+          <td style="padding: 10px 12px; font-size: 12px;"><span style="{badge_style}">{remarks}</span></td>
+        </tr>
+        """
+
+    if not summary_rows:
+        text_rows.append("No files or CSV entries to report.")
+        html_table_rows = """
+        <tr>
+          <td colspan="11" style="padding: 20px; text-align: center; color: #6b7280; font-size: 13px;">No files or CSV entries to report.</td>
+        </tr>
+        """
+
+    text_body = "\n".join(text_rows) + "\n\nBest regards,\nS4Carlisle Inkflow Automated System"
+
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1f2937; margin: 0; padding: 24px; background-color: #f3f4f6; }}
+          .container {{ max-width: 1100px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #e5e7eb; }}
+          .header {{ background: #1e3a8a; color: #ffffff; padding: 20px 28px; }}
+          .header h1 {{ margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }}
+          .header p {{ margin: 4px 0 0 0; font-size: 13px; color: #bfdbfe; }}
+          .table-wrapper {{ overflow-x: auto; padding: 20px 24px; }}
+          table {{ width: 100%; border-collapse: collapse; text-align: left; }}
+          th {{ background-color: #f8fafc; color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 12px; border-bottom: 2px solid #e2e8f0; }}
+          .footer {{ padding: 16px 28px; background: #f8fafc; border-top: 1px solid #e5e7eb; font-size: 12px; color: #64748b; text-align: right; }}
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <table style="width: 100%; border: none;">
+              <tr>
+                <td style="border: none; padding: 0;">
+                  <h1 style="color: #ffffff;">BOD JOB RECEIPT SUMMARY</h1>
+                  <p>Daily report of received files, covers, and CSV manifest reconciliation</p>
+                </td>
+                <td style="border: none; padding: 0; text-align: right; vertical-align: middle;">
+                  <span style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 600;">Date: {report_date_str}</span>
+                </td>
+              </tr>
+            </table>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th style="text-align: center;">S. No.</th>
+                  <th style="text-align: center;">Date</th>
+                  <th>ISBN</th>
+                  <th>Title Name</th>
+                  <th style="text-align: center;">Pages</th>
+                  <th>Input Type</th>
+                  <th style="text-align: center;">Cover</th>
+                  <th>Language</th>
+                  <th style="text-align: right;">File Size (KB)</th>
+                  <th style="text-align: center;">Alt Text?</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {html_table_rows}
+              </tbody>
+            </table>
+          </div>
+          <div class="footer">
+            Generated automatically by <strong>S4Carlisle Inkflow Automated System</strong>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+    send_email(manager_email, subject, text_body, html_body)
+

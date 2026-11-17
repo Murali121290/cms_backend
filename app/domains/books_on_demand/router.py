@@ -1973,3 +1973,20 @@ def sync_qc_reports_and_complete(
         "message": "EPUB and QC reports updated to BOD folder, old files archived to _before, stage moved to Ready to Dispatch, and job unassigned.",
         "job": job
     }
+
+
+@router.post("/send-daily-summary")
+def trigger_daily_summary(
+    date: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Manually triggers the daily BOD Job Receipt Summary email for a given date (default today).
+    """
+    from app.domains.books_on_demand.tasks import send_bod_daily_receipt_summary
+    try:
+        res = send_bod_daily_receipt_summary(target_date_str=date)
+        return {"status": True, "data": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
