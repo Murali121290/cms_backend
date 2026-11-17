@@ -95,6 +95,12 @@ export const startWordToIndesign = (fileId: number, options?: { template_file_id
 export const startIndesignToXml = (fileId: number) =>
   startProcessingJob(fileId, "indesign_to_xml", "style");
 
+export const startIndesignToXhtml = (fileId: number) =>
+  startProcessingJob(fileId, "indesign_to_xhtml", "style");
+
+export const startXhtmlToIndesign = (fileId: number) =>
+  startProcessingJob(fileId, "xhtml_to_indesign", "style");
+
 export const startExtractDesignCss = (fileId: number) =>
   startProcessingJob(fileId, "extract_design_css", "style");
 

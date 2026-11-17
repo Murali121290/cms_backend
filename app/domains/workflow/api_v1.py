@@ -121,13 +121,29 @@ AVAILABLE_PROCESSING_ACTIONS = [
         "key": "indesignToXml",
         "label": "InDesign to XML",
         "description": "Extract structured XML from an InDesign document",
-        "icon": "FileCode"
+        "icon": "FileCode",
+        "category": "Layout & Proofing"
+    },
+    {
+        "key": "indesignToXhtml",
+        "label": "InDesign to XHTML (Stage R1)",
+        "description": "Export InDesign layout to editable XHTML proof for author review (stored strictly in Proof folder)",
+        "icon": "FileCode",
+        "category": "Layout & Proofing"
+    },
+    {
+        "key": "xhtmlToIndesign",
+        "label": "Apply XHTML to InDesign (Stage R2)",
+        "description": "Apply reviewed XHTML corrections back into InDesign layout and regenerate proof",
+        "icon": "Layers",
+        "category": "Layout & Proofing"
     },
     {
         "key": "viewProof",
         "label": "View Proof",
         "description": "Inspect and view rendered page proof PDF",
-        "icon": "Eye"
+        "icon": "Eye",
+        "category": "Layout & Proofing"
     }
 ]
 
@@ -190,16 +206,31 @@ def get_processing_actions_mapping(db: Session = Depends(get_db)):
     from sqlalchemy import select
     stages = list(db.execute(select(StageMaster).order_by(StageMaster.id)).scalars().all())
     mapping: dict[str, list[str]] = {a["key"]: [] for a in AVAILABLE_PROCESSING_ACTIONS}
+    computed_stages = []
     for stage in stages:
-        for action in (stage.processing_actions or []):
+        actions = list(stage.processing_actions or [])
+        # Auto-include roundtrip actions if stage already has wordToIndesign
+        if "wordToIndesign" in actions:
+            if "indesignToXhtml" not in actions:
+                actions.append("indesignToXhtml")
+            if "xhtmlToIndesign" not in actions:
+                actions.append("xhtmlToIndesign")
+        for action in actions:
             if action in mapping:
-                mapping[action].append(stage.stage_name)
+                if stage.stage_name not in mapping[action]:
+                    mapping[action].append(stage.stage_name)
             else:
                 mapping[action] = [stage.stage_name]
+        computed_stages.append({
+            "id": stage.id,
+            "stage_name": stage.stage_name,
+            "active_status": stage.active_status,
+            "processing_actions": actions
+        })
     return {
         "definitions": AVAILABLE_PROCESSING_ACTIONS,
         "mapping": mapping,
-        "stages": [{"id": s.id, "stage_name": s.stage_name, "active_status": s.active_status, "processing_actions": s.processing_actions} for s in stages]
+        "stages": computed_stages
     }
 
 

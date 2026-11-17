@@ -39,6 +39,7 @@ export function ProcessingActionsManager({ stages, onMappingSaved }: ProcessingA
   const [draftMapping, setDraftMapping] = useState<Record<string, string[]>>({})
   const [saving, setSaving] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [activeDropdownKey, setActiveDropdownKey] = useState<string | null>(null)
   const [stageFilterText, setStageFilterText] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -85,20 +86,33 @@ export function ProcessingActionsManager({ stages, onMappingSaved }: ProcessingA
     return false
   }, [draftMapping, initialMapping])
 
+  // Discover available categories
+  const categories = useMemo(() => {
+    const set = new Set<string>()
+    definitions.forEach(d => {
+      if (d.category) set.add(d.category)
+    })
+    return ['all', ...Array.from(set).sort()]
+  }, [definitions])
+
   // Filtered definitions
   const filteredDefinitions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    if (!query) return definitions
-
     return definitions.filter(item => {
+      const matchesCategory = !selectedCategory || selectedCategory === 'all' || (item.category && item.category.toLowerCase() === selectedCategory.toLowerCase())
+      if (!matchesCategory) return false
+
+      if (!query) return true
+
       return (
         item.label.toLowerCase().includes(query) ||
         item.description.toLowerCase().includes(query) ||
         item.key.toLowerCase().includes(query) ||
+        (item.category && item.category.toLowerCase().includes(query)) ||
         (draftMapping[item.key] || []).some(s => s.toLowerCase().includes(query))
       )
     })
-  }, [definitions, searchQuery, draftMapping])
+  }, [definitions, searchQuery, draftMapping, selectedCategory])
 
   // Toggle stage for an action
   const handleToggleStage = (actionKey: string, stageName: string) => {
@@ -192,8 +206,8 @@ export function ProcessingActionsManager({ stages, onMappingSaved }: ProcessingA
           </div>
         </div>
 
-        {/* Search Bar */}
-        <div className="pt-2 border-t border-border/50">
+        {/* Search Bar & Category Filters */}
+        <div className="pt-2 border-t border-border/50 space-y-2.5">
           <div className="relative max-w-md">
             <Search size={13} className="absolute left-3 top-2.5 text-muted" />
             <input
@@ -212,6 +226,36 @@ export function ProcessingActionsManager({ stages, onMappingSaved }: ProcessingA
               </button>
             )}
           </div>
+
+          {/* Category Filter Pills */}
+          {categories.length > 1 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-1">
+              <span className="text-[11px] font-semibold text-muted uppercase tracking-wider mr-1">Filter:</span>
+              {categories.map(cat => {
+                const count = cat === 'all'
+                  ? definitions.length
+                  : definitions.filter(d => d.category?.toLowerCase() === cat.toLowerCase()).length
+                const isActive = selectedCategory.toLowerCase() === cat.toLowerCase()
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                      isActive
+                        ? 'bg-primary text-white shadow-xs'
+                        : 'bg-background hover:bg-surface text-muted hover:text-text border border-border'
+                    }`}
+                  >
+                    <span>{cat === 'all' ? 'All Actions' : cat}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-muted/15 text-muted'}`}>
+                      {count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -252,6 +296,16 @@ export function ProcessingActionsManager({ stages, onMappingSaved }: ProcessingA
                           <span className="text-[10px] font-mono text-muted bg-background px-1.5 py-0.5 rounded border border-border">
                             {action.key}
                           </span>
+                          {action.category && (
+                            <span className="text-[10px] font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
+                              {action.category}
+                            </span>
+                          )}
+                          {(action.key === 'indesignToXhtml' || action.key === 'xhtmlToIndesign') && (
+                            <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                              Proof folder only
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-muted mt-1 leading-relaxed">
                           {action.description}

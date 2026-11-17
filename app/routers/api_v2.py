@@ -4976,6 +4976,12 @@ def api_v2_start_batch_jobs(
     elif payload.process_type == "indesign_to_xml":
         target_category = "InDesign"
         target_extensions = [".indd", ".zip"]
+    elif payload.process_type == "indesign_to_xhtml":
+        target_category = "InDesign"
+        target_extensions = [".indd"]
+    elif payload.process_type == "xhtml_to_indesign":
+        target_category = "XML"
+        target_extensions = [".xhtml", ".html"]
     elif payload.process_type == "style_validation":
         target_category = "Manuscript"
         target_extensions = [".docx"]
@@ -5414,6 +5420,8 @@ def api_v2_processing_status(
         "credit_extractor_ai",
         "word_to_xml",
         "word_to_indesign",
+        "indesign_to_xhtml",
+        "xhtml_to_indesign",
         "indesign_to_xml",
         "xml_to_indesign",
         "style_validation",

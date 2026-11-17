@@ -43,6 +43,7 @@ import {
   startLanguageEdit,
   startPpdGeneration, startManuscriptAnalysisQa, startPreEditingQa, startPermissionsCheck, startCreditExtraction,
   startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof, startInddToProof,
+  startIndesignToXhtml, startXhtmlToIndesign,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -636,6 +637,21 @@ function ProcessingActionsMenu({
           </button>
         )}
 
+        {showAction('indesignToXhtml') && row?.subfolder?.toLowerCase() === 'indesign' && (
+          <button
+            disabled={!fid || !fname.endsWith('.indd')}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'InDesign to XHTML (Stage R1)',
+              jobFn: () => startIndesignToXhtml(fid),
+              pollFileId: fid,
+              pollProcessType: 'indesign_to_xhtml'
+            })}
+          >
+            <FileCode size={12} className="text-emerald-500" /> Export to XHTML (R1)
+          </button>
+        )}
+
         {showAction('inddToProof') && isIndesignFolder && (
           <button
             disabled={!targetInddFid}
@@ -696,6 +712,21 @@ function ProcessingActionsMenu({
             })}
           >
             <FileCode size={12} /> View Proof
+          </button>
+        )}
+
+        {showAction('xhtmlToIndesign') && (row?.subfolder?.toLowerCase() === 'proof' || row?.subfolder?.toLowerCase() === 'xml') && (
+          <button
+            disabled={!fid || (!fname.endsWith('.xhtml') && !fname.endsWith('.html'))}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Apply XHTML to InDesign (Stage R2)',
+              jobFn: () => startXhtmlToIndesign(fid),
+              pollFileId: fid,
+              pollProcessType: 'xhtml_to_indesign'
+            })}
+          >
+            <Layers size={12} className="text-indigo-500" /> Apply to InDesign (R2)
           </button>
         )}
       </div>
@@ -1432,7 +1463,7 @@ export function ChapterFilePage({
     }
   }
 
-  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation' | 'word_to_indesign') {
+  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation' | 'word_to_indesign' | 'indesign_to_xhtml' | 'xhtml_to_indesign') {
     if (selectedCount === 0 || batchBusy) return
     setBatchBusy(processType)
     try {
@@ -1440,13 +1471,25 @@ export function ChapterFilePage({
         ? startWordToXml
         : processType === 'word_to_indesign'
           ? startWordToIndesign
-          : startStyleValidation
+          : processType === 'indesign_to_xhtml'
+            ? startIndesignToXhtml
+            : processType === 'xhtml_to_indesign'
+              ? startXhtmlToIndesign
+              : startStyleValidation
       await Promise.all(
         selectedRows
           .filter(r => r.db_id)
           .map(r => apiFn(r.db_id!))
       )
-      const label = processType === 'word_to_xml' ? 'Word to XML' : processType === 'word_to_indesign' ? 'Word to InDesign' : 'Style Validation'
+      const label = processType === 'word_to_xml'
+        ? 'Word to XML'
+        : processType === 'word_to_indesign'
+          ? 'Word to InDesign'
+          : processType === 'indesign_to_xhtml'
+            ? 'InDesign to XHTML'
+            : processType === 'xhtml_to_indesign'
+              ? 'XHTML to InDesign'
+              : 'Style Validation'
       toast.success(
         `Successfully started ${label} for ${selectedCount} file(s)`
       )
@@ -1584,6 +1627,36 @@ export function ChapterFilePage({
           >
             {batchBusy === 'word_to_indesign' ? <Loader2 size={12} className="animate-spin" /> : <Layers size={12} />}
             {batchBusy === 'word_to_indesign' ? 'Processing…' : 'Batch Word to InDesign'}
+          </button>
+        )}
+
+        {/* Batch InDesign to XHTML - InDesign folder only */}
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'indesign' && isProcessingActionVisibleForStage('indesignToXhtml', resolvedStageName) && (
+          <button
+            onClick={() => void handleBatchProcess('indesign_to_xhtml')}
+            disabled={!!batchBusy}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+              ${!batchBusy
+                ? 'border-primary text-primary hover:bg-accent'
+                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+          >
+            {batchBusy === 'indesign_to_xhtml' ? <Loader2 size={12} className="animate-spin" /> : <FileCode size={12} />}
+            {batchBusy === 'indesign_to_xhtml' ? 'Processing…' : 'Batch Export to XHTML'}
+          </button>
+        )}
+
+        {/* Batch Apply XHTML to InDesign - Proof folder only */}
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'proof' && isProcessingActionVisibleForStage('xhtmlToIndesign', resolvedStageName) && (
+          <button
+            onClick={() => void handleBatchProcess('xhtml_to_indesign')}
+            disabled={!!batchBusy}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+              ${!batchBusy
+                ? 'border-primary text-primary hover:bg-accent'
+                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+          >
+            {batchBusy === 'xhtml_to_indesign' ? <Loader2 size={12} className="animate-spin" /> : <Layers size={12} />}
+            {batchBusy === 'xhtml_to_indesign' ? 'Processing…' : 'Batch Apply to InDesign'}
           </button>
         )}
 
@@ -1960,7 +2033,7 @@ export function ChapterFilePage({
             </div>
             <div className="max-h-48 overflow-y-auto mb-5 bg-surface rounded-lg p-2.5 space-y-1 divide-y divide-border/40 text-xs">
               {selectedRows.map(r => (
-                <div key={r.file_id || r.file_name} className="py-1 px-1 font-mono text-text truncate">
+                <div key={r.db_id || r.id || r.file_name} className="py-1 px-1 font-mono text-text truncate">
                   {r.file_name}
                 </div>
               ))}
