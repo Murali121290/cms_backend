@@ -3,6 +3,26 @@ import re
 import collections
 import os
 import traceback
+import unicodedata
+
+def _rects_overlap(rect1, rect2, threshold: float = 0.5) -> bool:
+    """Check if two rectangles overlap significantly."""
+    if rect1 is None or rect2 is None:
+        return False
+    try:
+        r1 = fitz.Rect(rect1)
+        r2 = fitz.Rect(rect2)
+        intersection = r1 & r2
+        if intersection.is_empty:
+            return False
+        area1 = r1.get_area()
+        area2 = r2.get_area()
+        smaller_area = min(area1, area2)
+        if smaller_area <= 0:
+            return False
+        return (intersection.get_area() / smaller_area) >= threshold
+    except Exception:
+        return False
 
 def get_bookmarks_from_pdf(pdf_path: str) -> list:
     try:
@@ -45,48 +65,48 @@ def roman_to_int(s):
         prev = cur
     return result if result > 0 else None
 
-def build_page_map(doc):
+def build_page_map(doc, toc_pages=None):
     """
     Builds a dictionary mapping printed page numbers (arabic) to physical page indices
     by calculating the most common offset. Also adds Roman numeral front-matter pages.
     """
+    if toc_pages is None:
+        toc_pages = []
     offsets = []
-    roman_map = {}  # roman numeral printed string -> physical idx
+    roman_map = {}  # roman numeral printed string / int -> physical idx
     
     for p_idx in range(len(doc)):
         page = doc[p_idx]
-        blocks = page.get_text("blocks")
-        if not blocks: continue
+        text = page.get_text()
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        if not lines: continue
         
-        candidates = []
-        if blocks:
-            candidates.append(blocks[0][4].strip())
-            candidates.append(blocks[-1][4].strip())
-            
-        for text in candidates:
-            cleaned = text.split('\n')
-            for line in cleaned:
-                line = line.strip()
-                if not line: continue
-                
-                num = None
-                if line.isdigit():
-                    num = int(line)
+        candidates = lines[:3] + lines[-3:]
+        for line in candidates:
+            num = None
+            if line.isdigit():
+                num = int(line)
+            else:
+                match = re.search(r'\s+(\d+)$', line)
+                if match:
+                    num = int(match.group(1))
                 else:
-                    match = re.search(r'\s+(\d+)$', line)
+                    match = re.match(r'^(\d+)\s+', line)
                     if match:
                         num = int(match.group(1))
-                    else:
-                        match = re.match(r'^(\d+)\s+', line)
-                        if match:
-                            num = int(match.group(1))
-                
-                if num is not None:
-                    offsets.append(p_idx - num)
-                else:
-                    # Check for Roman numeral page labels in front matter
-                    rv = roman_to_int(line)
-                    if rv is not None and rv < 20 and p_idx < 30:
+            
+            if num is not None and 0 < num < 3000:
+                offsets.append(p_idx - num)
+            else:
+                # Check for Roman numeral page labels in front matter
+                rv = roman_to_int(line)
+                if rv is not None and rv < 100 and p_idx < 60:
+                    # Give priority to body front matter outside of TOC pages
+                    if p_idx not in toc_pages:
+                        roman_map[rv] = p_idx
+                        roman_map[line.lower()] = p_idx
+                    elif rv not in roman_map:
+                        roman_map[rv] = p_idx
                         roman_map[line.lower()] = p_idx
                             
     page_map = {}
@@ -99,320 +119,1233 @@ def build_page_map(doc):
             if printed_page > 0:
                 page_map[printed_page] = p_idx
     
-    # Also store roman numeral mappings under their integer values (negative to avoid collision)
-    # Store them as strings for TOC lookup
+    # Also store roman numeral mappings
     page_map['_roman'] = roman_map
     return page_map
 
-def find_toc_entries(doc):
+def clean_toc_title(raw_title: str) -> str:
     """
-    Scans the first 15% of the book for the Contents section and extracts TOC entries.
+    Cleans up Table of Contents title strings by removing printed dot leaders
+    (e.g., '. . . . . . . .', '· · · · · ·', '_______') and excessive trailing punctuation.
     """
-    toc_entries = []
-    scan_limit = max(5, int(len(doc) * 0.15))
+    if not raw_title:
+        return ""
+    # Strip soft hyphens and zero-width spaces
+    cleaned = raw_title.replace('\xad', '').replace('\u00ad', '').replace('\u200b', '')
+    # Strip sequences of dots / bullets / underscores separated by spaces
+    cleaned = re.sub(r'(\s*\.\s*){2,}', ' ', cleaned)
+    cleaned = re.sub(r'(\s*·\s*){2,}', ' ', cleaned)
+    cleaned = re.sub(r'(\s*_\s*){2,}', ' ', cleaned)
+    # Strip any remaining trailing dots, dashes, or whitespace
+    cleaned = re.sub(r'[\s\.\-_]+$', '', cleaned)
+    return re.sub(r'\s+', ' ', cleaned).strip()
+
+def get_page_visual_lines(page):
+    """
+    Reconstructs page lines in visual reading order (top-to-bottom, left-to-right)
+    by grouping text spans whose vertical baselines fall within row tolerance.
+    This solves PDF column and block-order artifacts (e.g., InDesign placing
+    TOC headers or column numbers in disconnected blocks).
+    """
+    blocks = page.get_text("dict")['blocks']
+    spans = []
+    for b in blocks:
+        if b['type'] != 0: continue
+        for l in b['lines']:
+            for s in l['spans']:
+                t = s['text'].strip()
+                if t:
+                    spans.append({'text': t, 'bbox': s['bbox'], 'font': s['font'], 'size': s['size']})
+    if not spans:
+        return []
+    spans.sort(key=lambda s: (s['bbox'][1], s['bbox'][0]))
+    rows = []
+    for s in spans:
+        placed = False
+        for row in rows:
+            if abs(row['y'] - s['bbox'][1]) < 3.5:
+                row['spans'].append(s)
+                placed = True
+                break
+        if not placed:
+            rows.append({'y': s['bbox'][1], 'spans': [s]})
+            
+    lines = []
+    for row in rows:
+        row['spans'].sort(key=lambda s: s['bbox'][0])
+        full_text = ' '.join(s['text'] for s in row['spans'])
+        full_text = full_text.replace('\xa0', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+        # Only collapse spaces between single capitalized letters if individual spans were single letters
+        if any(len(s['text'].strip()) == 1 and s['text'].strip().isupper() for s in row['spans']):
+            full_text = re.sub(r'(?<=[A-Z]) (?=[A-Z])', '', full_text)
+            full_text = re.sub(r'(?<=[A-Z])  (?=\d)', ' ', full_text)
+        full_text = re.sub(r'\s+', ' ', full_text).strip()
+        x0 = min(s['bbox'][0] for s in row['spans'])
+        y0 = min(s['bbox'][1] for s in row['spans'])
+        x1 = max(s['bbox'][2] for s in row['spans'])
+        y1 = max(s['bbox'][3] for s in row['spans'])
+        lines.append({
+            'text': full_text,
+            'rect': fitz.Rect(x0, y0, x1, y1),
+            'x0': x0,
+            'y0': y0,
+            'spans': row['spans']
+        })
+    return lines
+
+def get_toc_page_indices(doc) -> list[int]:
+    """
+    Identifies all physical page indices (0-based) that belong to the Table of Contents.
+    Scans the first 15% of the book using visual line reconstruction and cleanly detects
+    the contiguous multi-page TOC block starting at the very first Contents page.
+    """
+    scan_limit = max(10, int(len(doc) * 0.15))
+    toc_pages = []
     in_contents = False
-    
+
     for p_idx in range(scan_limit):
         page = doc[p_idx]
-        text_lines = page.get_text("dict")['blocks']
-        
-        toc_matches_on_page = 0
-        page_lines = []
-        for b in text_lines:
-            if b['type'] != 0: continue
-            for l in b['lines']:
-                line_text = "".join(s['text'] for s in l['spans']).strip()
-                rect = fitz.Rect(l['bbox'])
-                if line_text:
-                    page_lines.append((line_text, rect))
-                    
-        i = 0
-        while i < len(page_lines):
-            line_text, rect = page_lines[i]
-            
-            if not in_contents:
-                if re.match(r'^contents\b', line_text.lower()):
-                    in_contents = True
-            
-            if in_contents:
-                if ".indd" in line_text.lower():
-                    i += 1
-                    continue
-                
-                # Handle front-matter TOC entries: "Introduction  v", "Preface  iii" etc.
-                # These have a Roman numeral page number inline
-                front_matter_match = re.match(
-                    r'^(introduction|preface|foreword|prologue|about the authors?|acknowledgements?|index)\s+([\u2002\u2003\s]*?)([ivxlcdm]+)$',
-                    line_text.lower().strip()
-                )
-                if not front_matter_match:
-                    # Also try pattern where the whole line is "Title   roman_numeral"
-                    front_matter_match = re.match(
-                        r'^(.*?)\s{2,}([ivxlcdm]+)$',
-                        line_text.strip()
-                    )
-                    if front_matter_match:
-                        rv = roman_to_int(front_matter_match.group(2))
-                        if rv is None or rv > 20:
-                            front_matter_match = None
-                
-                if front_matter_match:
-                    roman_str = front_matter_match.group(len(front_matter_match.groups())).lower()
-                    rv = roman_to_int(roman_str)
-                    if rv is not None:
-                        title = line_text.strip().rsplit(None, 1)[0].strip()
-                        # Clean up title from unicode spaces
-                        title = re.sub(r'[\u2002\u2003\t]+', ' ', title).strip()
-                        toc_entries.append({
-                            'title': title,
-                            'printed_page': rv,  # store as integer, not string
-                            'source_page': p_idx,
-                            'rect': rect,
-                            'x0': rect.x0,
-                            'is_part': False,
-                            'linked': False,
-                            'is_roman': True
-                        })
-                        toc_matches_on_page += 1
-                        i += 1
-                        continue
-                
-                # Check for bare front-matter keyword (no page number) - skip, don't break
-                if line_text.lower().strip() in ('introduction', 'preface', 'foreword', 'prologue') and len(toc_entries) > 5:
-                    in_contents = False
-                    break
-                        
-                # 1. Part Title handling
-                if re.match(r'^part\s+[ivxlcdm]+$', line_text.lower().strip()):
-                    if i + 1 < len(page_lines):
-                        nxt_text, nxt_rect = page_lines[i+1]
-                        title = f"{line_text.strip()} {nxt_text.strip()}"
-                        title = re.sub(r'\s+', ' ', title).strip()
-                        
-                        # See if next text has page number
-                        match = re.search(r'^(.*?)\s+(?:[\.\s]+)?(\d+)$', nxt_text)
-                        if match:
-                            title = f"{line_text.strip()} {match.group(1).replace('. ', '').strip()}"
-                            printed_page = int(match.group(2))
-                            toc_entries.append({
-                                'title': title,
-                                'printed_page': printed_page,
-                                'source_page': p_idx,
-                                'rect': rect | nxt_rect,
-                                'x0': rect.x0,
-                                'is_part': True,
-                                'linked': False
-                            })
-                            i += 2
-                            continue
-                        else:
-                            # Part title spans two lines, maybe page number is on the 3rd line?
-                            if i + 2 < len(page_lines):
-                                nn_text, nn_rect = page_lines[i+2]
-                                nn_match = re.search(r'^(.*?)\s+(?:[\.\s]+)?(\d+)$', nn_text)
-                                if nn_match or nn_text.strip().isdigit():
-                                    if nn_match:
-                                        title = f"{title} {nn_match.group(1).replace('. ', '').strip()}"
-                                        printed_page = int(nn_match.group(2))
-                                    else:
-                                        printed_page = int(nn_text.strip())
-                                    toc_entries.append({
-                                        'title': title,
-                                        'printed_page': printed_page,
-                                        'source_page': p_idx,
-                                        'rect': rect | nxt_rect | nn_rect,
-                                        'x0': rect.x0,
-                                        'is_part': True,
-                                        'linked': False
-                                    })
-                                    i += 3
-                                    continue
-                            
-                            # If no page number found, just add it as a part with no page number
-                            toc_entries.append({
-                                'title': title,
-                                'printed_page': -1,
-                                'source_page': p_idx,
-                                'rect': rect | nxt_rect,
-                                'x0': rect.x0,
-                                'is_part': True,
-                                'linked': False
-                            })
-                            i += 2
-                            continue
-                
-                # 1.5. Check for standalone chapter number '1' or 'One', then Title, then '15'
-                num_pattern = r'^(\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty-one|twenty-two|twenty-three|twenty-four|twenty-five|twenty-six|twenty-seven|twenty-eight|twenty-nine|thirty)$'
-                if re.match(num_pattern, line_text.lower().strip()):
-                    if i + 1 < len(page_lines):
-                        nxt_text, nxt_rect = page_lines[i+1]
-                        nxt_match = re.search(r'^(.*?)\s+(?:[\.\s]+)?(\d+)$', nxt_text)
-                        if nxt_match:
-                            title = f"Chapter {line_text.strip()}: {nxt_match.group(1).replace('. ', '').strip()}"
-                            printed_page = int(nxt_match.group(2))
-                            toc_entries.append({
-                                'title': title,
-                                'printed_page': printed_page,
-                                'source_page': p_idx,
-                                'rect': rect | nxt_rect,
-                                'x0': nxt_rect.x0,
-                                'is_part': False,
-                                'linked': False
-                            })
-                            toc_matches_on_page += 1
-                            i += 2
-                            continue
-                        elif i + 2 < len(page_lines):
-                            nn_text, nn_rect = page_lines[i+2]
-                            if not re.match(r'^\d+$', nxt_text.strip()) and re.match(r'^\d+$', nn_text.strip()):
-                                title = f"Chapter {line_text.strip()}: {nxt_text.strip()}"
-                                printed_page = int(nn_text.strip())
-                                toc_entries.append({
-                                    'title': title,
-                                    'printed_page': printed_page,
-                                    'source_page': p_idx,
-                                    'rect': rect | nxt_rect | nn_rect,
-                                    'x0': nxt_rect.x0,
-                                    'is_part': False,
-                                    'linked': False
-                                })
-                                toc_matches_on_page += 1
-                                i += 3
-                                continue
+        lines_info = get_page_visual_lines(page)
+        lines = [l['text'].strip() for l in lines_info if l['text'].strip()]
+        if not lines:
+            continue
 
-                # 2. Check for Chapter X on one line and Title on next
-                if i + 1 < len(page_lines) and re.match(r'^chapter\s+\d+[:\s]*$', line_text.lower().strip()):
-                    nxt_text, nxt_rect = page_lines[i+1]
-                    nxt_match = re.search(r'^(.*?)\s+(?:[\.\s]+)?(\d+)$', nxt_text)
-                    if nxt_match:
-                        title = f"{line_text.strip()} {nxt_match.group(1).replace('. ', '').strip()}"
-                        title = re.sub(r'\s+', ' ', title).strip()
-                        printed_page = int(nxt_match.group(2))
-                        toc_entries.append({
-                            'title': title,
-                            'printed_page': printed_page,
-                            'source_page': p_idx,
-                            'rect': rect | nxt_rect,
-                            'x0': rect.x0,
-                            'is_part': False,
-                            'linked': False
-                        })
-                        toc_matches_on_page += 1
-                        i += 2
-                        continue
-                    elif i + 2 < len(page_lines):
-                        nn_text, nn_rect = page_lines[i+2]
-                        if re.match(r"^([ivxlcdm]+|\d+)$", nn_text.lower().strip()):
-                            title = f"{line_text.strip()} {nxt_text.strip()}"
-                            title = re.sub(r'\s+', ' ', title).strip()
-                            if nn_text.strip().isdigit():
-                                printed_page = int(nn_text.strip())
-                                toc_entries.append({
-                                    'title': title,
-                                    'printed_page': printed_page,
-                                    'source_page': p_idx,
-                                    'rect': rect | nxt_rect,
-                                    'x0': rect.x0,
-                                    'is_part': False,
-                                    'linked': False
-                                })
-                                toc_matches_on_page += 1
-                                i += 3
-                                continue
-                        
-                # 3. Normal line with page number at the end
-                match = re.search(r'^(.*?)\s+(?:[\.\s]+)?(\d+)$', line_text)
-                if match:
-                    title = match.group(1).replace('. ', '').strip()
-                    title = re.sub(r'\s+', ' ', title).strip()
-                    
-                    if title.lower() == 'contents':
+        first_few_lines = lines[:4]
+        # Match standalone 'contents', 'table of contents', 'brief contents', 'detailed contents'
+        has_contents_header = any(
+            re.match(r'^(contents|table of contents|brief contents|detailed contents)\b', l, re.IGNORECASE) or
+            re.match(r'^[ivxlcdm\d]+\s+(contents|table of contents)\b', l, re.IGNORECASE) or
+            re.match(r'^(contents|table of contents)\s+[ivxlcdm\d]+\b', l, re.IGNORECASE)
+            for l in first_few_lines
+        )
+
+        dot_leaders = sum(1 for l in lines if re.search(r'(\s*\.\s*){2,}\s*([ivxlcdm]+|\d+)$', l, re.IGNORECASE))
+        standalone_digits = sum(1 for l in lines if re.match(r'^\d+$', l))
+        toc_end_numbers = sum(1 for l in lines if re.search(r'\s+([ivxlcdm]+|\d+)$', l, re.IGNORECASE))
+        numbered_sections = sum(1 for l in lines if re.match(r'^\d+(\.\d+)+\b', l))
+        chapter_headings = sum(1 for l in lines if re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+)\b', l, re.IGNORECASE))
+
+        is_toc_pattern = (
+            dot_leaders >= 3 or
+            (standalone_digits >= 3 and chapter_headings >= 1) or
+            (standalone_digits >= 5) or
+            (numbered_sections >= 3 and toc_end_numbers >= 3)
+        )
+
+        if not in_contents:
+            if has_contents_header or is_toc_pattern:
+                in_contents = True
+                toc_pages.append(p_idx)
+        else:
+            # We are inside the Table of Contents. Continue across contiguous pages.
+            if is_toc_pattern or has_contents_header or (toc_end_numbers >= 4):
+                toc_pages.append(p_idx)
+            else:
+                break
+
+    return toc_pages
+
+ROMAN_NUMS_SET = {
+    'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+    'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
+    'XXI', 'XXII', 'XXIII', 'XXIV', 'XXV', 'XXVI', 'XXVII', 'XXVIII', 'XXIX', 'XXX'
+}
+
+WORD_NUMBERS_SET = {
+    'one', 'two', 'tree', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    'eleven', 'twelve', 'tirteen', 'thirteen', 'fourteen', 'fifeen', 'fifteen', 'sixteen',
+    'seventeen', 'eighteen', 'nineteen', 'twenty', 'twenty-one', 'twenty-two', 'twenty-tree',
+    'twenty-three', 'twenty-four', 'twenty-five', 'twenty-six', 'twenty-seven', 'twenty-eight',
+    'twenty-nine', 'thirty'
+}
+
+def get_toc_entry_level(title: str, is_roman: bool = False, prev_letter: str = None) -> int:
+    """
+    Determines logical hierarchical level based on standard book styling:
+    - Numbered sections (e.g. 1.1 -> Level 2, 4.2.4 -> Level 3, 4.2.4.1 -> Level 4)
+    - Chapters (CHAPTER 1 ..., 1 Introduction, 5 ‘Enlightenment’...) -> Level 1 (H1)
+    - Front/back matter (Preface, Foreword, Contents, References, Index, Author/Subject Index,
+      About the Author, Continuing Education Credits, Appendix, Glossary, Bibliography) -> Level 1 (H1)
+    - Roman numeral sections (I. ..., II. ..., III. ...) -> Level 2 (H2)
+    - Capital lettered subsections (A. ..., B. ..., C. ...) -> Level 3 (H3)
+    - Numbered sub-items (1. ..., 2. ..., 3. ...) -> Level 4 (H4)
+    - Lowercase lettered sub-items (a. ..., b. ..., c. ...) -> Level 5 (H5)
+    """
+    tl = title.lower().strip()
+    ts = title.strip()
+
+    # 1. Decimal numbered sections (e.g., 4.2 -> Level 2, 4.2.4 -> Level 3, 4.2.4.1 -> Level 4)
+    # Must run FIRST so titles containing words like "indexing", "reference", "about" aren't misclassified as Level 1
+    m_sec = re.match(r'^(\d+(?:\.\d+)+)', ts)
+    if m_sec:
+        return min(6, m_sec.group(1).count('.') + 1)
+
+    # 2. Numbered chapters with word "CHAPTER" or "PART", or chapter-level features like "POETIC INTERRUPTION"
+    if re.match(r'^(?:chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b)\b', tl):
+        return 1
+
+    # 3. Roman numerals at start of title: "I. Statutory...", "II. History...", "III. Purpose..." -> Level 2 (H2)
+    m_rom = re.match(r'^([IVXLCDM]+)\.\s+', ts)
+    if m_rom and m_rom.group(1).upper() in ROMAN_NUMS_SET:
+        cand = m_rom.group(1).upper()
+        # If cand is 'I' or 'V' and immediately follows alphabetical predecessor (e.g. H. -> I.), treat as letter (H3)
+        if not (prev_letter and ((cand == 'I' and prev_letter in ['G', 'H']) or (cand == 'V' and prev_letter in ['T', 'U']))):
+            return 2
+
+    # 4. Capital letter subsections: "A. Overview", "B. Enforcement Actors", "C. Application..." -> Level 3 (H3)
+    if re.match(r'^[A-Z]\.\s+', ts):
+        return 3
+
+    # 5. Numbered sub-items: "1. The Commissioner...", "2. Statutory Exemptions..." -> Level 4 (H4)
+    if re.match(r'^\d+\.\s+', ts):
+        return 4
+
+    # 6. Lowercase letter subsections: "a. Something", "b. Something" -> Level 5 (H5)
+    if re.match(r'^[a-z]\.\s+', ts):
+        return 5
+
+    # 7. Unpunctuated numbered chapters e.g. "1 Overview of Competition...", "2 Investigations...", "10 Nutrition...",
+    # or spelled-out word chapters e.g. "One Meet...", "Two You Can...", "Tree Clear...", "Twenty-Two Te..."
+    m_ch_num = re.match(r'^\d+\s+[^\s\d]', ts)
+    if m_ch_num and not re.match(r'^\d+\.\d+', ts):
+        return 1
+
+    first_word = tl.split()[0] if tl.split() else ''
+    if first_word in WORD_NUMBERS_SET:
+        return 1
+
+    # 8. Front matter / back matter
+    if is_roman or any(tl.startswith(h) for h in [
+        'preface', 'acknowledg', 'foreword', 'contents', 'table of contents', 'introduction',
+        'table of cases', 'notes and references', 'annex'
+    ]):
+        return 1
+
+    # End-of-chapter items: 'references', 'reference', 'problems', 'exercises', 'review questions'
+    # Default to Level 2 (child of chapter) if appearing inside a chapter.
+    # Note: If it's a single standalone back-matter bibliography at the end of the entire book,
+    # find_toc_entries adjusts it to Level 1.
+    if any(re.search(rf'^{re.escape(k)}$', tl) for k in [
+        'reference', 'references', 'problems', 'exercises', 'further reading', 'review questions'
+    ]):
+        return 2
+
+    # Exact keyword or word-boundary matches for standalone back matter / end matter
+    if any(re.search(rf'\b{re.escape(k)}\b', tl) for k in [
+        'index', 'author index', 'subject index', 'name index', 'general index',
+        'about the author', 'about the authors',
+        'continuing education', 'education credits', 'education units',
+        'appendix', 'appendices', 'glossary', 'bibliography', 'epilogue', 'postscript'
+    ]) or tl.startswith('about '):
+        return 1
+
+    return 2
+
+def find_toc_entries(doc):
+    """
+    Extracts Table of Contents entries across all detected Table of Contents pages
+    using visual reading order and robust pattern recognition.
+    """
+    toc_entries = []
+    toc_page_indices = get_toc_page_indices(doc)
+
+    # Detect if document has both Brief Contents and Detailed Contents
+    brief_toc_pages = set()
+    detailed_toc_pages = set()
+    for p_i in toc_page_indices:
+        pg = doc[p_i]
+        h = pg.rect.height
+        hb = [b for b in pg.get_text('blocks') if b[1] < h * 0.18 and b[4].strip()]
+        hdr = ' '.join(b[4].strip() for b in hb).upper()
+        if 'BRIEF CONTENTS' in hdr:
+            brief_toc_pages.add(p_i)
+        elif 'CONTENTS' in hdr or 'TABLE OF CONTENTS' in hdr or 'DETAILED CONTENTS' in hdr:
+            detailed_toc_pages.add(p_i)
+    has_brief_and_detailed = bool(brief_toc_pages and detailed_toc_pages)
+    last_title = ""
+    last_letter = None
+    last_entry = None
+    
+    for p_idx in toc_page_indices:
+        page = doc[p_idx]
+        lines = get_page_visual_lines(page)
+        is_brief = p_idx in brief_toc_pages
+            
+        i = 0
+        while i < len(lines):
+            lt = lines[i]['text']
+            rect = lines[i]['rect']
+            x0 = lines[i]['x0']
+            
+            # Skip standalone headers or bare page folios
+            cln_lt = re.sub(r'[\s•·\-\–—|]+', ' ', lt).strip().lower()
+            if (
+                cln_lt == 'contents'
+                or re.match(r'^[ivxlcdm\d]+\s+contents$', cln_lt)
+                or re.match(r'^contents\s+[ivxlcdm\d]+$', cln_lt)
+                or (re.match(r'^[ivxlcdm\d]+$', cln_lt) and len(cln_lt) < 5)
+                or re.search(r'A\s*Technical\s*Guide\s*to', lt, re.IGNORECASE)
+            ):
+                i += 1
+                continue
+
+            # SECTION / PART heading without page number: e.g. 'SECTION I: FOUNDATIONS OF EVALUATION', 'PART I: FOUNDATION...', or 'I. IMPROVEMENT AND LEADERSHIP IN NURSING'
+            # Must be a divider title line, NOT ending with a trailing page number (e.g. 'Part VII.1 of the Competition Act ... 603')
+            m_sec_header = re.match(r'^(?:(?:SECTION|PART)\s*([IVXLCDM\d]+[:\s\-–—]?)\s*(.*)|([IVXLCDM]+)\.\s+([A-Z\s,\-–—\(\)]+))$', lt, re.IGNORECASE)
+            m_has_trailing_pg = bool(re.search(r'(?:\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', lt, re.IGNORECASE))
+            if m_sec_header and not m_has_trailing_pg:
+                clean_sec_title = clean_toc_title(lt)
+                last_title = clean_sec_title
+                last_letter = None
+                last_entry = {
+                    'title': clean_sec_title,
+                    'printed_page': -1,
+                    'source_page': p_idx,
+                    'rect': rect,
+                    'x0': x0,
+                    'is_part': True,
+                    'is_roman': False,
+                    'level': 1
+                }
+                toc_entries.append(last_entry)
+                i += 1
+                # Skip author / contributor line immediately following this entry (e.g. 'B. A. LeFrançois' after 'Poetic Interruption I: Abolition 33')
+                if i < len(lines):
+                    nxt_author = lines[i]['text'].strip()
+                    if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|\d{1,3}\.|\d+\s+[A-Z]|[IVXLCDM]+\.\s+[A-Z]|(?:SECTION|PART)\b)', nxt_author, re.IGNORECASE):
                         i += 1
-                        continue
-                        
-                    printed_page = int(match.group(2))
+                continue
+
+            # Numbered chapter heading with dot: '1. Evaluation and Advanced Nursing Practice: The Mandate'
+            # Only treat as a top-level chapter heading if NOT preceded by lettered (A., B.) or Roman outline sections (level >= 2)
+            m_num_dot = re.match(r'^(\d{1,3})\.\s+(.*)$', lt)
+            if m_num_dot and not ((not last_entry or not last_entry.get('is_part')) and (last_entry and last_entry.get('level', 1) >= 2)):
+                ch_num_str = m_num_dot.group(1)
+                rem_text = m_num_dot.group(2).strip()
+                comb_rect = rect
+
+                # Check if page number is inline at end of this line
+                m_end_pg = re.search(r'^(.*?)\s+([ivxlcdm]+|\d+)$', rem_text, re.IGNORECASE)
+                if m_end_pg:
+                    clean_ch_title = clean_toc_title(ch_num_str + '. ' + m_end_pg.group(1).strip())
+                    pg_str = m_end_pg.group(2)
+                    is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                    pg = roman_to_int(pg_str) if is_roman else int(pg_str)
+                    lvl = 1  # Top-level chapter
+                    last_title = clean_ch_title
+                    last_letter = None
+                    last_entry = {
+                        'title': clean_ch_title,
+                        'printed_page': pg,
+                        'source_page': p_idx,
+                        'rect': comb_rect,
+                        'x0': x0,
+                        'is_part': False,
+                        'is_roman': is_roman,
+                        'level': lvl
+                    }
+                    toc_entries.append(last_entry)
+                    i += 1
+                    # Skip next line if it is authors (e.g. 'Joanne V. Hickey')
+                    if i < len(lines):
+                        nxt_t = lines[i]['text'].strip()
+                        if not re.match(r'^(\d{1,3}\.|SECTION\b|[ivxlcdm\d]+$|Contributors|Preface|Acknowledgments|Index)', nxt_t, re.IGNORECASE):
+                            i += 1
+                    continue
+                else:
+                    # Page number is on line i+1 (e.g. line 1: '1. Title...', line 2: 'for Evaluation 3')
+                    if i + 1 < len(lines):
+                        nxt_line = lines[i+1]['text'].strip()
+                        nxt_rect = lines[i+1]['rect']
+                        m_next_end_pg = re.search(r'^(.*?)\s+([ivxlcdm]+|\d+)$', nxt_line, re.IGNORECASE)
+                        if m_next_end_pg:
+                            clean_ch_title = clean_toc_title(ch_num_str + '. ' + rem_text + ' ' + m_next_end_pg.group(1).strip())
+                            pg_str = m_next_end_pg.group(2)
+                            is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                            pg = roman_to_int(pg_str) if is_roman else int(pg_str)
+                            lvl = 1  # Top-level chapter
+                            last_title = clean_ch_title
+                            last_letter = None
+                            last_entry = {
+                                'title': clean_ch_title,
+                                'printed_page': pg,
+                                'source_page': p_idx,
+                                'rect': comb_rect | nxt_rect,
+                                'x0': x0,
+                                'is_part': False,
+                                'is_roman': is_roman,
+                                'level': lvl
+                            }
+                            toc_entries.append(last_entry)
+                            i += 2
+                            # Skip next line if it is authors
+                            if i < len(lines):
+                                nxt_author = lines[i]['text'].strip()
+                                if not re.match(r'^(\d{1,3}\.|SECTION\b|[ivxlcdm\d]+$|Contributors|Preface|Acknowledgments|Index)', nxt_author, re.IGNORECASE):
+                                    i += 1
+                            continue
+            
+            # 1. Standalone chapter header: '1 Introduction', '2 Preliminaries'
+            m_stand = re.match(r'^(\d+)\s+([A-Z][a-zA-Z\s,\-]+)$', lt)
+            if m_stand and not re.search(r'\d+$', m_stand.group(2)):
+                ch_title = clean_toc_title(lt)
+                next_pg = None
+                for j in range(i+1, min(i+4, len(lines))):
+                    m_sub = re.search(r'\s+(\d+)$', lines[j]['text'])
+                    if m_sub:
+                        next_pg = max(1, int(m_sub.group(1)) - 1)
+                        break
+                lvl = get_toc_entry_level(ch_title, is_roman=False)
+                toc_entries.append({
+                    'title': ch_title,
+                    'printed_page': next_pg if next_pg else 1,
+                    'source_page': p_idx,
+                    'rect': rect,
+                    'x0': x0,
+                    'is_part': False,
+                    'is_roman': False,
+                    'level': lvl
+                })
+                i += 1
+                continue
+
+            # 2. Numbered section with page number: '1.1 Why a Systems View Is Needed 2'
+            # Also handle multi-line numbered sections: line 1: '8.13 Closing Note...', line 2: 'Composition 230'
+            m_sec_start = re.match(r'^(\d+(?:\.\d+)+)\s+(.*)$', lt)
+            if m_sec_start:
+                sec_no = m_sec_start.group(1)
+                rem = m_sec_start.group(2).strip()
+                m_sec_end = re.search(r'^(.*?)\s+([ivxlcdm]+|\d+)$', rem, re.IGNORECASE)
+                if m_sec_end:
+                    clean_title = clean_toc_title(sec_no + ' ' + m_sec_end.group(1).strip())
+                    pg_str = m_sec_end.group(2)
+                    is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                    pg = roman_to_int(pg_str) if is_roman else int(pg_str)
+                    lvl = get_toc_entry_level(clean_title, is_roman=is_roman)
                     toc_entries.append({
-                        'title': title,
-                        'printed_page': printed_page,
+                        'title': clean_title,
+                        'printed_page': pg,
                         'source_page': p_idx,
                         'rect': rect,
-                        'x0': rect.x0,
+                        'x0': x0,
                         'is_part': False,
-                        'linked': False
+                        'is_roman': is_roman,
+                        'level': lvl
                     })
-                    toc_matches_on_page += 1
+                    i += 1
+                    continue
+                elif i + 1 < len(lines):
+                    next_lt = lines[i+1]['text']
+                    next_rect = lines[i+1]['rect']
+                    m_next_end = re.search(r'^(.*?)\s+([ivxlcdm]+|\d+)$', next_lt, re.IGNORECASE)
+                    if m_next_end:
+                        clean_title = clean_toc_title(sec_no + ' ' + rem + ' ' + m_next_end.group(1).strip())
+                        pg_str = m_next_end.group(2)
+                        is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                        pg = roman_to_int(pg_str) if is_roman else int(pg_str)
+                        lvl = get_toc_entry_level(clean_title, is_roman=is_roman)
+                        toc_entries.append({
+                            'title': clean_title,
+                            'printed_page': pg,
+                            'source_page': p_idx,
+                            'rect': rect | next_rect,
+                            'x0': x0,
+                            'is_part': False,
+                            'is_roman': is_roman,
+                            'level': lvl
+                        })
+                        i += 2
+                        continue
+
+            # 3. CHAPTER, PART, or APPENDIX heading (supports single or multi-line)
+            m_ch = re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|appendix(?:\s+[a-z\d]+)?|annex(?:\s+[a-z\d]+)?)\b(.*)$', lt, re.IGNORECASE)
+            if m_ch:
+                raw_prefix = m_ch.group(1).strip()
+                if raw_prefix.upper().startswith(('CHAPTER', 'PART')):
+                    ch_prefix = raw_prefix.upper()
                 else:
-                    # 4. Look ahead for page number on next line
-                    matched_lookahead = False
-                    if i + 1 < len(page_lines):
-                        nxt_text, nxt_rect = page_lines[i+1]
-                        if re.match(r"^([ivxlcdm]+|\d+)$", nxt_text.lower()):
-                            if not re.match(r"^\d+$", line_text) and len(line_text) > 3:
-                                title = line_text.strip()
-                                title = re.sub(r'\s+', ' ', title).strip()
-                                if title.lower() == 'contents':
-                                    i += 1
-                                    continue
-                                
-                                if nxt_text.isdigit():
-                                    printed_page = int(nxt_text)
-                                    combined_rect = rect | nxt_rect
-                                    
-                                    toc_entries.append({
-                                        'title': title,
-                                        'printed_page': printed_page,
-                                        'source_page': p_idx,
-                                        'rect': combined_rect,
-                                        'x0': rect.x0,
-                                        'is_part': False,
-                                        'linked': False
-                                    })
-                                    toc_matches_on_page += 1
-                                    matched_lookahead = True
-                                    
-                    if not matched_lookahead:
-                        clean_text = line_text.strip()
-                        if clean_text.isupper() and len(clean_text) > 4:
-                            if clean_text.lower() not in ('contents', 'introduction', 'preface', 'foreword', 'prologue'):
+                    ch_prefix = raw_prefix.title()
+                rem = m_ch.group(2).strip()
+                comb_rect = rect
+                m_end_pg = re.search(r'^(.*?)\s+([ivxlcdm]+|\d+)$', rem, re.IGNORECASE)
+                if m_end_pg:
+                    clean_title = clean_toc_title(ch_prefix + ' ' + m_end_pg.group(1).strip())
+                    pg_str = m_end_pg.group(2)
+                    is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                    found_page = roman_to_int(pg_str) if is_roman else int(pg_str)
+                    i += 1
+                else:
+                    title_parts = [rem] if rem else []
+                    j = i + 1
+                    found_page = None
+                    is_roman = False
+                    while j < len(lines):
+                        next_text = lines[j]['text'].strip()
+                        next_rect = lines[j]['rect']
+                        # Do NOT swallow the next Chapter, Part, Poetic Interruption, or major heading
+                        if re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b)', next_text, re.IGNORECASE):
+                            break
+                        if re.match(r'^\d+$', next_text):
+                            found_page = int(next_text)
+                            comb_rect |= next_rect
+                            j += 1
+                            break
+                        m_end_next = re.search(r'^(.*?)\s+([ivxlcdm]+|\d+)$', next_text, re.IGNORECASE)
+                        if m_end_next:
+                            title_parts.append(m_end_next.group(1).strip())
+                            pg_str = m_end_next.group(2)
+                            is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                            found_page = roman_to_int(pg_str) if is_roman else int(pg_str)
+                            comb_rect |= next_rect
+                            j += 1
+                            break
+                        title_parts.append(next_text)
+                        comb_rect |= next_rect
+                        j += 1
+                        if j - i > 6: break
+                    clean_title = clean_toc_title(ch_prefix + ' ' + ' '.join(title_parts))
+                    i = j
+
+                # Skip author / contributor line immediately following a chapter heading
+                if i < len(lines):
+                    nxt_author = lines[i]['text'].strip()
+                    # If this line has no page number and isn't a new chapter/section/part heading
+                    if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|\d{1,3}\.|\d+\s+[A-Z])', nxt_author, re.IGNORECASE):
+                        i += 1
+
+                lvl = get_toc_entry_level(clean_title, is_roman=is_roman)
+                toc_entries.append({
+                    'title': clean_title,
+                    'printed_page': found_page if found_page is not None else -1,
+                    'source_page': p_idx,
+                    'rect': comb_rect,
+                    'x0': x0,
+                    'is_part': ch_prefix.upper().startswith('PART'),
+                    'is_roman': is_roman,
+                    'level': lvl
+                })
+                continue
+
+            # 3.5. Bullet-separated sub-topics within a chapter block
+            # e.g., 'Chapter Objectives 3 • Becoming an Athletic Trainer 5 • Interprofessional Approach...'
+            if '•' in lt or (i + 1 < len(lines) and '•' in lines[i+1]['text']):
+                # Accumulate consecutive visual lines that form this bullet-delimited paragraph
+                bullet_lines = [lines[i]]
+                k = i + 1
+                while k < len(lines):
+                    next_txt = lines[k]['text'].strip()
+                    # If next line starts a new chapter, section, or part, stop
+                    if re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|\d{1,3}\.|\d+\s+[A-Z])\b', next_txt, re.IGNORECASE):
+                        break
+                    # If this line has bullets, or is a continuation line of the bullet paragraph
+                    if '•' in next_txt or ('•' in bullet_lines[-1]['text'] and not re.search(r'\s+([ivxlcdm]+|\d+)$', next_txt)):
+                        bullet_lines.append(lines[k])
+                        k += 1
+                    elif bullet_lines and '•' in bullet_lines[-1]['text'] and re.search(r'\s+\d+$', next_txt):
+                        # Final line of bullet paragraph ending with a page number
+                        bullet_lines.append(lines[k])
+                        k += 1
+                        break
+                    else:
+                        break
+
+                combined_bullet_text = ' '.join(bl['text'] for bl in bullet_lines)
+                if '•' in combined_bullet_text:
+                    y_min = min(bl['rect'].y0 for bl in bullet_lines)
+                    y_max = max(bl['rect'].y1 for bl in bullet_lines)
+                    page_words = page.get_text('words')
+                    
+                    def _match_sub_rect(t_str):
+                        cands = [w for w in page_words if y_min - 4 <= w[1] <= y_max + 4]
+                        t_words = [w.lower() for w in t_str.split()]
+                        matched = []
+                        idx_w = 0
+                        for w in cands:
+                            cln = w[4].replace('\u2002', '').strip().lower()
+                            if not cln: continue
+                            if cln == t_words[idx_w]:
+                                matched.append(w)
+                                idx_w += 1
+                                if idx_w == len(t_words):
+                                    break
+                            else:
+                                if idx_w > 0 and cln == t_words[0]:
+                                    matched = [w]
+                                    idx_w = 1
+                                else:
+                                    matched = []
+                                    idx_w = 0
+                        if len(matched) == len(t_words):
+                            r_res = fitz.Rect(matched[0][:4])
+                            for mw in matched[1:]: r_res |= fitz.Rect(mw[:4])
+                            return r_res
+                        return None
+
+                    raw_parts = combined_bullet_text.split('•')
+                    for p_part in raw_parts:
+                        clean_part = ' '.join(p_part.split()).replace('\u2002', '').strip()
+                        m_part = re.search(r'^(.*?)\s+(\d+)$', clean_part)
+                        if m_part:
+                            sub_title = clean_part[:m_part.start(2)].strip()
+                            sub_page = int(m_part.group(2))
+                            # Clean up leading numbers or unwanted words if any
+                            sub_title = re.sub(r'^\d+\s+', '', sub_title).strip()
+                            # If first bullet part contains author names before 'Chapter Objectives', extract 'Chapter Objectives'
+                            m_obj = re.search(r'\b(Chapter\s+Objectives|Objectives)\b', sub_title, re.IGNORECASE)
+                            if m_obj:
+                                sub_title = sub_title[m_obj.start():].strip()
+                            if len(sub_title) >= 3:
+                                sub_rect = _match_sub_rect(sub_title)
+                                if sub_rect is None:
+                                    sub_rect = bullet_lines[0]['rect']
                                 toc_entries.append({
-                                    'title': clean_text,
-                                    'printed_page': -1,
+                                    'title': clean_toc_title(sub_title),
+                                    'printed_page': sub_page,
                                     'source_page': p_idx,
-                                    'rect': rect,
-                                    'x0': rect.x0,
-                                    'is_part': True,
-                                    'linked': False
+                                    'rect': sub_rect,
+                                    'x0': sub_rect.x0,
+                                    'is_part': False,
+                                    'is_roman': False,
+                                    'level': 2
                                 })
-            i += 1
-                                    
-        if in_contents and len(toc_entries) > 5 and toc_matches_on_page == 0:
-            in_contents = False
-            break
+                    i = k
+                    continue
+
+            # 4. Front/back matter or standard title with inline roman or arabic page number
+            # e.g., "Preface   vii", "Acknowledgments   ix", "References   227", "Author Index   301",
+            # or Roman section e.g. "I. Statutory ... 2", "A. Overview ... 2", "1. Regulated Conduct ... 8"
+            # Also supports multi-line titles where title wraps across lines before page number:
+            # line 1: "A. An Act for the Prevention and Suppression of Combinations"
+            # line 2: "in Restraint of Trade . . . . . . . . . 12"
+            # or unnumbered subheading wraps:
+            # line 1: "Appropriate Interventions for Managing Stress"
+            # line 2: "in Healthcare Providers 301"
+            m_inline = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', lt, re.IGNORECASE)
+
+            # Check if this line is part 1 of a multi-line wrapped title without a page number
+            if not m_inline and i + 1 < len(lines) and not re.match(r'^(chapter|part|appendix|annex)\b', lt, re.IGNORECASE):
+                nxt_line = lines[i+1]
+                nxt_lt = nxt_line['text'].strip()
+                nxt_rect = nxt_line['rect']
+                m_nxt_pg = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', nxt_lt, re.IGNORECASE)
+                # Ensure next line is not a separate chapter/part heading, has a page number,
+                # is vertically close (within typical line spacing), and has similar left alignment
+                y_dist = nxt_rect.y0 - rect.y1
+                x_diff = abs(nxt_rect.x0 - x0)
+                if m_nxt_pg and not re.match(r'^(chapter|part|appendix|annex)\b', nxt_lt, re.IGNORECASE) and y_dist <= 22 and x_diff <= 15:
+                    comb_title = lt.strip() + ' ' + m_nxt_pg.group(1).strip()
+                    comb_title = clean_toc_title(comb_title)
+                    pg_str = m_nxt_pg.group(2).strip()
+                    allow_contents = bool(has_brief_and_detailed and is_brief and comb_title.lower() == 'contents')
+                    if (comb_title.lower() != 'contents' or allow_contents) and len(comb_title) > 2:
+                        is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                        pg = roman_to_int(pg_str) if is_roman else int(pg_str)
+                        lvl = get_toc_entry_level(comb_title, is_roman=is_roman, prev_letter=last_letter)
+                        m_let = re.match(r'^([A-Z])\.\s+', comb_title)
+                        if m_let:
+                            last_letter = m_let.group(1)
+                        elif re.match(r'^\d+\s+[A-Z]', comb_title) or re.match(r'^(?:chapter|part)\b', comb_title, re.IGNORECASE):
+                            last_letter = None
+                        last_title = comb_title
+                        last_entry = {
+                            'title': comb_title,
+                            'printed_page': pg,
+                            'source_page': p_idx,
+                            'rect': rect | nxt_rect,
+                            'x0': x0,
+                            'is_part': False,
+                            'is_roman': is_roman,
+                            'level': lvl
+                        }
+                        toc_entries.append(last_entry)
+                        i += 2
+                        # Skip author / contributor line if any
+                        if i < len(lines):
+                            nxt_author = lines[i]['text'].strip()
+                            if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|\d{1,3}\.|\d+\s+[A-Z])', nxt_author, re.IGNORECASE):
+                                i += 1
+                        continue
+
+            if m_inline and not re.match(r'^(chapter|part|appendix|annex)\b', lt, re.IGNORECASE):
+                title = clean_toc_title(m_inline.group(1))
+                pg_str = m_inline.group(2).strip()
+                allow_contents = bool(has_brief_and_detailed and is_brief and title.lower() == 'contents')
+                if (title.lower() != 'contents' or allow_contents) and len(title) > 2:
+                    is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                    pg = roman_to_int(pg_str) if is_roman else int(pg_str)
+                    lvl = get_toc_entry_level(title, is_roman=is_roman, prev_letter=last_letter)
+                    m_let = re.match(r'^([A-Z])\.\s+', title)
+                    if m_let:
+                        last_letter = m_let.group(1)
+                    elif re.match(r'^\d+\s+[A-Z]', title) or re.match(r'^(?:chapter|part)\b', title, re.IGNORECASE):
+                        last_letter = None
+                    last_title = title
+                    last_entry = {
+                        'title': title,
+                        'printed_page': pg,
+                        'source_page': p_idx,
+                        'rect': rect,
+                        'x0': x0,
+                        'is_part': False,
+                        'is_roman': is_roman,
+                        'level': lvl
+                    }
+                    toc_entries.append(last_entry)
+                    i += 1
+                    # Skip author / contributor line immediately following this entry (e.g. 'B. A. LeFrançois' after 'Poetic Interruption I: Abolition 33')
+                    # But do NOT skip if the next line is part of a wrapped title whose following line has a page number!
+                    if i < len(lines):
+                        nxt_author = lines[i]['text'].strip()
+                        if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|\d{1,3}\.|\d+\s+[A-Z]|[IVXLCDM]+\.\s+[A-Z]|(?:SECTION|PART)\b)', nxt_author, re.IGNORECASE):
+                            # Check if lines[i] is followed by a line with a page number (multi-line wrap)
+                            is_wrap_first_line = False
+                            if i + 1 < len(lines):
+                                line_after = lines[i+1]['text'].strip()
+                                m_nxt_end = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', line_after, re.IGNORECASE)
+                                if m_nxt_end and (lines[i+1]['rect'].y0 - lines[i]['rect'].y1 <= 22) and abs(lines[i+1]['rect'].x0 - lines[i]['rect'].x0) <= 15:
+                                    is_wrap_first_line = True
+                            if not is_wrap_first_line:
+                                i += 1
+                    continue
+            elif not re.match(r'^(chapter|part|appendix|annex)\b', lt, re.IGNORECASE) and (
+                re.match(r'^[IVXLCDM]+\.\s+', lt.strip())
+                or re.match(r'^[A-Z]\.\s+', lt.strip())
+                or re.match(r'^\d+\.\s+', lt.strip())
+                or re.match(r'^[a-z]\.\s+', lt.strip())
+            ):
+                # Multi-line title starting with outline marker where page number is on next line
+                if i + 1 < len(lines):
+                    nxt_lt = lines[i+1]['text'].strip()
+                    nxt_rect = lines[i+1]['rect']
+                    m_nxt_end_pg = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', nxt_lt, re.IGNORECASE)
+                    if m_nxt_end_pg:
+                        comb_title = lt.strip() + ' ' + m_nxt_end_pg.group(1).strip()
+                        comb_title = clean_toc_title(comb_title)
+                        pg_str = m_nxt_end_pg.group(2).strip()
+                        is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                        pg = roman_to_int(pg_str) if is_roman else int(pg_str)
+                        lvl = get_toc_entry_level(comb_title, is_roman=is_roman, prev_letter=last_letter)
+                        m_let = re.match(r'^([A-Z])\.\s+', comb_title)
+                        if m_let:
+                            last_letter = m_let.group(1)
+                        elif re.match(r'^\d+\s+[A-Z]', comb_title) or re.match(r'^(?:chapter|part)\b', comb_title, re.IGNORECASE):
+                            last_letter = None
+                        last_title = comb_title
+                        last_entry = {
+                            'title': comb_title,
+                            'printed_page': pg,
+                            'source_page': p_idx,
+                            'rect': rect | nxt_rect,
+                            'x0': x0,
+                            'is_part': False,
+                            'is_roman': is_roman,
+                            'level': lvl
+                        }
+                        toc_entries.append(last_entry)
+                        i += 2
+                        continue
             
+            # 5. Chapter Sub-headings: 'Title' followed on next line by page digits
+            if i + 1 < len(lines):
+                next_text = lines[i+1]['text']
+                next_rect = lines[i+1]['rect']
+                if re.match(r'^\d+$', next_text) and not re.match(r'^\d+$', lt):
+                    clean_t = clean_toc_title(lt)
+                    if clean_t.lower() != 'contents' and len(clean_t) > 2:
+                        lvl = get_toc_entry_level(clean_t, is_roman=False)
+                        toc_entries.append({
+                            'title': clean_t,
+                            'printed_page': int(next_text),
+                            'source_page': p_idx,
+                            'rect': rect | next_rect,
+                            'x0': x0,
+                            'is_part': False,
+                            'is_roman': False,
+                            'level': lvl
+                        })
+                        i += 2
+                        continue
+
+            i += 1
+            
+    # Promote standalone end-of-book References / Bibliography / Endnotes to Level 1
+    # If 'references' occurs multiple times or is followed by subsequent chapters,
+    # it belongs inside the chapter (Level 2). But if it occurs only once as back matter
+    # after the last chapter, promote it to Level 1.
+    last_chapter_idx = -1
+    for idx, e in enumerate(toc_entries):
+        tl = e.get('title', '').lower()
+        if re.match(r'^(?:chapter\s+\d+|part\s+[ivxlcdm]+|\d+\s+[^\s\d])\b', tl):
+            last_chapter_idx = idx
+
+    ref_indices = [idx for idx, e in enumerate(toc_entries) if e.get('title', '').strip().lower() in ['references', 'reference']]
+    if len(ref_indices) == 1 and ref_indices[0] > last_chapter_idx:
+        toc_entries[ref_indices[0]]['level'] = 1
+
+        # In books where individual chapters start with an unnumbered section named "Introduction"
+    # (e.g. Chapter 1 Children Around the World -> Introduction), Demote Introduction to Level 2
+    # so it nests inside the Chapter instead of becoming an independent top-level root item.
+    for idx, e in enumerate(toc_entries):
+        if e.get('title', '').strip().lower() == 'introduction' and idx > 0:
+            prev_t = toc_entries[idx - 1].get('title', '').strip().lower()
+            if re.match(r'^(?:chapter\s+\d+|\d+\s+[^\s\d])\b', prev_t):
+                e['level'] = 2
+
+    # In unnumbered books where subheadings are formatted in visual indentation columns
+    # without section numbering (e.g., Level 2 at x=146, Level 3 at x=158, Level 4 at x=170),
+    # detect prominent indentation columns and assign hierarchical levels automatically.
+    has_explicit_sub_levels = any(e.get('level', 1) >= 3 for e in toc_entries)
+    first_ch_idx = next((i for i, e in enumerate(toc_entries) if re.match(r'^(?:chapter\s+\d+|part\s+[ivxlcdm]+|\d+\s+[^\s\d])\b', e.get('title', '').lower())), None)
+    if not has_explicit_sub_levels and first_ch_idx is not None:
+        sub_entries = [e for e in toc_entries[first_ch_idx:] if not re.match(r'^(?:chapter\s+\d+|part\s+[ivxlcdm]+|\d+\s+[^\s\d])\b', e.get('title', '').lower()) and e.get('level', 1) >= 2]
+        if len(sub_entries) >= 20:
+            raw_x0 = [s.get('x0', 0) for s in sub_entries if s.get('x0', 0) > 80]
+            clusters = []
+            for x in sorted(raw_x0):
+                matched = False
+                for c in clusters:
+                    if abs(x - (sum(c) / len(c))) <= 6.0:
+                        c.append(x)
+                        matched = True
+                        break
+                if not matched:
+                    clusters.append([x])
+
+            valid_clusters = sorted([sum(c) / len(c) for c in clusters if len(c) >= 15])
+            if len(valid_clusters) >= 2:
+                for s in sub_entries:
+                    sx = s.get('x0', 0)
+                    for l_idx, center in enumerate(valid_clusters):
+                        if abs(sx - center) <= 6.0:
+                            s['level'] = l_idx + 2
+                            break
+
     return toc_entries
 
+def find_front_matter_page(doc, title: str, scan_limit: int = 50) -> int | None:
+    """
+    Finds the physical page index (0-based) for a front-matter or back-matter heading
+    (e.g. 'Acknowledgements', 'Preface', 'Foreword', 'About the Author', 'Earn Continuing Education Credits')
+    whose printed page has no folio digit printed on it (common in publishing for the first page of a section)
+    or where the printed page is outside the main numbering scheme / unfolioed.
+    """
+    clean_target = re.sub(r'[^a-zA-Z0-9]', '', title).lower()
+    if not clean_target:
+        return None
+
+    try:
+        toc_indices = set(get_toc_page_indices(doc))
+    except Exception:
+        toc_indices = set()
+
+    # Front-matter candidates (first scan_limit pages) and Back-matter candidates (last 35 pages)
+    front_pages = [p for p in range(min(scan_limit, len(doc))) if p not in toc_indices]
+    back_pages = [p for p in range(max(0, len(doc) - 35), len(doc)) if p not in toc_indices]
+    
+    # Priority order: if title looks like back matter, check back pages first
+    tl = title.lower()
+    is_back_candidate = any(k in tl for k in [
+        'author', 'credit', 'continuing', 'education', 'advertis', 'subscribe',
+        'companion', 'series', 'order', 'also by', 'index', 'about the'
+    ])
+    
+    pages_to_check = (back_pages + front_pages) if is_back_candidate else (front_pages + back_pages)
+    # Deduplicate while preserving order
+    seen_pages = set()
+    ordered_pages = []
+    for p in pages_to_check:
+        if p not in seen_pages:
+            seen_pages.add(p)
+            ordered_pages.append(p)
+
+    # 1. Exact or heading match in blocks or lines
+    for p_idx in ordered_pages:
+        try:
+            page = doc[p_idx]
+            # Fast check: lines
+            text = page.get_text('text')
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            for l in lines[:10]:
+                clean_l = re.sub(r'[^a-zA-Z0-9]', '', l).lower()
+                if clean_l and (clean_l == clean_target or clean_target in clean_l or clean_l in clean_target):
+                    if len(clean_l) >= 6:
+                        return p_idx
+
+            # Check blocks
+            blocks = page.get_text('blocks')
+            for b in blocks:
+                for l in b[4].split('\n'):
+                    clean_l = re.sub(r'[^a-zA-Z0-9]', '', l).lower()
+                    if clean_l and (clean_l == clean_target or clean_target in clean_l or clean_l in clean_target):
+                        if len(clean_l) >= 6:
+                            return p_idx
+        except Exception:
+            continue
+
+    # 2. Key phrases in full page text for unfolioed back-matter promo/credits pages
+    # e.g., 'Earn Continuing Education Credits/Units' -> check for 'continuing' and 'education'
+    tokens = [w for w in re.findall(r'[a-zA-Z0-9]+', title.lower()) if len(w) > 3]
+    if len(tokens) >= 2 and is_back_candidate:
+        for p_idx in back_pages:
+            try:
+                p_txt = doc[p_idx].get_text().lower()
+                if all(t in p_txt for t in tokens[:2]):
+                    return p_idx
+            except Exception:
+                continue
+
+    return None
+
+def find_part_or_section_page(doc, title: str, start_page: int = 0, end_page: int = None, page_texts_cache: dict = None):
+    """
+    Finds the divider page in the PDF for a Part or Section title without a printed page number.
+    Uses cached short-page texts or limits search to the window between previous
+    and next known chapter pages to run in milliseconds even on 1,000+ page books.
+    """
+    if not title:
+        return None
+
+    is_part_sec = bool(re.search(r'^(?:(?:part|section|unit|module)\b|[ivxlcdm]+\.\s+)', title.strip(), re.I))
+    if not is_part_sec:
+        return None
+
+    # Exclude Table of Contents pages from being matched as a divider page
+    try:
+        toc_indices = set(get_toc_page_indices(doc))
+    except Exception:
+        toc_indices = set()
+
+    if end_page is None or end_page > len(doc):
+        end_page = len(doc)
+    start_page = max(0, start_page)
+
+    clean_t = re.sub(r'[^a-zA-Z0-9]', '', title).lower()
+    m_split = re.match(r'^(?:(?:part|section|unit|module)\s+)?([ivxlcdm\d]+)[:\.\s\-–—]+\s*(.*)$', title.strip(), re.I)
+    p_num = None
+    sub_title = title.strip()
+    if m_split:
+        p_num = m_split.group(1).lower()
+        sub_title = m_split.group(2).strip()
+    clean_sub = re.sub(r'[^a-zA-Z0-9]', '', sub_title).lower()
+
+    for p_idx in range(start_page, end_page):
+        if p_idx in toc_indices:
+            continue
+        try:
+            if page_texts_cache is not None and p_idx in page_texts_cache:
+                clean_page_text, raw_text = page_texts_cache[p_idx]
+            else:
+                page = doc[p_idx]
+                raw_text = page.get_text()
+                if not raw_text or len(raw_text.strip()) > 3000:
+                    clean_page_text = ""
+                else:
+                    clean_page_text = re.sub(r'[^a-zA-Z0-9]', '', raw_text).lower()
+                if page_texts_cache is not None:
+                    page_texts_cache[p_idx] = (clean_page_text, raw_text)
+
+            if clean_page_text:
+                if clean_t in clean_page_text:
+                    return p_idx
+                if clean_sub and len(clean_sub) > 5 and clean_sub in clean_page_text:
+                    if not p_num or re.search(rf'\b{p_num}\b', raw_text, re.I):
+                        return p_idx
+        except Exception:
+            continue
+
+    # 2. Strict label + number matching with subtitle keyword scoring
+    # (e.g. 'PART V: THERAPEUTIC AND MEDICAL INTERVENTIONS' matching divider page where
+    # 'PART V' and 'Therapeutic and Medical Interventions' appear)
+    m = re.search(r'^(part|section|unit|module)\s+([ivxlcdm0-9]+)[:\s\-]*(.*)', title.strip(), re.I)
+    if m:
+        p_type, p_num, p_sub = m.group(1), m.group(2), m.group(3).strip()
+        pattern = rf'\b{p_type}\s+{p_num}\b'
+        sub_words = [re.sub(r'[^a-zA-Z0-9]', '', w).lower() for w in p_sub.split() if len(w) > 3]
+
+        candidates = []
+        for p_idx in range(start_page, end_page):
+            if p_idx in toc_indices:
+                continue
+            try:
+                page = doc[p_idx]
+                text = page.get_text()
+                if not text or len(text.strip()) > 3000:
+                    continue
+                if re.search(pattern, text, re.I):
+                    clean_text = re.sub(r'[^a-zA-Z0-9]', '', text).lower()
+                    match_score = sum(1 for w in sub_words if w in clean_text)
+                    candidates.append((p_idx, match_score, len(text.strip())))
+            except Exception:
+                continue
+
+        if candidates:
+            # Sort by match_score desc, then shortest text length
+            candidates.sort(key=lambda x: (-x[1], x[2]))
+            return candidates[0][0]
+
+    return None
+
 def find_title_on_page(page, title):
+    """
+    Locates the title / chapter heading on a target page so that a back-link
+    can be placed directly on the printed heading (linking back to the TOC).
+    Searches exclusively in the top 40% of the page to avoid accidentally matching
+    body text, footnotes, or sub-content.
+    """
     words = title.split()
     if not words: return None
     
-    # Try exact match
-    rects = page.search_for(title)
-    if rects: return rects[0]
-    
-    # Try first 2-3 words
-    search_str = " ".join(words[:min(3, len(words))])
-    rects = page.search_for(search_str)
-    if rects: return rects[0]
-    
-    # Try words 2 and 3
-    if len(words) >= 3:
-        search_str = " ".join(words[1:3])
-        rects = page.search_for(search_str)
-        if rects: return rects[0]
-        
-    # If text search fails, return a generic header rectangle (top 20% of page)
-    # This guarantees the user can click the top area to go back.
-    return fitz.Rect(0, 0, page.rect.width, page.rect.height * 0.2)
+    page_height = page.rect.height
+    header_clip = fitz.Rect(0, 0, page.rect.width, page_height * 0.40)
+    norm_title = re.sub(r'\s+', ' ', title).strip()
+
+    # 1. Direct search for full title (PyMuPDF search_for returns a rect list for multi-line wraps)
+    rects = page.search_for(norm_title, clip=header_clip)
+    if not rects:
+        # Try stripping leading label/prefix like 'Introduction: ', 'Postscript: ', 'CHAPTER 1. '
+        clean_title = re.sub(r'^(?:(?:chapter|part|section)\s+)?(?:\d+|[ivxlcdm]+)[\.:\s\-–—]+\s*', '', norm_title, flags=re.I).strip()
+        if not clean_title or clean_title == norm_title:
+            clean_title = re.sub(r'^[a-zA-Z0-9\s]+:\s*', '', norm_title).strip()
+        if clean_title and clean_title != norm_title:
+            rects = page.search_for(clean_title, clip=header_clip)
+
+    if rects:
+        # If multiple rects were returned for a wrapped title, merge them into a single bounding rect
+        # Exclude an isolated small chapter label at the top if it is separated from the main title box
+        res = fitz.Rect()
+        for r in rects:
+            if len(rects) > 1 and r.height < 15 and r.y1 < rects[-1].y0 - 8:
+                continue
+            res |= r
+
+        # Check if page has a separate CHAPTER label and number adjacent to this title
+        # (e.g. 'CHAPTER\n1' graphic block placed next to the chapter title)
+        ch_match = re.search(r'\b(?:chapter|part|section)\s*(\d+|[ivxlcdm]+)\b', norm_title, re.I)
+        if ch_match and not res.is_empty:
+            num = ch_match.group(1)
+            # Find CHAPTER and {num} in header area within horizontal/vertical reach
+            ch_cands = [
+                r for r in page.search_for('CHAPTER', clip=header_clip)
+                if abs(r.y0 - res.y0) < 60 or abs(r.y1 - res.y1) < 60 or (r.y0 >= res.y0 - 50 and r.y1 <= res.y1 + 50)
+            ]
+            num_cands = [
+                r for r in page.search_for(num, clip=header_clip)
+                if abs(r.y0 - res.y0) < 60 or abs(r.y1 - res.y1) < 60 or (r.y0 >= res.y0 - 50 and r.y1 <= res.y1 + 50)
+            ]
+            for r_cand in ch_cands + num_cands:
+                # Merge if placed to the left or above the main title within reasonable distance
+                if r_cand.x1 <= res.x0 + 40 or r_cand.y1 <= res.y0 + 20:
+                    res |= r_cand
+
+        return res
+
+    # 2. Multi-line / Chapter block matching in header area
+    # Unites CHAPTER {N} banner and wrapped chapter title lines, stopping before author credentials
+    try:
+        blocks = page.get_text('dict')['blocks']
+        norm_title_nfkd = unicodedata.normalize('NFKD', norm_title)
+        clean_title = re.sub(r'^(?:(?:chapter|part|section)\s+)?(?:\d+|[ivxlcdm]+)[\.:\s\-–—]+\s*', '', norm_title, flags=re.I).strip()
+        clean_words = set(re.findall(r'[a-zA-Z0-9]+', clean_title.lower()))
+        title_words = set(re.findall(r'[a-zA-Z0-9]+', norm_title_nfkd.lower()))
+        m_ch_num = re.search(r'\b(?:CHAPTER|PART|SECTION)?\s*(\d+|[IVXLCDM]+)\b', norm_title_nfkd, re.IGNORECASE)
+        if m_ch_num:
+            title_words.add(m_ch_num.group(1).lower())
+        title_words.add('chapter')
+
+        matching_rects = []
+        for b in blocks:
+            if b.get('bbox')[1] > page_height * 0.40:
+                continue
+            for l in b.get('lines', []):
+                raw_line = ''.join(s['text'] for s in l.get('spans', []))
+                line_text = unicodedata.normalize('NFKD', raw_line).strip()
+                if not line_text:
+                    continue
+                line_words = set(re.findall(r'[a-zA-Z0-9]+', line_text.lower()))
+                if not line_words:
+                    continue
+                if len(line_words) == 1 and len(line_text) == 1:
+                    continue
+                if any(re.search(r'\b(PhD|EdD|ATC|LAT|MS|RDN|MD|PT|RRT|RCP|FAARC|MAACVPR)\b', s['text']) for s in l.get('spans', [])):
+                    continue
+                if line_words and line_words.issubset(title_words):
+                    spans = l.get('spans', [])
+                    max_s = max((s.get('size', 0) for s in spans), default=0)
+                    is_label = bool(re.match(r'^(?:chapter|part|section|postscript|introduction|preface|foreword|acknowledgements|contents|index)\b', line_text, re.I))
+                    if max_s >= 12.0 or is_label or (clean_words and line_words.issubset(clean_words)):
+                        matching_rects.append(fitz.Rect(l['bbox']))
+
+        if matching_rects:
+            res = fitz.Rect()
+            for r in matching_rects:
+                res |= r
+            return res
+    except Exception:
+        pass
+
+    def _merge_contiguous(r_list):
+        if not r_list: return None
+        res = fitz.Rect(r_list[0])
+        for extra in r_list[1:]:
+            if 0 <= (extra.y0 - res.y1) < 25 and abs(extra.x0 - res.x0) < 50:
+                res |= extra
+        return res
+
+    # 1. Direct text search of full title in header area
+    rects = page.search_for(norm_title, clip=header_clip)
+    if rects:
+        return _merge_contiguous(rects)
+
+    # 2. Section / Part matching: e.g. 'SECTION I: FOUNDATIONS OF EVALUATION'
+    m_sec = re.match(r'^(SECTION|PART)\s*([IVXLCDM\d]+)[:\s\.\-]?\s*(.*)$', norm_title, re.IGNORECASE)
+    if m_sec:
+        sec_type = m_sec.group(1).upper()
+        sec_num = m_sec.group(2).rstrip(':.- ')
+        sec_prefix = f"{sec_type} {sec_num}"
+        sec_name = m_sec.group(3).strip()
+
+        r_prefix = page.search_for(sec_prefix, clip=header_clip)
+        r_name = []
+        if sec_name:
+            r_name = page.search_for(sec_name, clip=header_clip)
+            if not r_name:
+                w_sec = sec_name.split()
+                if len(w_sec) >= 2:
+                    r_name = page.search_for(' '.join(w_sec[:2]), clip=header_clip)
+
+        if r_prefix or r_name:
+            combined_sec = fitz.Rect()
+            for r_item in (r_prefix or []) + (r_name or []):
+                combined_sec |= r_item
+            if not combined_sec.is_empty:
+                return combined_sec
+
+    # 3. Extract chapter number / title parts (e.g. 'CHAPTER 1 Athletic Training...', '17. Answers to Case Study Questions')
+    m_ch = re.match(r'^(?:CHAPTER\s+)?(\d+)[\.\s\:\-–—]+(.*)$', norm_title, re.IGNORECASE)
+    ch_num = m_ch.group(1) if m_ch else None
+    ch_name = m_ch.group(2).strip().lstrip('.:-–— ') if m_ch else norm_title
+
+    # Search for chapter name and number in header area
+    r_name_list = []
+    if ch_name and len(ch_name) > 2:
+        r_name_list = page.search_for(ch_name, clip=header_clip)
+        if not r_name_list:
+            w = ch_name.split()
+            if len(w) >= 3:
+                r_name_list = page.search_for(' '.join(w[:3]), clip=header_clip)
+            elif len(w) >= 2:
+                r_name_list = page.search_for(' '.join(w[:2]), clip=header_clip)
+
+    r_num_list = []
+    if ch_num:
+        for ch_pattern in [f'CHAPTER {ch_num}', f'CHAPTER{ch_num}', f'Chapter {ch_num}', ch_num]:
+            matches = page.search_for(ch_pattern, clip=header_clip)
+            if matches:
+                r_num_list = matches
+                break
+
+    if r_name_list or r_num_list:
+        combined_ch = fitz.Rect()
+        for r_item in (r_name_list or []) + (r_num_list or []):
+            combined_ch |= r_item
+        if not combined_ch.is_empty:
+            return combined_ch
+
+    # 4. Large font heading detection in top 35% of page
+    header_spans = []
+    for b in page.get_text('dict')['blocks']:
+        if b['type'] != 0 or b['bbox'][1] > page_height * 0.35: continue
+        for l in b['lines']:
+            for s in l['spans']:
+                t = s['text'].strip()
+                if len(t) > 0 and not re.search(r'\b(PhD|EdD|ATC|LAT|MS|RDN|MD|PT)\b', t):
+                    header_spans.append(s)
+    if header_spans:
+        header_spans.sort(key=lambda s: s['size'], reverse=True)
+        max_size = header_spans[0]['size']
+        if max_size >= 16.0:
+            title_spans = [s for s in header_spans if s['size'] >= max_size - 4.0]
+            r = fitz.Rect(title_spans[0]['bbox'])
+            for s in title_spans[1:]: r |= fitz.Rect(s['bbox'])
+            return r
+
+    return None
+
+def find_subheading_on_page(page, title: str):
+    """
+    Locates a sub-topic / mini-content heading anywhere on a target page
+    so that a back-link can be placed directly on the printed sub-heading back to the TOC.
+    Differentiates true headings from body text mentions using font size, font weight,
+    and line isolation so the link rect covers ONLY the actual subtitle.
+    """
+    if not title:
+        return None
+    norm_title = re.sub(r'\s+', ' ', title).strip()
+
+    cands = page.search_for(norm_title)
+    if not cands:
+        clean_hyphens = norm_title.replace('- ', '-').replace(' -', '-')
+        cands = page.search_for(clean_hyphens)
+    if not cands:
+        words = [w for w in norm_title.split() if len(w) > 2]
+        if len(words) >= 3:
+            cands = page.search_for(' '.join(words[:3]))
+        elif len(words) >= 2:
+            cands = page.search_for(' '.join(words[:2]))
+
+    if not cands:
+        return None
+
+    if len(cands) == 1:
+        return cands[0]
+
+    # Multiple candidates found (e.g. heading + body text mentions)
+    # Score each candidate to identify the TRUE heading
+    blocks = page.get_text('dict')['blocks']
+    scored = []
+
+    for r in cands:
+        best_span = None
+        is_standalone = False
+        for b in blocks:
+            if b.get('type') == 0:
+                for l in b['lines']:
+                    line_txt = ''.join(s['text'] for s in l['spans']).strip()
+                    for s in l['spans']:
+                        sr = fitz.Rect(s['bbox'])
+                        if sr.intersects(r) and (sr.intersect(r).get_area() / r.get_area() > 0.4):
+                            best_span = s
+                            if line_txt.lower() == norm_title.lower() or abs(len(line_txt) - len(norm_title)) < 10:
+                                is_standalone = True
+                            break
+                    if best_span: break
+            if best_span: break
+
+        font_size = best_span['size'] if best_span else 9.0
+        font_name = best_span['font'].lower() if best_span else ''
+        is_bold = any(k in font_name for k in ['bold', 'medium', 'heavy', 'black', 'semibold'])
+
+        score = font_size
+        if is_bold:
+            score += 5.0
+        if is_standalone:
+            score += 10.0
+
+        scored.append((score, r))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_r = scored[0]
+
+    # For multi-line subheadings, merge candidate rects that are contiguous vertically
+    # (either overlapping or line spacing < 25pt) and part of the same heading block (horizontal offset < 100pt)
+    combined = fitz.Rect(best_r)
+    for score, r in scored[1:]:
+        vertical_dist = r.y0 - combined.y1
+        # Accept vertically overlapping or adjacent lines up to 25pt gap
+        if -10 <= vertical_dist < 25 and (abs(r.x0 - combined.x0) < 100 or abs(r.x1 - combined.x1) < 100):
+            combined |= r
+
+    return combined
 
 def determine_hierarchy(toc_entries):
     """
@@ -456,10 +1389,148 @@ def determine_hierarchy(toc_entries):
             entry['level'] = 1
             
         title_lower = entry.get('title', '').lower()
-        if any(bm in title_lower for bm in ['about the author', 'about the authors', 'index', 'bibliography', 'references', 'glossary', 'appendix']):
+        if (
+            entry.get('is_roman')
+            or title_lower.startswith('chapter')
+            or any(bm in title_lower for bm in ['preface', 'acknowledgment', 'acknowledgement', 'introduction', 'about the author', 'about the authors', 'index', 'bibliography', 'references', 'glossary', 'appendix'])
+        ):
             entry['level'] = 1
             
     return toc_entries
+
+def _detect_front_and_back_matter(doc, contents_page_1based: int) -> tuple[list, list | None]:
+    """
+    Detect standard front-matter pages (Half Title, About the Authors/Editors, Title Page,
+    Copyright Page, Dedication) occurring before the Table of Contents, as well as
+    Back Cover at the end of the document.
+    """
+    fm_items = []
+    seen_kinds = set()
+
+    # 1. Detect if Page 1 is an actual Cover image
+    p1 = doc[0]
+    p1_txt = p1.get_text('text').strip()
+    p1_imgs = p1.get_images()
+    has_cover_image = len(p1_imgs) > 0 and len(p1_txt.splitlines()) <= 2
+
+    # Detect Document Title from metadata or copyright page
+    doc_title = None
+    m_title = (doc.metadata.get('title') or '').strip()
+    if m_title and len(m_title) > 3 and not any(m_title.lower().endswith(ext) for ext in ['.indd', '.pdf', '.zip']):
+        doc_title = m_title
+
+    # Check copyright page for full title with subtitle (e.g. 'Wolf Land: The Lost Wolves...')
+    if not doc_title:
+        for p_idx in range(min(contents_page_1based - 1, 8)):
+            txt = doc[p_idx].get_text('text')
+            if 'copyright' in txt.lower():
+                for l in txt.splitlines():
+                    l_s = l.strip()
+                    if l_s.lower().startswith('title:'):
+                        t_val = l_s.split(':', 1)[1].strip()
+                        t_val = t_val.split('/', 1)[0].strip()
+                        if len(t_val) > 3:
+                            doc_title = t_val
+                            break
+                if not doc_title:
+                    for l in txt.splitlines():
+                        l_s = l.strip()
+                        if ':' in l_s and not any(k in l_s.lower() for k in [
+                            'http', 'doi', 'published', 'isbn', 'representative', 'author', 'typeset', 'editor', 'compositor',
+                            'publisher', 'permissions', 'coordinator', 'address', 'rights', 'reserved'
+                        ]) and len(l_s) < 80:
+                            doc_title = l_s
+                            break
+                if doc_title:
+                    break
+
+    # 2. Classify front-matter pages before Contents
+    page_kinds = {}
+    start_idx = 1 if has_cover_image else 0
+    for p_idx in range(start_idx, contents_page_1based - 1):
+        p = doc[p_idx]
+        txt = p.get_text('text').strip()
+        txt_lower = txt.lower()
+        lines = [l.strip() for l in txt.splitlines() if l.strip()]
+
+        if not lines:
+            continue
+
+        # Skip promotional / online access registration pages
+        if any(k in txt_lower for k in ['register now', 'quick access', 'online access', 'scan here']):
+            continue
+
+        # Copyright Page
+        if any(k in txt_lower for k in ['copyright', 'isbn', 'all rights reserved', 'british library', 'cip data', 'first published', 'library of congress']):
+            if 'Copyright Page' not in seen_kinds:
+                page_kinds[p_idx + 1] = 'Copyright Page'
+                seen_kinds.add('Copyright Page')
+                continue
+
+        # Dedication
+        if 'dedicate' in txt_lower or 'dedication' in txt_lower or (len(lines) <= 6 and txt_lower.startswith('for ') and any(w in txt_lower for w in ['memory', 'love', 'family', 'parents', 'wolves', 'children'])):
+            if 'Dedication' not in seen_kinds:
+                page_kinds[p_idx + 1] = 'Dedication'
+                seen_kinds.add('Dedication')
+                continue
+
+        # About the Authors / Editors (author biographies before title page)
+        has_bio_indicators = (
+            bool(re.search(r'\b(is an? (?:associate |assistant |adjunct )?professor|she is|he is|received (?:her|his)|holds a|earned (?:her|his)|serves as|graduated from)\b', txt_lower))
+            or 'about the author' in txt_lower or 'about the editor' in txt_lower
+            or (len(lines) >= 15 and bool(re.search(r'\b(professor|dean|faculty|scholarship)\b', txt_lower)) and bool(re.search(r'\b(phd|dnp|md|rn|faan)\b', txt_lower)))
+        )
+        if has_bio_indicators:
+            is_editor = 'editor' in txt_lower or 'editors' in txt_lower
+            bio_label = 'About the Editors' if is_editor else 'About the Author'
+            if 'About the Author' not in seen_kinds and 'About the Editors' not in seen_kinds:
+                page_kinds[p_idx + 1] = bio_label
+                seen_kinds.add(bio_label)
+                continue
+
+        # Half Title (usually page 1, 2, or 3 with 1-4 lines containing just book title without author / publisher)
+        has_author_or_editor = bool(re.search(r'\b(author|editor|editors|by|edited by|phd|md|rn|faan|cne)\b', txt_lower))
+        has_publisher = any(k in txt_lower for k in ['press', 'publishing', 'publishers', 'books', 'springer', 'pelagic', 'routledge', 'oxford', 'wiley', 'elsevier'])
+        
+        if p_idx < 4 and len(lines) <= 4 and not has_author_or_editor and not has_publisher:
+            if 'Half Title' not in seen_kinds:
+                page_kinds[p_idx + 1] = 'Half Title'
+                seen_kinds.add('Half Title')
+                if not doc_title and lines:
+                    doc_title = lines[0]
+                continue
+
+        # Title Page (contains book title along with author(s), editor(s), or publisher)
+        if has_author_or_editor or has_publisher or len(lines) >= 3:
+            if 'Title Page' not in seen_kinds:
+                page_kinds[p_idx + 1] = 'Title Page'
+                seen_kinds.add('Title Page')
+                if not doc_title and lines:
+                    doc_title = lines[0]
+                continue
+
+    sorted_pages = sorted(page_kinds.keys())
+
+    # Build front matter list: start with Cover if an image cover exists, otherwise start with Half Title
+    if has_cover_image:
+        fm_items.append([1, doc_title or 'Cover', 1])
+
+    for p_num in sorted_pages:
+        fm_items.append([1, page_kinds[p_num], p_num])
+
+    # Check Back Cover on last page
+    back_cover = None
+    last_idx = len(doc) - 1
+    if last_idx >= contents_page_1based:
+        last_p = doc[last_idx]
+        last_txt = last_p.get_text('text').strip()
+        if len(last_p.get_images()) > 0 and len(last_txt) < 50:
+            back_cover = [1, 'Back Cover', last_idx + 1]
+        elif 'back cover' in last_txt.lower() and len(last_txt) < 200:
+            back_cover = [1, 'Back Cover', last_idx + 1]
+
+    return fm_items, back_cover
+
 
 def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_subheadings: bool = True) -> dict:
     """
@@ -473,11 +1544,9 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
     except Exception as e:
         return {"success": False, "error": f"Error opening PDF: {e}"}
         
-    page_map = build_page_map(doc)
+    toc_pages = get_toc_page_indices(doc)
+    page_map = build_page_map(doc, toc_pages)
     toc_entries = find_toc_entries(doc)
-    
-    # Assign levels based on indentation
-    toc_entries = determine_hierarchy(toc_entries)
     
     linked_count = 0
     back_links_count = 0
@@ -486,13 +1555,24 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
         p_page = entry['printed_page']
         
         target_p_idx = None
-        if p_page > 0:
+        if entry.get('is_roman'):
+            roman_map = page_map.get('_roman', {})
+            cand = roman_map.get(p_page) if p_page in roman_map else (roman_map.get(str(p_page).lower()) if isinstance(p_page, str) else None)
+            if cand is not None and cand not in toc_pages:
+                target_p_idx = cand
+            else:
+                # Fallback: search for front-matter heading page in the PDF body (outside TOC)
+                target_p_idx = find_front_matter_page(doc, entry.get('title', ''))
+        elif p_page > 0:
             target_p_idx = page_map.get(p_page)
             if target_p_idx is None:
                 for offset in range(-3, 4):
                     if (p_page + offset) in page_map:
                         target_p_idx = page_map[p_page + offset] - offset
                         break
+            if target_p_idx is None:
+                # Fallback: search for unfolioed heading page in the PDF body
+                target_p_idx = find_front_matter_page(doc, entry.get('title', ''))
                         
         if target_p_idx is not None and 0 <= target_p_idx < len(doc):
             entry['linked'] = True
@@ -507,23 +1587,44 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
             }
             source_page.insert_link(link)
             
-            target_page = doc[target_p_idx]
-            title_rect = find_title_on_page(target_page, entry['title'])
-            
-            if title_rect:
-                back_link = {
-                    "kind": fitz.LINK_GOTO,
-                    "from": title_rect,
-                    "page": entry['source_page']
-                }
-                target_page.insert_link(back_link)
-                back_links_count += 1
-                entry['back_linked'] = True
+            # Only create one-way links in generate_bookmarks_for_pdf.
+            # Two-way back links are exclusively handled in create_links_in_pdf if user selects 'two_way'.
                 
-    # Fix unlinked entries (e.g. Parts with no page numbers)
+    # Fix unlinked entries (e.g. Parts / Sections with no page numbers)
+    page_texts_cache = {}
     for idx, entry in enumerate(toc_entries):
         if not entry.get('linked') and entry.get('printed_page') == -1:
-            # find next linked entry
+            # 1. First attempt: Search for the actual section divider page in the book body
+            # We search between the previous known chapter page and next known chapter page if possible
+            prev_p = 0
+            for prev_entry in reversed(toc_entries[:idx]):
+                if prev_entry.get('linked') and prev_entry.get('target_p_idx') is not None:
+                    prev_p = max(0, prev_entry['target_p_idx'] - 5)
+                    break
+            next_p = len(doc)
+            for next_entry in toc_entries[idx+1:]:
+                if next_entry.get('linked') and next_entry.get('target_p_idx') is not None:
+                    next_p = min(len(doc), next_entry['target_p_idx'] + 2)
+                    break
+
+            sec_p_idx = find_part_or_section_page(doc, entry.get('title', ''), start_page=prev_p, end_page=next_p, page_texts_cache=page_texts_cache)
+            if sec_p_idx is None and (prev_p > 0 or next_p < len(doc)):
+                # Broaden search to entire doc if localized window didn't match
+                sec_p_idx = find_part_or_section_page(doc, entry.get('title', ''), start_page=0, end_page=len(doc), page_texts_cache=page_texts_cache)
+
+            if sec_p_idx is not None and 0 <= sec_p_idx < len(doc):
+                entry['linked'] = True
+                entry['target_p_idx'] = sec_p_idx
+                linked_count += 1
+                source_page = doc[entry['source_page']]
+                source_page.insert_link({
+                    "kind": fitz.LINK_GOTO,
+                    "from": entry['rect'],
+                    "page": sec_p_idx
+                })
+                continue
+
+            # 2. Fallback: find next linked entry
             for nxt in toc_entries[idx+1:]:
                 if nxt.get('linked'):
                     entry['linked'] = True
@@ -531,116 +1632,102 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
                     break
 
     # ---------------------------------------------------------
-    # Build Hierarchical Bookmarks
+    # Build Hierarchical Bookmarks directly from TOC
     # ---------------------------------------------------------
-    toc_bookmarks = []
-    
-    # Level 1: Document Title
-    meta_title = doc.metadata.get('title')
-    if not meta_title:
-        for page_idx in range(min(2, len(doc))):
-            page = doc[page_idx]
-            blocks = page.get_text("dict").get("blocks", [])
-            largest_text = None
-            largest_size = 0
-            for b in blocks:
-                if b.get("type") == 0:
-                    for l in b.get("lines", []):
-                        for s in l.get("spans", []):
-                            text = s.get("text", "").strip()
-                            if len(text) > 3 and s.get("size", 0) > largest_size:
-                                largest_size = s["size"]
-                                largest_text = text
-            if largest_text:
-                meta_title = largest_text
-                break
-                
-    if not meta_title:
-        meta_title = "Book Title"
-        
-    toc_bookmarks.append((1, meta_title, 1))
-    
-    # Level 2: Front Matter
-    fm_pages = {}
-    for page_num in range(min(15, len(doc))):
-        page = doc[page_num]
-        text_lower = page.get_text("text").lower()
-        if "half title" not in fm_pages and page_num < 3:
-            fm_pages["Half Title"] = page_num + 1
-        if "title page" not in fm_pages and ("contributing authors:" in text_lower or "dr. russell l. claxton" in text_lower or "a formula to help you" in text_lower):
-            fm_pages["Title Page"] = page_num + 1
-        if "copyright page" not in fm_pages and ("copyright" in text_lower or "isbn" in text_lower or "all rights reserved" in text_lower):
-            fm_pages["Copyright Page"] = page_num + 1
-        if "dedication" not in fm_pages and ("dedication" in text_lower or "dedicated to" in text_lower):
-            fm_pages["Dedication"] = page_num + 1
-        if "contents" not in fm_pages and "contents" in text_lower:
-            fm_pages["Contents"] = page_num + 1
-            
-    fm_order = ["Half Title", "Title Page", "Copyright Page", "Dedication", "Contents", "Introduction"]
-    
-    # If Introduction is found in toc_entries, don't add it via FM
-    has_intro_in_toc = any("introduction" in e['title'].lower() for e in toc_entries)
-    if not has_intro_in_toc:
-        for page_num in range(min(20, len(doc))):
-            if "introduction" in doc[page_num].get_text("text").lower():
-                fm_pages["Introduction"] = page_num + 1
-                break
-
-    for fm in fm_order:
-        if fm in fm_pages:
-            toc_bookmarks.append((1, fm, fm_pages[fm]))
-            
-    # Add TOC Entries
-    for entry in toc_entries:
-        if entry.get('linked'):
-            level = entry.get('level', 1)
-            toc_bookmarks.append((level, entry['title'], entry['target_p_idx'] + 1))
-            
-    # Subheadings (H3s)
-    h3_headings = []
-    ch1_start = next((b[2] for b in toc_bookmarks if "chapter 1" in b[1].lower() or "chapter one" in b[1].lower()), None)
-    
-    if include_subheadings and ch1_start is not None:
-        for page_num in range(ch1_start - 1, len(doc)):
-            page = doc[page_num]
-            blocks = page.get_text("dict").get("blocks", [])
-            for b in blocks:
-                if b.get("type") == 0:
-                    for l in b.get("lines", []):
-                        for s in l.get("spans", []):
-                            text = s.get("text", "").strip()
-                            if not text: continue
-                            font_lower = s.get("font", "").lower()
-                            is_h3_font = "impactltstd" in font_lower or "timesltstd-bold" in font_lower
-                            is_h3_size = 15.0 < s.get("size", 0) < 18.0
-                            if is_h3_font and is_h3_size and text.isupper():
-                                if text in ("SCHOOL ADMINISTRATION", "CONTENTS", "VISION: THE DRIVING FORCE", "INSTRUCTIONAL LEADERSHIP", "ORGANIZATIONAL MANAGEMENT", "ADVOCACY, NEGOTIATION, AND PARTNERSHIPS"):
-                                    continue
-                                h3_headings.append({'title': text, 'target_page': page_num})
-                                
-    # Merge H3s intelligently
     final_bookmarks = []
-    
-    all_items = []
-    for b in toc_bookmarks:
-        all_items.append({'type': 'toc', 'level': b[0], 'title': b[1], 'page': b[2]})
-        
-    for h in h3_headings:
-        if any(abs(b[2] - (h['target_page'] + 1)) < 2 and b[1].lower() in h['title'].lower() for b in toc_bookmarks):
-             continue
-        all_items.append({'type': 'h3', 'title': h['title'], 'page': h['target_page'] + 1})
-        
-    all_items.sort(key=lambda x: (x['page'], 0 if x['type'] == 'toc' else 1))
-    
-    current_parent_level = 1
-    for item in all_items:
-        if item['type'] == 'toc':
-            current_parent_level = item['level']
-            final_bookmarks.append((item['level'], item['title'], item['page']))
-        else:
-            final_bookmarks.append((current_parent_level + 1, item['title'], item['page']))
 
-    # Sanitize hierarchy to prevent jumps
+    # When document contains both Brief Contents and Detailed Contents,
+    # build bookmarks from the Detailed Contents (plus a single Brief Contents bookmark)
+    # so we avoid duplicate chapter bookmarks at the root.
+    bookmark_entries = toc_entries
+    brief_pages = set()
+    detailed_pages = set()
+    for p_i in toc_pages:
+        pg = doc[p_i]
+        hb = [b for b in pg.get_text('blocks') if b[1] < pg.rect.height * 0.18 and b[4].strip()]
+        hdr = ' '.join(b[4].strip() for b in hb).upper()
+        if 'BRIEF CONTENTS' in hdr:
+            brief_pages.add(p_i)
+        elif 'CONTENTS' in hdr or 'DETAILED CONTENTS' in hdr:
+            detailed_pages.add(p_i)
+
+    has_both_contents = bool(brief_pages and detailed_pages)
+
+    # Find the Contents / Table of Contents page
+    contents_page_1based = None
+    if has_both_contents:
+        # In books with both Brief Contents and Detailed Contents,
+        # "Contents" bookmark should take the user directly to the primary Detailed Contents page
+        contents_page_1based = min(detailed_pages) + 1
+    elif toc_entries:
+        # First check the source page where TOC entries were detected
+        contents_page_1based = toc_entries[0].get('source_page', 0) + 1
+
+    if not contents_page_1based:
+        for p_num in range(min(15, len(doc))):
+            t_low = doc[p_num].get_text("text").lower()
+            if "contents" in t_low or "table of contents" in t_low:
+                contents_page_1based = p_num + 1
+                break
+
+    # Add detected Front Matter bookmarks (Document Title, Half Title, Title Page, Copyright Page)
+    # For front-matter detection range, look before the very first TOC page (Brief or Detailed)
+    earliest_toc_page_1based = min(toc_pages) + 1 if toc_pages else contents_page_1based
+    if earliest_toc_page_1based:
+        fm_items, back_cover = _detect_front_and_back_matter(doc, earliest_toc_page_1based)
+        final_bookmarks.extend(fm_items)
+        if not has_both_contents:
+            final_bookmarks.append([1, "Contents", contents_page_1based])
+    else:
+        back_cover = None
+
+    if has_both_contents:
+        # Check if detailed_pages has entries
+        detailed_entries = [e for e in toc_entries if e.get('source_page') in detailed_pages]
+        if detailed_entries:
+            # Add a single Brief Contents bookmark pointing to the start of Brief Contents
+            brief_entry = {'title': 'Brief Contents', 'linked': True, 'target_p_idx': min(brief_pages), 'level': 1}
+            filtered_bm_entries = [brief_entry]
+            # Add a single Contents bookmark pointing to the start of Detailed Contents
+            contents_entry = {'title': 'Contents', 'linked': True, 'target_p_idx': min(detailed_pages), 'level': 1}
+            filtered_bm_entries.append(contents_entry)
+            # Filter out redundant 'Brief Contents' or 'Contents' items inside detailed_entries
+            for e in detailed_entries:
+                tl = e.get('title', '').strip().lower()
+                if tl not in ['brief contents', 'contents', 'table of contents']:
+                    filtered_bm_entries.append(e)
+            bookmark_entries = filtered_bm_entries
+
+    # If document has PART or SECTION divider headers, nest subsequent chapters and their subheadings under them
+    has_parts = any(e.get('is_part') for e in bookmark_entries)
+    in_part = False
+
+    for entry in bookmark_entries:
+        if entry.get('linked') and entry.get('target_p_idx') is not None:
+            level = entry.get('level', 1)
+            if has_parts:
+                if entry.get('is_part'):
+                    level = 1
+                    in_part = True
+                elif in_part:
+                    tl = entry.get('title', '').strip().lower()
+                    # Only reset in_part for true standalone back matter at the end of the entire book
+                    if any(bm in tl for bm in ['author index', 'subject index', 'name index', 'general index', 'about the author', 'about the authors']) or tl.startswith('about ') or (tl == 'index' and entry.get('level', 1) == 1):
+                        in_part = False
+                        level = 1
+                    elif tl in ['references', 'reference'] and entry.get('level', 1) == 1:
+                        # Standalone end-of-book references
+                        in_part = False
+                        level = 1
+                    else:
+                        level = level + 1
+            target_page_1based = entry['target_p_idx'] + 1
+            final_bookmarks.append([level, entry['title'], target_page_1based])
+
+    if back_cover:
+        final_bookmarks.append(back_cover)
+
+    # Sanitize hierarchy to ensure standard PDF outline compliance (no missing parent levels)
     sanitized_bookmarks = []
     prev_level = 0
     for level, title, page in final_bookmarks:
@@ -669,36 +1756,100 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
         "output_path": output_path
     }
 
-def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only: bool = False) -> dict:
+def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only: bool = False, preserve_existing: bool = True) -> dict:
     """
     Creates internal links based on the Table of Contents.
     link_type: "one_way" (TOC -> Chapter) or "two_way" (TOC <-> Chapter)
+    preserve_existing: If True, keeps existing valid links and only generates missing links.
     Returns a dict with link counts.
     """
     doc = fitz.open(pdf_path)
-    page_map = build_page_map(doc)
+    toc_pages = get_toc_page_indices(doc)
+    page_map = build_page_map(doc, toc_pages)
     toc_entries = find_toc_entries(doc)
     
     one_way_count = 0
     two_way_count = 0
+    existing_preserved_count = 0
     link_details = []
     
-    for entry in toc_entries:
+    toc_page_set = set(toc_pages)
+    
+    # Detect if document has both Brief Contents and Detailed Contents
+    brief_toc_pages = set()
+    detailed_toc_pages = set()
+    for p_i in toc_pages:
+        pg = doc[p_i]
+        h = pg.rect.height
+        hb = [b for b in pg.get_text('blocks') if b[1] < h * 0.18 and b[4].strip()]
+        hdr = ' '.join(b[4].strip() for b in hb).upper()
+        if 'BRIEF CONTENTS' in hdr:
+            brief_toc_pages.add(p_i)
+        elif 'CONTENTS' in hdr or 'TABLE OF CONTENTS' in hdr or 'DETAILED CONTENTS' in hdr:
+            detailed_toc_pages.add(p_i)
+    has_brief_and_detailed = bool(brief_toc_pages and detailed_toc_pages)
+    primary_toc_pages = detailed_toc_pages if has_brief_and_detailed else toc_page_set
+
+    if not analyze_only and not preserve_existing:
+        # Clean up existing back-links from body pages back to TOC pages ONLY if not preserving existing
+        for p_idx in range(len(doc)):
+            if p_idx not in toc_page_set:
+                p = doc[p_idx]
+                for l in p.get_links():
+                    if l.get('kind') == fitz.LINK_GOTO and l.get('page') in toc_page_set:
+                        p.delete_link(l)
+    
+    for idx, entry in enumerate(toc_entries):
+        target_page_idx = None
+
         if entry['printed_page'] == -1:
-            continue
-            
-        printed_page = entry['printed_page']
-        
-        # Handle Roman numeral pages (front-matter like Introduction v, Preface iii)
-        if isinstance(printed_page, str) and entry.get('is_roman'):
-            roman_map = page_map.get('_roman', {})
-            if printed_page.lower() not in roman_map:
+            # Unnumbered entries (e.g. Part / Section divider pages)
+            prev_p = 0
+            for prev_entry in reversed(toc_entries[:idx]):
+                if prev_entry.get('printed_page') != -1:
+                    pp = prev_entry['printed_page']
+                    p_idx = page_map.get('_roman', {}).get(pp) if prev_entry.get('is_roman') else page_map.get(pp)
+                    if p_idx is not None:
+                        prev_p = p_idx
+                        break
+            next_p = len(doc)
+            for next_entry in toc_entries[idx+1:]:
+                if next_entry.get('printed_page') != -1:
+                    pp = next_entry['printed_page']
+                    p_idx = page_map.get('_roman', {}).get(pp) if next_entry.get('is_roman') else page_map.get(pp)
+                    if p_idx is not None:
+                        next_p = p_idx
+                        break
+
+            search_start = min(prev_p, next_p)
+            search_end = max(prev_p, next_p) + 2
+            sec_p_idx = find_part_or_section_page(doc, entry.get('title', ''), start_page=search_start, end_page=search_end)
+            if sec_p_idx is None:
+                sec_p_idx = find_part_or_section_page(doc, entry.get('title', ''), start_page=0, end_page=len(doc))
+
+            if sec_p_idx is not None and 0 <= sec_p_idx < len(doc):
+                target_page_idx = sec_p_idx
+            else:
                 continue
-            target_page_idx = roman_map[printed_page.lower()]
-        elif printed_page not in page_map:
-            continue
+        elif entry.get('is_roman'):
+            # Handle Roman numeral pages (front-matter like Introduction v, Preface iii)
+            printed_page = entry['printed_page']
+            roman_map = page_map.get('_roman', {})
+            cand = roman_map.get(printed_page) if printed_page in roman_map else (roman_map.get(str(printed_page).lower()) if isinstance(printed_page, str) else None)
+            if cand is not None and cand not in toc_page_set:
+                target_page_idx = cand
+            else:
+                # Fallback: search for front-matter heading page in the PDF body (outside TOC)
+                target_page_idx = find_front_matter_page(doc, entry.get('title', ''))
+                if target_page_idx is None:
+                    continue
+        elif entry['printed_page'] not in page_map:
+            # Fallback: search for unfolioed heading page in the PDF body
+            target_page_idx = find_front_matter_page(doc, entry.get('title', ''))
+            if target_page_idx is None:
+                continue
         else:
-            target_page_idx = page_map[printed_page]
+            target_page_idx = page_map[entry['printed_page']]
         source_page_idx = entry['source_page']
         rect = entry['rect']
         
@@ -711,54 +1862,122 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
         one_way_exists = len(old_one_way) > 0
         
         if not analyze_only:
-            # Remove any old stale link to this target first, then insert fresh with correct rect
-            for old_link in old_one_way:
-                source_page.delete_link(old_link)
-            link_dict = {
-                "kind": fitz.LINK_GOTO,
-                "from": rect,
-                "page": target_page_idx
-            }
-            source_page.insert_link(link_dict)
+            # If preserve_existing is requested and a link already exists, keep it as-is!
+            if preserve_existing and one_way_exists:
+                existing_preserved_count += 1
+            else:
+                for old_link in old_one_way:
+                    source_page.delete_link(old_link)
+                link_dict = {
+                    "kind": fitz.LINK_GOTO,
+                    "from": rect,
+                    "page": target_page_idx
+                }
+                source_page.insert_link(link_dict)
         one_way_count += 1
         link_details.append({
             "type": "one_way",
             "title": entry['title'],
             "source_page": source_page_idx + 1,
             "target_page": target_page_idx + 1,
-            "is_linked": one_way_exists or not analyze_only
+            "is_linked": one_way_exists or not analyze_only,
+            "preserved": preserve_existing and one_way_exists
         })
         
         # 2. Two-way link: Chapter -> TOC
-        if link_type == "two_way":
-            target_page = doc[target_page_idx]
-            title_rect = find_title_on_page(target_page, entry['title'])
-            
-            # Check if two-way link already exists (any link back to source/TOC page)
-            existing_target_links = target_page.get_links()
-            old_two_way = [l for l in existing_target_links if l.get('kind') == fitz.LINK_GOTO and l.get('page') == source_page_idx]
-            two_way_exists = len(old_two_way) > 0
+        target_page = doc[target_page_idx]
+        existing_target_links = target_page.get_links()
+        old_two_way = [l for l in existing_target_links if l.get('kind') == fitz.LINK_GOTO and l.get('page') == source_page_idx]
+        two_way_exists = len(old_two_way) > 0
 
-            if not analyze_only:
-                # Remove old stale back-links then insert fresh
-                for old_link in old_two_way:
-                    target_page.delete_link(old_link)
-                back_link_dict = {
-                    "kind": fitz.LINK_GOTO,
-                    "from": title_rect,
-                    "page": source_page_idx
-                }
-                target_page.insert_link(back_link_dict)
-            two_way_count += 1
-            link_details.append({
-                "type": "two_way",
-                "title": entry['title'],
-                "source_page": target_page_idx + 1,
-                "target_page": source_page_idx + 1,
-                "is_linked": two_way_exists or not analyze_only,
-                "rect_found": title_rect is not None
-            })
-                
+        # For cross-TOC links (e.g. Brief Contents <-> Detailed Contents), do not create back-links
+        # (they are already linked directly to each other via one-way links)
+        is_cross_toc = (
+            has_brief_and_detailed
+            and (
+                (source_page_idx in brief_toc_pages and target_page_idx in detailed_toc_pages)
+                or (source_page_idx in detailed_toc_pages and target_page_idx in brief_toc_pages)
+            )
+        )
+
+        # When both Brief Contents and Detailed Contents exist, chapters and front-matter headings
+        # should link back to the main/detailed Contents, NOT to Brief Contents.
+        skip_brief_backlink = (has_brief_and_detailed and source_page_idx in brief_toc_pages)
+
+        if link_type == "two_way" and not is_cross_toc and not skip_brief_backlink:
+                # For level 1 (chapter titles), look in header area first.
+                # For level > 1 (mini content / subheadings), look anywhere on target page.
+                title_rect = None
+                if entry.get('level', 1) > 1:
+                    title_rect = find_subheading_on_page(target_page, entry['title'])
+                if title_rect is None:
+                    title_rect = find_title_on_page(target_page, entry['title'])
+                if title_rect is None and entry.get('level', 1) == 1:
+                    # Fallback: search anywhere on page if not found in header
+                    title_rect = find_subheading_on_page(target_page, entry['title'])
+
+                if title_rect is not None:
+                    # Check if this chapter title already has a two-way link to a TOC page
+                    # (we preserve the link to the first/primary TOC instead of overwriting it).
+                    already_linked_to_prior_toc = False
+                    for l in existing_target_links:
+                        if l.get('kind') == fitz.LINK_GOTO:
+                            l_rect = l.get('from')
+                            # Check overlap with title_rect
+                            if l_rect and _rects_overlap(l_rect, title_rect, threshold=0.5):
+                                target_p = l.get('page')
+                                # If it points to an earlier TOC page (or already points to a TOC), don't overwrite with a later TOC
+                                if target_p is not None and target_p <= source_page_idx and target_p != source_page_idx:
+                                    already_linked_to_prior_toc = True
+                                    break
+
+                    if not already_linked_to_prior_toc:
+                        if not analyze_only:
+                            # Remove any existing back link for this title rect before inserting
+                            for l in existing_target_links:
+                                if l.get('kind') == fitz.LINK_GOTO and _rects_overlap(l.get('from'), title_rect, threshold=0.5):
+                                    target_page.delete_link(l)
+                            back_link_dict = {
+                                "kind": fitz.LINK_GOTO,
+                                "from": title_rect,
+                                "page": source_page_idx
+                            }
+                            target_page.insert_link(back_link_dict)
+                        two_way_count += 1
+                        link_details.append({
+                            "type": "two_way",
+                            "title": entry['title'],
+                            "source_page": target_page_idx + 1,
+                            "target_page": source_page_idx + 1,
+                            "is_linked": two_way_exists or not analyze_only,
+                            "rect_found": True
+                        })
+                    else:
+                        # Title already linked to the primary (earlier) TOC section
+                        two_way_count += 1
+                        link_details.append({
+                            "type": "two_way",
+                            "title": entry['title'],
+                            "source_page": target_page_idx + 1,
+                            "target_page": source_page_idx + 1,
+                            "is_linked": True,
+                            "rect_found": True,
+                            "skipped_duplicate": True
+                        })
+                else:
+                    # If no text found on target page, keep as one-way link
+                    link_details.append({
+                        "type": "two_way",
+                        "title": entry['title'],
+                        "source_page": target_page_idx + 1,
+                        "target_page": source_page_idx + 1,
+                        "is_linked": False,
+                        "rect_found": False
+                    })
+        elif link_type == "one_way" and not analyze_only:
+            # Remove any existing back links from chapter page back to TOC
+            for old_link in old_two_way:
+                target_page.delete_link(old_link)
     if not analyze_only and (one_way_count > 0 or two_way_count > 0):
         temp_path = pdf_path.replace('.pdf', '_temp.pdf')
         doc.save(temp_path, incremental=False, garbage=3, deflate=True)
@@ -771,6 +1990,7 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
     return {
         "one_way_links": one_way_count,
         "two_way_links": two_way_count,
+        "existing_preserved": existing_preserved_count,
         "total_links": one_way_count + two_way_count,
         "details": link_details
     }

@@ -10,6 +10,7 @@ import fitz  # PyMuPDF
 import requests
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from app.domains.post_prod.web_pdf_processor.services.stream_color_utils import recolor_url_in_stream, recolor_text_in_stream
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,9 @@ def _check_url_status(href: str):
     """
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (compatible; PDF-LinkChecker/1.0)'}
-        resp = requests.head(href, allow_redirects=True, timeout=8, headers=headers)
+        resp = requests.head(href, allow_redirects=True, timeout=2.5, headers=headers)
         if resp.status_code == 405:
-            resp = requests.get(href, allow_redirects=True, timeout=8, headers=headers, stream=True)
+            resp = requests.get(href, allow_redirects=True, timeout=2.5, headers=headers, stream=True)
         return resp.status_code, _status_description(resp.status_code)
     except requests.exceptions.SSLError:
         return None, 'SSL Error'
@@ -53,7 +54,7 @@ def _status_description(code: int) -> str:
     return descriptions.get(code, f'HTTP {code}')
 
 
-def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
+def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True, color_urls: bool = False) -> dict:
     """
     Scan PDF for plain-text URLs.
     - Checks if each URL is already hyperlinked in the PDF.
@@ -99,6 +100,9 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
         normalized_text = re_module.sub(r'://\s*\n\s*', '://', normalized_text)
         # 4. "www\n.example" → "www.example"
         normalized_text = re_module.sub(r'(www)\s*\n\s*(?=\.)', r'\1', normalized_text)
+        # 5. Hyphenated path continuations: "word-\npath" or "path\n-subpath"
+        normalized_text = re_module.sub(r'([a-zA-Z0-9/])\s*\n\s*(?=-[a-zA-Z0-9])', r'\1', normalized_text)
+        normalized_text = re_module.sub(r'(-)\s*\n\s*(?=[a-zA-Z0-9])', r'\1', normalized_text)
 
         # Clean up any remaining newlines with space
         normalized_text = normalized_text.replace('\n', ' ').replace('\r', ' ')
@@ -139,10 +143,19 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
             logger.debug(f"Found URL on page {physical_page}: {raw_url}")
 
         # Second pass: process all found URLs (including merged ones)
+        used_rects = []
         for raw_url in found_urls:
             href = raw_url if raw_url.startswith('http') else f'https://{raw_url}'
             norm = _normalise_url(href)
-            url_rect = _find_text_rect(page, raw_url)
+            matched_rects, segs = _find_all_text_rects_and_segments(page, raw_url, used_rects=used_rects)
+            if not matched_rects:
+                continue
+
+            # If all rects significantly overlap with already used rects, skip redundant duplicate substring
+            if all(any(_rects_overlap(r, ur, threshold=0.6) for ur in used_rects) for r in matched_rects):
+                continue
+
+            primary_rect = matched_rects[0] if matched_rects else None
 
             # Check if already linked by:
             # 1. Exact URI match (normalized or raw)
@@ -153,19 +166,45 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                 raw_url.rstrip('/') in existing_uris_raw
             )
 
-            # If not found by URI match, check spatial overlap
-            if not already_linked and url_rect:
+            # If not found by URI match, check spatial overlap with existing links on page
+            if not already_linked and matched_rects:
                 for link_rect, link_uri in existing_link_rects:
-                    if _rects_overlap(url_rect, link_rect):
+                    if any(_rects_overlap(r, link_rect, threshold=0.3) for r in matched_rects):
                         already_linked = True
+                        # Adopt existing link's true URI and exact bounded rectangle to avoid
+                        # capturing adjacent footnotes/citation numbers (e.g. "...acclimatization.33")
+                        href = link_uri
+                        exact_clip_text = page.get_text('text', clip=fitz.Rect(link_rect)).strip()
+                        if exact_clip_text:
+                            raw_url = exact_clip_text
+                        matched_rects = [fitz.Rect(link_rect)]
+                        primary_rect = matched_rects[0]
+                        segs = [raw_url]
                         break
+
+            # If this URL is already linked by an existing link, ensure matched_rects strictly matches the link rect
+            if already_linked and matched_rects:
+                for link_rect, link_uri in existing_link_rects:
+                    if _normalise_url(link_uri) == _normalise_url(href) or any(_rects_overlap(r, link_rect, threshold=0.3) for r in matched_rects):
+                        href = link_uri
+                        exact_clip_text = page.get_text('text', clip=fitz.Rect(link_rect)).strip()
+                        if exact_clip_text:
+                            raw_url = exact_clip_text
+                        matched_rects = [fitz.Rect(link_rect)]
+                        primary_rect = matched_rects[0]
+                        segs = [raw_url]
+                        break
+
+            used_rects.extend(matched_rects)
 
             raw_entries.append({
                 "url": href,
                 "display_text": raw_url,
                 "page": physical_page,
                 "is_linked": already_linked,
-                "rect": list(url_rect) if url_rect else None,
+                "rect": list(primary_rect) if primary_rect else None,
+                "all_rects": [list(r) for r in matched_rects],
+                "segments": segs,
                 "page_idx": page_idx,
             })
 
@@ -174,7 +213,7 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     http_results: dict = {}
 
     if unique_hrefs:
-        with ThreadPoolExecutor(max_workers=min(10, len(unique_hrefs))) as executor:
+        with ThreadPoolExecutor(max_workers=min(25, len(unique_hrefs))) as executor:
             future_map = {executor.submit(_check_url_status, href): href for href in unique_hrefs}
             for future in as_completed(future_map):
                 href = future_map[future]
@@ -194,18 +233,54 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
         status_code, description = http_results.get(href, (None, 'Unknown'))
         is_ok = status_code is not None and status_code < 400
 
+        rect_list = [fitz.Rect(r) for r in entry.get("all_rects", [])]
+        if not rect_list and entry.get("rect"):
+            rect_list = [fitz.Rect(entry["rect"])]
+
         if not entry["is_linked"]:
             not_linked_count += 1
-            if not analyze_only and entry["rect"]:
+            if not analyze_only and rect_list:
                 page = doc[entry["page_idx"]]
-                page.insert_link({
-                    "kind": fitz.LINK_URI,
-                    "from": fitz.Rect(entry["rect"]),
-                    "uri": href,
-                })
+                existing_page_links = page.get_links()
+                for link_rect in rect_list:
+                    # Check for duplicate overlapping link
+                    already_has_link = any(
+                        _rects_overlap(link_rect, fitz.Rect(ex["from"]), threshold=0.6)
+                        for ex in existing_page_links
+                    )
+                    if not already_has_link:
+                        page.insert_link({
+                            "kind": fitz.LINK_URI,
+                            "from": link_rect,
+                            "uri": href,
+                        })
+                
+                # Recolor text in content streams directly to link blue only if requested
+                if color_urls:
+                    try:
+                        segments = entry.get("segments") or [entry.get("display_text") or href]
+                        for xref in page.get_contents():
+                            stream = page.parent.xref_stream(xref).decode('latin1', errors='ignore')
+                            new_stream = recolor_url_in_stream(stream, segments, color_rgb=(0.06, 0.45, 0.75))
+                            if new_stream != stream:
+                                page.parent.update_stream(xref, new_stream.encode('latin1'))
+                    except Exception as ex_color:
+                        logger.debug(f"Stream text recolor failed for {href}: {ex_color}")
+
                 entry["is_linked"] = True
         else:
             linked_count += 1
+            if not analyze_only and rect_list and color_urls:
+                page = doc[entry["page_idx"]]
+                try:
+                    segments = entry.get("segments") or [entry.get("display_text") or href]
+                    for xref in page.get_contents():
+                        stream = page.parent.xref_stream(xref).decode('latin1', errors='ignore')
+                        new_stream = recolor_url_in_stream(stream, segments, color_rgb=(0.06, 0.45, 0.75))
+                        if new_stream != stream:
+                            page.parent.update_stream(xref, new_stream.encode('latin1'))
+                except Exception as ex_color:
+                    logger.debug(f"Stream text recolor failed for {href}: {ex_color}")
 
         details.append({
             "url": href,
@@ -218,16 +293,14 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
             "http_ok": is_ok,
         })
 
+    # Save document if changes were made
+    linked_count = sum(1 for d in details if d["is_linked"])
+    not_linked_count = sum(1 for d in details if not d["is_linked"])
     if not analyze_only:
-        linked_count = sum(1 for d in details if d["is_linked"])
-        not_linked_count = sum(1 for d in details if not d["is_linked"])
-        if details:
-            temp_path = pdf_path.replace('.pdf', '_temp.pdf')
-            doc.save(temp_path, incremental=False, garbage=3, deflate=True)
-            doc.close()
-            os.replace(temp_path, pdf_path)
-        else:
-            doc.close()
+        temp_path = pdf_path.replace('.pdf', '_temp.pdf')
+        doc.save(temp_path, incremental=False)
+        doc.close()
+        os.replace(temp_path, pdf_path)
     else:
         doc.close()
 
@@ -264,24 +337,116 @@ def _rects_overlap(rect1, rect2, threshold: float = 0.5) -> bool:
         return False
 
 
+def _find_all_text_rects_and_segments(page, text: str, used_rects: list = None):
+    """
+    Find all bounding rectangles and corresponding text segments for a text string,
+    including multi-line URLs where words/characters span across lines.
+    """
+    clean_text = text.strip()
+    if not clean_text:
+        return [], []
+
+    if used_rects is None:
+        used_rects = []
+
+    def overlaps_used(r):
+        return any(fitz.Rect(r).intersects(u) and fitz.Rect(r).intersect(u).get_area() / fitz.Rect(r).get_area() > 0.5 for u in used_rects)
+
+    # 1. Single-line exact match
+    raw_rects = page.search_for(clean_text)
+    avail_rects = [r for r in raw_rects if not overlaps_used(r)]
+    if avail_rects:
+        return avail_rects, [clean_text] * len(avail_rects)
+
+    # 2. Multi-line match by searching consecutive words on page
+    words = page.get_text('words')
+    LEADING_TRIM = '([<{\'"“‘'
+    TRAILING_TRIM = ')]}>\'"”’.,;:!?'
+
+    for i in range(len(words)):
+        w_first = words[i][4].lstrip(LEADING_TRIM)
+        for strip_trail in (False, True):
+            cand = w_first.rstrip(TRAILING_TRIM) if strip_trail else w_first
+            if cand and clean_text.startswith(cand):
+                accum = cand
+                segments = [cand]
+                matched_rects = []
+                w_rect = fitz.Rect(words[i][:4])
+                sr = [r for r in page.search_for(cand) if not overlaps_used(r)]
+                if sr:
+                    best_r = min(sr, key=lambda r: abs(r.y0 - w_rect.y0) + abs(r.x0 - w_rect.x0))
+                    matched_rects.append(best_r)
+                else:
+                    matched_rects.append(w_rect)
+
+                if accum == clean_text:
+                    return matched_rects, segments
+
+                for j in range(i + 1, min(i + 15, len(words))):
+                    w_next = words[j][4]
+                    rem = clean_text[len(accum):]
+                    matched_step = False
+                    for st in (False, True):
+                        w_cand = w_next.rstrip(TRAILING_TRIM) if st else w_next
+                        if w_cand and (rem.startswith(w_cand) or rem == w_cand):
+                            accum += w_cand
+                            segments.append(w_cand)
+                            sr_j = [r for r in page.search_for(w_cand) if not overlaps_used(r)]
+                            w_rect_j = fitz.Rect(words[j][:4])
+                            if sr_j:
+                                best_r = min(sr_j, key=lambda r: abs(r.y0 - w_rect_j.y0) + abs(r.x0 - w_rect_j.x0))
+                                matched_rects.append(best_r)
+                            else:
+                                matched_rects.append(w_rect_j)
+                            matched_step = True
+                            break
+                    if matched_step:
+                        if accum == clean_text:
+                            return matched_rects, segments
+                    else:
+                        break
+
+    # 3. Fallback: search for long prefix (first line)
+    if len(clean_text) > 30:
+        for prefix_len in range(len(clean_text) - 5, 20, -5):
+            prefix = clean_text[:prefix_len]
+            sr = [r for r in page.search_for(prefix) if not overlaps_used(r)]
+            if sr:
+                remainder = clean_text[prefix_len:]
+                matched_rects = [sr[0]]
+                segments = [prefix]
+                if remainder:
+                    sr_rem = [r for r in page.search_for(remainder) if not overlaps_used(r)]
+                    if sr_rem:
+                        below_rects = [r for r in sr_rem if r.y0 >= sr[0].y0 - 2]
+                        if below_rects:
+                            best_rem = min(below_rects, key=lambda r: r.y0 - sr[0].y0)
+                            matched_rects.append(best_rem)
+                            segments.append(remainder)
+                return matched_rects, segments
+
+    base = clean_text.split('/')[0]
+    if base != clean_text:
+        base_rects = [r for r in page.search_for(base) if not overlaps_used(r)]
+        if base_rects:
+            return base_rects, [base] * len(base_rects)
+
+    return [], []
+
+
+def _find_all_text_rects(page, text: str, used_rects: list = None):
+    """
+    Find all bounding rectangles for a text string, including multi-line URLs
+    where words/characters span across lines.
+    """
+    rects, _ = _find_all_text_rects_and_segments(page, text, used_rects=used_rects)
+    return rects
+
+
 def _find_text_rect(page, text: str):
     """Find the bounding rectangle of a given text string on the page."""
-    rects = page.search_for(text)
-    if rects:
-        return rects[0]
-
-    if len(text) > 40:
-        rects = page.search_for(text[:40])
-        if rects:
-            return rects[0]
-
-    base = text.split('/')[0]
-    if base != text:
-        rects = page.search_for(base)
-        if rects:
-            return rects[0]
-
-    return None
+    rects = _find_all_text_rects(page, text)
+    return rects[0] if rects else None
 
 
 def _normalise_url(url: str) -> str:
@@ -291,3 +456,16 @@ def _normalise_url(url: str) -> str:
         if url.lower().startswith(prefix):
             return url[len(prefix):].lower()
     return url.lower()
+
+
+def _recolor_text_exact_blue(page, text_str: str, rects: list, color=(0.06, 0.45, 0.75), segments: list = None):
+    """
+    Transparent redaction and font re-insertion is disabled because PyMuPDF's
+    apply_redactions rewrites the page contents stream, corrupting relative text
+    matrices (Tm / Td / T*) in surrounding content (such as tables).
+    Native PDF link annotations alone provide full clickable hyperlinking without
+    distorting underlying page layouts.
+    """
+    return
+
+

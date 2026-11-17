@@ -16,7 +16,14 @@ import {
   ChevronUp,
   ChevronDown,
   Play,
+  Bookmark,
   FileText,
+  SlidersHorizontal,
+  ShieldCheck,
+  Layers,
+  Type,
+  AlignLeft,
+  FileCheck2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -37,18 +44,30 @@ import {
   mergeProjectFiles,
   trimProjectPDF,
   generateBookmarks,
+  getExistingBookmarksInfo,
+  acceptExistingBookmarks,
+  type ExistingBookmarksInfo,
   getBookmarks,
   updateBookmarks,
   generateLinks,
+  getExistingTocLinksInfo,
+  acceptExistingTocLinks,
+  type ExistingTocLinksInfo,
   generateLinkManual,
   generateUrlLinks,
   generateEmailLinks,
   generateEndnoteLinks,
   generateCrossrefLinks,
+  generateIndexLinks,
+  generateGlossaryLinks,
+  runValidationDiff,
+  type ValidationDiffReport,
   type UrlLinkDetail,
   type EmailLinkDetail,
   type EndnoteDetail,
   type CrossrefDetail,
+  type IndexLinkDetail,
+  type GlossaryLinkDetail,
   type BookmarkItem,
   type WebPdfProject,
   type ProjectFile,
@@ -346,15 +365,17 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
               'Email Linked': 8,
               'Endnote Linked': 9,
               'Crossref Linked': 10,
+              'Index Linked': 11,
+              'Glossary Linked': 12,
             };
             const currentStep = statusSteps[project.status] || 0;
-            const progressPercent = (currentStep / 10) * 100;
+            const progressPercent = (currentStep / 12) * 100;
 
             return (
               <>
                 <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
                   <span>Progress</span>
-                  <span>{currentStep}/10 Steps · {Math.round(progressPercent)}%</span>
+                  <span>{currentStep}/12 Steps · {Math.round(progressPercent)}%</span>
                 </div>
                 <div className="h-2 w-full bg-border rounded-full overflow-hidden">
                   <div
@@ -412,15 +433,17 @@ export function PostProdWebPdfProcessor() {
   const [merging, setMerging] = useState(false);
 
   // Trim
-  const [trimMode, setTrimMode] = useState('auto');
+  const [trimMode, setTrimMode] = useState('trimbox');
   const [trimMargins, setTrimMargins] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
   const [standardizeSize, setStandardizeSize] = useState(false);
   const [removeMarks, setRemoveMarks] = useState(false);
   const [trimming, setTrimming] = useState(false);
+  const [showCustomTrim, setShowCustomTrim] = useState(false);
 
   // Fonts Check
   const [activeStep, setActiveStep] = useState(1);
   const [checkingFonts, setCheckingFonts] = useState(false);
+  const [fixingFonts, setFixingFonts] = useState(false);
   const [fontsStatus, setFontsStatus] = useState<any>(null);
   const [checkingSecurity, setCheckingSecurity] = useState(false);
   const [securityStatus, setSecurityStatus] = useState<any>(null);
@@ -432,6 +455,9 @@ export function PostProdWebPdfProcessor() {
 
   // Bookmarks
   const [generatingBookmarks, setGeneratingBookmarks] = useState(false);
+  const [acceptingExistingBookmarks, setAcceptingExistingBookmarks] = useState(false);
+  const [existingBookmarksInfo, setExistingBookmarksInfo] = useState<ExistingBookmarksInfo | null>(null);
+  const [checkingExistingBookmarks, setCheckingExistingBookmarks] = useState(false);
   const [includeSubheadings, setIncludeSubheadings] = useState(true);
   const [bookmarksStatus, setBookmarksStatus] = useState<any>(null);
 
@@ -439,6 +465,9 @@ export function PostProdWebPdfProcessor() {
   const [generatingLinks, setGeneratingLinks] = useState(false);
   const [analyzingLinks, setAnalyzingLinks] = useState(false);
   const [linkType, setLinkType] = useState<'one_way' | 'two_way' | 'none'>('one_way');
+  const [preserveExistingLinks, setPreserveExistingLinks] = useState(true);
+  const [existingTocLinksInfo, setExistingTocLinksInfo] = useState<ExistingTocLinksInfo | null>(null);
+  const [acceptingExistingTocLinks, setAcceptingExistingTocLinks] = useState(false);
   const [linksStatus, setLinksStatus] = useState<any>(null);
   const [linksAnalysisStatus, setLinksAnalysisStatus] = useState<any>(null);
 
@@ -446,11 +475,13 @@ export function PostProdWebPdfProcessor() {
   const [urlLinksAnalysis, setUrlLinksAnalysis] = useState<any>(null);
   const [analyzingUrlLinks, setAnalyzingUrlLinks] = useState(false);
   const [applyingUrlLinks, setApplyingUrlLinks] = useState(false);
+  const [colorUrls, setColorUrls] = useState(false);
 
   // Email Links (Step 8)
   const [emailLinksAnalysis, setEmailLinksAnalysis] = useState<any>(null);
   const [analyzingEmailLinks, setAnalyzingEmailLinks] = useState(false);
   const [applyingEmailLinks, setApplyingEmailLinks] = useState(false);
+  const [colorEmails, setColorEmails] = useState(false);
 
   // Endnote Links (Step 9)
   const [endnoteLinksAnalysis, setEndnoteLinksAnalysis] = useState<any>(null);
@@ -462,7 +493,36 @@ export function PostProdWebPdfProcessor() {
   const [analyzingCrossrefLinks, setAnalyzingCrossrefLinks] = useState(false);
   const [applyingCrossrefLinks, setApplyingCrossrefLinks] = useState(false);
 
+  // Index Links (Step 11)
+  const [indexLinksAnalysis, setIndexLinksAnalysis] = useState<any>(null);
+  const [analyzingIndexLinks, setAnalyzingIndexLinks] = useState(false);
+  const [applyingIndexLinks, setApplyingIndexLinks] = useState(false);
+
+  // Glossary Links (Step 12)
+  const [glossaryLinksAnalysis, setGlossaryLinksAnalysis] = useState<any>(null);
+  const [analyzingGlossaryLinks, setAnalyzingGlossaryLinks] = useState(false);
+  const [applyingGlossaryLinks, setApplyingGlossaryLinks] = useState(false);
+
+  // Final Validation Diff (Step 13)
+  const [validationDiffReport, setValidationDiffReport] = useState<ValidationDiffReport | null>(null);
+  const [runningValidationDiff, setRunningValidationDiff] = useState(false);
+
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
+
+  const PDF_AVAILABLE_STATUSES = [
+    'Merged',
+    'Trimmed',
+    'Fonts Checked',
+    'Security Checked',
+    'Bookmarked',
+    'TOC Linked',
+    'URL Linked',
+    'Email Linked',
+    'Endnote Linked',
+    'Crossref Linked',
+    'Index Linked',
+    'Glossary Linked',
+  ];
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -580,6 +640,17 @@ export function PostProdWebPdfProcessor() {
     }
   }, []);
 
+  // Pre-load existing bookmarks and TOC links info on project select
+  useEffect(() => {
+    if (!selectedProject?.id) return;
+    getExistingBookmarksInfo(selectedProject.id)
+      .then((info) => setExistingBookmarksInfo(info))
+      .catch(() => setExistingBookmarksInfo(null));
+    getExistingTocLinksInfo(selectedProject.id)
+      .then((info) => setExistingTocLinksInfo(info))
+      .catch(() => setExistingTocLinksInfo(null));
+  }, [selectedProject?.id]);
+
   // ── Lazy load analysis when step is opened ──────────────────────────────
   useEffect(() => {
     if (!selectedProject) return;
@@ -594,7 +665,26 @@ export function PostProdWebPdfProcessor() {
         8: { step: 'email_links', setter: setEmailLinksAnalysis },
         9: { step: 'endnote_links', setter: setEndnoteLinksAnalysis },
         10: { step: 'crossref_links', setter: setCrossrefLinksAnalysis },
+        11: { step: 'index_links', setter: setIndexLinksAnalysis },
+        12: { step: 'glossary_links', setter: setGlossaryLinksAnalysis },
+        13: { step: 'final_validation', setter: setValidationDiffReport },
       };
+
+      // Also check existing bookmarks info when step 5 is active
+      if (activeStep === 5) {
+        setCheckingExistingBookmarks(true);
+        getExistingBookmarksInfo(selectedProject.id)
+          .then((info) => setExistingBookmarksInfo(info))
+          .catch(() => setExistingBookmarksInfo(null))
+          .finally(() => setCheckingExistingBookmarks(false));
+      }
+
+      // Check existing TOC links info when step 6 is active
+      if (activeStep === 6) {
+        getExistingTocLinksInfo(selectedProject.id)
+          .then((info) => setExistingTocLinksInfo(info))
+          .catch(() => setExistingTocLinksInfo(null));
+      }
 
       const config = stepMap[activeStep];
       if (!config) return;
@@ -744,11 +834,11 @@ export function PostProdWebPdfProcessor() {
     setMerging(true);
     try {
       await mergeProjectFiles(selectedProject.id, selectedFiles);
-      toast.success('PDF files merged successfully!');
+      toast.success('PDF files merged and auto-trimmed to TrimBox!');
       setPdfRefreshKey(Date.now());
-      setSelectedProject(prev => prev ? { ...prev, status: "Merged" } : prev);
+      setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
       fetchProjects();
-      setActiveStep(2);
+      setActiveStep(3);
     } catch (err: any) {
       toast.error(err.message || 'Failed to merge PDF files.');
     } finally {
@@ -817,10 +907,31 @@ export function PostProdWebPdfProcessor() {
       setSelectedProject(prev => prev ? { ...prev, status: 'Bookmarked' } : prev);
       setPdfRefreshKey(Date.now());
       fetchProjects();
+      setActiveStep(6);
     } catch (err: any) {
       toast.error(err.message || 'Failed to generate bookmarks.');
     } finally {
       setGeneratingBookmarks(false);
+    }
+  };
+
+  const handleAcceptExistingBookmarks = async () => {
+    if (!selectedProject) return;
+    setAcceptingExistingBookmarks(true);
+    try {
+      const data = await acceptExistingBookmarks(selectedProject.id);
+      setBookmarksStatus(data);
+      toast.success('Existing bookmarks set as default!');
+
+      // Update selected project state
+      setSelectedProject(prev => prev ? { ...prev, status: 'Bookmarked' } : prev);
+      setPdfRefreshKey(Date.now());
+      fetchProjects();
+      setActiveStep(6);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to set existing bookmarks');
+    } finally {
+      setAcceptingExistingBookmarks(false);
     }
   };
 
@@ -890,15 +1001,87 @@ export function PostProdWebPdfProcessor() {
     setEditingBookmarksList(list);
   };
 
-  const handleAnalyzeLinks = async () => {
+  // ── QUICK BOOKMARK SHORTCUT (Ctrl + B / Cmd + B for Windows & Mac) ────────
+  // When text is selected/copied, pressing Ctrl+B appends it directly into the
+  // Edit Bookmarks list without any modal popup! The page input is auto-focused for quick entry.
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // Trigger on Ctrl+B (Windows/Linux) or Cmd+B (Mac)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        if (!selectedProject) return;
+
+        e.preventDefault();
+
+        // 1. Try to read highlighted selection from window
+        let text = window.getSelection()?.toString().trim() || '';
+
+        // 2. If nothing highlighted in window (e.g. selected inside PDF viewer), try reading clipboard
+        if (!text && navigator.clipboard && navigator.clipboard.readText) {
+          try {
+            text = (await navigator.clipboard.readText()).trim();
+          } catch {}
+        }
+
+        if (text) {
+          text = text.replace(/\s+/g, ' ');
+        }
+
+        // Open Step 5 & Edit Bookmarks if not already open
+        setActiveStep(5);
+        let list = [...editingBookmarksList];
+        if (!showEditBookmarksModal || list.length === 0) {
+          try {
+            setLoadingBookmarks(true);
+            list = await getBookmarks(selectedProject.id);
+          } catch {} finally {
+            setLoadingBookmarks(false);
+          }
+        }
+        setShowEditBookmarksModal(true);
+
+        const newTitle = text || 'New Bookmark';
+        const lastPage = list.length > 0 ? list[list.length - 1].page : 1;
+
+        const newBm: BookmarkItem = {
+          title: newTitle,
+          level: 1,
+          page: lastPage,
+        };
+
+        const updatedList = [...list, newBm];
+        setEditingBookmarksList(updatedList);
+        toast.success(`Added "${newTitle}" to bookmarks! Adjust page and click Save Changes.`);
+
+        // Auto-scroll and focus on the newly added item's page input
+        setTimeout(() => {
+          const pageInputs = document.querySelectorAll<HTMLInputElement>('input[data-bookmark-page]');
+          if (pageInputs.length > 0) {
+            const lastInput = pageInputs[pageInputs.length - 1];
+            lastInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            lastInput.focus();
+            lastInput.select();
+          }
+        }, 150);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [selectedProject, showEditBookmarksModal, editingBookmarksList]);
+
+  const handleAnalyzeLinks = async (explicitLinkType?: 'one_way' | 'two_way' | 'none') => {
     if (!selectedProject) return;
+    const targetType = explicitLinkType || linkType;
     setAnalyzingLinks(true);
     setLinksAnalysisStatus(null);
     setLinksStatus(null);
     try {
-      const result = await generateLinks(selectedProject.id, linkType === 'none' ? 'one_way' : linkType, true);
+      const result = await generateLinks(selectedProject.id, targetType === 'none' ? 'one_way' : targetType, true, preserveExistingLinks);
       setLinksAnalysisStatus(result);
       toast.success('Link analysis complete');
+      if (result.not_linked === 0 || result.total_links === 0) {
+        setActiveStep(7);
+      }
     } catch (err: any) {
       setLinksAnalysisStatus({ success: false, error: err.message });
       toast.error(err.message || 'Failed to analyze links');
@@ -912,11 +1095,13 @@ export function PostProdWebPdfProcessor() {
     setGeneratingLinks(true);
     setLinksStatus(null);
     try {
-      const result = await generateLinks(selectedProject.id, linkType === 'none' ? 'one_way' : linkType, false);
+      const result = await generateLinks(selectedProject.id, linkType === 'none' ? 'one_way' : linkType, false, preserveExistingLinks);
       setLinksStatus(result);
       setPdfRefreshKey((prev) => prev + 1);
       setSelectedProject(prev => prev ? { ...prev, status: 'TOC Linked' } : prev);
       toast.success(`Successfully generated ${result.total_links} internal links`);
+      fetchProjects();
+      setActiveStep(7);
       // Re-run analysis automatically
       handleAnalyzeLinks();
     } catch (err: any) {
@@ -924,6 +1109,24 @@ export function PostProdWebPdfProcessor() {
       toast.error(err.message || 'Failed to generate links');
     } finally {
       setGeneratingLinks(false);
+    }
+  };
+
+  const handleAcceptExistingTocLinks = async () => {
+    if (!selectedProject) return;
+    setAcceptingExistingTocLinks(true);
+    try {
+      const result = await acceptExistingTocLinks(selectedProject.id);
+      setLinksStatus({ success: true, total_links: result.total_links });
+      setSelectedProject(prev => prev ? { ...prev, status: 'TOC Linked' } : prev);
+      setPdfRefreshKey(Date.now());
+      fetchProjects();
+      toast.success('Existing TOC links set as default!');
+      setActiveStep(7);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to accept existing TOC links');
+    } finally {
+      setAcceptingExistingTocLinks(false);
     }
   };
 
@@ -952,8 +1155,10 @@ export function PostProdWebPdfProcessor() {
     try {
       const result = await generateUrlLinks(selectedProject.id, true);
       setUrlLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
       if (result.not_linked === 0) {
         setSelectedProject(prev => prev ? { ...prev, status: 'URL Linked' } : prev);
+        setActiveStep(8);
       }
     } catch (err: any) {
       toast.error(err.message || 'Failed to analyze URL links');
@@ -966,11 +1171,12 @@ export function PostProdWebPdfProcessor() {
     if (!selectedProject) return;
     setApplyingUrlLinks(true);
     try {
-      const result = await generateUrlLinks(selectedProject.id, false);
+      const result = await generateUrlLinks(selectedProject.id, false, colorUrls);
       setUrlLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
       setSelectedProject(prev => prev ? { ...prev, status: 'URL Linked' } : prev);
-      toast.success(`Hyperlinked ${result.not_linked} URL(s) successfully`);
+      toast.success(`Hyperlinked ${result.not_linked} URL(s) successfully${colorUrls ? ' with link blue color' : ''}`);
+      setActiveStep(8);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply URL links');
     } finally {
@@ -985,8 +1191,10 @@ export function PostProdWebPdfProcessor() {
     try {
       const result = await generateEmailLinks(selectedProject.id, true);
       setEmailLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
       if (result.not_linked === 0) {
         setSelectedProject(prev => prev ? { ...prev, status: 'Email Linked' } : prev);
+        setActiveStep(9);
       }
       toast.success('Email scan complete');
     } catch (err: any) {
@@ -1000,11 +1208,12 @@ export function PostProdWebPdfProcessor() {
     if (!selectedProject) return;
     setApplyingEmailLinks(true);
     try {
-      const result = await generateEmailLinks(selectedProject.id, false);
+      const result = await generateEmailLinks(selectedProject.id, false, colorEmails);
       setEmailLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
       setSelectedProject(prev => prev ? { ...prev, status: 'Email Linked' } : prev);
-      toast.success(`Hyperlinked ${result.not_linked} email(s) successfully`);
+      toast.success(`Hyperlinked ${result.not_linked} email(s) successfully${colorEmails ? ' with link blue color' : ''}`);
+      setActiveStep(9);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply email links');
     } finally {
@@ -1021,6 +1230,7 @@ export function PostProdWebPdfProcessor() {
       setEndnoteLinksAnalysis(result);
       if (result.not_linked === 0) {
         setSelectedProject(prev => prev ? { ...prev, status: 'Endnote Linked' } : prev);
+        setActiveStep(10);
       }
       toast.success('Endnote scan complete');
     } catch (err: any) {
@@ -1039,6 +1249,7 @@ export function PostProdWebPdfProcessor() {
       setPdfRefreshKey((prev) => prev + 1);
       setSelectedProject(prev => prev ? { ...prev, status: 'Endnote Linked' } : prev);
       toast.success(`Created ${result.not_linked} endnote link(s) successfully`);
+      setActiveStep(10);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply endnote links');
     } finally {
@@ -1055,6 +1266,7 @@ export function PostProdWebPdfProcessor() {
       setCrossrefLinksAnalysis(result);
       if (result.not_linked === 0) {
         setSelectedProject(prev => prev ? { ...prev, status: 'Crossref Linked' } : prev);
+        setActiveStep(11);
       }
       toast.success('Cross-reference scan complete');
     } catch (err: any) {
@@ -1073,10 +1285,105 @@ export function PostProdWebPdfProcessor() {
       setPdfRefreshKey((prev) => prev + 1);
       setSelectedProject(prev => prev ? { ...prev, status: 'Crossref Linked' } : prev);
       toast.success(`Applied cross-reference links - ${result.linked} linked, ${result.not_linked} remaining`);
+      setActiveStep(11);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply cross-reference links');
     } finally {
       setApplyingCrossrefLinks(false);
+    }
+  };
+
+  const handleAnalyzeIndexLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingIndexLinks(true);
+    setIndexLinksAnalysis(null);
+    try {
+      const result = await generateIndexLinks(selectedProject.id, true);
+      setIndexLinksAnalysis(result);
+      if (result.not_linked === 0 && result.total_references > 0) {
+        setSelectedProject(prev => prev ? { ...prev, status: 'Index Linked' } : prev);
+        setActiveStep(12);
+      }
+      toast.success('Index references scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze index references');
+    } finally {
+      setAnalyzingIndexLinks(false);
+    }
+  };
+
+  const handleApplyIndexLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingIndexLinks(true);
+    try {
+      const result = await generateIndexLinks(selectedProject.id, false);
+      setIndexLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      setSelectedProject(prev => prev ? { ...prev, status: 'Index Linked' } : prev);
+      toast.success(`Applied index hyperlinks - ${result.linked} linked`);
+      setActiveStep(12);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply index hyperlinks');
+    } finally {
+      setApplyingIndexLinks(false);
+    }
+  };
+
+  const handleAnalyzeGlossaryLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingGlossaryLinks(true);
+    setGlossaryLinksAnalysis(null);
+    try {
+      const result = await generateGlossaryLinks(selectedProject.id, true);
+      setGlossaryLinksAnalysis(result);
+      if (result.not_linked === 0 && result.total_terms > 0) {
+        setSelectedProject(prev => prev ? { ...prev, status: 'Glossary Linked' } : prev);
+        setActiveStep(13);
+      }
+      toast.success('Glossary terms scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze glossary terms');
+    } finally {
+      setAnalyzingGlossaryLinks(false);
+    }
+  };
+
+  const handleApplyGlossaryLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingGlossaryLinks(true);
+    try {
+      const result = await generateGlossaryLinks(selectedProject.id, false);
+      setGlossaryLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      setSelectedProject(prev => prev ? { ...prev, status: 'Glossary Linked' } : prev);
+      toast.success(`Applied glossary hyperlinks - ${result.linked} linked`);
+      setActiveStep(13);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply glossary hyperlinks');
+    } finally {
+      setApplyingGlossaryLinks(false);
+    }
+  };
+
+  const handleRunValidationDiff = async () => {
+    if (!selectedProject) return;
+    setRunningValidationDiff(true);
+    setValidationDiffReport(null);
+    try {
+      const report = await runValidationDiff(selectedProject.id);
+      setValidationDiffReport(report);
+      if (report.status === 'passed') {
+        toast.success(`Validation Passed! Integrity score: ${report.integrity_score}%`);
+      } else if (report.status === 'warnings') {
+        toast.warning(`Validation Completed with warnings. Score: ${report.integrity_score}%`);
+      } else {
+        toast.error(`Validation Discrepancies detected. Score: ${report.integrity_score}%`);
+      }
+      fetchProjects();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to run validation diff');
+    } finally {
+      setRunningValidationDiff(false);
     }
   };
 
@@ -1095,11 +1402,42 @@ export function PostProdWebPdfProcessor() {
       toast.success('Font check completed');
       setSelectedProject(prev => prev ? { ...prev, status: 'Fonts Checked' } : prev);
       fetchProjects();
-      setActiveStep(4);
+      if (data.all_embedded) {
+        setActiveStep(4);
+      }
     } catch (err: any) {
       toast.error(err.message || 'Failed to check fonts');
     } finally {
       setCheckingFonts(false);
+    }
+  };
+
+  const handleFixFonts = async () => {
+    if (!selectedProject) return;
+    setFixingFonts(true);
+    try {
+      const res = await fetch(`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/fix-fonts`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || 'Failed to fix fonts');
+      }
+      const data = await res.json();
+      setFontsStatus(data);
+      if (data.all_embedded) {
+        toast.success('All fonts successfully embedded!');
+        setActiveStep(4);
+      } else {
+        toast.warning('Some fonts could not be fully embedded');
+      }
+      setPdfRefreshKey(Date.now());
+      setSelectedProject(prev => prev ? { ...prev, status: 'Fonts Checked' } : prev);
+      fetchProjects();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to fix fonts');
+    } finally {
+      setFixingFonts(false);
     }
   };
 
@@ -1180,7 +1518,7 @@ export function PostProdWebPdfProcessor() {
             <h2 className="text-sm font-bold text-text mb-3 flex items-center gap-2 shrink-0">
               <FileText size={16} className="text-primary" />
               {selectedProject ? `${selectedProject.status === 'Bookmarked' ? 'Bookmarked' : selectedProject.status === 'Trimmed' ? 'Trimmed' : selectedProject.status === 'Fonts Checked' ? 'Fonts Checked' : selectedProject.status === 'Security Checked' ? 'Security Checked' : 'Merged'} PDF Preview` : 'PDF Preview'}
-              {['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) && (
+              {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) && (
                 <>
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                     ✓ {selectedProject.status}
@@ -1198,7 +1536,7 @@ export function PostProdWebPdfProcessor() {
             </h2>
 
             <div className="flex-1 rounded-xl overflow-hidden bg-card border border-border relative">
-              {['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
+              {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) ? (
                 <iframe
                   key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}`} // force reload if status or key changes
                   src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf?t=${pdfRefreshKey}${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
@@ -1228,11 +1566,11 @@ export function PostProdWebPdfProcessor() {
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${PDF_AVAILABLE_STATUSES.includes(selectedProject.status)
                         ? 'bg-emerald-500/20 text-emerald-600'
                         : activeStep === 1 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
-                      {['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '1'}
+                      {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '1'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Merge PDF</h2>
                   </div>
@@ -1348,19 +1686,19 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 2 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) {
+                    if (PDF_AVAILABLE_STATUSES.includes(selectedProject.status)) {
                       setActiveStep(activeStep === 2 ? 0 : 2);
                     }
                   }}
-                  disabled={!['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
+                  disabled={!PDF_AVAILABLE_STATUSES.includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${['Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${['Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status)
                         ? 'bg-emerald-500/20 text-emerald-600'
                         : activeStep === 2 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
-                      {['Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '2'}
+                      {['Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '2'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Trim PDF</h2>
                   </div>
@@ -1369,102 +1707,129 @@ export function PostProdWebPdfProcessor() {
 
                 {activeStep === 2 && (
                   <div className="p-4 border-t border-border flex flex-col gap-4">
-                    <div className="flex items-start justify-between shrink-0 gap-3">
-                      <p className="text-[11px] text-muted m-0">
-                        Select a trim mode to crop the PDF pages.
-                      </p>
-                      <Button
-                        onClick={handleTrim}
-                        disabled={trimming}
-                        leftIcon={trimming ? <RefreshCw size={14} className="animate-spin" /> : <Edit size={14} />}
-                        className="text-xs font-semibold h-8 px-4 shrink-0"
-                      >
-                        {trimming ? 'Trimming...' : 'Trim PDF'}
-                      </Button>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-[11px] font-semibold text-text block mb-1">Crop Mode</label>
-                        <select
-                          value={trimMode}
-                          onChange={(e) => setTrimMode(e.target.value)}
-                          className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                        >
-                          <option value="auto">Auto Fix Bounds</option>
-                          <option value="fixed">Fixed Margins</option>
-                          <option value="trimbox">PDF TrimBox</option>
-                          <option value="bleedbox">PDF BleedBox</option>
-                        </select>
+                    {/* Default Auto-Trim Summary with Toggle */}
+                    <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                        <div>
+                          <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300 m-0">
+                            Auto-trimmed to PDF TrimBox
+                          </p>
+                          <p className="text-[10px] text-muted m-0">
+                            TrimBox bounds applied during merge. Toggle below only if you need custom trim adjustments.
+                          </p>
+                        </div>
                       </div>
-
-                      {trimMode === 'fixed' && (
-                        <div className="grid grid-cols-2 gap-3 p-3 rounded border border-border bg-muted/10">
-                          <div>
-                            <label className="text-[10px] font-semibold text-muted block mb-1">Top Margin</label>
-                            <input
-                              type="number"
-                              value={trimMargins.top}
-                              onChange={(e) => setTrimMargins({ ...trimMargins, top: Number(e.target.value) })}
-                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-semibold text-muted block mb-1">Right Margin</label>
-                            <input
-                              type="number"
-                              value={trimMargins.right}
-                              onChange={(e) => setTrimMargins({ ...trimMargins, right: Number(e.target.value) })}
-                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-semibold text-muted block mb-1">Bottom Margin</label>
-                            <input
-                              type="number"
-                              value={trimMargins.bottom}
-                              onChange={(e) => setTrimMargins({ ...trimMargins, bottom: Number(e.target.value) })}
-                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-semibold text-muted block mb-1">Left Margin</label>
-                            <input
-                              type="number"
-                              value={trimMargins.left}
-                              onChange={(e) => setTrimMargins({ ...trimMargins, left: Number(e.target.value) })}
-                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      <label className="flex items-center gap-2 mt-4 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={standardizeSize}
-                          onChange={(e) => setStandardizeSize(e.target.checked)}
-                          className="rounded border-border text-primary focus:ring-primary w-4 h-4"
-                        />
-                        <div>
-                          <p className="text-xs font-semibold text-text m-0">Standardize Size</p>
-                          <p className="text-[10px] text-muted m-0">Ensures all pages end up the same dimension.</p>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={removeMarks}
-                          onChange={(e) => setRemoveMarks(e.target.checked)}
-                          className="rounded border-border text-primary focus:ring-primary w-4 h-4"
-                        />
-                        <div>
-                          <p className="text-xs font-semibold text-text m-0">Remove Marks outside bounds</p>
-                          <p className="text-[10px] text-muted m-0">Sanitizes crop box edge artifacts.</p>
-                        </div>
-                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomTrim(!showCustomTrim)}
+                        className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-border bg-background hover:bg-muted/10 text-text transition-colors shrink-0 flex items-center gap-1.5"
+                      >
+                        <SlidersHorizontal size={13} className="text-primary" />
+                        {showCustomTrim ? 'Hide Settings' : 'Customize Trim'}
+                      </button>
                     </div>
+
+                    {showCustomTrim && (
+                      <div className="p-3 rounded-lg border border-border/80 bg-muted/5 space-y-4">
+                        <div className="flex items-start justify-between shrink-0 gap-3">
+                          <p className="text-[11px] text-muted m-0">
+                            Select a custom trim mode or adjust margins to re-crop the PDF pages.
+                          </p>
+                          <Button
+                            onClick={handleTrim}
+                            disabled={trimming}
+                            leftIcon={trimming ? <RefreshCw size={14} className="animate-spin" /> : <Edit size={14} />}
+                            className="text-xs font-semibold h-8 px-4 shrink-0"
+                          >
+                            {trimming ? 'Trimming...' : 'Re-Trim PDF'}
+                          </Button>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div>
+                            <label className="text-[11px] font-semibold text-text block mb-1">Crop Mode</label>
+                            <select
+                              value={trimMode}
+                              onChange={(e) => setTrimMode(e.target.value)}
+                              className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              <option value="trimbox">PDF TrimBox (Default)</option>
+                              <option value="auto">Auto Fix Bounds</option>
+                              <option value="fixed">Fixed Margins</option>
+                              <option value="bleedbox">PDF BleedBox</option>
+                            </select>
+                          </div>
+
+                          {trimMode === 'fixed' && (
+                            <div className="grid grid-cols-2 gap-3 p-3 rounded border border-border bg-muted/10">
+                              <div>
+                                <label className="text-[10px] font-semibold text-muted block mb-1">Top Margin</label>
+                                <input
+                                  type="number"
+                                  value={trimMargins.top}
+                                  onChange={(e) => setTrimMargins({ ...trimMargins, top: Number(e.target.value) })}
+                                  className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-semibold text-muted block mb-1">Right Margin</label>
+                                <input
+                                  type="number"
+                                  value={trimMargins.right}
+                                  onChange={(e) => setTrimMargins({ ...trimMargins, right: Number(e.target.value) })}
+                                  className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-semibold text-muted block mb-1">Bottom Margin</label>
+                                <input
+                                  type="number"
+                                  value={trimMargins.bottom}
+                                  onChange={(e) => setTrimMargins({ ...trimMargins, bottom: Number(e.target.value) })}
+                                  className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-semibold text-muted block mb-1">Left Margin</label>
+                                <input
+                                  type="number"
+                                  value={trimMargins.left}
+                                  onChange={(e) => setTrimMargins({ ...trimMargins, left: Number(e.target.value) })}
+                                  className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <label className="flex items-center gap-2 mt-4 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={standardizeSize}
+                              onChange={(e) => setStandardizeSize(e.target.checked)}
+                              className="rounded border-border text-primary focus:ring-primary w-4 h-4"
+                            />
+                            <div>
+                              <p className="text-xs font-semibold text-text m-0">Standardize Size</p>
+                              <p className="text-[10px] text-muted m-0">Ensures all pages end up the same dimension.</p>
+                            </div>
+                          </label>
+
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={removeMarks}
+                              onChange={(e) => setRemoveMarks(e.target.checked)}
+                              className="rounded border-border text-primary focus:ring-primary w-4 h-4"
+                            />
+                            <div>
+                              <p className="text-xs font-semibold text-text m-0">Remove Marks outside bounds</p>
+                              <p className="text-[10px] text-muted m-0">Sanitizes crop box edge artifacts.</p>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1473,15 +1838,15 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 3 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) {
+                    if (PDF_AVAILABLE_STATUSES.includes(selectedProject.status)) {
                       setActiveStep(activeStep === 3 ? 0 : 3);
                     }
                   }}
-                  disabled={!['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
+                  disabled={!PDF_AVAILABLE_STATUSES.includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${(fontsStatus && fontsStatus.all_embedded) || ['Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${(fontsStatus && fontsStatus.all_embedded) || ['Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status)
                         ? 'bg-emerald-500/20 text-emerald-600'
                         : fontsStatus && !fontsStatus.all_embedded
                           ? 'bg-amber-500/20 text-amber-600'
@@ -1489,7 +1854,7 @@ export function PostProdWebPdfProcessor() {
                       }`}>
                       {fontsStatus ? (
                         fontsStatus.all_embedded ? <CheckCircle2 size={14} /> : <XCircle size={14} />
-                      ) : ['Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
+                      ) : ['Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? (
                         <CheckCircle2 size={14} />
                       ) : '3'}
                     </div>
@@ -1528,7 +1893,17 @@ export function PostProdWebPdfProcessor() {
 
                         {!fontsStatus.all_embedded && fontsStatus.missing_fonts.length > 0 && (
                           <div className="bg-background/50 p-3 rounded border border-amber-500/20">
-                            <h5 className="text-[10px] uppercase tracking-wider font-bold mb-2">Unembedded Fonts</h5>
+                            <div className="flex items-center justify-between mb-2">
+                              <h5 className="text-[10px] uppercase tracking-wider font-bold m-0">Unembedded Fonts</h5>
+                              <Button
+                                onClick={handleFixFonts}
+                                disabled={fixingFonts || checkingFonts}
+                                leftIcon={fixingFonts ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} />}
+                                className="text-[11px] font-semibold h-7 px-3 bg-amber-600 hover:bg-amber-700 text-white border-none"
+                              >
+                                {fixingFonts ? 'Embedding Fonts...' : 'Fix & Embed Fonts'}
+                              </Button>
+                            </div>
                             <ul className="list-disc pl-4 text-xs space-y-1">
                               {fontsStatus.missing_fonts.map((f: string, i: number) => (
                                 <li key={i}>{f}</li>
@@ -1546,15 +1921,15 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 4 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) {
+                    if (PDF_AVAILABLE_STATUSES.includes(selectedProject.status)) {
                       setActiveStep(activeStep === 4 ? 0 : 4);
                     }
                   }}
-                  disabled={!['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
+                  disabled={!PDF_AVAILABLE_STATUSES.includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${(securityStatus && securityStatus.is_free_of_protection) || ['Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${(securityStatus && securityStatus.is_free_of_protection) || ['Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status)
                         ? 'bg-emerald-500/20 text-emerald-600'
                         : securityStatus && !securityStatus.is_free_of_protection
                           ? 'bg-amber-500/20 text-amber-600'
@@ -1562,7 +1937,7 @@ export function PostProdWebPdfProcessor() {
                       }`}>
                       {securityStatus ? (
                         securityStatus.is_free_of_protection ? <CheckCircle2 size={14} /> : <XCircle size={14} />
-                      ) : ['Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
+                      ) : ['Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? (
                         <CheckCircle2 size={14} />
                       ) : '4'}
                     </div>
@@ -1615,21 +1990,21 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 5 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) {
+                    if (PDF_AVAILABLE_STATUSES.includes(selectedProject.status)) {
                       setActiveStep(activeStep === 5 ? 0 : 5);
                     }
                   }}
-                  disabled={!['Merged', 'Trimmed', 'Fonts Checked', 'Security Checked', 'Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
+                  disabled={!PDF_AVAILABLE_STATUSES.includes(selectedProject.status)}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${bookmarksStatus && bookmarksStatus.success || ['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${bookmarksStatus && bookmarksStatus.success || ['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status)
                       ? 'bg-emerald-500/20 text-emerald-600'
                       : activeStep === 5 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
                       {bookmarksStatus ? (
                         bookmarksStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />
-                      ) : ['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
+                      ) : ['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? (
                         <CheckCircle2 size={14} />
                       ) : '5'}
                     </div>
@@ -1640,6 +2015,52 @@ export function PostProdWebPdfProcessor() {
 
                 {activeStep === 5 && (
                   <div className="p-4 border-t border-border flex flex-col gap-4">
+                    {/* If existing bookmarks detected in PDF, present the choice */}
+                    {existingBookmarksInfo && existingBookmarksInfo.has_existing_bookmarks && (
+                      <div className="p-3 rounded-lg border border-primary/20 bg-primary/5 flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Bookmark size={15} className="text-primary" />
+                            <span className="text-xs font-bold text-text">
+                              Existing Bookmarks Detected ({existingBookmarksInfo.count} items)
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                            In PDF
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted m-0">
+                          This PDF already contains <strong>{existingBookmarksInfo.count} bookmarks</strong>. You can set them as default to immediately unlock TOC links, or generate a fresh set from the Table of Contents.
+                        </p>
+                        {existingBookmarksInfo.sample_titles.length > 0 && (
+                          <div className="text-[10px] text-muted/80 bg-background/60 p-2 rounded border border-border/50 truncate">
+                            Sample: {existingBookmarksInfo.sample_titles.join(' • ')}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 mt-1">
+                          <Button
+                            size="sm"
+                            onClick={handleAcceptExistingBookmarks}
+                            disabled={acceptingExistingBookmarks || generatingBookmarks}
+                            leftIcon={acceptingExistingBookmarks ? <RefreshCw size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                            className="text-xs font-semibold h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white"
+                          >
+                            {acceptingExistingBookmarks ? 'Saving...' : 'Set as Default'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={handleGenerateBookmarks}
+                            disabled={generatingBookmarks || acceptingExistingBookmarks}
+                            leftIcon={generatingBookmarks ? <RefreshCw size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                            className="text-xs font-semibold h-7 px-3"
+                          >
+                            {generatingBookmarks ? 'Generating...' : 'Scan & Re-generate'}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-start justify-between shrink-0 gap-3">
                       <div className="flex flex-col gap-3">
                         <p className="text-[11px] text-muted m-0">
@@ -1655,14 +2076,16 @@ export function PostProdWebPdfProcessor() {
                           Include Chapter Subheadings (H3)
                         </label>
                       </div>
-                      <Button
-                        onClick={handleGenerateBookmarks}
-                        disabled={generatingBookmarks}
-                        leftIcon={generatingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
-                        className="text-xs font-semibold h-8 px-4 shrink-0"
-                      >
-                        {generatingBookmarks ? 'Generating...' : 'Generate'}
-                      </Button>
+                      {(!existingBookmarksInfo || !existingBookmarksInfo.has_existing_bookmarks) && (
+                        <Button
+                          onClick={handleGenerateBookmarks}
+                          disabled={generatingBookmarks}
+                          leftIcon={generatingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                          className="text-xs font-semibold h-8 px-4 shrink-0"
+                        >
+                          {generatingBookmarks ? 'Generating...' : (bookmarksStatus?.success || ['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? 'Re-generate' : 'Generate')}
+                        </Button>
+                      )}
                     </div>
 
                     {bookmarksStatus && (
@@ -1693,14 +2116,24 @@ export function PostProdWebPdfProcessor() {
                       </div>
                     )}
 
-                    {selectedProject.status === 'Bookmarked' && !showEditBookmarksModal && (
-                      <div className="mt-2 text-right border-t border-border pt-4">
+                    {(['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) || bookmarksStatus?.success || existingBookmarksInfo?.has_existing_bookmarks) && !showEditBookmarksModal && (
+                      <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted">
+                          <span className="flex items-center gap-1 font-mono text-[10px] bg-muted/30 px-1.5 py-0.5 rounded border border-border/60">
+                            <kbd className="font-semibold text-text">Ctrl</kbd>+<kbd className="font-semibold text-text">B</kbd>
+                          </span>
+                          <span className="text-[10px] text-muted/60">/</span>
+                          <span className="flex items-center gap-0.5 font-mono text-[10px] bg-muted/30 px-1.5 py-0.5 rounded border border-border/60">
+                            <kbd className="font-semibold text-text">⌘B</kbd>
+                          </span>
+                          <span className="text-[11px] text-muted ml-0.5">Quick add</span>
+                        </div>
                         <Button
                           variant="secondary"
                           size="sm"
                           onClick={handleOpenEditBookmarks}
-                          leftIcon={<Edit size={14} />}
-                          className="text-xs"
+                          leftIcon={<Edit size={13} />}
+                          className="text-xs h-7 px-2.5 font-medium"
                         >
                           Edit Bookmarks
                         </Button>
@@ -1717,9 +2150,42 @@ export function PostProdWebPdfProcessor() {
                           <>
                             <div className="flex items-center justify-between">
                               <h4 className="font-bold text-sm text-text m-0">Edit Bookmarks</h4>
-                              <p className="text-[10px] text-muted m-0">
-                                You can manually rename, reorganize, or delete bookmarks.
-                              </p>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={async () => {
+                                    let text = window.getSelection()?.toString().trim() || '';
+                                    if (!text && navigator.clipboard && navigator.clipboard.readText) {
+                                      try {
+                                        text = (await navigator.clipboard.readText()).trim();
+                                      } catch {}
+                                    }
+                                    if (text) text = text.replace(/\s+/g, ' ');
+
+                                    const newTitle = text || 'New Bookmark';
+                                    const lastPage = editingBookmarksList.length > 0 ? editingBookmarksList[editingBookmarksList.length - 1].page : 1;
+                                    const updated = [...editingBookmarksList, { title: newTitle, level: 1, page: lastPage }];
+                                    setEditingBookmarksList(updated);
+                                    toast.success(`Added "${newTitle}"! Set page number and click Save Changes.`);
+
+                                    setTimeout(() => {
+                                      const pageInputs = document.querySelectorAll<HTMLInputElement>('input[data-bookmark-page]');
+                                      if (pageInputs.length > 0) {
+                                        const last = pageInputs[pageInputs.length - 1];
+                                        last.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                        last.focus();
+                                        last.select();
+                                      }
+                                    }, 100);
+                                  }}
+                                  leftIcon={<Plus size={13} />}
+                                  className="text-xs h-6 px-2 font-medium"
+                                  title="Add new bookmark from selected or copied text"
+                                >
+                                  + Quick Add
+                                </Button>
+                              </div>
                             </div>
 
                             <div className="flex-1 max-h-[50vh] overflow-y-auto border border-border rounded-lg bg-background p-2 space-y-1">
@@ -1770,6 +2236,7 @@ export function PostProdWebPdfProcessor() {
                                         <input
                                           type="number"
                                           min="1"
+                                          data-bookmark-page
                                           value={bm.page}
                                           onChange={(e) => {
                                             const list = [...editingBookmarksList];
@@ -1809,19 +2276,19 @@ export function PostProdWebPdfProcessor() {
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 6 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
                   onClick={() => {
-                    if (['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)) setActiveStep(activeStep === 6 ? 0 : 6);
+                    if (['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) || bookmarksStatus?.success) setActiveStep(activeStep === 6 ? 0 : 6);
                   }}
-                  disabled={!['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)}
+                  disabled={!['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) && !bookmarksStatus?.success}
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${linksStatus && linksStatus.success || ['TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status)
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${linksStatus && linksStatus.success || ['TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status)
                       ? 'bg-emerald-500/20 text-emerald-600'
                       : activeStep === 6 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                       }`}>
                       {linksStatus ? (
                         <CheckCircle2 size={14} className="text-emerald-500" />
-                      ) : ['TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? (
+                      ) : ['TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? (
                         <CheckCircle2 size={14} className="text-emerald-500" />
                       ) : (
                         "6"
@@ -1840,23 +2307,64 @@ export function PostProdWebPdfProcessor() {
                       Automatically create clickable links in the PDF from the Table of Contents to the corresponding chapters.
                     </p>
 
+                    {/* Preservation toggle: Keep existing vs Rebuild all */}
+                    <div className="space-y-2 p-3 bg-muted/10 rounded-lg border border-border/50">
+                      <label className="text-xs font-bold text-muted uppercase tracking-wider block">Linking Mode</label>
+                      <div className="flex flex-col gap-2">
+                        <label className="flex items-center gap-2 text-xs cursor-pointer">
+                          <input
+                            type="radio"
+                            name="preserve_mode"
+                            checked={preserveExistingLinks}
+                            onChange={() => setPreserveExistingLinks(true)}
+                            className="text-primary accent-primary"
+                          />
+                          <div>
+                            <span className={preserveExistingLinks ? 'font-semibold text-text block' : 'text-text block'}>
+                              Keep Existing Links &amp; Link Remaining Entries (Recommended)
+                            </span>
+                            <span className="text-[11px] text-muted block">
+                              Preserves all existing valid links already in the PDF and only creates links for unlinked entries.
+                            </span>
+                          </div>
+                        </label>
+                        <label className="flex items-center gap-2 text-xs cursor-pointer">
+                          <input
+                            type="radio"
+                            name="preserve_mode"
+                            checked={!preserveExistingLinks}
+                            onChange={() => setPreserveExistingLinks(false)}
+                            className="text-primary accent-primary"
+                          />
+                          <div>
+                            <span className={!preserveExistingLinks ? 'font-semibold text-text block' : 'text-text block'}>
+                              Recreate All Links from Scratch
+                            </span>
+                            <span className="text-[11px] text-muted block">
+                              Replaces all internal TOC links with a freshly generated set.
+                            </span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
                     <div className="space-y-2">
-                      <label className="text-xs font-bold text-muted uppercase tracking-wider block">Link Type</label>
+                      <label className="text-xs font-bold text-muted uppercase tracking-wider block">Link Type for Remaining Entries</label>
 
                       <div className="flex flex-col gap-2">
                         <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
-                          <input type="radio" name="link_type" value="none" checked={linkType === 'none'} onChange={() => setLinkType('none')} className="text-primary accent-primary" />
+                          <input type="radio" name="link_type" value="none" checked={linkType === 'none'} onChange={() => { setLinkType('none'); handleAnalyzeLinks('none'); }} className="text-primary accent-primary" />
                           <span className={linkType === 'none' ? 'font-medium' : ''}>No Links</span>
                         </label>
                         <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
-                          <input type="radio" name="link_type" value="one_way" checked={linkType === 'one_way'} onChange={() => setLinkType('one_way')} className="text-primary accent-primary" />
+                          <input type="radio" name="link_type" value="one_way" checked={linkType === 'one_way'} onChange={() => { setLinkType('one_way'); handleAnalyzeLinks('one_way'); }} className="text-primary accent-primary" />
                           <div>
                             <span className={linkType === 'one_way' ? 'font-medium block' : 'block'}>One-Way Links</span>
                             <span className="text-xs text-muted block">Table of Contents entries link to the respective chapters.</span>
                           </div>
                         </label>
                         <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
-                          <input type="radio" name="link_type" value="two_way" checked={linkType === 'two_way'} onChange={() => setLinkType('two_way')} className="text-primary accent-primary" />
+                          <input type="radio" name="link_type" value="two_way" checked={linkType === 'two_way'} onChange={() => { setLinkType('two_way'); handleAnalyzeLinks('two_way'); }} className="text-primary accent-primary" />
                           <div>
                             <span className={linkType === 'two_way' ? 'font-medium block' : 'block'}>Two-Way Links</span>
                             <span className="text-xs text-muted block">TOC links to chapters AND chapter titles link back to the TOC.</span>
@@ -1957,8 +2465,8 @@ export function PostProdWebPdfProcessor() {
                   onClick={() => setActiveStep(activeStep === 7 ? 0 : 7)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
-                      {['URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '7'}
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {['URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '7'}
                     </div>
                     <span className="font-medium text-sm">URL Hyperlinking</span>
                     {urlLinksAnalysis && (
@@ -2038,6 +2546,30 @@ export function PostProdWebPdfProcessor() {
                       <p className="text-sm text-muted text-center py-2">No plain-text URLs found in the PDF.</p>
                     )}
 
+                    {/* Color URLs Toggle */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/10">
+                      <div>
+                        <p className="text-xs font-semibold text-text m-0">Change URL Text Color</p>
+                        <p className="text-[10px] text-muted m-0">
+                          {colorUrls
+                            ? 'URL text will be colored link blue (#0f73bf) upon applying links.'
+                            : 'Keep existing text color in the PDF (no font color change).'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setColorUrls(!colorUrls)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${colorUrls ? 'bg-primary' : 'bg-muted/40'}`}
+                        role="switch"
+                        aria-checked={colorUrls}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${colorUrls ? 'translate-x-4' : 'translate-x-0'}`}
+                        />
+                      </button>
+                    </div>
+
                     {/* Buttons */}
                     <div className="flex gap-3 mt-2">
                       <Button
@@ -2070,8 +2602,8 @@ export function PostProdWebPdfProcessor() {
                   onClick={() => setActiveStep(activeStep === 8 ? 0 : 8)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
-                      {['Email Linked', 'Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '8'}
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {['Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '8'}
                     </div>
                     <span className="font-medium text-sm">Email Hyperlinking</span>
                     {emailLinksAnalysis && (
@@ -2163,6 +2695,30 @@ export function PostProdWebPdfProcessor() {
                       <p className="text-sm text-muted text-center py-2">No email addresses found in the PDF.</p>
                     )}
 
+                    {/* Color Emails Toggle */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/10">
+                      <div>
+                        <p className="text-xs font-semibold text-text m-0">Change Email Text Color</p>
+                        <p className="text-[10px] text-muted m-0">
+                          {colorEmails
+                            ? 'Email text will be colored link blue (#0f73bf) upon applying links.'
+                            : 'Keep existing text color in the PDF (no font color change).'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setColorEmails(!colorEmails)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${colorEmails ? 'bg-primary' : 'bg-muted/40'}`}
+                        role="switch"
+                        aria-checked={colorEmails}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${colorEmails ? 'translate-x-4' : 'translate-x-0'}`}
+                        />
+                      </button>
+                    </div>
+
                     {/* Buttons */}
                     <div className="flex gap-3 mt-2">
                       <Button
@@ -2195,8 +2751,8 @@ export function PostProdWebPdfProcessor() {
                   onClick={() => setActiveStep(activeStep === 9 ? 0 : 9)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
-                      {['Endnote Linked', 'Crossref Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '9'}
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {['Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '9'}
                     </div>
                     <span className="font-medium text-sm">Endnote Links</span>
                     {endnoteLinksAnalysis && (
@@ -2320,8 +2876,8 @@ export function PostProdWebPdfProcessor() {
                   onClick={() => setActiveStep(activeStep === 10 ? 0 : 10)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Crossref Linked' ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
-                      {selectedProject.status === 'Crossref Linked' ? <CheckCircle2 size={14} /> : '10'}
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {['Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '10'}
                     </div>
                     <span className="font-medium text-sm">Cross-Reference Links</span>
                     {crossrefLinksAnalysis && (
@@ -2437,6 +2993,379 @@ export function PostProdWebPdfProcessor() {
                         {applyingCrossrefLinks ? 'Applying...' : 'Apply / Fix'}
                       </Button>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── STEP 11: INDEX HYPERLINKING ── */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 11 ? 0 : 11)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {['Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '11'}
+                    </div>
+                    <span className="font-medium text-sm">Index Hyperlinking</span>
+                    {indexLinksAnalysis && (
+                      <span className="text-xs bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full">
+                        {indexLinksAnalysis.total_references} Refs · {indexLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 11 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 11 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Scan the Index pages for printed page numbers and ranges (e.g., 155, 157–8) and create clickable links directly to their destination pages.
+                    </p>
+
+                    {/* Status Legend */}
+                    <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg text-xs space-y-1">
+                      <p className="font-semibold text-indigo-800">Link Status:</p>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 font-bold">✓ Linked</span>
+                          <span className="text-muted">= Clickable link created directly to target page</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-500 font-bold">✗ Not linked</span>
+                          <span className="text-muted">= Unlinked page number, needs "Apply / Fix"</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Analysis Summary */}
+                    {indexLinksAnalysis && (
+                      <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg space-y-1 text-sm text-indigo-800">
+                        <p className="font-semibold">Index Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total index page references: <strong>{indexLinksAnalysis.total_references}</strong></li>
+                          {indexLinksAnalysis.index_pages?.length > 0 && (
+                            <li>Index pages: <strong>Pages {indexLinksAnalysis.index_pages[0]}–{indexLinksAnalysis.index_pages[indexLinksAnalysis.index_pages.length - 1]}</strong></li>
+                          )}
+                          <li className="text-emerald-700">Already linked: <strong>{indexLinksAnalysis.linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{indexLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Details Table */}
+                    {indexLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-indigo-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-indigo-50/90 text-indigo-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-indigo-200">Index Entry / Term</th>
+                              <th className="p-2 border-b border-indigo-200 w-24 text-center">Reference</th>
+                              <th className="p-2 border-b border-indigo-200 w-20 text-center">Index Pg</th>
+                              <th className="p-2 border-b border-indigo-200 w-20 text-center">Target Pg</th>
+                              <th className="p-2 border-b border-indigo-200 w-24 text-center">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {indexLinksAnalysis.details.slice(0, 500).map((item: IndexLinkDetail, i: number) => (
+                              <tr key={i} className="border-b border-indigo-100 last:border-0 hover:bg-indigo-50/30">
+                                <td className="p-2 text-text font-medium truncate max-w-[180px]">{item.term}</td>
+                                <td className="p-2 text-center text-indigo-700 font-semibold">{item.page_reference}</td>
+                                <td className="p-2 text-center text-muted">{item.source_page}</td>
+                                <td className="p-2 text-center text-emerald-700 font-semibold">{item.target_page}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <span className="text-emerald-600 font-bold">✓ Linked</span>
+                                  ) : (
+                                    <span className="text-red-500 font-bold">✗ Not linked</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {indexLinksAnalysis?.total_references === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No Index section found in this PDF.</p>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeIndexLinks}
+                        disabled={analyzingIndexLinks || applyingIndexLinks}
+                        variant={indexLinksAnalysis ? 'outline' : 'primary'}
+                        leftIcon={analyzingIndexLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
+                      >
+                        {analyzingIndexLinks ? 'Analyzing...' : 'Analyze Index'}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyIndexLinks}
+                        disabled={applyingIndexLinks || analyzingIndexLinks || !indexLinksAnalysis || indexLinksAnalysis.not_linked === 0}
+                        leftIcon={applyingIndexLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
+                      >
+                        {applyingIndexLinks ? 'Applying...' : 'Apply / Fix'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── STEP 12: GLOSSARY HYPERLINKING ── */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 12 ? 0 : 12)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Glossary Linked' ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      {selectedProject.status === 'Glossary Linked' ? <CheckCircle2 size={14} /> : '12'}
+                    </div>
+                    <span className="font-medium text-sm">Glossary Hyperlinking</span>
+                    {glossaryLinksAnalysis && (
+                      <span className="text-xs bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full">
+                        {glossaryLinksAnalysis.total_terms} Terms · {glossaryLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 12 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 12 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Scan the chapter body pages for key terms defined in the Glossary and create clickable links directly to their definition in the Glossary.
+                    </p>
+
+                    {/* Status Legend */}
+                    <div className="p-3 bg-teal-500/5 border border-teal-500/20 rounded-lg text-xs space-y-1">
+                      <p className="font-semibold text-teal-800">Link Status:</p>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 font-bold">✓ Linked</span>
+                          <span className="text-muted">= Clickable link created directly to Glossary definition</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-500 font-bold">✗ Not linked</span>
+                          <span className="text-muted">= Unlinked term, needs "Apply / Fix"</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Analysis Summary */}
+                    {glossaryLinksAnalysis && (
+                      <div className="p-3 bg-teal-500/5 border border-teal-500/20 rounded-lg space-y-1 text-sm text-teal-800">
+                        <p className="font-semibold">Glossary Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total body term occurrences: <strong>{glossaryLinksAnalysis.total_terms}</strong></li>
+                          {glossaryLinksAnalysis.glossary_pages?.length > 0 && (
+                            <li>Glossary pages: <strong>Pages {glossaryLinksAnalysis.glossary_pages[0]}–{glossaryLinksAnalysis.glossary_pages[glossaryLinksAnalysis.glossary_pages.length - 1]}</strong></li>
+                          )}
+                          <li className="text-emerald-700">Already linked: <strong>{glossaryLinksAnalysis.linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{glossaryLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Details Table */}
+                    {glossaryLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-teal-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-teal-50/90 text-teal-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-teal-200">Key Term</th>
+                              <th className="p-2 border-b border-teal-200 w-24 text-center">Body Pg</th>
+                              <th className="p-2 border-b border-teal-200 w-24 text-center">Glossary Pg</th>
+                              <th className="p-2 border-b border-teal-200 w-24 text-center">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {glossaryLinksAnalysis.details.slice(0, 500).map((item: GlossaryLinkDetail, i: number) => (
+                              <tr key={i} className="border-b border-teal-100 last:border-0 hover:bg-teal-50/30">
+                                <td className="p-2 text-text font-medium truncate max-w-[200px]" title={item.term}>
+                                  {item.body_term || item.term}
+                                </td>
+                                <td className="p-2 text-center text-teal-700 font-semibold">{item.body_page}</td>
+                                <td className="p-2 text-center text-emerald-700 font-semibold">{item.glossary_page}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <span className="text-emerald-600 font-bold">✓ Linked</span>
+                                  ) : (
+                                    <span className="text-red-500 font-bold">✗ Not linked</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {glossaryLinksAnalysis?.total_terms === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No Glossary section or key terms found in this PDF.</p>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeGlossaryLinks}
+                        disabled={analyzingGlossaryLinks || applyingGlossaryLinks}
+                        variant={glossaryLinksAnalysis ? 'outline' : 'primary'}
+                        leftIcon={analyzingGlossaryLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
+                      >
+                        {analyzingGlossaryLinks ? 'Analyzing...' : 'Analyze Glossary'}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyGlossaryLinks}
+                        disabled={applyingGlossaryLinks || analyzingGlossaryLinks || !glossaryLinksAnalysis || glossaryLinksAnalysis.not_linked === 0}
+                        leftIcon={applyingGlossaryLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
+                      >
+                        {applyingGlossaryLinks ? 'Applying...' : 'Apply / Fix'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 13: Final Inspection & Differential Validation */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 13 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => setActiveStep(activeStep === 13 ? 0 : 13)}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      validationDiffReport && validationDiffReport.status === 'passed'
+                        ? 'bg-emerald-500/20 text-emerald-600'
+                        : activeStep === 13 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {validationDiffReport && validationDiffReport.status === 'passed' ? <CheckCircle2 size={14} /> : '13'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Quality &amp; Differential Validation</h2>
+                  </div>
+                  {activeStep === 13 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 13 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Audit final PDF against original baseline for text, font, and layout integrity.
+                      </p>
+                      <Button
+                        onClick={handleRunValidationDiff}
+                        disabled={runningValidationDiff}
+                        leftIcon={runningValidationDiff ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
+                      >
+                        {runningValidationDiff ? 'Validating...' : (validationDiffReport ? 'Re-validate' : 'Validate')}
+                      </Button>
+                    </div>
+
+                    {validationDiffReport && (
+                      <div className={`p-4 rounded-lg border ${
+                        validationDiffReport.status === 'passed'
+                          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
+                          : validationDiffReport.status === 'warnings'
+                          ? 'bg-amber-500/10 border-amber-500/20 text-amber-700'
+                          : 'bg-destructive/10 border-destructive/20 text-destructive'
+                      }`}>
+                        <div className="flex items-center gap-2 mb-2 font-bold text-sm">
+                          {validationDiffReport.status === 'passed' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                          <h4 className="font-bold text-sm m-0">
+                            {validationDiffReport.status === 'passed' ? 'Validation Passed' : 'Validation Discrepancies Found'}
+                          </h4>
+                        </div>
+
+                        <div className="bg-background/50 p-3 rounded border border-emerald-500/20 mt-3 grid grid-cols-2 gap-3 text-xs font-medium">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-[10px]">Integrity Score</span>
+                            <span className="text-text font-bold text-sm">{validationDiffReport.integrity_score}%</span>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-[10px]">Audited Pages</span>
+                            <span className="text-text">{validationDiffReport.total_pages_analyzed} pages</span>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-[10px]">Text &amp; Fonts</span>
+                            <span className={validationDiffReport.text_discrepancies_count === 0 ? "text-emerald-600 font-semibold" : "text-destructive font-semibold"}>
+                              {validationDiffReport.text_discrepancies_count === 0 ? '✓ Intact' : `${validationDiffReport.text_discrepancies_count} Issues`}
+                            </span>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-[10px]">Layout Alignment</span>
+                            <span className={validationDiffReport.alignment_drifts_count === 0 ? "text-emerald-600 font-semibold" : "text-amber-600 font-semibold"}>
+                              {validationDiffReport.alignment_drifts_count === 0 ? '✓ 0pt Drift' : `${validationDiffReport.alignment_drifts_count} Shifted`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {validationDiffReport.text_discrepancies?.length > 0 && (
+                          <div className="mt-3 space-y-1.5 border-t border-destructive/20 pt-2 text-[11px]">
+                            <span className="font-semibold text-destructive block">Altered Pages (Text/Fonts):</span>
+                            {validationDiffReport.text_discrepancies.map((td, idx) => (
+                              <div key={idx} className="bg-background/70 p-2 rounded border border-border/50 text-[10px]">
+                                <div className="flex justify-between font-semibold mb-0.5">
+                                  <span>Page {td.page}</span>
+                                  <span className="text-destructive">{td.issue}</span>
+                                </div>
+                                <p className="m-0 text-muted truncate"><strong>Baseline:</strong> {td.sample_baseline}</p>
+                                <p className="m-0 text-text truncate"><strong>Final:</strong> {td.sample_final}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {validationDiffReport.alignment_drifts?.length > 0 && (
+                          <div className="mt-3 space-y-1.5 border-t border-amber-500/20 pt-2 text-[11px]">
+                            <span className="font-semibold text-amber-700 dark:text-amber-400 block">Layout Shifts / Alignment Drift:</span>
+                            <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                              {validationDiffReport.alignment_drifts.map((ad: any, idx: number) => (
+                                <div key={idx} className="bg-background/70 p-2 rounded border border-border/50 text-[10px] flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-text">Page {ad.page}</span>
+                                    <span className="text-muted">{ad.issue}</span>
+                                  </div>
+                                  <span className="text-amber-600 font-bold px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                                    Max drift: {ad.max_drift_pt} pt
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {validationDiffReport.font_discrepancies?.length > 0 && (
+                          <div className="mt-3 space-y-1.5 border-t border-destructive/20 pt-2 text-[11px]">
+                            <span className="font-semibold text-destructive block">Font Set Discrepancies:</span>
+                            <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                              {validationDiffReport.font_discrepancies.map((fd: any, idx: number) => (
+                                <div key={idx} className="bg-background/70 p-2 rounded border border-border/50 text-[10px]">
+                                  <div className="flex justify-between font-semibold mb-0.5">
+                                    <span>Page {fd.page}</span>
+                                    <span className="text-destructive">{fd.issue}</span>
+                                  </div>
+                                  {fd.missing_fonts?.length > 0 && (
+                                    <p className="m-0 text-muted"><strong>Missing:</strong> {fd.missing_fonts.join(', ')}</p>
+                                  )}
+                                  {fd.new_fonts?.length > 0 && (
+                                    <p className="m-0 text-text"><strong>Added/Replaced:</strong> {fd.new_fonts.join(', ')}</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2686,6 +3615,8 @@ export function PostProdWebPdfProcessor() {
           </div>
         </div>
       </Modal>
+
+
 
     </div>
   );

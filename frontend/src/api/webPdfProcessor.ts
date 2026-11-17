@@ -129,6 +129,30 @@ export interface BookmarkItem {
   page: number;
 }
 
+export interface ExistingBookmarksInfo {
+  has_existing_bookmarks: boolean;
+  count: number;
+  sample_titles: string[];
+}
+
+export async function getExistingBookmarksInfo(projectId: number): Promise<ExistingBookmarksInfo> {
+  try {
+    const { data } = await api.get<ExistingBookmarksInfo>(`/post-prod/web-pdf-processor/projects/${projectId}/bookmarks-info`);
+    return data;
+  } catch (err) {
+    return { has_existing_bookmarks: false, count: 0, sample_titles: [] };
+  }
+}
+
+export async function acceptExistingBookmarks(projectId: number): Promise<{ success: boolean; toc_entries_detected: number; bookmarks_generated: number; kept_existing: boolean }> {
+  try {
+    const { data } = await api.post(`/post-prod/web-pdf-processor/projects/${projectId}/accept-existing-bookmarks`);
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to accept existing bookmarks'));
+  }
+}
+
 export async function getBookmarks(projectId: number): Promise<BookmarkItem[]> {
   try {
     const { data } = await api.get<{ bookmarks: BookmarkItem[] }>(`/post-prod/web-pdf-processor/projects/${projectId}/bookmarks`);
@@ -146,16 +170,42 @@ export async function updateBookmarks(projectId: number, bookmarks: BookmarkItem
   }
 }
 
+export interface ExistingTocLinksInfo {
+  has_existing_links: boolean;
+  count: number;
+  toc_pages_count?: number;
+}
+
+export async function getExistingTocLinksInfo(projectId: number): Promise<ExistingTocLinksInfo> {
+  try {
+    const { data } = await api.get<ExistingTocLinksInfo>(`/post-prod/web-pdf-processor/projects/${projectId}/toc-links-info`);
+    return data;
+  } catch {
+    return { has_existing_links: false, count: 0 };
+  }
+}
+
+export async function acceptExistingTocLinks(projectId: number): Promise<{ success: boolean; total_links: number; kept_existing: boolean }> {
+  try {
+    const { data } = await api.post(`/post-prod/web-pdf-processor/projects/${projectId}/accept-existing-toc-links`);
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to accept existing TOC links'));
+  }
+}
+
 export async function generateLinks(
   projectId: number,
   linkType: 'one_way' | 'two_way',
-  analyzeOnly: boolean = false
+  analyzeOnly: boolean = false,
+  preserveExisting: boolean = true
 ): Promise<{ 
   success: boolean; 
   total_links: number; 
   one_way_links: number; 
   two_way_links: number;
-  details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean }[];
+  existing_preserved?: number;
+  details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean; preserved?: boolean }[];
 }> {
   try {
     const { data } = await api.post<{ 
@@ -163,10 +213,11 @@ export async function generateLinks(
       total_links: number; 
       one_way_links: number; 
       two_way_links: number;
-      details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean }[];
+      existing_preserved?: number;
+      details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean; preserved?: boolean }[];
     }>(
       `/post-prod/web-pdf-processor/projects/${projectId}/generate-links`,
-      { link_type: linkType, analyze_only: analyzeOnly },
+      { link_type: linkType, analyze_only: analyzeOnly, preserve_existing: preserveExisting },
     );
     return data;
   } catch (err) {
@@ -205,7 +256,8 @@ export interface UrlLinkDetail {
 
 export async function generateUrlLinks(
   projectId: number,
-  analyzeOnly: boolean = true
+  analyzeOnly: boolean = true,
+  colorUrls: boolean = false
 ): Promise<{
   success: boolean;
   total_urls: number;
@@ -216,7 +268,7 @@ export async function generateUrlLinks(
   try {
     const { data } = await api.post(
       `/post-prod/web-pdf-processor/projects/${projectId}/generate-url-links`,
-      { analyze_only: analyzeOnly }
+      { analyze_only: analyzeOnly, color_urls: colorUrls }
     );
     return data;
   } catch (err) {
@@ -233,7 +285,8 @@ export interface EmailLinkDetail {
 
 export async function generateEmailLinks(
   projectId: number,
-  analyzeOnly: boolean = true
+  analyzeOnly: boolean = true,
+  colorEmails: boolean = false
 ): Promise<{
   success: boolean;
   total_emails: number;
@@ -244,7 +297,7 @@ export async function generateEmailLinks(
   try {
     const { data } = await api.post(
       `/post-prod/web-pdf-processor/projects/${projectId}/generate-email-links`,
-      { analyze_only: analyzeOnly }
+      { analyze_only: analyzeOnly, color_emails: colorEmails }
     );
     return data;
   } catch (err) {
@@ -292,6 +345,68 @@ export interface CrossrefDetail {
   is_linked: boolean;
 }
 
+export interface IndexLinkDetail {
+  term: string;
+  page_reference: string;
+  printed_page: number;
+  source_page: number;
+  target_page: number;
+  is_linked: boolean;
+}
+
+export interface GlossaryLinkDetail {
+  term: string;
+  body_term: string;
+  body_page: number;
+  glossary_page: number;
+  is_linked: boolean;
+  rect?: number[];
+}
+
+export async function generateIndexLinks(
+  projectId: number,
+  analyzeOnly: boolean = true
+): Promise<{
+  success: boolean;
+  total_references: number;
+  linked: number;
+  not_linked: number;
+  details: IndexLinkDetail[];
+  index_pages: number[];
+}> {
+  try {
+    const { data } = await api.post(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-index-links`,
+      { analyze_only: analyzeOnly }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate index links'));
+  }
+}
+
+export async function generateGlossaryLinks(
+  projectId: number,
+  analyzeOnly: boolean = true
+): Promise<{
+  success: boolean;
+  total_terms: number;
+  linked: number;
+  not_linked: number;
+  details: GlossaryLinkDetail[];
+  glossary_pages: number[];
+}> {
+  try {
+    const { data } = await api.post(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-glossary-links`,
+      { analyze_only: analyzeOnly }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate glossary links'));
+  }
+}
+
 export async function generateCrossrefLinks(
   projectId: number,
   analyzeOnly: boolean = true
@@ -310,5 +425,77 @@ export async function generateCrossrefLinks(
     return data;
   } catch (err) {
     throw new Error(getApiErrorMessage(err, 'Failed to generate cross-reference links'));
+  }
+}
+export interface FontCheckResult {
+  all_embedded: boolean;
+  missing_fonts: string[];
+  embedded_fonts: string[];
+  total_fonts: number;
+}
+
+export async function checkProjectFonts(projectId: number): Promise<FontCheckResult> {
+  try {
+    const { data } = await api.get<FontCheckResult>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/fonts-status`
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to check fonts'));
+  }
+}
+
+export async function fixProjectFonts(projectId: number): Promise<FontCheckResult> {
+  try {
+    const { data } = await api.post<FontCheckResult>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/fix-fonts`
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to fix and embed fonts'));
+  }
+}
+
+export interface ValidationDiffReport {
+  success: boolean;
+  integrity_score: number;
+  status: 'passed' | 'warnings' | 'failed';
+  page_count_match: boolean;
+  base_page_count: number;
+  final_page_count: number;
+  total_pages_analyzed: number;
+  text_discrepancies_count: number;
+  font_discrepancies_count: number;
+  alignment_drifts_count: number;
+  text_discrepancies: {
+    page: number;
+    issue: string;
+    baseline_words: number;
+    final_words: number;
+    sample_baseline: string;
+    sample_final: string;
+  }[];
+  font_discrepancies: {
+    page: number;
+    issue: string;
+    missing_fonts: string[];
+    new_fonts: string[];
+  }[];
+  alignment_drifts: {
+    page: number;
+    issue: string;
+    max_drift_pt: number;
+  }[];
+  error?: string;
+}
+
+export async function runValidationDiff(projectId: number): Promise<ValidationDiffReport> {
+  try {
+    const { data } = await api.post<ValidationDiffReport>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/validation-diff`
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to run validation diff'));
   }
 }

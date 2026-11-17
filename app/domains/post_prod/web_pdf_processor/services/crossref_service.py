@@ -220,6 +220,19 @@ def _find_targets(doc) -> dict:
     return targets
 
 
+def _get_exact_match_rect(page, match_text: str, line_bbox: fitz.Rect) -> fitz.Rect:
+    """Find the exact bounding box for the match string within the visual line."""
+    pad_clip = fitz.Rect(line_bbox.x0 - 2, line_bbox.y0 - 2, line_bbox.x1 + 2, line_bbox.y1 + 2)
+    rects = page.search_for(match_text, clip=pad_clip)
+    if rects:
+        return rects[0]
+    rects = page.search_for(match_text)
+    if rects:
+        closest = min(rects, key=lambda r: abs((r.y0 + r.y1)/2 - (line_bbox.y0 + line_bbox.y1)/2))
+        return closest
+    return line_bbox
+
+
 def _find_references(doc, targets: dict, skip_pages: set) -> list:
     """
     Find cross-reference text that mentions the targets.
@@ -242,38 +255,45 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
 
             for line in block.get("lines", []):
                 line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
+                if not line.get("spans"):
+                    continue
+                line_rect = fitz.Rect(line["bbox"]) if "bbox" in line else fitz.Rect(line["spans"][0]["bbox"])
 
                 # Find figure references in text (skip in bibliography/notes sections)
                 if not skip_external_refs:
                     for fig_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|look\s+at|Look\s+at)?\s*(?:Figure|Fig\.?|FIGURE|FIG\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE):
                         fig_id = f"figure_{fig_match.group(1)}"
                         if fig_id in targets:
-                            if line.get("spans"):
-                                rect = fitz.Rect(line["spans"][0]["bbox"])
-                                references.append({
-                                    "page_idx": page_idx,
-                                    "page": physical_page,
-                                    "rect": rect,
-                                    "type": "figure",
-                                    "text": fig_match.group(0),
-                                    "target_info": targets[fig_id],
-                                })
+                            # Skip if this line is the caption itself of the target on this page
+                            if targets[fig_id]["page_idx"] == page_idx and line_text.startswith(fig_match.group(0).lstrip()):
+                                continue
+                            exact_rect = _get_exact_match_rect(page, fig_match.group(0), line_rect)
+                            references.append({
+                                "page_idx": page_idx,
+                                "page": physical_page,
+                                "rect": exact_rect,
+                                "type": "figure",
+                                "text": fig_match.group(0),
+                                "target_info": targets[fig_id],
+                            })
 
                 # Find table references in text (skip in bibliography/notes sections)
                 if not skip_external_refs:
                     for table_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|look\s+at|Look\s+at)?\s*(?:Table|Tab\.?|TABLE|TAB\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE):
                         table_id = f"table_{table_match.group(1)}"
                         if table_id in targets:
-                            if line.get("spans"):
-                                rect = fitz.Rect(line["spans"][0]["bbox"])
-                                references.append({
-                                    "page_idx": page_idx,
-                                    "page": physical_page,
-                                    "rect": rect,
-                                    "type": "table",
-                                    "text": table_match.group(0),
-                                    "target_info": targets[table_id],
-                                })
+                            # Skip if this line is the caption itself of the target on this page
+                            if targets[table_id]["page_idx"] == page_idx and line_text.startswith(table_match.group(0).lstrip()):
+                                continue
+                            exact_rect = _get_exact_match_rect(page, table_match.group(0), line_rect)
+                            references.append({
+                                "page_idx": page_idx,
+                                "page": physical_page,
+                                "rect": exact_rect,
+                                "type": "table",
+                                "text": table_match.group(0),
+                                "target_info": targets[table_id],
+                            })
 
                 # Find chapter references in text (skip in bibliography/notes sections, section headers, only match body text)
                 if not skip_external_refs:
@@ -289,12 +309,12 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                                                line_text.startswith(ch_match.group(0).lstrip()))
                             is_section_header = len(line_text) < 50  # Section headers are short
 
-                            if not is_chapter_header and not is_section_header and line.get("spans"):
-                                rect = fitz.Rect(line["spans"][0]["bbox"])
+                            if not is_chapter_header and not is_section_header:
+                                exact_rect = _get_exact_match_rect(page, ch_match.group(0), line_rect)
                                 references.append({
                                     "page_idx": page_idx,
                                     "page": physical_page,
-                                    "rect": rect,
+                                    "rect": exact_rect,
                                     "type": "chapter",
                                     "text": ch_match.group(0),
                                     "target_info": target_chapter,
@@ -308,21 +328,20 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                         try:
                             target_page = int(page_ref) - 1  # Convert to 0-indexed
                             if 0 <= target_page < len(doc):
-                                if line.get("spans"):
-                                    rect = fitz.Rect(line["spans"][0]["bbox"])
-                                    references.append({
-                                        "page_idx": page_idx,
-                                        "page": physical_page,
-                                        "rect": rect,
+                                exact_rect = _get_exact_match_rect(page, page_match.group(0), line_rect)
+                                references.append({
+                                    "page_idx": page_idx,
+                                    "page": physical_page,
+                                    "rect": exact_rect,
+                                    "type": "page",
+                                    "text": page_match.group(0),
+                                    "target_info": {
+                                        "page_idx": target_page,
+                                        "page": int(page_ref),
                                         "type": "page",
-                                        "text": page_match.group(0),
-                                        "target_info": {
-                                            "page_idx": target_page,
-                                            "page": int(page_ref),
-                                            "type": "page",
-                                            "identifier": page_ref,
-                                        },
-                                    })
+                                        "identifier": page_ref,
+                                    },
+                                })
                         except (ValueError, IndexError):
                             pass
 

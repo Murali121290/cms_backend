@@ -9,6 +9,7 @@ import re
 import os
 import fitz  # PyMuPDF
 import logging
+from app.domains.post_prod.web_pdf_processor.services.stream_color_utils import recolor_url_in_stream, recolor_text_in_stream
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ EMAIL_PATTERN = re.compile(
 )
 
 
-def find_emails_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
+def find_emails_in_pdf(pdf_path: str, analyze_only: bool = True, color_emails: bool = False) -> dict:
     """
     Scan PDF for plain-text email addresses.
     - Checks if each email is already hyperlinked as a mailto: link in the PDF.
@@ -90,15 +91,51 @@ def find_emails_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
             if not email_entry["is_linked"]:
                 if not analyze_only and email_rect:
                     page = doc[email_entry["page_idx"]]
-                    # Create mailto: link
+                    target_rect = fitz.Rect(email_rect)
                     mailto_uri = f"mailto:{email_entry['email']}"
-                    page.insert_link({
-                        "kind": fitz.LINK_URI,
-                        "from": fitz.Rect(email_rect),
-                        "uri": mailto_uri,
-                    })
+                    
+                    # 1. Check for duplicate overlapping link before inserting
+                    existing_links = page.get_links()
+                    already_has_link = any(
+                        target_rect.intersects(fitz.Rect(ex["from"])) and
+                        target_rect.intersect(fitz.Rect(ex["from"])).get_area() / target_rect.get_area() > 0.6
+                        for ex in existing_links
+                    )
+                    if not already_has_link:
+                        page.insert_link({
+                            "kind": fitz.LINK_URI,
+                            "from": target_rect,
+                            "uri": mailto_uri,
+                        })
+                    
+                    # Recolor email text in content streams directly to link blue only if requested
+                    if color_emails:
+                        try:
+                            tgt = email_entry.get("email")
+                            if tgt:
+                                for xref in page.get_contents():
+                                    stream = page.parent.xref_stream(xref).decode('latin1', errors='ignore')
+                                    new_stream = recolor_url_in_stream(stream, [tgt], color_rgb=(0.06, 0.45, 0.75))
+                                    if new_stream != stream:
+                                        page.parent.update_stream(xref, new_stream.encode('latin1'))
+                        except Exception as ex_color:
+                            logger.debug(f"Stream text recolor failed for email {tgt}: {ex_color}")
+                    
                     email_entry["is_linked"] = True
                     logger.debug(f"Created mailto link for {email_entry['email']} on page {email_entry['page']}")
+            else:
+                if not analyze_only and email_rect and color_emails:
+                    page = doc[email_entry["page_idx"]]
+                    try:
+                        tgt = email_entry.get("email")
+                        if tgt:
+                            for xref in page.get_contents():
+                                stream = page.parent.xref_stream(xref).decode('latin1', errors='ignore')
+                                new_stream = recolor_url_in_stream(stream, [tgt], color_rgb=(0.06, 0.45, 0.75))
+                                if new_stream != stream:
+                                    page.parent.update_stream(xref, new_stream.encode('latin1'))
+                    except Exception as ex_color:
+                        logger.debug(f"Stream text recolor failed for email {tgt}: {ex_color}")
 
             raw_entries.append(email_entry)
 
@@ -183,3 +220,14 @@ def _find_text_rect(page, text: str):
             return rects[0]
 
     return None
+
+
+def _recolor_text_exact_blue(page, text_str: str, rects: list, color=(0.06, 0.45, 0.75)):
+    """
+    Transparent redaction and font re-insertion is disabled because PyMuPDF's
+    apply_redactions rewrites the page contents stream, corrupting relative text
+    matrices (Tm / Td / T*) in surrounding content (such as tables).
+    Native PDF link annotations alone provide full clickable hyperlinking without
+    distorting underlying page layouts.
+    """
+    return
