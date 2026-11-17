@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap, History, FileText } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap, History, FileText, PauseCircle, HelpCircle } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -35,7 +35,7 @@ export function BodInternalPage() {
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
-  type QuickFilter = 'all' | 'total_all' | 'fastrack' | 'total_intake' | 'total_backlog' | 'add_job_all' | 'analysis_all' | 'analysis_today' | 'analysis_previous' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
+  type QuickFilter = 'all' | 'total_all' | 'fastrack' | 'hold' | 'support' | 'total_intake' | 'total_backlog' | 'add_job_all' | 'analysis_all' | 'analysis_today' | 'analysis_previous' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
   const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
@@ -553,7 +553,7 @@ export function BodInternalPage() {
     const matchesAssignee = effectiveAssigneeFilter === 'all'
       || (effectiveAssigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === effectiveAssigneeFilter)
 
-    const matchesDate = cardFilter === 'fastrack' ? true : matchesDateFilter(j)
+    const matchesDate = (cardFilter === 'fastrack' || cardFilter === 'hold' || cardFilter === 'support') ? true : matchesDateFilter(j)
 
     return matchesSearch && matchesAssignee && matchesDate
   })
@@ -573,6 +573,10 @@ export function BodInternalPage() {
 
   // Fastrack count: completely independent of date filter, counts active fastrack jobs
   const fastrackJobsCount = jobs.filter(j => !isJobCompleted(j) && Boolean(j.is_fastrack)).length
+
+  // Hold & Support counts: active jobs on Hold or Support
+  const holdJobsCount = jobs.filter(j => !isJobCompleted(j) && j.status === 'Hold').length
+  const supportJobsCount = jobs.filter(j => !isJobCompleted(j) && j.status === 'Support').length
 
   // Metric card counts computed dynamically from baseJobs
   const totalJobs = baseJobs.length
@@ -763,6 +767,26 @@ export function BodInternalPage() {
     const isOverdueJob = isOverdue(job.due_date)
     const isTomorrowJob = isDueTomorrow(job.due_date)
 
+    if (job.status === 'Hold') {
+      return {
+        label: 'Hold',
+        badgeClass: 'bg-fuchsia-500/15 border-fuchsia-500/40 text-fuchsia-600 dark:text-fuchsia-400 font-bold',
+        sublabel: 'Customer Query',
+        isOverdue: isOverdueJob,
+        isTomorrow: isTomorrowJob,
+      }
+    }
+
+    if (job.status === 'Support') {
+      return {
+        label: 'Support',
+        badgeClass: 'bg-indigo-500/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-400 font-bold',
+        sublabel: 'Internal Help',
+        isOverdue: isOverdueJob,
+        isTomorrow: isTomorrowJob,
+      }
+    }
+
     if (job.current_stage_name === 'Add job') {
       return {
         label: 'Awaiting CSV',
@@ -778,8 +802,8 @@ export function BodInternalPage() {
       return {
         label: addedToday ? 'Analysis (Today)' : 'Analysis (Backlog)',
         badgeClass: addedToday
-          ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold'
-          : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400',
+          ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-600 dark:text-cyan-400 font-bold'
+          : 'bg-cyan-500/10 border-cyan-500/20 text-cyan-600 dark:text-cyan-400',
         sublabel: addedToday ? 'Added Today' : 'Backlog',
         isOverdue: isOverdueJob,
         isTomorrow: isTomorrowJob,
@@ -861,6 +885,10 @@ export function BodInternalPage() {
       matchesFilter = true
     } else if (cardFilter === 'fastrack') {
       matchesFilter = !jobCompleted && Boolean(j.is_fastrack)
+    } else if (cardFilter === 'hold') {
+      matchesFilter = !jobCompleted && j.status === 'Hold'
+    } else if (cardFilter === 'support') {
+      matchesFilter = !jobCompleted && j.status === 'Support'
     } else if (cardFilter === 'total_intake') {
       matchesFilter = isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)
     } else if (cardFilter === 'total_backlog') {
@@ -970,6 +998,10 @@ export function BodInternalPage() {
         if (!isInProgress) return false
       } else if (colFilters.status === 'ready_to_dispatch') {
         if (jobCompleted || j.current_stage_name !== 'Ready to Dispatch') return false
+      } else if (colFilters.status === 'hold') {
+        if (jobCompleted || j.status !== 'Hold') return false
+      } else if (colFilters.status === 'support') {
+        if (jobCompleted || j.status !== 'Support') return false
       }
     }
 
@@ -1495,7 +1527,7 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        {/* Row 2: Stages (Total, Fresh, Production, QC, Ready to Dispatch) */}
+        {/* Row 2: Workflow Stages */}
         <div>
           <div className="flex items-center justify-between mb-1 px-0.5">
             <span className="text-[10px] font-bold tracking-wider uppercase text-muted flex items-center gap-1.5">
@@ -1504,32 +1536,12 @@ export function BodInternalPage() {
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
-            {/* Group the first 3 columns (spans 3 cols to align under Overdue + Today Due + Today Receipt = 3 cols) */}
-            <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-12 gap-2">
-              {/* 1. Fastrack (independent of date filter) */}
-              <div
-                onClick={() => setCardFilter(cardFilter === 'fastrack' ? 'all' : 'fastrack')}
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${cardFilter === 'fastrack' ? 'border-amber-500/60 ring-2 ring-amber-500/20 bg-amber-500/[0.04]' : 'border-border/80 hover:border-amber-500/40'}`}
-                title="Click to view all active Fastrack jobs (independent of date filter)"
-              >
-                <div className="flex items-center justify-between pb-1 border-b border-border/50">
-                  <div className="flex items-center gap-1">
-                    <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded">
-                      <Zap size={11} className="fill-amber-500 text-amber-500" />
-                    </div>
-                    <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider truncate">Fastrack</span>
-                  </div>
-                </div>
-                <div className="flex items-baseline justify-between mt-1 pt-0.5">
-                  <span className="text-lg font-bold text-amber-600 dark:text-amber-400 leading-none">{fastrackJobsCount}</span>
-                  <span className="text-[8px] text-amber-600/80 dark:text-amber-400/80 truncate">Active</span>
-                </div>
-              </div>
-
-              {/* 2. Add Job Stage (Awaiting CSV match) */}
+            {/* Group the first 3 columns (aligns under Overdue + Today Due + Today Receipt = 3 cols) */}
+            <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {/* 1. Add Job Stage (Awaiting CSV match) */}
               <div
                 onClick={() => setCardFilter(cardFilter === 'add_job_all' ? 'all' : 'add_job_all')}
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${cardFilter === 'add_job_all' ? 'border-blue-500/60 ring-2 ring-blue-500/20 bg-blue-500/[0.03]' : 'border-border/80 hover:border-blue-500/40'}`}
+                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[62px] ${cardFilter === 'add_job_all' ? 'border-blue-500/60 ring-2 ring-blue-500/20 bg-blue-500/[0.03]' : 'border-border/80 hover:border-blue-500/40'}`}
                 title="Jobs fetched from FTP awaiting CSV match"
               >
                 <div className="flex items-center justify-between pb-1 border-b border-border/50">
@@ -1546,9 +1558,9 @@ export function BodInternalPage() {
                 </div>
               </div>
 
-              {/* 3. Job Analysis */}
+              {/* 2. Job Analysis (Cyan / Sky) */}
               <div
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-6 min-h-[62px] ${cardFilter.startsWith('analysis') || cardFilter.startsWith('fresh') ? 'border-amber-500/60 ring-2 ring-amber-500/20' : 'border-border/80 hover:border-amber-500/30'}`}
+                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[62px] ${cardFilter.startsWith('analysis') || cardFilter.startsWith('fresh') ? 'border-cyan-500/60 ring-2 ring-cyan-500/20' : 'border-border/80 hover:border-cyan-500/30'}`}
               >
                 <div className="flex items-center justify-between pb-1 border-b border-border/50">
                   <div
@@ -1556,15 +1568,15 @@ export function BodInternalPage() {
                     className="flex items-center gap-1 cursor-pointer select-none group/title"
                     title="Show all Job Analysis jobs"
                   >
-                    <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded group-hover/title:bg-amber-500/20 transition-colors">
+                    <div className="p-0.5 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 rounded group-hover/title:bg-cyan-500/20 transition-colors">
                       <Plus size={11} />
                     </div>
-                    <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider group-hover/title:underline truncate">Job Analysis</span>
+                    <span className="text-[9px] font-bold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider group-hover/title:underline truncate">Job Analysis</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'analysis_all' ? 'all' : 'analysis_all')}
-                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'analysis_all' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'}`}
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'analysis_all' ? 'bg-cyan-600 text-white' : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20'}`}
                     title="Show all Job Analysis jobs"
                   >
                     Total {analysisTotal}
@@ -1575,12 +1587,12 @@ export function BodInternalPage() {
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'analysis_previous' ? 'all' : 'analysis_previous')}
-                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_previous' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_previous' ? 'bg-cyan-500/10 border-cyan-500/40 ring-1 ring-cyan-500/30' : 'bg-background/60 border-border/60 hover:border-cyan-500/30 hover:bg-accent/40'}`}
                     title="Job Analysis jobs added in previous days"
                   >
                     <div className="flex items-center justify-between gap-1">
-                      <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600/80 dark:text-amber-400/80 flex items-center gap-1 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 shrink-0"></span>
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-600/80 dark:text-cyan-400/80 flex items-center gap-1 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/60 shrink-0"></span>
                         Backlog
                       </span>
                       <span className="text-xs font-bold text-text shrink-0">{analysisPreviousJobs}</span>
@@ -1589,12 +1601,12 @@ export function BodInternalPage() {
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'analysis_today' ? 'all' : 'analysis_today')}
-                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_today' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_today' ? 'bg-cyan-500/10 border-cyan-500/40 ring-1 ring-cyan-500/30' : 'bg-background/60 border-border/60 hover:border-cyan-500/30 hover:bg-accent/40'}`}
                     title="Job Analysis jobs added today"
                   >
                     <div className="flex items-center justify-between gap-1">
-                      <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 flex items-center gap-1 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>
                         Today
                       </span>
                       <span className="text-xs font-bold text-text shrink-0">{analysisTodayJobs}</span>
@@ -1604,7 +1616,7 @@ export function BodInternalPage() {
               </div>
             </div>
 
-            {/* Container for Production & QC: exactly spanning 3 cols to fit under Date Filters (3 cols) */}
+            {/* Container for Production & QC: exactly spanning 3 cols to align under Date Filters (cols 4, 5, 6) */}
             <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
               {/* 3. Production: subdivided into YTS and In Progress */}
               <div
@@ -1742,6 +1754,80 @@ export function BodInternalPage() {
               <div className="flex items-baseline justify-between mt-1 pt-0.5">
                 <span className="text-lg font-bold text-text leading-none">{dispatchTotal}</span>
                 <span className="text-[8px] text-muted truncate">Awaiting FTP Delivery</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Row 3: Special Status & Priority (Fastrack, Hold, Support) */}
+        <div>
+          <div className="flex items-center justify-between mb-1 px-0.5">
+            <span className="text-[10px] font-bold tracking-wider uppercase text-muted flex items-center gap-1.5">
+              <AlertCircle size={12} className="text-amber-500" />
+              Special Attention & Status
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {/* 1. Fastrack */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'fastrack' ? 'all' : 'fastrack')}
+              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'fastrack' ? 'border-amber-500/60 ring-2 ring-amber-500/20 bg-amber-500/[0.04]' : 'border-border/80 hover:border-amber-500/40'}`}
+              title="Click to view all active Fastrack jobs"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg">
+                  <Zap size={16} className="fill-amber-500 text-amber-500" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider block">Fastrack</span>
+                  <span className="text-[9px] text-muted">Priority Delivery Required</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xl font-bold text-amber-600 dark:text-amber-400 leading-none">{fastrackJobsCount}</span>
+                <span className="text-[9px] text-amber-600/80 dark:text-amber-400/80 block mt-0.5">Active</span>
+              </div>
+            </div>
+
+            {/* 2. Hold (Fuchsia / Magenta theme - distinct from Overdue red, Fastrack amber, Support indigo) */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'hold' ? 'all' : 'hold')}
+              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'hold' ? 'border-fuchsia-500/60 ring-2 ring-fuchsia-500/20 bg-fuchsia-500/[0.04]' : 'border-border/80 hover:border-fuchsia-500/40'}`}
+              title="Click to view all active jobs on Hold (Customer Query)"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400 rounded-lg">
+                  <PauseCircle size={16} className="text-fuchsia-500" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-wider block">Hold</span>
+                  <span className="text-[9px] text-muted">Customer Query / Clarification</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xl font-bold text-fuchsia-600 dark:text-fuchsia-400 leading-none">{holdJobsCount}</span>
+                <span className="text-[9px] text-fuchsia-600/80 dark:text-fuchsia-400/80 block mt-0.5">Customer</span>
+              </div>
+            </div>
+
+            {/* 3. Support */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'support' ? 'all' : 'support')}
+              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'support' ? 'border-indigo-500/60 ring-2 ring-indigo-500/20 bg-indigo-500/[0.04]' : 'border-border/80 hover:border-indigo-500/40'}`}
+              title="Click to view all active jobs on Support (Internal Help)"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                  <HelpCircle size={16} className="text-indigo-500" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">Support</span>
+                  <span className="text-[9px] text-muted">Internal Technical Help</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400 leading-none">{supportJobsCount}</span>
+                <span className="text-[9px] text-indigo-600/80 dark:text-indigo-400/80 block mt-0.5">Internal</span>
               </div>
             </div>
           </div>
@@ -2073,6 +2159,8 @@ export function BodInternalPage() {
                       <Dropdown
                         options={[
                           { value: 'all', label: 'All Status' },
+                          { value: 'hold', label: 'Hold' },
+                          { value: 'support', label: 'Support' },
                           { value: 'fresh', label: 'Fresh' },
                           { value: 'yts', label: 'YTS' },
                           { value: 'in_progress', label: 'In-Progress' },

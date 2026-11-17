@@ -97,6 +97,7 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "is_fastrack": bool(job.is_fastrack),
             "fastrack_requested_date": job.fastrack_requested_date,
             "file_history": job.file_history or [],
+            "hold_support_history": job.hold_support_history or [],
             "epubcheck_report_filepath": job.epubcheck_report_filepath,
             "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
         }
@@ -153,6 +154,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "is_fastrack": bool(job.is_fastrack),
         "fastrack_requested_date": job.fastrack_requested_date,
         "file_history": job.file_history or [],
+        "hold_support_history": job.hold_support_history or [],
         "epubcheck_report_filepath": job.epubcheck_report_filepath,
         "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None,
         "has_history_csv": has_history_csv,
@@ -622,6 +624,136 @@ def toggle_fastrack(
 class BodDueDateRequest(BaseModel):
     due_date: str | None
     reason: str
+
+
+class BodHoldSupportRequest(BaseModel):
+    status: str # "Hold", "Support", or "Active"
+    description: str # query reason or resolution notes
+
+
+@router.put("/jobs/{job_id}/hold-support")
+def update_job_hold_support(
+    job_id: int,
+    payload: BodHoldSupportRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Update job status to Hold, Support, or resolve back to Active with reason and resolution history."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    target_status = payload.status.strip()
+    valid_statuses = ["Hold", "Support", "Active"]
+    if target_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+
+    description = payload.description.strip() if payload.description else ""
+    if not description:
+        raise HTTPException(status_code=400, detail="Description / query reason or resolution is required.")
+
+    fn = (getattr(current_user, "first_name", None) or "").strip()
+    ln = (getattr(current_user, "last_name", None) or "").strip()
+    if fn and ln:
+        full_name = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
+    else:
+        full_name = fn or ln or getattr(current_user, "username", getattr(current_user, "user_name", "Unknown"))
+
+    old_status = job.status or "Active"
+    job.status = target_status
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 1. Update hold_support_history
+    hold_history = list(job.hold_support_history) if job.hold_support_history else []
+
+    if target_status in ["Hold", "Support"]:
+        # If there was an open item of another type or same type, we resolve it first
+        for item in hold_history:
+            if item.get("status") == "Open":
+                item["status"] = "Resolved"
+                item["resolved_at"] = now_iso
+                item["resolved_by"] = full_name
+                item["resolution_notes"] = f"Superceded by {target_status}: {description}"
+
+        # Create new Hold / Support ticket/record
+        record_id = f"HS-{job.id}-{len(hold_history) + 1}"
+        new_record = {
+            "id": record_id,
+            "type": target_status,
+            "status": "Open",
+            "query_reason": description,
+            "created_by": full_name,
+            "created_at": now_iso,
+            "stage_at_hold": job.current_stage_name,
+            "resolution_notes": None,
+            "resolved_by": None,
+            "resolved_at": None,
+        }
+        hold_history.append(new_record)
+    elif target_status == "Active":
+        # Resolve any currently Open Hold or Support records
+        resolved_any = False
+        for item in hold_history:
+            if item.get("status") == "Open":
+                item["status"] = "Resolved"
+                item["resolved_at"] = now_iso
+                item["resolved_by"] = full_name
+                item["resolution_notes"] = description
+                resolved_any = True
+
+        if not resolved_any:
+            # If no open record was found (e.g. legacy), record a resolution entry
+            record_id = f"HS-{job.id}-{len(hold_history) + 1}"
+            hold_history.append({
+                "id": record_id,
+                "type": old_status if old_status in ["Hold", "Support"] else "Status Change",
+                "status": "Resolved",
+                "query_reason": "Previously marked as hold/support",
+                "created_by": full_name,
+                "created_at": now_iso,
+                "stage_at_hold": job.current_stage_name,
+                "resolution_notes": description,
+                "resolved_by": full_name,
+                "resolved_at": now_iso,
+            })
+
+    job.hold_support_history = hold_history
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(job, "hold_support_history")
+
+    # 2. Also keep timeline entry in due_date_history for unified auditing
+    history_entry = {
+        "field": "Status",
+        "old_status": old_status,
+        "new_status": target_status,
+        "reason": description,
+        "action": "Resolve" if target_status == "Active" else f"Report {target_status}",
+        "changed_by": full_name,
+        "timestamp": now_iso,
+        "changes": [
+            {
+                "field": "Status",
+                "old": old_status,
+                "new": target_status
+            }
+        ]
+    }
+    due_history = list(job.due_date_history) if job.due_date_history else []
+    due_history.append(history_entry)
+    job.due_date_history = due_history
+    flag_modified(job, "due_date_history")
+
+    db.commit()
+    db.refresh(job)
+
+    return {
+        "status": "success",
+        "job_id": job.id,
+        "new_status": job.status,
+        "hold_support_history": job.hold_support_history,
+        "due_date_history": job.due_date_history
+    }
+
 
 @router.put("/jobs/{job_id}/due-date")
 def update_due_date(
