@@ -12,7 +12,7 @@ from app.processing.manuscript_core.fixer import apply_fixes_targeted, apply_te_
 # Cache directory inside the app workspace
 RESULTS_DIR = Path(__file__).parent.parent.parent / "processing" / "results"
 # Bump when detectors change so cached scans made by older rule code are re-run.
-SCAN_ENGINE_VERSION = "2026.11-house-style-6"
+SCAN_ENGINE_VERSION = "2026.11-house-style-7"
 
 def _map_findings_to_legacy_issues(findings: list[dict]) -> list[dict]:
     """Maps rich occurrences back to legacy issues schema for backward compatibility."""
@@ -46,6 +46,7 @@ def scan_errors(
     file_id: int,
     logger,
     technical_editor_cls,
+    force_rescan: bool = False,
 ):
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
     if not file_record:
@@ -67,7 +68,7 @@ def scan_errors(
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = RESULTS_DIR / f"{file_id}_scan.json"
     
-    if cache_path.exists():
+    if not force_rescan and cache_path.exists():
         try:
             with open(cache_path, "r", encoding="utf-8") as cf:
                 cached = json.load(cf)
@@ -80,6 +81,8 @@ def scan_errors(
                 return cached
         except Exception as e:
             logger.warning(f"Failed to read cached scan results for file {file_id}: {e}")
+    elif force_rescan:
+        logger.info(f"Force re-scan requested for file {file_id}: bypassing cached scan results")
 
     # 2. Run manuscript_core Analyzer
     try:

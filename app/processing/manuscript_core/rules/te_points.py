@@ -553,18 +553,20 @@ def detect_date_format(seg: Segment) -> Iterable[Finding]:
 # Rule 19: inline list marker style
 # ---------------------------------------------------------------------------
 LIST_MARKER_PATTERNS = [
-    (re.compile(r"\([A-Z]\)"), "list_paren_alpha_uc"),
-    (re.compile(r"\([a-z]\)"), "list_paren_alpha_lc"),
-    (re.compile(r"\([IVX]+\)"), "list_paren_roman_uc"),
-    (re.compile(r"\([ivx]+\)"), "list_paren_roman_lc"),
-    (re.compile(r"\(\d+\)"), "list_paren_num"),
-    (re.compile(r"(?<!\()\b[A-Z]\)"), "list_alpha_close_uc"),
-    (re.compile(r"(?<!\()\b[a-z]\)"), "list_alpha_close_lc"),
-    (re.compile(r"\b[IVX]+\)"), "list_roman_close_uc"),
-    (re.compile(r"\b[ivx]+\)"), "list_roman_close_lc"),
-    (re.compile(r"(?<![.,\-–—\s\d/])\b[1-9]\)"), "list_num_close"),
+    (re.compile(r"(?<![^\s:;,])\([A-HJ-Z]\)(?=\s|\w)"), "list_paren_alpha_uc"),
+    (re.compile(r"(?<![^\s:;,])\([a-hj-z]\)(?=\s|\w)"), "list_paren_alpha_lc"),
+    (re.compile(r"(?<![^\s:;,])\([IVX]{1,4}\)(?=\s|\w)"), "list_paren_roman_uc"),
+    (re.compile(r"(?<![^\s:;,])\([ivx]{1,4}\)(?=\s|\w)"), "list_paren_roman_lc"),
+    (re.compile(r"(?<![^\s:;,])\([1-9]\d?\)(?=\s|\w)"), "list_paren_num"),
+    (re.compile(r"(?<![^\s:;,])[A-Z]\)(?=\s|\w)"), "list_alpha_close_uc"),
+    (re.compile(r"(?<![^\s:;,])[a-z]\)(?=\s|\w)"), "list_alpha_close_lc"),
+    (re.compile(r"(?<![^\s:;,])[IVX]{1,4}\)(?=\s|\w)"), "list_roman_close_uc"),
+    (re.compile(r"(?<![^\s:;,])[ivx]{1,4}\)(?=\s|\w)"), "list_roman_close_lc"),
+    (re.compile(r"(?<![^\s:;,])[1-9]\d?\)"), "list_num_close"),
 ]
 def detect_list_marker(seg: Segment) -> Iterable[Finding]:
+    if seg.region in ("references", "front") or seg.source == "references":
+        return
     for pat, rule_id in LIST_MARKER_PATTERNS:
         for m in iter_unmasked_matches(pat, seg.text, seg.mask):
             yield _f(seg, m, "te_point", rule_id, "Inline list marker style", "list_marker_style", pat=pat)
@@ -915,7 +917,7 @@ _COMMON_UPPER_STOP_WORDS = {
 _ADDITIONAL_KNOWN_ACRONYMS = {
     'DNA', 'RNA', 'COVID', 'COVID-19', 'AIDS', 'USEPA', 'TBD', 'N/A', 'FAQ', 'IQ',
     'STEM', 'EPA', 'EBP', 'EHR', 'EMR', 'QI', 'DNP', 'AACN', 'CDC', 'IRB', 'HRSA',
-    'SUNY', 'AMEE', 'BMJ', 'MMWR', 'CFIR', 'CIPP', 'PDSA', 'PRISM', 'ROI', 'NNE', 'AIM'
+    'SUNY', 'AMEE', 'BMJ', 'MMWR', 'CFIR', 'CIPP', 'PDSA', 'PRISM', 'ROI', 'NNE', 'AIM', 'WHO'
 }
 
 def is_heading_segment(seg: Segment) -> bool:
@@ -952,10 +954,10 @@ def detect_abbreviations(seg: Segment) -> Iterable[Finding]:
 
     for m in iter_unmasked_matches(_ABBREV_PAT, seg.text, seg.mask):
         word = m.group(0)
-        if word in _COMMON_UPPER_STOP_WORDS:
-            continue
 
         if is_head or is_all_caps:
+            if word in _COMMON_UPPER_STOP_WORDS and word not in dict_abbrs:
+                continue
             if word not in dict_abbrs and word not in _ADDITIONAL_KNOWN_ACRONYMS:
                 start, end = m.start(), m.end()
                 is_parenthetical = (
@@ -964,6 +966,9 @@ def detect_abbreviations(seg: Segment) -> Iterable[Finding]:
                 )
                 if not is_parenthetical:
                     continue
+        else:
+            if word in _COMMON_UPPER_STOP_WORDS and word not in dict_abbrs:
+                continue
 
         yield _f(seg, m, "te_point", rule_id, label, "abbreviation_style", pat=_ABBREV_PAT)
 # ---------------------------------------------------------------------------

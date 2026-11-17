@@ -12,8 +12,18 @@ import {
   Eye,
   FileCode,
   CheckCircle2,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+
+// Hidden on request: display-mode switch (Highlights / Track Changes / Clean View),
+// Batch Auto-Fix, Workspace / Overview, Apply & Export and the fullscreen button.
+// Fixes are applied from the sidebar's "Apply N Selected Changes". Set to true to restore.
+const SHOW_HEADER_WORKBENCH = false;
+// Also hidden on request: the "N already in house style (hidden)" pill and the header
+// right-dock toggle (the sidebar keeps its own collapse button).
+const SHOW_COMPLIANT_PILL = false;
+const SHOW_DOCK_TOGGLE = false;
 
 interface TechnicalReviewHeaderProps {
   filename: string;
@@ -39,6 +49,10 @@ interface TechnicalReviewHeaderProps {
   compliantHidden?: number;
   /** Where the rules came from: "stylesheet.json" | "database" | "preset". */
   stylesheetSource?: string | null;
+  onReloadRules?: () => void;
+  isReloadingRules?: boolean;
+  onRescanChapter?: () => void;
+  isRescanning?: boolean;
 }
 
 export function TechnicalReviewHeader({
@@ -63,6 +77,10 @@ export function TechnicalReviewHeader({
   rightSidebarCollapsed = false,
   compliantHidden = 0,
   stylesheetSource = null,
+  onReloadRules,
+  isReloadingRules = false,
+  onRescanChapter,
+  isRescanning = false,
 }: TechnicalReviewHeaderProps) {
   const percent =
     totalFindings > 0 ? Math.min(100, Math.round((reviewedCount / totalFindings) * 100)) : 0;
@@ -99,13 +117,24 @@ export function TechnicalReviewHeader({
             <span className="truncate max-w-[180px]" title={stylesheetSource ? `Rules from ${stylesheetSource}` : undefined}>
               {activeStylesheetName}
             </span>
+            {onReloadRules && (
+              <button
+                type="button"
+                onClick={onReloadRules}
+                disabled={isReloadingRules}
+                className="ml-1 p-0.5 text-emerald-700 hover:text-emerald-950 hover:bg-emerald-200/70 rounded transition cursor-pointer"
+                title="Reload updated rules from active stylesheet"
+              >
+                <RefreshCw className={`w-3 h-3 ${isReloadingRules ? "animate-spin text-emerald-800" : ""}`} />
+              </button>
+            )}
           </div>
         ) : (
           <div className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-medium shrink-0">
             <span>No Active Stylesheet</span>
           </div>
         )}
-        {compliantHidden > 0 && (
+        {SHOW_COMPLIANT_PILL && compliantHidden > 0 && (
           <div
             className="hidden lg:inline-flex items-center px-2.5 py-0.5 rounded-full bg-slate-50 border border-slate-200 text-slate-600 text-[11px] font-medium shrink-0"
             title="Occurrences already in the selected house style are not listed"
@@ -137,6 +166,19 @@ export function TechnicalReviewHeader({
 
       {/* Right: Display Modes & Workbench Actions */}
       <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+        {onRescanChapter && (
+          <button
+            type="button"
+            onClick={onRescanChapter}
+            disabled={isRescanning}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 hover:text-indigo-900 text-xs font-semibold rounded-lg shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+            title="Re-scan chapter manuscript from DOCX to refresh findings"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isRescanning ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">{isRescanning ? "Scanning..." : "Re-scan Chapter"}</span>
+          </button>
+        )}
+        {SHOW_HEADER_WORKBENCH && (<>
         {/* Three Display Modes Switcher (Highlights / Diff / Clean) */}
         {activeTab === "reviewer" && onDisplayModeChange && (
           <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
@@ -248,9 +290,10 @@ export function TechnicalReviewHeader({
         >
           {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </button>
+        </>)}
 
         {/* Toggle Right Dock Collapse */}
-        {onToggleRightSidebar && (
+        {SHOW_DOCK_TOGGLE && onToggleRightSidebar && (
           <button
             type="button"
             onClick={onToggleRightSidebar}

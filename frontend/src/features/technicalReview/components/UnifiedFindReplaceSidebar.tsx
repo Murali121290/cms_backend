@@ -22,6 +22,9 @@ import {
   ShieldAlert,
   ArrowRight,
   Sparkles,
+  Check,
+  Pencil,
+  Highlighter,
 } from "lucide-react";
 import { FindReplaceMasterCard } from "./FindReplaceMasterCard";
 import { ChangesReviewPanel } from "@/features/editor";
@@ -80,6 +83,13 @@ export interface UnifiedFindReplaceSidebarProps {
   onActiveTabChange?: (tab: RightDockTab) => void;
   rules?: CERule[];
   onQuickFixFinding?: (finding: any) => void;
+  onOpenInlinePopover?: (idx: number) => void;
+  onHighlightFinding?: (finding: any) => void;
+  onIgnoreFinding?: (finding: any) => void;
+  onReloadRules?: () => void;
+  isReloadingRules?: boolean;
+  onRescanChapter?: () => void;
+  isRescanning?: boolean;
 }
 
 export function UnifiedFindReplaceSidebar({
@@ -131,6 +141,13 @@ export function UnifiedFindReplaceSidebar({
   onActiveTabChange,
   rules = [],
   onQuickFixFinding,
+  onOpenInlinePopover,
+  onHighlightFinding,
+  onIgnoreFinding,
+  onReloadRules,
+  isReloadingRules = false,
+  onRescanChapter,
+  isRescanning = false,
 }: UnifiedFindReplaceSidebarProps) {
   const [internalTab, setInternalTab] = useState<RightDockTab>("findings");
   const activeTab = externalTab ?? internalTab;
@@ -147,13 +164,20 @@ export function UnifiedFindReplaceSidebar({
     let redFlags = 0;
     let eponyms = 0;
     let houseStyle = 0;
+    let abbreviations = 0;
     let inSsCount = 0;
 
     findings.forEach((f: any) => {
       const isRf = f.ce_rule_no === 125 || f.category === "red_flag" || f.rule_id === "red_flag";
       const isEp = f.ce_rule_no === 124 || f.rule_id === "eponyms";
+      const isAb =
+        f.ce_rule_no === 31 ||
+        f.rule_id?.startsWith("abbrev_") ||
+        (f.rule_label && f.rule_label.toLowerCase().includes("abbrev"));
+
       if (isRf) redFlags++;
       else if (isEp) eponyms++;
+      else if (isAb) abbreviations++;
       else houseStyle++;
 
       if (f.in_stylesheet === true) inSsCount++;
@@ -164,6 +188,7 @@ export function UnifiedFindReplaceSidebar({
       redFlags,
       eponyms,
       houseStyle,
+      abbreviations,
       in_stylesheet: inSsCount,
     };
   }, [findings]);
@@ -346,16 +371,29 @@ export function UnifiedFindReplaceSidebar({
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Search & Category Filter Controls */}
           <div className="p-3 border-b border-slate-200 bg-white space-y-2 shrink-0">
-            {/* Search Input */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search occurrences, context, or rules..."
-                value={searchTerm}
-                onChange={(e) => onSearchChange(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white transition-all"
-              />
+            {/* Search Input and Action Buttons */}
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search occurrences, context, or rules..."
+                  value={searchTerm}
+                  onChange={(e) => onSearchChange(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white transition-all"
+                />
+              </div>
+              {onReloadRules && (
+                <button
+                  type="button"
+                  onClick={onReloadRules}
+                  disabled={isReloadingRules}
+                  className="p-1.5 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 text-slate-500 hover:text-emerald-700 rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                  title="Reload updated rules from active stylesheet"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isReloadingRules ? "animate-spin text-emerald-600" : ""}`} />
+                </button>
+              )}
             </div>
 
             {/* Category Filter Chips */}
@@ -370,6 +408,17 @@ export function UnifiedFindReplaceSidebar({
                 }`}
               >
                 All ({counts.all})
+              </button>
+              <button
+                type="button"
+                onClick={() => onCategoryFilterChange("abbreviations")}
+                className={`px-2.5 py-0.5 rounded-full transition-all cursor-pointer whitespace-nowrap font-bold ${
+                  categoryFilter === "abbreviations"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200"
+                }`}
+              >
+                Abbreviations ({counts.abbreviations})
               </button>
               <button
                 type="button"
@@ -398,7 +447,7 @@ export function UnifiedFindReplaceSidebar({
                 onClick={() => onCategoryFilterChange("style")}
                 className={`px-2.5 py-0.5 rounded-full transition-all cursor-pointer whitespace-nowrap ${
                   categoryFilter === "style"
-                    ? "bg-indigo-600 text-white font-bold"
+                    ? "bg-sky-600 text-white font-bold"
                     : "bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200"
                 }`}
               >
@@ -448,39 +497,104 @@ export function UnifiedFindReplaceSidebar({
                 const isSelected = selectedIndex === idx;
                 const isRedFlag = f.ce_rule_no === 125 || f.category === "red_flag" || f.rule_id === "red_flag";
                 const isEponym = f.ce_rule_no === 124 || f.rule_id === "eponyms";
+                const isAbbrev =
+                  f.ce_rule_no === 31 ||
+                  f.rule_id?.startsWith("abbrev_") ||
+                  (f.rule_label && f.rule_label.toLowerCase().includes("abbrev"));
+
+                const catStyle = isAbbrev
+                  ? { border: "border-l-indigo-500", text: "text-indigo-600", bg: "bg-indigo-50/30" }
+                  : isRedFlag
+                  ? { border: "border-l-rose-500", text: "text-rose-700", bg: "bg-rose-50/30" }
+                  : isEponym
+                  ? { border: "border-l-amber-500", text: "text-amber-800", bg: "bg-amber-50/30" }
+                  : { border: "border-l-sky-500", text: "text-sky-700", bg: "bg-sky-50/30" };
+
+                const displayCategory = isAbbrev
+                  ? "ABBREVIATIONS"
+                  : isRedFlag
+                  ? "RED FLAG"
+                  : isEponym
+                  ? "EPONYM"
+                  : f.ce_rule_name || f.rule_label || "HOUSE STYLE";
+
+                let problemLabel: string | null = f.problem_label || null;
+                if (isAbbrev && !problemLabel) {
+                  if (f.ce_status === "error" || f.ce_rule_name?.includes("First-Use") || f.replacement) {
+                    problemLabel = "FIRST USE";
+                  } else if (f.ce_status === "compliant") {
+                    problemLabel = "LATER USE";
+                  }
+                }
+                if (isRedFlag && !problemLabel) {
+                  problemLabel = "DO NOT USE";
+                }
 
                 return (
                   <div
                     key={`${f.para_index}-${f.match_start}-${idx}`}
                     onClick={() => {
                       onSelectIndex(idx);
-                      handleTabChange("inspector");
                     }}
-                    className={`p-3 rounded-xl border transition-all cursor-pointer text-xs ${
+                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer border-l-4 ${catStyle.border} ${
                       isSelected
-                        ? "bg-white border-indigo-500 shadow-sm ring-1 ring-indigo-500"
-                        : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-2xs"
+                        ? "bg-white border-indigo-400 shadow-md ring-2 ring-indigo-400/50"
+                        : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-xs"
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`font-mono font-bold text-[10px] px-1.5 py-0.2 rounded border ${
-                            isRedFlag
-                              ? "bg-rose-100 text-rose-800 border-rose-300"
-                              : isEponym
-                              ? "bg-amber-100 text-amber-800 border-amber-300"
-                              : "bg-sky-100 text-sky-800 border-sky-300"
-                          }`}
-                        >
-                          {f.ce_rule_no ? `R${f.ce_rule_no}` : f.rule_label || "Rule"}
+                    {/* Card Header: Category + Problem Label + Rule Badge + Para */}
+                    <div className="flex items-center justify-between gap-1.5 mb-2">
+                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                        <span className={`text-[11px] font-bold uppercase tracking-wide truncate ${catStyle.text}`}>
+                          {displayCategory}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-medium">
-                          ¶ {f.para_index}
+                        {problemLabel && (
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider border ${
+                              isRedFlag
+                                ? "bg-rose-100 text-rose-700 border-rose-300"
+                                : isAbbrev && problemLabel === "FIRST USE"
+                                ? "bg-indigo-100 text-indigo-800 border-indigo-200"
+                                : "bg-slate-100 text-slate-700 border-slate-200"
+                            }`}
+                          >
+                            {problemLabel}
+                          </span>
+                        )}
+                        <span className="font-mono text-[9.5px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 font-semibold">
+                          {f.ce_rule_no ? `R${f.ce_rule_no}` : f.rule_id || "R"}
                         </span>
                       </div>
 
-                      {/* Quick Fix Button */}
+                      <span className="text-[11px] text-slate-400 font-mono shrink-0">
+                        Para {f.para_index !== undefined ? f.para_index + 1 : 1}
+                      </span>
+                    </div>
+
+                    {/* Diff Row: Surface -> Replacement */}
+                    <div className="flex items-center gap-2 flex-wrap font-mono text-xs mb-2">
+                      <span className="font-semibold text-rose-600 line-through bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100/60 truncate max-w-[150px]">
+                        {f.surface}
+                      </span>
+                      {(f.replacement || f.suggestion) && (
+                        <>
+                          <span className="text-slate-400 font-normal">→</span>
+                          <span className="font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60 truncate max-w-[180px]">
+                            {f.replacement || f.suggestion}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Context sentence */}
+                    {f.context && (
+                      <p className="text-[11px] text-slate-600 leading-snug line-clamp-2 mb-2.5 font-normal">
+                        {f.context}
+                      </p>
+                    )}
+
+                    {/* Action Buttons Bar: Accept | Edit | Highlight | Ignore | Inspect */}
+                    <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100 flex-wrap">
                       {(f.replacement || f.suggestion) && !isRedFlag && (
                         <button
                           type="button"
@@ -490,45 +604,70 @@ export function UnifiedFindReplaceSidebar({
                             if (onQuickFixFinding) onQuickFixFinding(f);
                             else onReplaceAndNext(f.replacement || f.suggestion, true);
                           }}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors flex items-center gap-1 cursor-pointer"
-                          title="Apply house style fix in 1-click"
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                          title="Accept and apply house style replacement into document"
                         >
-                          <Zap className="w-2.5 h-2.5 text-emerald-600" />
-                          <span>Quick Fix</span>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Accept</span>
                         </button>
                       )}
 
-                      {f.ia_element && (
-                        <span className="text-[10px] font-bold text-sky-800 bg-sky-50 border border-sky-200 px-1.5 py-0.2 rounded truncate max-w-[130px]" title={`IA Rule: ${f.ia_element} (${f.ia_pattern || f.ia_subtype})`}>
-                          IA: {f.ia_element}
-                        </span>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectIndex(idx);
+                          if (onOpenInlinePopover) onOpenInlinePopover(idx);
+                        }}
+                        className="px-2.5 py-1 text-xs font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Edit occurrence text via inline popover"
+                      >
+                        <Pencil className="w-3 h-3 text-slate-500" />
+                        <span>Edit</span>
+                      </button>
 
-                      {isRedFlag && (
-                        <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded">
-                          AQ Required
-                        </span>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectIndex(idx);
+                          if (onHighlightFinding) onHighlightFinding(f);
+                          else onHighlightAndNext();
+                        }}
+                        className="px-2.5 py-1 text-xs font-medium rounded-lg border border-amber-200 bg-amber-50/60 hover:bg-amber-100 text-amber-800 flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Mark occurrence for manual review"
+                      >
+                        <Highlighter className="w-3 h-3 text-amber-600" />
+                        <span>Highlight</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectIndex(idx);
+                          if (onIgnoreFinding) onIgnoreFinding(f);
+                          else onSkipNext();
+                        }}
+                        className="px-2 py-1 text-xs font-medium text-slate-400 hover:text-slate-600 ml-auto transition-colors cursor-pointer"
+                        title="Ignore / skip this finding"
+                      >
+                        Ignore
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectIndex(idx);
+                          handleTabChange("inspector");
+                        }}
+                        className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+                        title="Open in Inspector for Checklist Options"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-
-                    {/* Term Replacement Comparison */}
-                    <div className="flex items-center gap-1.5 font-mono text-[11px] mb-1">
-                      <span className="text-rose-700 line-through bg-rose-50 px-1 py-0.2 rounded font-semibold truncate max-w-[150px]">
-                        {f.surface}
-                      </span>
-                      {(f.replacement || f.suggestion) && (
-                        <>
-                          <span className="text-slate-400">→</span>
-                          <span className="text-emerald-800 bg-emerald-50 px-1 py-0.2 rounded font-bold truncate max-w-[150px]">
-                            {f.replacement || f.suggestion}
-                          </span>
-                        </>
-                      )}
-                    </div>
-
-                    <p className="text-[11px] text-slate-500 leading-snug truncate" title={f.suggestion || f.rule_label}>
-                      {f.suggestion ? `Suggestion: "${f.suggestion}"` : f.rule_label || "Formatting deviates from house style standard."}
-                    </p>
                   </div>
                 );
               })
@@ -591,6 +730,7 @@ export function UnifiedFindReplaceSidebar({
               onSelectedRuleFilterChange?.(selectedRuleFilter === rule ? null : rule)
             }
             isFilteredByRule={Boolean(selectedRuleFilter)}
+            onOpenInlinePopover={onOpenInlinePopover}
           />
 
           <div className="text-center pt-2">

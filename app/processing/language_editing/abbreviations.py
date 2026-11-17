@@ -193,25 +193,59 @@ def _choose_meaning_for_occurrence(
 def resolve_abbreviation_meaning(
     text: str, abbr: str, position: int,
     *, rule_overrides: Optional[dict[str, dict[str, Any]]] = None,
+    allow_all: bool = True,
 ) -> Optional[str]:
     """Convenience for callers / tests: return the chosen expansion string
     for ``abbr`` at ``position`` in ``text``, or None when ambiguous.
 
-    Only consults Context_Rules + eligibility filters — mirrors what the
-    engine does internally when building document state.
+    Resolves directly from abbreviations_list.json and abbreviations_context_rules.json.
     """
     all_by_abbr = _abbr_entries_by_abbr()
+    raw_entries = all_by_abbr.get(abbr, [])
+    if not raw_entries:
+        return None
+
     entries = [
-        e for e in all_by_abbr.get(abbr, [])
+        e for e in raw_entries
         if _is_entry_eligible(e, audience="general")
         and not _rule_disabled_by_override(e.id, rule_overrides)
     ]
+    if not entries and allow_all:
+        entries = [
+            e for e in raw_entries
+            if not _rule_disabled_by_override(e.id, rule_overrides)
+        ]
     if not entries:
         return None
+
+    if len(entries) == 1:
+        return entries[0].expansion
+
     chosen, _ = _choose_meaning_for_occurrence(
         text, abbr, position, position + len(abbr), entries,
     )
-    return chosen.expansion if chosen else None
+    if chosen:
+        return chosen.expansion
+    return entries[0].expansion if allow_all else None
+
+
+def get_abbreviation_expansion(
+    abbr: str,
+    context: str = "",
+    pos: int = 0,
+    *,
+    author_defs: Optional[dict[str, str]] = None,
+    rule_overrides: Optional[dict[str, dict[str, Any]]] = None,
+) -> Optional[str]:
+    """Return expansion for an abbreviation, checking author definitions,
+    abbreviations_list.json, and abbreviations_context_rules.json."""
+    if author_defs and abbr in author_defs:
+        return re.sub(r'^(?:The|the|A|a|An|an)\s+', '', author_defs[abbr]).strip()
+
+    exp = resolve_abbreviation_meaning(context, abbr, pos, rule_overrides=rule_overrides, allow_all=True)
+    if exp:
+        return re.sub(r'^(?:The|the|A|a|An|an)\s+', '', exp).strip()
+    return None
 
 
 # ---------------------------------------------------------------------------

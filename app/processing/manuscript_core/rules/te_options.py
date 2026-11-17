@@ -364,6 +364,45 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
     if rule_id.startswith("versus_"):
         return _unless_same(_opts("vs.", "vs", "versus", "v."), s)
 
+    # R31 First-Use Abbreviation Definition / R34 Heading / R81 Table
+    if rule_id in ("abbrev_body", "abbrev_heading", "abbrev_table", "abbrev_caption"):
+        abbr = s.strip()
+        expansion = None
+        try:
+            from app.processing.language_editing.abbreviations import (
+                get_abbreviation_expansion,
+                _dnu_data,
+            )
+            # 1. Check Do Not Use notations (e.g. 10 U, QD, etc.)
+            dnu_rules = _dnu_data().get("rules", [])
+            for dnu in dnu_rules:
+                pat = dnu.get("pattern")
+                if pat and re.search(pat, m.string):
+                    sugg = dnu.get("suggestion_1") or dnu.get("intended_meaning")
+                    if sugg:
+                        return _opts(sugg, None, QUERY)
+
+            # 2. Get abbreviation expansion from language editing module
+            expansion = get_abbreviation_expansion(abbr, m.string, m.start())
+        except Exception:
+            expansion = None
+
+        if expansion:
+            clean_exp = re.sub(r'^(?:The|the|A|a|An|an)\s+', '', expansion).strip()
+            if rule_id == "abbrev_heading":
+                return _opts(abbr, clean_exp, QUERY)
+            elif rule_id == "abbrev_table":
+                return _opts(f"{abbr}: {clean_exp}", clean_exp, QUERY)
+            else:
+                return _opts(f"{clean_exp} ({abbr})", None, clean_exp)
+        else:
+            if rule_id == "abbrev_heading":
+                return _opts(abbr, None, QUERY)
+            elif rule_id == "abbrev_table":
+                return _opts(abbr, None, QUERY)
+            else:
+                return _opts(None, None, None)
+
     # R4 unit abbreviation consistency: symbol after a number. Option 2 (the form the
     # manuscript uses most) is filled in document-wide by the analyzer.
     if rule_id.startswith("unit_") and rule_id.endswith("_spelled"):

@@ -33,7 +33,7 @@ def test_catalog_has_all_72_rules():
     workbook = [r for r in rules if r["sno"] < 92]
     house_style = [r for r in rules if r["sno"] >= 92]
     assert len(workbook) == 72
-    assert len(house_style) == 34  # ce_rules_extensions.NEW_RULES (92-125), off by default
+    assert len(house_style) == 46  # ce_rules_extensions.NEW_RULES (92-137), off by default
     assert all(not r["default_enabled"] for r in house_style)
     assert all(len(r["options"]) >= 3 for r in rules)
     assert all(len(r["forms"]) == len(r["options"]) for r in rules)

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     INDESIGN_SERVER_URL: str = "http://10.1.6.24:5555"
     WORD_TO_XML_SERVER_URL: str = ""
     WORD_TO_XML_TIMEOUT_SECONDS: int = 3600
+    PDF2XML_API_URL: str = "http://10.1.6.181:8087/convert"
+    PDF2XML_TIMEOUT_SECONDS: int = 1800
+    PDF2XML_CONNECT_TIMEOUT_SECONDS: int = 30
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:8085",
         "http://localhost:8080",

@@ -776,6 +776,46 @@ def document_pass(findings: list[Finding], segments: list[Segment]) -> list[Find
         else:
             seen_marks.add(key)
             f.option_replacements = {**f.option_replacements, "2": None}
+
+    # Author-defined abbreviations across segments (e.g. Doctor of Nursing Practice (DNP))
+    author_defs: dict[str, str] = {}
+    def_rx = re.compile(r'\b([A-Z][A-Za-z0-9\-]+(?:\s+[A-Za-z0-9\-]+){1,6})\s*\(([A-Z]{2,})\)')
+    for seg in segments:
+        for m in def_rx.finditer(seg.text):
+            exp_text = re.sub(r'^(?:The|the|A|a|An|an)\s+', '', m.group(1)).strip()
+            abbr_text = m.group(2).strip()
+            if abbr_text not in author_defs:
+                author_defs[abbr_text] = exp_text
+
+    # R31: Abbreviation first-use per chapter.
+    # The first mention in a chapter carries the expansion in Option 1; subsequent
+    # mentions keep the abbreviation (Option 1 = None, compliant per house style).
+    seen_abbr_first_use: set[tuple[int, str]] = set()
+    for f in ordered:
+        if f.rule_id != "abbrev_body":
+            continue
+        abbr = f.surface
+        key = (f.chapter_index, abbr)
+
+        # If author defined it in manuscript and Option 1 has no expansion yet:
+        if abbr in author_defs and not (f.option_replacements and f.option_replacements.get("1")):
+            exp = author_defs[abbr]
+            f.option_replacements = {**f.option_replacements, "1": f"{exp} ({abbr})", "2": None, "3": exp}
+
+        if key in seen_abbr_first_use:
+            # Subsequent occurrence in this chapter: keep abbreviation under Option 1
+            f.option_replacements = {**f.option_replacements, "1": None}
+            f.ce_status = "compliant"
+            f.suggestion = None
+            f.replacement = None
+        else:
+            # First occurrence in this chapter
+            seen_abbr_first_use.add(key)
+            opt1 = (f.option_replacements or {}).get("1")
+            if opt1 and opt1 != abbr:
+                f.suggestion = opt1
+                f.replacement = opt1
+                f.ce_status = "error"
     # R119: avoid chapters with only one or two H1 headings.
     h1: dict[int, list[Segment]] = defaultdict(list)
     for seg in segments:

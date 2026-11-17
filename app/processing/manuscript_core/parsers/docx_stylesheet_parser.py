@@ -101,15 +101,22 @@ class DocxStylesheetParser:
             res = ia_row_to_rule(el, sub, pat)
             if res:
                 sno, opt = res
-                if sno not in matched_ce_rules:
-                    matched_ce_rules[sno] = {
+                sno_str = str(sno)
+                if sno_str not in matched_ce_rules:
+                    matched_ce_rules[sno_str] = self._rule_entry(int(sno), {
                         "option": opt or 1,
                         "enabled": True,
                         "severity": "Major",
-                        "basis": f"From IA pattern '{pat}'",
-                    }
-                elif opt is not None and "option" not in matched_ce_rules[sno]:
-                    matched_ce_rules[sno]["option"] = opt
+                        "confidence": row.get("confidence", 0.95),
+                        "source_label": f"IA pattern: {el} › {pat}",
+                        "source_value": f"{el} > {sub}: {pat}",
+                        "explanation": f"From IA pattern '{pat}'",
+                    })
+                elif opt is not None and "option" not in matched_ce_rules[sno_str]:
+                    matched_ce_rules[sno_str]["option"] = opt
+
+        # Ensure all rule keys are strictly strings for Pydantic schema validation
+        matched_ce_rules = {str(k): v for k, v in matched_ce_rules.items()}
 
         style_profile: Dict[str, Any] = {}
         if preset_id == "springer":
@@ -244,6 +251,7 @@ class DocxStylesheetParser:
             profile.setdefault("list_style", "narrative")
         profile["source_doc"] = {"title": title, "layout": "springer_sectioned"}
 
+        matched = {str(k): v for k, v in matched.items()}
         from_sheet = sum(1 for r in matched.values() if not r["source_label"].startswith("Springer default"))
         return {
             "metadata": {"Title": title, "Customer": "Springer Publishing" if is_springer else ""},

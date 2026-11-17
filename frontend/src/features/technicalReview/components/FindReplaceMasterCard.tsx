@@ -8,6 +8,13 @@ import {
   Sparkles,
 } from "lucide-react";
 
+// Inspector sections: "IA Rule / Suggestion" box,
+// Style Tip + "Checklist R… options" list, and Live Diff Preview.
+// Hidden on request to keep the inspector compact and uncluttered.
+const SHOW_IA_RULE_GUIDANCE = false;
+const SHOW_CHECKLIST_OPTIONS = false;
+const SHOW_LIVE_DIFF_PREVIEW = false;
+
 export interface FindReplaceMasterCardProps {
   activeOccurrence: any | null;
   totalFindings: number;
@@ -23,6 +30,7 @@ export interface FindReplaceMasterCardProps {
   onBatchFixRule?: (ruleId: string, replacement: string) => void;
   onFilterByRule?: (ruleKey: string) => void;
   isFilteredByRule?: boolean;
+  onOpenInlinePopover?: (idx: number) => void;
 }
 
 export function FindReplaceMasterCard({
@@ -40,6 +48,7 @@ export function FindReplaceMasterCard({
   onBatchFixRule,
   onFilterByRule,
   isFilteredByRule = false,
+  onOpenInlinePopover,
 }: FindReplaceMasterCardProps) {
   const [replaceSuccess, setReplaceSuccess] = useState<string | null>(null);
 
@@ -176,9 +185,22 @@ export function FindReplaceMasterCard({
         <div className="space-y-1">
           <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-500">
             <span>1. Find (Surface)</span>
-            <span className="font-mono text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-              "{surface}"
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                "{surface}"
+              </span>
+              {onOpenInlinePopover && (
+                <button
+                  type="button"
+                  onClick={() => onOpenInlinePopover(selectedIndex)}
+                  className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Open inline suggestion popover on canvas"
+                >
+                  <Sparkles className="w-2.5 h-2.5 text-violet-600" />
+                  <span>Inline Edit</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs leading-relaxed text-slate-700 font-medium">
@@ -209,7 +231,7 @@ export function FindReplaceMasterCard({
         {/* Section 2: REPLACE (Field + Live Dropdown Options) */}
         <div className="space-y-2">
           {/* IA Rule & Suggestion Guidance */}
-          {(iaElement || suggestion) && (
+          {SHOW_IA_RULE_GUIDANCE && (iaElement || suggestion) && (
             <div className="p-2.5 bg-sky-50/80 border border-sky-200 rounded-lg text-xs space-y-1.5 shadow-2xs">
               <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-sky-800">
                 <span className="flex items-center gap-1.5">
@@ -315,7 +337,7 @@ export function FindReplaceMasterCard({
             </div>
           )}
 
-          {ceOptions.length > 0 && (
+          {SHOW_CHECKLIST_OPTIONS && ceOptions.length > 0 && (
             <div className="space-y-1.5 pt-1">
               {ceRuleNo === 6 && (
                 <div className="text-[10px] bg-amber-50 border border-amber-200 text-amber-900 rounded p-1.5 flex items-center gap-1">
@@ -392,32 +414,34 @@ export function FindReplaceMasterCard({
         </div>
 
         {/* Section 3: Visual Diff Preview */}
-        <div className="border border-slate-200 rounded-lg overflow-hidden text-xs">
-          <div className="bg-slate-50 px-2.5 py-1 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex justify-between">
-            <span>3. Live Diff Preview</span>
-            <span>{actionType === "fix" ? "Track Changes" : "Highlight Only"}</span>
-          </div>
-          <div className="p-2 bg-slate-50/50 font-mono text-[11px] leading-relaxed flex items-center gap-1.5 flex-wrap">
-            <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded line-through">
-              {surface}
-            </span>
-            <span className="text-slate-400">→</span>
-            {actionType === "fix" && effectiveReplacement ? (
-              <span className="bg-emerald-100 text-emerald-900 font-bold px-1.5 py-0.5 rounded">
-                {effectiveReplacement}
+        {SHOW_LIVE_DIFF_PREVIEW && (
+          <div className="border border-slate-200 rounded-lg overflow-hidden text-xs">
+            <div className="bg-slate-50 px-2.5 py-1 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex justify-between">
+              <span>3. Live Diff Preview</span>
+              <span>{actionType === "fix" ? "Track Changes" : "Highlight Only"}</span>
+            </div>
+            <div className="p-2 bg-slate-50/50 font-mono text-[11px] leading-relaxed flex items-center gap-1.5 flex-wrap">
+              <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded line-through">
+                {surface}
               </span>
-            ) : (
-              <span className="bg-amber-100 text-amber-900 font-medium px-1.5 py-0.5 rounded">
-                [Highlight Marker]
-              </span>
-            )}
+              <span className="text-slate-400">→</span>
+              {actionType === "fix" && effectiveReplacement ? (
+                <span className="bg-emerald-100 text-emerald-900 font-bold px-1.5 py-0.5 rounded">
+                  {effectiveReplacement}
+                </span>
+              ) : (
+                <span className="bg-amber-100 text-amber-900 font-medium px-1.5 py-0.5 rounded">
+                  [Highlight Marker]
+                </span>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Section 4: Action Resolution Toggle */}
+        {/* Action Resolution Toggle */}
         <div className="space-y-1.5">
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-            4. Action Resolution
+            {SHOW_LIVE_DIFF_PREVIEW ? "4. Action Resolution" : "3. Action Resolution"}
           </span>
           <div className="grid grid-cols-2 gap-2">
             <button

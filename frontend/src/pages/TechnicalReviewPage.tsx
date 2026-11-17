@@ -20,6 +20,7 @@ import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { useTechnicalApply } from "@/features/technicalReview/useTechnicalApply";
 import { useTechnicalReviewQuery } from "@/features/technicalReview/useTechnicalReviewQuery";
 import { useFileXhtmlQuery } from "@/features/technicalReview/useFileXhtmlQuery";
+import { getTechnicalReview } from "@/api/technicalReview";
 import {
   WysiwygEditor,
   useEditorSave,
@@ -39,6 +40,12 @@ import {
 } from "@/api/comments";
 import { toast } from "@/store/useToastStore";
 import { useStylesheetsQuery, useCeRulesQuery } from "@/features/stylesheets/useStylesheetsQuery";
+import {
+  upperCase,
+  lowerCase,
+  toTitleCase,
+  applyCasePreservingStructure,
+} from "@/features/language_edit/caseTransforms";
 
 // Subcomponents
 import { TechnicalReviewHeader } from "@/features/technicalReview/components/TechnicalReviewHeader";
@@ -48,6 +55,10 @@ import {
 } from "@/features/technicalReview/components/UnifiedFindReplaceSidebar";
 import { TechnicalApplyConfirmModal } from "@/features/technicalReview/components/TechnicalApplyConfirmModal";
 import { OverviewDashboardTab } from "@/features/technicalReview/components/OverviewDashboardTab";
+
+// The "Manuscript Canvas" sub-toolbar above the editor (title + finding stepper) is hidden;
+// the sidebar inspector has its own stepper. Set to true to show it again.
+const SHOW_CANVAS_TOOLBAR = false;
 
 /**
  * A house-style error the rule may correct by itself (the backend sets `replacement` only
@@ -144,6 +155,19 @@ export function TechnicalReviewPage() {
   const [selectedOccurrenceIndex, setSelectedOccurrenceIndex] = useState<number>(0);
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set());
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
+  const [isReloadingRules, setIsReloadingRules] = useState(false);
+  const [isRescanning, setIsRescanning] = useState(false);
+
+  // Inline suggestion & edit popover anchored to clicked occurrence in WYSIWYG editor
+  interface TechnicalInlinePopover {
+    index: number;
+    findingKey: string;
+    originalText: string;
+    anchor: { top: number; left: number; width: number; height: number };
+  }
+  const [inlinePopover, setInlinePopover] = useState<TechnicalInlinePopover | null>(null);
+  const [inlineInput, setInlineInput] = useState("");
+  const inlinePopoverRef = useRef<HTMLDivElement | null>(null);
 
   // Comments / Author Queries (AQ) state
   const [comments, setComments] = useState<CommentRecord[]>([]);
@@ -396,6 +420,11 @@ export function TechnicalReviewPage() {
         matchesCategory = isRedFlag(f);
       } else if (categoryFilter === "eponym") {
         matchesCategory = isEponym(f);
+      } else if (categoryFilter === "abbreviations") {
+        matchesCategory =
+          f.ce_rule_no === 31 ||
+          f.rule_id?.startsWith("abbrev_") ||
+          (f.rule_label && f.rule_label.toLowerCase().includes("abbrev"));
       } else if (categoryFilter === "style") {
         matchesCategory = !isRedFlag(f) && !isEponym(f);
       } else if (categoryFilter === "in_stylesheet") {
@@ -561,6 +590,147 @@ export function TechnicalReviewPage() {
     [customReplacements, handleReplaceInEditor]
   );
 
+  // Mark occurrence for manual review (highlight only) from sidebar card
+  const handleHighlightFinding = useCallback(
+    (finding: any) => {
+      if (!finding) return;
+      handleReplaceInEditor(finding, "", false, true);
+      toast.info(`Marked "${finding.surface}" for manual review`);
+    },
+    [handleReplaceInEditor]
+  );
+
+  // Ignore / dismiss finding from sidebar card
+  const handleIgnoreFinding = useCallback((finding: any) => {
+    if (!finding) return;
+    const key = `${finding.para_index}-${finding.match_start}-${finding.surface}`;
+    setAppliedKeys((prev) => new Set([...prev, key]));
+    toast.info(`Ignored finding "${finding.surface}"`);
+  }, []);
+
+  // Close inline suggestion popover: clear state + input
+  const closeInlinePopover = useCallback(() => {
+    setInlinePopover(null);
+    setInlineInput("");
+  }, []);
+
+  // Open inline suggestion popover anchored to occurrence in WYSIWYG editor
+  const openInlinePopoverForIndex = useCallback(
+    (idx: number) => {
+      setSelectedOccurrenceIndex(idx);
+      const target = filteredFindings[idx];
+      if (!target) return;
+
+      requestAnimationFrame(() => {
+        const dom = (editorRef.current?.editor as any)?.view?.dom as HTMLElement | undefined;
+        const el = dom?.querySelector<HTMLElement>(`[data-occ-index="${idx}"]`);
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        setInlinePopover({
+          index: idx,
+          findingKey: `${target.para_index}-${target.match_start}-${target.surface}`,
+          originalText: target.surface,
+          anchor: { top: r.top, left: r.left, width: r.width, height: r.height },
+        });
+        const initial =
+          customReplacements[`${target.para_index}-${target.match_start}-${target.surface}`] ||
+          target.replacement ||
+          target.suggestion ||
+          target.surface;
+        setInlineInput(initial);
+      });
+    },
+    [filteredFindings, customReplacements]
+  );
+
+  // Bi-directional click: when user clicks an occurrence on the WysiwygEditor canvas,
+  // select the matching inspector occurrence and open the inline suggestion popover.
+  const handleOccurrenceClick = useCallback(
+    (idx: number) => {
+      setSelectedOccurrenceIndex(idx);
+      setRightSidebarTab("inspector");
+      setRightSidebarCollapsed(false);
+      openInlinePopoverForIndex(idx);
+    },
+    [openInlinePopoverForIndex]
+  );
+
+  // Apply replacement text via inline popover with Track Changes
+  const applyInlineReplace = useCallback(
+    (rawText: string) => {
+      if (!inlinePopover) return;
+      const target =
+        filteredFindings[inlinePopover.index] &&
+        `${filteredFindings[inlinePopover.index].para_index}-${filteredFindings[inlinePopover.index].match_start}-${filteredFindings[inlinePopover.index].surface}` ===
+          inlinePopover.findingKey
+          ? filteredFindings[inlinePopover.index]
+          : filteredFindings.find(
+              (f: any) =>
+                `${f.para_index}-${f.match_start}-${f.surface}` === inlinePopover.findingKey
+            );
+      if (!target) {
+        closeInlinePopover();
+        return;
+      }
+      const newText = rawText;
+      if (!newText || newText === target.surface) {
+        closeInlinePopover();
+        return;
+      }
+
+      handleReplaceInEditor(target, newText, true, false);
+      toast.success(`Replaced "${target.surface}" with "${newText}"`);
+      closeInlinePopover();
+    },
+    [inlinePopover, filteredFindings, handleReplaceInEditor, closeInlinePopover]
+  );
+
+  // Mark occurrence for manual review via inline popover (highlight only)
+  const applyInlineHighlight = useCallback(() => {
+    if (!inlinePopover) return;
+    const target =
+      filteredFindings[inlinePopover.index] &&
+      `${filteredFindings[inlinePopover.index].para_index}-${filteredFindings[inlinePopover.index].match_start}-${filteredFindings[inlinePopover.index].surface}` ===
+        inlinePopover.findingKey
+        ? filteredFindings[inlinePopover.index]
+        : filteredFindings.find(
+            (f: any) =>
+              `${f.para_index}-${f.match_start}-${f.surface}` === inlinePopover.findingKey
+          );
+      if (!target) {
+        closeInlinePopover();
+        return;
+      }
+      handleReplaceInEditor(target, "", false, true);
+      toast.success(`Marked "${target.surface}" for manual review`);
+      closeInlinePopover();
+    },
+    [inlinePopover, filteredFindings, handleReplaceInEditor, closeInlinePopover]
+  );
+
+  // Esc closes popover; click outside the popover also closes.
+  useEffect(() => {
+    if (!inlinePopover) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        closeInlinePopover();
+      }
+    };
+    const onPointerDown = (e: MouseEvent) => {
+      const el = inlinePopoverRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        closeInlinePopover();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("mousedown", onPointerDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("mousedown", onPointerDown, true);
+    };
+  }, [inlinePopover, closeInlinePopover]);
+
   // Batch Auto-Fix All Routine House Style Occurrences
   const handleBatchAutoFix = useCallback(() => {
     if (!editorRef.current?.replaceOccurrence) {
@@ -636,6 +806,44 @@ export function TechnicalReviewPage() {
       }
     }
   }, [editorSave, editorFileId, navigate, technicalPath]);
+
+  // Scenario 1: Reload updated stylesheet rules without full document re-parse
+  const handleReloadRules = useCallback(async () => {
+    if (!editorFileId) return;
+    setIsReloadingRules(true);
+    try {
+      if (normalizedProjectId) {
+        await queryClient.invalidateQueries({ queryKey: ["stylesheets", normalizedProjectId] });
+      }
+      const updated = await getTechnicalReview(editorFileId, selectedStylesheetId, { reload_rules: true });
+      queryClient.setQueryData(["technical-review", editorFileId, selectedStylesheetId ?? null], updated);
+      toast.success("Stylesheet rules reloaded successfully!");
+    } catch (err) {
+      console.error("Failed to reload stylesheet rules:", err);
+      toast.error("Failed to reload stylesheet rules.");
+    } finally {
+      setIsReloadingRules(false);
+    }
+  }, [editorFileId, selectedStylesheetId, normalizedProjectId, queryClient]);
+
+  // Scenario 2: Re-scan chapter manuscript from physical DOCX against stylesheet
+  const handleRescanChapter = useCallback(async () => {
+    if (!editorFileId) return;
+    setIsRescanning(true);
+    try {
+      const fresh = await getTechnicalReview(editorFileId, selectedStylesheetId, { rescan: true });
+      queryClient.setQueryData(["technical-review", editorFileId, selectedStylesheetId ?? null], fresh);
+      setCheckedIds({});
+      // Refresh the editor's XHTML view as well so any saved edits are synced
+      await xhtmlQuery.refetch();
+      toast.success("Chapter re-scanned successfully with latest manuscript edits!");
+    } catch (err) {
+      console.error("Failed to re-scan chapter:", err);
+      toast.error("Failed to re-scan chapter.");
+    } finally {
+      setIsRescanning(false);
+    }
+  }, [editorFileId, selectedStylesheetId, queryClient, xhtmlQuery]);
 
   function handleApplySelected() {
     const selectedList: any[] = [];
@@ -842,7 +1050,10 @@ export function TechnicalReviewPage() {
   const isTrackChangesActive = displayMode === "diff" || trackChangesEnabled;
 
   return (
-    <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden font-sans">
+    <div className="h-screen w-full flex bg-slate-50 overflow-hidden font-sans">
+      {/* Left column: header + manuscript. The tools dock (Findings / Inspector / Queries / Rules)
+          runs full height on the right so its tabs sit at the very top of the page. */}
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {/* Top Header */}
       <TechnicalReviewHeader
         filename={file.filename}
@@ -874,6 +1085,10 @@ export function TechnicalReviewPage() {
         canSave={true}
         onSave={handleSaveToDocx}
         isSaving={editorSave.isPending}
+        onReloadRules={handleReloadRules}
+        isReloadingRules={isReloadingRules}
+        onRescanChapter={handleRescanChapter}
+        isRescanning={isRescanning}
         onToggleRightSidebar={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
         rightSidebarCollapsed={rightSidebarCollapsed}
       />
@@ -978,8 +1193,8 @@ export function TechnicalReviewPage() {
           <div className="flex-1 min-h-0 flex overflow-hidden">
             {/* Left/Center: Manuscript Document Canvas (Takes Full Space) */}
             <main className="flex-1 flex flex-col min-w-0 bg-slate-100 overflow-hidden relative">
-              {/* Document Sub-Toolbar */}
-              <div className="h-11 bg-white border-b border-slate-200 px-3 flex items-center justify-between shrink-0">
+              {/* Document Sub-Toolbar ("Manuscript Canvas" + finding stepper): hidden on request */}
+              <div className={`h-11 bg-white border-b border-slate-200 px-3 items-center justify-between shrink-0 ${SHOW_CANVAS_TOOLBAR ? "flex" : "hidden"}`}>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
@@ -1046,7 +1261,19 @@ export function TechnicalReviewPage() {
               </div>
 
               {/* Document Editor Area */}
-              <div className="flex-1 relative min-h-0 overflow-hidden">
+              <div className="flex-1 relative min-h-0 overflow-hidden technical-review-canvas">
+                <style>{`
+                  /* Hide paragraph style markup badges in Technical Review canvas */
+                  .technical-review-canvas .ProseMirror p::after,
+                  .technical-review-canvas .ProseMirror h1::after,
+                  .technical-review-canvas .ProseMirror h2::after,
+                  .technical-review-canvas .ProseMirror h3::after,
+                  .technical-review-canvas .ProseMirror h4::after,
+                  .technical-review-canvas .ProseMirror h5::after,
+                  .technical-review-canvas .ProseMirror h6::after {
+                    display: none !important;
+                  }
+                `}</style>
                 {xhtmlQuery.isPending ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center space-y-3 bg-slate-100">
                     <RefreshCw className="w-8 h-8 text-blue-600 animate-spin" />
@@ -1085,11 +1312,7 @@ export function TechnicalReviewPage() {
                     height="100%"
                     occurrences={editorOccurrences}
                     selectedOccurrenceIndex={selectedOccurrenceIndex}
-                    onOccurrenceClick={(idx) => {
-                      setSelectedOccurrenceIndex(idx);
-                      setRightSidebarTab("inspector");
-                      setRightSidebarCollapsed(false);
-                    }}
+                    onOccurrenceClick={handleOccurrenceClick}
                     onSelectionChange={(text) => setSelectedEditorText(text)}
                     onCommentClick={(commentId) => {
                       setRightSidebarTab("queries");
@@ -1105,93 +1328,104 @@ export function TechnicalReviewPage() {
               </div>
             </main>
 
-            {/* Right: Consolidated 4-Tab Right Tools Dock */}
-            <UnifiedFindReplaceSidebar
-              findings={findings}
-              filteredFindings={filteredFindings}
-              activeOccurrence={activeOccurrence}
-              selectedIndex={selectedOccurrenceIndex}
-              onSelectIndex={(idx) => {
-                setSelectedOccurrenceIndex(idx);
-              }}
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              categoryFilter={categoryFilter}
-              onCategoryFilterChange={setCategoryFilter}
-              stylesheetFilter={stylesheetFilter}
-              onStylesheetFilterChange={(filter) => {
-                setStylesheetFilter(filter);
-                setSelectedOccurrenceIndex(0);
-              }}
-              hasActiveStylesheet={Boolean(activeStylesheet || selectedStylesheetId)}
-              activeStylesheetName={activeStylesheetName}
-              activeStylesheet={activeStylesheet}
-              selectedRuleFilter={selectedRuleFilter}
-              onSelectedRuleFilterChange={(rule) => {
-                setSelectedRuleFilter(rule);
-                setSelectedOccurrenceIndex(0);
-              }}
-              actionType={actionTypes[activeKey] || "fix"}
-              onActionTypeChange={(act) =>
-                setActionTypes((prev) => ({ ...prev, [activeKey]: act }))
-              }
-              customReplacement={
-                activeKey in customReplacements && customReplacements[activeKey] !== ""
-                  ? customReplacements[activeKey]
-                  : (activeOccurrence?.replacement ?? "")
-              }
-              onCustomReplacementChange={(val) =>
-                setCustomReplacements((prev) => ({ ...prev, [activeKey]: val }))
-              }
-              onReplaceAndNext={(rep, asTrack) => {
-                handleReplaceInEditor(activeOccurrence, rep, asTrack, false);
-                if (selectedOccurrenceIndex < filteredFindings.length - 1) {
-                  setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
-                }
-              }}
-              onHighlightAndNext={() => {
-                handleReplaceInEditor(activeOccurrence, "", false, true);
-                if (selectedOccurrenceIndex < filteredFindings.length - 1) {
-                  setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
-                }
-              }}
-              onSkipNext={() => {
-                if (selectedOccurrenceIndex < filteredFindings.length - 1) {
-                  setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
-                }
-              }}
-              onBatchFixRule={handleBatchFixRule}
-              onApplySelected={handleApplySelected}
-              isApplying={technicalApply.isPending}
-              selectedCount={selectedCount}
-              applyWarning={applyWarning}
-              editorRef={editorRef}
-              isCollapsed={rightSidebarCollapsed}
-              onToggleCollapse={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
-              comments={comments}
-              commentsLoading={commentsLoading}
-              newCommentText={newCommentText}
-              onNewCommentTextChange={setNewCommentText}
-              submittingComment={submittingComment}
-              onPostComment={handleCreateComment}
-              onToggleResolveComment={handleToggleResolveComment}
-              onDeleteComment={handleDeleteComment}
-              filterUnresolved={filterUnresolved}
-              onToggleFilterUnresolved={() => setFilterUnresolved((v) => !v)}
-              selectedEditorText={selectedEditorText}
-              selectedCommentId={selectedCommentId}
-              onSelectCommentId={(uuid) => {
-                setSelectedCommentId(uuid);
-                editorRef.current?.scrollToComment?.(uuid);
-              }}
-              activeTab={rightSidebarTab}
-              onActiveTabChange={setRightSidebarTab}
-              rules={allRules}
-              onQuickFixFinding={handleQuickFixFinding}
-            />
           </div>
         )}
       </div>
+      </div>
+
+      {/* Right: Consolidated 4-Tab Right Tools Dock (full height) */}
+      {activeTab !== "dashboard" && (
+        <UnifiedFindReplaceSidebar
+          findings={findings}
+          filteredFindings={filteredFindings}
+          activeOccurrence={activeOccurrence}
+          selectedIndex={selectedOccurrenceIndex}
+          onSelectIndex={(idx) => {
+            setSelectedOccurrenceIndex(idx);
+          }}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          categoryFilter={categoryFilter}
+          onCategoryFilterChange={setCategoryFilter}
+          stylesheetFilter={stylesheetFilter}
+          onStylesheetFilterChange={(filter) => {
+            setStylesheetFilter(filter);
+            setSelectedOccurrenceIndex(0);
+          }}
+          hasActiveStylesheet={Boolean(activeStylesheet || selectedStylesheetId)}
+          activeStylesheetName={activeStylesheetName}
+          activeStylesheet={activeStylesheet}
+          selectedRuleFilter={selectedRuleFilter}
+          onSelectedRuleFilterChange={(rule) => {
+            setSelectedRuleFilter(rule);
+            setSelectedOccurrenceIndex(0);
+          }}
+          actionType={actionTypes[activeKey] || "fix"}
+          onActionTypeChange={(act) =>
+            setActionTypes((prev) => ({ ...prev, [activeKey]: act }))
+          }
+          customReplacement={
+            activeKey in customReplacements && customReplacements[activeKey] !== ""
+              ? customReplacements[activeKey]
+              : (activeOccurrence?.replacement ?? "")
+          }
+          onCustomReplacementChange={(val) =>
+            setCustomReplacements((prev) => ({ ...prev, [activeKey]: val }))
+          }
+          onReplaceAndNext={(rep, asTrack) => {
+            handleReplaceInEditor(activeOccurrence, rep, asTrack, false);
+            if (selectedOccurrenceIndex < filteredFindings.length - 1) {
+              setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
+            }
+          }}
+          onHighlightAndNext={() => {
+            handleReplaceInEditor(activeOccurrence, "", false, true);
+            if (selectedOccurrenceIndex < filteredFindings.length - 1) {
+              setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
+            }
+          }}
+          onSkipNext={() => {
+            if (selectedOccurrenceIndex < filteredFindings.length - 1) {
+              setSelectedOccurrenceIndex(selectedOccurrenceIndex + 1);
+            }
+          }}
+          onBatchFixRule={handleBatchFixRule}
+          onApplySelected={handleApplySelected}
+          isApplying={technicalApply.isPending}
+          selectedCount={selectedCount}
+          applyWarning={applyWarning}
+          editorRef={editorRef}
+          isCollapsed={rightSidebarCollapsed}
+          onToggleCollapse={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
+          comments={comments}
+          commentsLoading={commentsLoading}
+          newCommentText={newCommentText}
+          onNewCommentTextChange={setNewCommentText}
+          submittingComment={submittingComment}
+          onPostComment={handleCreateComment}
+          onToggleResolveComment={handleToggleResolveComment}
+          onDeleteComment={handleDeleteComment}
+          filterUnresolved={filterUnresolved}
+          onToggleFilterUnresolved={() => setFilterUnresolved((v) => !v)}
+          selectedEditorText={selectedEditorText}
+          selectedCommentId={selectedCommentId}
+          onSelectCommentId={(uuid) => {
+            setSelectedCommentId(uuid);
+            editorRef.current?.scrollToComment?.(uuid);
+          }}
+          activeTab={rightSidebarTab}
+          onActiveTabChange={setRightSidebarTab}
+          rules={allRules}
+          onQuickFixFinding={handleQuickFixFinding}
+          onOpenInlinePopover={openInlinePopoverForIndex}
+          onHighlightFinding={handleHighlightFinding}
+          onIgnoreFinding={handleIgnoreFinding}
+          onReloadRules={handleReloadRules}
+          isReloadingRules={isReloadingRules}
+          onRescanChapter={handleRescanChapter}
+          isRescanning={isRescanning}
+        />
+      )}
 
       {/* Floating Exit Fullscreen Button */}
       {isFullscreen && (
@@ -1220,6 +1454,214 @@ export function TechnicalReviewPage() {
         fixesCount={pendingApplyLists?.selectedList.length ?? 0}
         highlightsCount={pendingApplyLists?.highlightList.length ?? 0}
       />
+
+      {/* ══ INLINE EDIT CONTEXT POPOVER ═══════════════════════════════════════ */}
+      {inlinePopover && (() => {
+        const target =
+          filteredFindings[inlinePopover.index] &&
+          `${filteredFindings[inlinePopover.index].para_index}-${filteredFindings[inlinePopover.index].match_start}-${filteredFindings[inlinePopover.index].surface}` ===
+            inlinePopover.findingKey
+            ? filteredFindings[inlinePopover.index]
+            : filteredFindings.find(
+                (f: any) =>
+                  `${f.para_index}-${f.match_start}-${f.surface}` === inlinePopover.findingKey
+              );
+        if (!target) return null;
+
+        const ruleSuggestion =
+          target.suggestion && target.suggestion !== target.surface ? target.suggestion : null;
+        const ruleReplacement =
+          target.replacement &&
+          target.replacement !== target.surface &&
+          target.replacement !== ruleSuggestion
+            ? target.replacement
+            : null;
+
+        const altOptions: string[] = [];
+        if (Array.isArray(target.replacement_options)) {
+          target.replacement_options.forEach((opt: string) => {
+            if (
+              opt &&
+              opt !== target.surface &&
+              opt !== ruleSuggestion &&
+              opt !== ruleReplacement &&
+              !altOptions.includes(opt)
+            ) {
+              altOptions.push(opt);
+            }
+          });
+        }
+        if (target.option_replacements && typeof target.option_replacements === "object") {
+          Object.values(target.option_replacements).forEach((val: any) => {
+            if (
+              val &&
+              typeof val === "string" &&
+              val !== "QUERY" &&
+              val !== target.surface &&
+              val !== ruleSuggestion &&
+              val !== ruleReplacement &&
+              !altOptions.includes(val)
+            ) {
+              altOptions.push(val);
+            }
+          });
+        }
+
+        const POPOVER_W = 340;
+        const POPOVER_H = 290;
+        const fitsBelow =
+          inlinePopover.anchor.top + inlinePopover.anchor.height + 6 + POPOVER_H < window.innerHeight;
+        const top = fitsBelow
+          ? inlinePopover.anchor.top + inlinePopover.anchor.height + 6
+          : Math.max(8, inlinePopover.anchor.top - POPOVER_H - 6);
+        const left = Math.max(8, Math.min(window.innerWidth - POPOVER_W - 8, inlinePopover.anchor.left));
+
+        return (
+          <div
+            ref={inlinePopoverRef}
+            style={{ position: "fixed", top, left, width: POPOVER_W, zIndex: 100 }}
+            className="bg-white border border-slate-200 shadow-2xl rounded-2xl p-3 text-slate-800"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-violet-600">
+                Edit occurrence
+              </span>
+              <button
+                type="button"
+                onClick={closeInlinePopover}
+                className="text-slate-400 hover:text-slate-700 text-xs leading-none p-1 cursor-pointer"
+                title="Close (Esc)"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-[11px] text-slate-500 mb-1">Original</div>
+            <div className="text-xs font-mono bg-slate-50 border border-slate-200 rounded-md px-2 py-1 mb-2 break-words">
+              {inlinePopover.originalText}
+            </div>
+
+            {(ruleSuggestion || ruleReplacement || altOptions.length > 0) && (
+              <div className="mb-2 flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                {ruleSuggestion && (
+                  <button
+                    type="button"
+                    onClick={() => setInlineInput(ruleSuggestion)}
+                    className="px-2 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 cursor-pointer"
+                    title="Rule suggestion"
+                  >
+                    Suggestion: {ruleSuggestion}
+                  </button>
+                )}
+                {ruleReplacement && (
+                  <button
+                    type="button"
+                    onClick={() => setInlineInput(ruleReplacement)}
+                    className="px-2 py-1 rounded-full text-[11px] font-medium bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100 cursor-pointer"
+                    title="House style replacement"
+                  >
+                    Fix: {ruleReplacement}
+                  </button>
+                )}
+                {altOptions.map((alt, i) => (
+                  <button
+                    key={`alt-${i}`}
+                    type="button"
+                    onClick={() => setInlineInput(alt)}
+                    className="px-2 py-1 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 cursor-pointer truncate max-w-full"
+                    title="Alternative option"
+                  >
+                    Alt: {alt}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="text-[11px] text-slate-500 mb-1">Replace with</div>
+            <input
+              autoFocus
+              type="text"
+              value={inlineInput}
+              onChange={(e) => setInlineInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyInlineReplace(inlineInput);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeInlinePopover();
+                }
+              }}
+              className="w-full text-sm px-2.5 py-1.5 bg-white border border-violet-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-200 font-mono"
+              placeholder="Type replacement…"
+            />
+
+            <div className="flex flex-wrap gap-1 mt-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setInlineInput(
+                    applyCasePreservingStructure(inlineInput, inlinePopover.originalText, upperCase)
+                  )
+                }
+                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer"
+              >
+                UPPERCASE
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setInlineInput(
+                    applyCasePreservingStructure(inlineInput, inlinePopover.originalText, lowerCase)
+                  )
+                }
+                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer"
+              >
+                lowercase
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setInlineInput(
+                    applyCasePreservingStructure(inlineInput, inlinePopover.originalText, toTitleCase)
+                  )
+                }
+                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer"
+              >
+                Title Case
+              </button>
+            </div>
+
+            <div className="flex gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => applyInlineReplace(inlineInput)}
+                disabled={!inlineInput || inlineInput === inlinePopover.originalText}
+                className="flex-1 py-1.5 rounded-full bg-violet-600 text-white text-xs font-semibold hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-xs transition-colors"
+              >
+                Replace
+              </button>
+              <button
+                type="button"
+                onClick={applyInlineHighlight}
+                className="px-3 py-1.5 rounded-full border border-amber-300 bg-amber-50 text-xs font-semibold text-amber-800 hover:bg-amber-100 cursor-pointer transition-colors"
+                title="Highlight occurrence for review without changing text"
+              >
+                Highlight
+              </button>
+              <button
+                type="button"
+                onClick={closeInlinePopover}
+                className="px-3 py-1.5 rounded-full border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

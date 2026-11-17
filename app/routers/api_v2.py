@@ -5883,6 +5883,8 @@ def api_v2_update_job_priority(
 def api_v2_technical_scan(
     file_id: int,
     stylesheet_id: int | None = None,
+    rescan: bool = Query(False, description="Force re-scan chapter manuscript from DOCX"),
+    reload_rules: bool = Query(False, description="Force re-sync stylesheet from disk/DB"),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -5901,6 +5903,7 @@ def api_v2_technical_scan(
             file_id=file_id,
             logger=logger,
             technical_editor_cls=TechnicalEditor,
+            force_rescan=rescan,
         )
     except HTTPException as exc:
         code = "TECHNICAL_SCAN_FAILED"
@@ -5936,11 +5939,14 @@ def api_v2_technical_scan(
     active_stylesheet = None
     active_ss = None
     if file_record and file_record.project_id:
+        if reload_rules:
+            # Force re-sync stylesheet from disk (CE support/Style sheet template/stylesheet.json) or DB
+            stylesheet_service.sync_stylesheet_from_ce_support(db, project_id=file_record.project_id)
         active_ss = stylesheet_service.ensure_publisher_stylesheet(db, project_id=file_record.project_id)
 
     # The chosen (or active) stylesheet decides every finding: the selected option is the
     # house style, other forms are errors with the selected form as the fix.
-    findings = raw_scan.get("findings", [])
+    findings = [dict(f) for f in raw_scan.get("findings", [])]
     applied_ss = active_ss
     if stylesheet_id and file_record:
         applied_ss = db.query(ProjectStylesheet).filter(
@@ -6234,6 +6240,8 @@ async def api_v2_parse_docx_stylesheet(
         from app.processing.manuscript_core.parsers.docx_stylesheet_parser import DocxStylesheetParser
         parser = DocxStylesheetParser()
         result = parser.parse(content_bytes)
+        if isinstance(result, dict) and "matched_ce_rules" in result and isinstance(result["matched_ce_rules"], dict):
+            result["matched_ce_rules"] = {str(k): v for k, v in result["matched_ce_rules"].items()}
         return schemas_v2.DocxStylesheetParseResponse(**result)
     except Exception as e:
         logger.error(f"Failed to parse docx stylesheet: {e}", exc_info=True)

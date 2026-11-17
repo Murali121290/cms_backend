@@ -14,6 +14,7 @@ celery_app.conf.task_routes = {
     "app.core.worker.process_document": "main-queue",
     "app.core.worker.run_post_prod_conversion_task": "main-queue",
     "app.core.worker.run_epub_validation_task": "main-queue",
+    "app.core.worker.run_xml_conversion_celery_task": "main-queue",
     "app.domains.books_on_demand.tasks.watch_ftp_for_new_pdfs": "main-queue",
 }
 celery_app.conf.update(
