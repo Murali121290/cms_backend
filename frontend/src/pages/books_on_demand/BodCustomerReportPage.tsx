@@ -387,7 +387,7 @@ export function BodCustomerReportPage() {
     } else {
       if (overdueRefDate && isOverdue(job.due_date, overdueRefDate)) {
         finalStatus = 'Overdue'
-      } else if (job.current_stage === 'Add job') {
+      } else if (job.current_stage === 'Add job' || job.current_stage === 'Job Analysis') {
         finalStatus = 'YTS'
       } else if (job.current_stage === 'Production' || job.current_stage === 'QC' || job.current_stage === 'Ready to Dispatch') {
         finalStatus = 'In-progress'

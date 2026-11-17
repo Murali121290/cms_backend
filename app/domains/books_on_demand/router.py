@@ -936,7 +936,7 @@ def advance_job_stage(job_id: int, background_tasks: BackgroundTasks, db: Sessio
 
 def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Session):
     settings = get_settings()
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     
     try:
@@ -971,6 +971,10 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     # Set start time for next stage
     new_stage_data = history.get(new_stage, {})
     new_stage_data["start_time"] = now_iso
+
+    # When moving from 'Add job' to 'Job Analysis', recalculate due date from now (move date)
+    if new_stage == "Job Analysis":
+        job.due_date = calculate_bod_due_date(job.pdf_type, job.pdf_page_count, datetime.now(timezone.utc))
     
     from sqlalchemy.orm.attributes import flag_modified
     if new_stage == "Ready to Dispatch":
@@ -1160,7 +1164,11 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
             settings.BOD_FTP_USERNAME,
             settings.BOD_FTP_PASSWORD,
             port=getattr(settings, "BOD_FTP_PORT", 21),
-            timeout=getattr(settings, "BOD_FTP_TIMEOUT", 30)
+            timeout=getattr(settings, "BOD_FTP_TIMEOUT", 30),
+            use_tls=getattr(settings, "BOD_FTP_USE_TLS", True),
+            passive=getattr(settings, "BOD_FTP_PASSIVE", True),
+            ssl_verify=getattr(settings, "BOD_FTP_SSL_VERIFY", True),
+            ca_file=getattr(settings, "BOD_FTP_CA_FILE", None) or None
         ) as ftp:
             ftp.ensure_dir(delivery_dir)
             ftp.upload_file(zip_filepath, zip_filename)
@@ -1170,7 +1178,7 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
         return False, f"FTP upload failed: {str(e)}"
 
     # ONLY AFTER FTP SUCCEEDS: Update stage to Archive and status to Completed
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     archive_index = stages.index("Archive") if "Archive" in stages else len(stages) - 1
 
@@ -1452,7 +1460,7 @@ def upload_epub(
     now_iso = datetime.now(timezone.utc).isoformat()
     history = dict(job.stage_history)
     
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     
     qc_index = stages.index("QC") if "QC" in stages else 2
@@ -1626,7 +1634,7 @@ def create_job(
     except Exception as e:
         logger.error(f"Failed to extract page count and type for {file.filename}: {e}")
         
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     first_stage = stages[0]
     

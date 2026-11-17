@@ -166,6 +166,20 @@ export function BodInternalJobPage() {
     }
   }
 
+  const proceedToJobAnalysis = async () => {
+    if (!job) return
+    setIsAdvancing(true)
+    try {
+      await api.post(`/bod/jobs/${jobId}/advance`)
+      toast.success("Job moved to Job Analysis stage")
+      fetchJob()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to proceed to Job Analysis")
+    } finally {
+      setIsAdvancing(false)
+    }
+  }
+
   const proceedToProduction = async () => {
     if (!job) return
     setIsAdvancing(true)
@@ -498,6 +512,17 @@ export function BodInternalJobPage() {
           {!isCompleted && job.current_stage_name === 'Add job' && (
             <Button
               variant="primary"
+              onClick={proceedToJobAnalysis}
+              disabled={isAdvancing}
+              rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}
+            >
+              {isAdvancing ? 'Proceeding...' : 'Proceed to Job Analysis'}
+            </Button>
+          )}
+
+          {!isCompleted && job.current_stage_name === 'Job Analysis' && (
+            <Button
+              variant="primary"
               onClick={proceedToProduction}
               disabled={isAdvancing}
               rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}
@@ -659,8 +684,42 @@ export function BodInternalJobPage() {
         </div>
       )}
 
-      {/* Job Analysis Step Card (Only shown in Add job stage) */}
+      {/* Add Job Stage Card (Waiting for CSV on FTP or manual move) */}
       {job.current_stage_name === 'Add job' && (
+        <div className="bg-card border rounded-xl p-5 shadow-sm transition-all border-blue-500/40 ring-1 ring-blue-500/20">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/60">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg">
+                <FileText size={18} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-text m-0">Add Job Stage</h3>
+                  <span className="text-[10px] bg-blue-500/10 border border-blue-500/30 text-blue-600 dark:text-blue-400 font-bold px-2 py-0.5 rounded-full">
+                    Awaiting CSV Match
+                  </span>
+                </div>
+                <p className="text-xs text-muted m-0 mt-0.5">
+                  PDF fetched from FTP. Once matching CSV with ISBN is found on FTP, it moves to Job Analysis. Or click Proceed to advance manually.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={proceedToJobAnalysis}
+              disabled={isAdvancing}
+              rightIcon={!isAdvancing ? <ArrowRight size={13} /> : undefined}
+            >
+              {isAdvancing ? 'Moving...' : 'Move to Job Analysis'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Job Analysis Step Card (Shown in Job Analysis stage) */}
+      {job.current_stage_name === 'Job Analysis' && (
         <div className="bg-card border rounded-xl p-5 shadow-sm transition-all border-amber-500/40 ring-1 ring-amber-500/20">
           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/60">
             <div className="flex items-center gap-2.5">
@@ -671,11 +730,11 @@ export function BodInternalJobPage() {
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-text m-0">Job Analysis Step</h3>
                   <span className="text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold px-2 py-0.5 rounded-full">
-                    Add Job Analysis
+                    Review & Verify
                   </span>
                 </div>
                 <p className="text-xs text-muted m-0 mt-0.5">
-                  Review and update document specifications (eISBN, Pages, Type, Language, Due Date).
+                  Review and update document specifications (eISBN, Pages, Type, Language, Due Date). Due date is computed from the date moved to Job Analysis.
                 </p>
               </div>
             </div>

@@ -35,7 +35,7 @@ export function BodInternalPage() {
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
-  type QuickFilter = 'all' | 'total_all' | 'fastrack' | 'total_intake' | 'total_backlog' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
+  type QuickFilter = 'all' | 'total_all' | 'fastrack' | 'total_intake' | 'total_backlog' | 'add_job_all' | 'analysis_all' | 'analysis_today' | 'analysis_previous' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
   const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
@@ -584,11 +584,19 @@ export function BodInternalPage() {
   const completedOnTime = baseJobs.filter(j => isJobCompleted(j) && getCompletionTiming(getCompletedDate(j), j.due_date) === 'On-time').length
   const completedDelay = baseJobs.filter(j => isJobCompleted(j) && getCompletionTiming(getCompletedDate(j), j.due_date) === 'Delay').length
 
-  // Fresh: means Add job stage, split into Today and Previous days
-  const freshAllJobs = activeJobs.filter(j => j.current_stage_name === 'Add job')
-  const freshTotal = freshAllJobs.length
-  const freshTodayJobs = freshAllJobs.filter(j => isCreatedToday(j.created_at)).length
-  const freshPreviousJobs = freshAllJobs.filter(j => !isCreatedToday(j.created_at)).length
+  // Add job stage (FTP fetched, awaiting CSV match)
+  const addJobStageJobs = activeJobs.filter(j => j.current_stage_name === 'Add job')
+  const addJobTotal = addJobStageJobs.length
+
+  // Job Analysis stage (CSV matched or manually advanced)
+  const analysisAllJobs = activeJobs.filter(j => j.current_stage_name === 'Job Analysis')
+  const analysisTotal = analysisAllJobs.length
+  const analysisTodayJobs = analysisAllJobs.filter(j => isCreatedToday(j.created_at)).length
+  const analysisPreviousJobs = analysisAllJobs.filter(j => !isCreatedToday(j.created_at)).length
+
+  // Legacy alias for fresh filters
+  const freshAllJobs = analysisAllJobs.length > 0 ? analysisAllJobs : addJobStageJobs
+  const freshTotal = analysisTotal + addJobTotal
 
   // Production: sub divided into YTS (pending PDF download) and In Progress (PDF downloaded)
   const prodJobs = activeJobs.filter(j => j.current_stage_name === 'Production')
@@ -756,9 +764,19 @@ export function BodInternalPage() {
     const isTomorrowJob = isDueTomorrow(job.due_date)
 
     if (job.current_stage_name === 'Add job') {
+      return {
+        label: 'Awaiting CSV',
+        badgeClass: 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 font-bold',
+        sublabel: 'Add job',
+        isOverdue: false,
+        isTomorrow: false,
+      }
+    }
+
+    if (job.current_stage_name === 'Job Analysis') {
       const addedToday = isCreatedToday(job.created_at)
       return {
-        label: addedToday ? 'Fresh (Today)' : 'Fresh (Backlog)',
+        label: addedToday ? 'Analysis (Today)' : 'Analysis (Backlog)',
         badgeClass: addedToday
           ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold'
           : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400',
@@ -825,10 +843,11 @@ export function BodInternalPage() {
   const getStagePercent = (job: any) => {
     if (isJobCompleted(job)) return 100
     if (job.current_stage_name === 'Add job') return 10
-    if (job.current_stage_name === 'Production') return 35
-    if (job.current_stage_name === 'QC') return 65
+    if (job.current_stage_name === 'Job Analysis') return 25
+    if (job.current_stage_name === 'Production') return 50
+    if (job.current_stage_name === 'QC') return 75
     if (job.current_stage_name === 'Ready to Dispatch') return 90
-    return Math.min(95, Math.round((job.current_stage_index / 4) * 100))
+    return Math.min(95, Math.round((job.current_stage_index / 5) * 100))
   }
 
   const getStatusBadgeClass = (job: any) => getJobStatusInfo(job).badgeClass
@@ -846,12 +865,14 @@ export function BodInternalPage() {
       matchesFilter = isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)
     } else if (cardFilter === 'total_backlog') {
       matchesFilter = !isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)
-    } else if (cardFilter === 'fresh_all' || (cardFilter as any) === 'fresh') {
+    } else if (cardFilter === 'add_job_all') {
       matchesFilter = !jobCompleted && j.current_stage_name === 'Add job'
-    } else if (cardFilter === 'fresh_today') {
-      matchesFilter = !jobCompleted && j.current_stage_name === 'Add job' && isCreatedToday(j.created_at)
-    } else if (cardFilter === 'fresh_previous') {
-      matchesFilter = !jobCompleted && j.current_stage_name === 'Add job' && !isCreatedToday(j.created_at)
+    } else if (cardFilter === 'analysis_all' || cardFilter === 'fresh_all' || (cardFilter as any) === 'fresh') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Job Analysis'
+    } else if (cardFilter === 'analysis_today' || cardFilter === 'fresh_today') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Job Analysis' && isCreatedToday(j.created_at)
+    } else if (cardFilter === 'analysis_previous' || cardFilter === 'fresh_previous') {
+      matchesFilter = !jobCompleted && j.current_stage_name === 'Job Analysis' && !isCreatedToday(j.created_at)
     } else if (cardFilter === 'prod_all') {
       matchesFilter = !jobCompleted && j.current_stage_name === 'Production'
     } else if (cardFilter === 'prod_yts') {
@@ -1485,7 +1506,7 @@ export function BodInternalPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
             {/* Group the first 3 columns (spans 3 cols to align under Overdue + Today Due + Today Receipt = 3 cols) */}
             <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-12 gap-2">
-              {/* 1. Fastrack (3 of 12 cols = 25%, independent of date filter) */}
+              {/* 1. Fastrack (independent of date filter) */}
               <div
                 onClick={() => setCardFilter(cardFilter === 'fastrack' ? 'all' : 'fastrack')}
                 className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${cardFilter === 'fastrack' ? 'border-amber-500/60 ring-2 ring-amber-500/20 bg-amber-500/[0.04]' : 'border-border/80 hover:border-amber-500/40'}`}
@@ -1505,33 +1526,35 @@ export function BodInternalPage() {
                 </div>
               </div>
 
-              {/* 2. Total titles (reduced width: 3 of 12 cols = 25%) */}
+              {/* 2. Add Job Stage (Awaiting CSV match) */}
               <div
-                onClick={() => setCardFilter(cardFilter === 'total_all' || cardFilter === 'all' ? 'all' : 'total_all')}
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${(cardFilter === 'total_all' || (cardFilter === 'all' && !hasActiveFilters)) ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.03]' : 'border-border/80 hover:border-primary/40'}`}
+                onClick={() => setCardFilter(cardFilter === 'add_job_all' ? 'all' : 'add_job_all')}
+                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-3 min-h-[62px] ${cardFilter === 'add_job_all' ? 'border-blue-500/60 ring-2 ring-blue-500/20 bg-blue-500/[0.03]' : 'border-border/80 hover:border-blue-500/40'}`}
+                title="Jobs fetched from FTP awaiting CSV match"
               >
                 <div className="flex items-center justify-between pb-1 border-b border-border/50">
                   <div className="flex items-center gap-1">
-                    <div className="p-0.5 bg-primary/10 text-primary rounded">
-                      <Layers size={11} />
+                    <div className="p-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded">
+                      <FileText size={11} />
                     </div>
-                    <span className="text-[9px] font-bold text-primary uppercase tracking-wider truncate">Total titles</span>
+                    <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider truncate">Add Job</span>
                   </div>
                 </div>
                 <div className="flex items-baseline justify-between mt-1 pt-0.5">
-                  <span className="text-lg font-bold text-text leading-none">{totalJobs}</span>
+                  <span className="text-lg font-bold text-text leading-none">{addJobTotal}</span>
+                  <span className="text-[8px] text-blue-600/80 dark:text-blue-400/80 truncate">Awaiting CSV</span>
                 </div>
               </div>
 
-              {/* 3. Job Analysis (increased width: 6 of 12 cols = 50%) */}
+              {/* 3. Job Analysis */}
               <div
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-6 min-h-[62px] ${cardFilter.startsWith('fresh') ? 'border-amber-500/60 ring-2 ring-amber-500/20' : 'border-border/80 hover:border-amber-500/30'}`}
+                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-12 sm:col-span-6 min-h-[62px] ${cardFilter.startsWith('analysis') || cardFilter.startsWith('fresh') ? 'border-amber-500/60 ring-2 ring-amber-500/20' : 'border-border/80 hover:border-amber-500/30'}`}
               >
                 <div className="flex items-center justify-between pb-1 border-b border-border/50">
                   <div
-                    onClick={() => setCardFilter(cardFilter === 'fresh_all' ? 'all' : 'fresh_all')}
+                    onClick={() => setCardFilter(cardFilter === 'analysis_all' ? 'all' : 'analysis_all')}
                     className="flex items-center gap-1 cursor-pointer select-none group/title"
-                    title="Show all Fresh jobs"
+                    title="Show all Job Analysis jobs"
                   >
                     <div className="p-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded group-hover/title:bg-amber-500/20 transition-colors">
                       <Plus size={11} />
@@ -1540,41 +1563,41 @@ export function BodInternalPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setCardFilter(cardFilter === 'fresh_all' ? 'all' : 'fresh_all')}
-                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'fresh_all' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'}`}
-                    title="Show all Fresh (Add job) jobs"
+                    onClick={() => setCardFilter(cardFilter === 'analysis_all' ? 'all' : 'analysis_all')}
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'analysis_all' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'}`}
+                    title="Show all Job Analysis jobs"
                   >
-                    Total {freshTotal}
+                    Total {analysisTotal}
                   </button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-1.5 pt-1">
                   <button
                     type="button"
-                    onClick={() => setCardFilter(cardFilter === 'fresh_previous' ? 'all' : 'fresh_previous')}
-                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'fresh_previous' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
-                    title="Fresh jobs added in previous days"
+                    onClick={() => setCardFilter(cardFilter === 'analysis_previous' ? 'all' : 'analysis_previous')}
+                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_previous' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                    title="Job Analysis jobs added in previous days"
                   >
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600/80 dark:text-amber-400/80 flex items-center gap-1 truncate">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 shrink-0"></span>
                         Backlog
                       </span>
-                      <span className="text-xs font-bold text-text shrink-0">{freshPreviousJobs}</span>
+                      <span className="text-xs font-bold text-text shrink-0">{analysisPreviousJobs}</span>
                     </div>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCardFilter(cardFilter === 'fresh_today' ? 'all' : 'fresh_today')}
-                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'fresh_today' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
-                    title="Fresh jobs added today"
+                    onClick={() => setCardFilter(cardFilter === 'analysis_today' ? 'all' : 'analysis_today')}
+                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_today' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                    title="Job Analysis jobs added today"
                   >
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1 truncate">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
                         Today
                       </span>
-                      <span className="text-xs font-bold text-text shrink-0">{freshTodayJobs}</span>
+                      <span className="text-xs font-bold text-text shrink-0">{analysisTodayJobs}</span>
                     </div>
                   </button>
                 </div>
@@ -2033,6 +2056,7 @@ export function BodInternalPage() {
                         options={[
                           { value: 'all', label: 'All Stages' },
                           { value: 'Add job', label: 'Add job' },
+                          { value: 'Job Analysis', label: 'Job Analysis' },
                           { value: 'Production', label: 'Production' },
                           { value: 'QC', label: 'QC' },
                           { value: 'Ready to Dispatch', label: 'Ready to Dispatch' },
