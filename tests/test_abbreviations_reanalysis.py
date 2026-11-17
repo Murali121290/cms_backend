@@ -691,13 +691,71 @@ def test_serialize_finding_row_attaches_first_definition_to_ab04(
     assert "chronic kidney disease (ckd)" in ref["text"].lower()
 
 
-def test_serialize_finding_row_does_not_attach_first_definition_to_non_ab04(
+def test_serialize_finding_row_attaches_first_definition_to_ab02(
     db_session, _ab_fixture,
 ):
-    """Non-AB04 rules (AB01 first use, AB13 periods-in-initialism,
-    DN notations, grammar, spelling, etc.) must NOT carry a
-    ``first_definition`` — the reference row is specific to AB04
-    ``Repeated definition`` cards."""
+    """AB02 "Repeated Expansion" findings must carry a
+    ``first_definition`` dict in their serialised row so the frontend
+    can prepend the same First Occurrence · Reference row the AB04
+    card already shows.
+
+    Per spec: once the document establishes ``expansion (ABBR)``,
+    every later bare-expansion occurrence (what AB02 flags) is a
+    repeated use of the same term. The reviewer needs the original
+    definition visible for context.
+    """
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+    from docx import Document
+    doc = Document()
+    # Paragraph 0: establishes the definition ``chronic kidney disease (CKD)``.
+    # Paragraph 1: bare expansion repeat — this is what AB02 flags.
+    doc.add_paragraph("The chronic kidney disease (CKD) burden is high.")
+    doc.add_paragraph("Later analyses of chronic kidney disease outcomes continue.")
+    doc.save(file.path)
+
+    # Emit an AB02 at the bare expansion in paragraph 1.
+    para1 = "Later analyses of chronic kidney disease outcomes continue."
+    s = para1.index("chronic kidney disease")
+    e = s + len("chronic kidney disease")
+    ab02_row = _ab_finding(
+        job.job_id, file.id, para_index=1, start=s, end=e,
+        rule_id="AB02", original="chronic kidney disease",
+        suggestion="CKD",
+    )
+    db_session.add(ab02_row)
+    db_session.commit()
+
+    from app.routers import language_edit as le
+    m = le._build_first_definition_map(job, db_session)
+    serialized = le._serialize_finding_row(ab02_row, m)
+    assert serialized.get("first_definition") is not None, (
+        "AB02 findings must carry a first_definition reference"
+    )
+    ref = serialized["first_definition"]
+    assert ref["para_index"] == 0, (
+        f"AB02's first_definition must point to the defining paragraph; "
+        f"got para_index={ref['para_index']}"
+    )
+    assert "chronic kidney disease (ckd)" in ref["text"].lower(), (
+        f"AB02's first_definition surface must be the ``exp (ABBR)`` "
+        f"pattern; got text={ref['text']!r}"
+    )
+
+
+def test_serialize_finding_row_does_not_attach_first_definition_to_non_reference_rules(
+    db_session, _ab_fixture,
+):
+    """Rules outside the reference-row scope (AB01 first use, AB03
+    premature use, AB05 single use, AB06 inconsistent abbreviation,
+    AB07 ambiguous, AB09 apostrophe plural, AB10 article agreement,
+    AB11 heading, AB12 abstract-only, AB13 periods, AB14 title case,
+    AB15 table/figure, DN notations, grammar, spelling, etc.) must
+    NOT carry a ``first_definition`` — the reference row semantics
+    (an EARLIER definition the current finding is a later occurrence
+    of) only applies to AB02 Repeated Expansion and AB04 Repeated
+    Definition.
+    """
     job = _ab_fixture["job"]
     file = _ab_fixture["file"]
     from docx import Document
@@ -715,7 +773,29 @@ def test_serialize_finding_row_does_not_attach_first_definition_to_non_ab04(
     from app.routers import language_edit as le
     m = le._build_first_definition_map(job, db_session)
     serialized = le._serialize_finding_row(ab01_row, m)
-    assert serialized.get("first_definition") is None
+    assert serialized.get("first_definition") is None, (
+        "AB01 IS the first use — it must not carry a reference to itself"
+    )
+
+    # Spot-check a handful of other out-of-scope rules via the same
+    # map to confirm the scope guard is centralised, not duplicated.
+    from app.routers.language_edit import _first_definition_for
+
+    class _Row:
+        def __init__(self, rid):
+            self.rule_id = rid
+            self.original_text = "CKD"
+            self.suggestion = "chronic kidney disease (CKD)"
+            self.para_index = 99
+            self.start_offset = 0
+            self.end_offset = 3
+
+    for out_of_scope in ("AB03", "AB05", "AB06", "AB07", "AB09", "AB10",
+                         "AB11", "AB12", "AB13", "AB14", "AB15", "DN01"):
+        assert _first_definition_for(_Row(out_of_scope), m) is None, (
+            f"{out_of_scope} must not carry first_definition — "
+            f"its semantic doesn't match the reference-row scope"
+        )
 
 
 def test_serialize_finding_row_handles_missing_first_def_map():
@@ -974,3 +1054,365 @@ def test_ignore_does_not_trigger_abbreviation_reanalysis(db_session, _ab_fixture
         "Ignore wrongly deleted or renumbered sibling AB rows — they must "
         "stay untouched because Ignore does not run the AB re-analysis"
     )
+
+
+# ─── AB07 bulk-accept reappearance regression ──────────────────────
+#
+# These tests pin the Language Review spec requirement: "Once all
+# abbreviation findings have been successfully accepted, Abbreviations
+# should remain completed and hidden — previously accepted findings
+# must not reappear as pending."
+#
+# The bug these tests guard against was AB07-specific. AB07 emits
+# ``suggestion == original_text`` because the author must pick a
+# meaning — there is no mechanical replacement. The per-category
+# Accept All button bulk-accepts every pending AB row, including any
+# AB07 ones, as status=``accepted`` with no ``edited_text``. The
+# ``_reanalyze_abbreviations_for_job`` helper then applies a no-op
+# patch (``replacement = suggestion or ""`` → the original abbreviation
+# text) so the virtual document is unchanged at the AB07 span. Running
+# the AB analyzer against that unchanged text re-finds the same AB07
+# occurrence. Previously the suppression set only contained
+# rejected/highlighted findings, and ``existing_by_key`` only indexed
+# PENDING rows — so the just-accepted AB07 row was neither suppressed
+# nor matched, and a brand-new pending AB07 row was inserted with a
+# new id. The category chip immediately re-opened with duplicate
+# "ambiguous abbreviation" cards for every AB07 the reviewer had just
+# "accepted".
+#
+# The fix: include every decided status (accepted, edited, rejected,
+# highlighted) in the suppression set.
+
+
+def _rewrite_fixture_with_ambiguous_abbrs(fixture: dict) -> None:
+    """Replace the fixture DOCX with text that reliably emits AB07
+    findings for two ambiguous abbreviations ("PA" and "ED"). Each
+    paragraph is written without disambiguating cue words so the
+    scorer can't resolve a single meaning and AB07 fires.
+
+    Why "PA" and "ED": both appear in the AB engine's Context_Rules
+    with multiple possible meanings (PA → "physician assistant" /
+    "posterior-anterior" / "pulmonary artery"; ED → "emergency
+    department" / "erectile dysfunction" / "eating disorder") and
+    neither paragraph here supplies any cue that resolves them.
+    """
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph("The PA was reviewed.")
+    doc.add_paragraph("The ED decision was documented.")
+    doc.add_paragraph("The ED decision was reiterated.")
+    doc.save(fixture["docx_path"])
+
+
+def test_reanalyze_does_not_duplicate_ab07_after_bulk_accept(
+    db_session, _ab_fixture,
+):
+    """Primary regression for the "Abbreviations reappears with 3
+    pending findings after Accept All" bug.
+
+    Simulates the batch-accept path: seed AB07 rows at the exact spans
+    the analyzer will re-emit for the fixture DOCX, flip them to
+    ``accepted`` with ``suggestion == original_text`` (the shape the
+    AB07 engine always emits), then run re-analysis. The helper must
+    NOT insert duplicate pending AB07 rows at the same spans — the
+    accepted rows' decisions must be preserved.
+    """
+    _rewrite_fixture_with_ambiguous_abbrs(_ab_fixture)
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    # Paragraph 0 "The PA was reviewed." — PA at offset 4..6
+    pa_accepted = _ab_finding(
+        job.job_id, file.id,
+        para_index=0, start=4, end=6,
+        rule_id="AB07", original="PA",
+        suggestion="PA",  # AB07 shape: suggestion == original
+        status="accepted",
+    )
+    # Paragraph 1 "The ED decision was documented." — ED at 4..6
+    ed1_accepted = _ab_finding(
+        job.job_id, file.id,
+        para_index=1, start=4, end=6,
+        rule_id="AB07", original="ED",
+        suggestion="ED",
+        status="accepted",
+    )
+    # Paragraph 2 "The ED decision was reiterated." — ED at 4..6
+    ed2_accepted = _ab_finding(
+        job.job_id, file.id,
+        para_index=2, start=4, end=6,
+        rule_id="AB07", original="ED",
+        suggestion="ED",
+        status="accepted",
+    )
+    db_session.add_all([pa_accepted, ed1_accepted, ed2_accepted])
+    db_session.commit()
+    accepted_ids = {pa_accepted.id, ed1_accepted.id, ed2_accepted.id}
+
+    le_router._reanalyze_abbreviations_for_job(job, db_session)
+
+    # No new pending AB07 rows at the just-accepted spans.
+    pending_ab07 = (
+        db_session.query(LanguageEditFinding)
+        .filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.rule_id == "AB07",
+            LanguageEditFinding.status == "pending",
+        )
+        .all()
+    )
+    assert pending_ab07 == [], (
+        "AB07 findings that were already accepted must NOT be re-emitted "
+        f"as new pending rows after re-analysis. Found: "
+        f"{[(p.para_index, p.original_text, p.id) for p in pending_ab07]}"
+    )
+
+    # The reviewer's accepted decisions survive, still keyed by their
+    # original ids. The frontend's grouped-card state stays valid.
+    surviving = {
+        r.id: r.status for r in
+        db_session.query(LanguageEditFinding).filter(
+            LanguageEditFinding.id.in_(accepted_ids)
+        )
+    }
+    assert set(surviving.keys()) == accepted_ids
+    assert all(status == "accepted" for status in surviving.values())
+
+
+def test_reanalyze_preserves_edited_ab07_without_duplicate(
+    db_session, _ab_fixture,
+):
+    """When AB07 is accepted per-card via the meaning picker, the
+    server records it as ``status='edited'`` with ``edited_text`` set
+    to the chosen meaning. Re-analysis must preserve this decision
+    the same way — no duplicate pending row at the same span.
+
+    Covers the "Preserve individual occurrence decisions inside
+    grouped abbreviation cards" fix requirement for the AB07 branch.
+    """
+    _rewrite_fixture_with_ambiguous_abbrs(_ab_fixture)
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    edited = _ab_finding(
+        job.job_id, file.id,
+        para_index=0, start=4, end=6,
+        rule_id="AB07", original="PA",
+        suggestion="PA", status="edited",
+    )
+    edited.edited_text = "physician assistant"
+    db_session.add(edited)
+    db_session.commit()
+
+    le_router._reanalyze_abbreviations_for_job(job, db_session)
+
+    duplicate_at_span = (
+        db_session.query(LanguageEditFinding)
+        .filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.rule_id == "AB07",
+            LanguageEditFinding.para_index == 0,
+            LanguageEditFinding.original_text == "PA",
+            LanguageEditFinding.status == "pending",
+        )
+        .count()
+    )
+    assert duplicate_at_span == 0, (
+        "Edited AB07 decisions must survive re-analysis without "
+        "spawning duplicate pending rows at the same span"
+    )
+
+
+def test_reanalyze_cleans_up_pre_existing_ab07_duplicate(
+    db_session, _ab_fixture,
+):
+    """Users on documents affected by the pre-fix behaviour already
+    have duplicate pending AB07 rows in their DB. The next time any
+    AB re-analysis runs, those duplicates must be deleted so the
+    workflow self-heals — the reviewer should not need a manual
+    cleanup step.
+
+    Seeds BOTH an accepted AB07 row (the original decision) AND a
+    pending AB07 row at the same (para, rule_id, original_text) span
+    (the duplicate introduced by the old bug). After re-analysis
+    only the accepted row survives.
+    """
+    _rewrite_fixture_with_ambiguous_abbrs(_ab_fixture)
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    accepted = _ab_finding(
+        job.job_id, file.id,
+        para_index=1, start=4, end=6,
+        rule_id="AB07", original="ED",
+        suggestion="ED", status="accepted",
+    )
+    stale_duplicate = _ab_finding(
+        job.job_id, file.id,
+        para_index=1, start=4, end=6,
+        rule_id="AB07", original="ED",
+        suggestion="ED", status="pending",
+    )
+    db_session.add_all([accepted, stale_duplicate])
+    db_session.commit()
+    accepted_id = accepted.id
+    duplicate_id = stale_duplicate.id
+
+    le_router._reanalyze_abbreviations_for_job(job, db_session)
+
+    remaining_ids = {
+        r.id for r in db_session.query(LanguageEditFinding).filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.rule_id == "AB07",
+            LanguageEditFinding.para_index == 1,
+            LanguageEditFinding.original_text == "ED",
+        )
+    }
+    assert accepted_id in remaining_ids, (
+        "Accepted AB07 row must be preserved across cleanup"
+    )
+    assert duplicate_id not in remaining_ids, (
+        "Stale duplicate pending AB07 row from the pre-fix bug must be "
+        "removed on the next re-analysis so the workflow self-heals"
+    )
+
+
+def test_reanalyze_still_emits_genuinely_new_ab07(
+    db_session, _ab_fixture,
+):
+    """The suppression fix must only suppress spans that a reviewer
+    already decided. A genuinely new AB07 occurrence (different
+    paragraph, or different abbreviation) must still appear as a
+    pending row so the reviewer sees legitimate new findings.
+    """
+    _rewrite_fixture_with_ambiguous_abbrs(_ab_fixture)
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    # Reviewer already decided PA — but the two ED occurrences in
+    # paragraphs 1 and 2 are brand new and must still be emitted.
+    pa_accepted = _ab_finding(
+        job.job_id, file.id,
+        para_index=0, start=4, end=6,
+        rule_id="AB07", original="PA",
+        suggestion="PA", status="accepted",
+    )
+    db_session.add(pa_accepted)
+    db_session.commit()
+
+    le_router._reanalyze_abbreviations_for_job(job, db_session)
+
+    pending_ed = (
+        db_session.query(LanguageEditFinding)
+        .filter(
+            LanguageEditFinding.job_id == job.job_id,
+            LanguageEditFinding.rule_id == "AB07",
+            LanguageEditFinding.original_text == "ED",
+            LanguageEditFinding.status == "pending",
+        )
+        .all()
+    )
+    assert pending_ed, (
+        "Genuinely new AB07 occurrences for a different abbreviation "
+        "must still surface — the fix must not over-suppress"
+    )
+    # PA at the accepted span must NOT reappear.
+    assert not any(
+        r.rule_id == "AB07"
+        and r.para_index == 0
+        and r.original_text == "PA"
+        and r.status == "pending"
+        for r in db_session.query(LanguageEditFinding).filter(
+            LanguageEditFinding.job_id == job.job_id,
+        )
+    ), "The accepted PA span must stay suppressed"
+
+
+def test_batch_decide_accept_all_ab07_keeps_category_empty(
+    db_session, _ab_fixture, admin_user,
+):
+    """Full-path integration: drive the batch-decide endpoint with a
+    pending AB07 row and assert the refreshed-findings bundle it
+    returns contains NO pending AB rows afterwards.
+
+    Mirrors the exact UI flow: the per-category Accept All button
+    POSTs ``/jobs/{job_id}/batch-decide`` with every pending finding
+    id and status=``accepted``. The server flips the rows, runs
+    re-analysis once, then returns ``findings`` so the frontend can
+    swap its local state atomically. With the bug, that bundle
+    contained duplicate pending AB07 rows and the Abbreviations
+    chip re-opened immediately. With the fix, the bundle's pending
+    AB set is empty and the category stays completed.
+    """
+    _rewrite_fixture_with_ambiguous_abbrs(_ab_fixture)
+    job = _ab_fixture["job"]
+    file = _ab_fixture["file"]
+
+    # Seed one pending AB07 per occurrence the DOCX contains so the
+    # batch-accept call mirrors the real UI: Accept All collects every
+    # pending AB row in the category and posts the full list.
+    pa = _ab_finding(
+        job.job_id, file.id,
+        para_index=0, start=4, end=6,
+        rule_id="AB07", original="PA", suggestion="PA",
+    )
+    ed1 = _ab_finding(
+        job.job_id, file.id,
+        para_index=1, start=4, end=6,
+        rule_id="AB07", original="ED", suggestion="ED",
+    )
+    ed2 = _ab_finding(
+        job.job_id, file.id,
+        para_index=2, start=4, end=6,
+        rule_id="AB07", original="ED", suggestion="ED",
+    )
+    db_session.add_all([pa, ed1, ed2])
+    db_session.commit()
+    pending_ids = [pa.id, ed1.id, ed2.id]
+
+    from app.routers import language_edit as le
+    from app.routers.language_edit import BatchDecideRequest, BatchDecisionItem
+    import app.domains.processing.service as svc
+    orig_check = svc.check_permission
+    svc.check_permission = lambda *a, **kw: None
+    try:
+        resp = le.batch_decide_findings(
+            job_id=job.job_id,
+            body=BatchDecideRequest(
+                status="accepted",
+                decisions=[BatchDecisionItem(finding_id=i) for i in pending_ids],
+            ),
+            db=db_session,
+            current_user=admin_user,
+        )
+    finally:
+        svc.check_permission = orig_check
+
+    assert set(resp["processed"]) == set(pending_ids)
+    assert resp.get("reanalyzed") is True, (
+        "Batch accept of AB findings must trigger re-analysis"
+    )
+    refreshed = resp.get("findings") or []
+    pending_ab_refreshed = [
+        f for f in refreshed
+        if (f.get("rule_id") or "").startswith("AB")
+        and f.get("status") == "pending"
+    ]
+    assert pending_ab_refreshed == [], (
+        "After Accept All, the refreshed findings bundle must contain "
+        "no pending AB rows — otherwise the Abbreviations chip re-opens "
+        f"with duplicates. Found: "
+        f"{[(f['id'], f['para_index'], f['original_text']) for f in pending_ab_refreshed]}"
+    )
+
+    # Every accepted AB07 row's id must match what the UI already knew
+    # about, so grouped-card state stays valid across re-analysis.
+    accepted_by_id = {
+        f["id"]: f for f in refreshed
+        if f.get("status") == "accepted" and f.get("rule_id") == "AB07"
+    }
+    for pid in pending_ids:
+        assert pid in accepted_by_id, (
+            f"Accepted AB07 id {pid} must survive re-analysis with its "
+            f"original id (got ids: {list(accepted_by_id.keys())})"
+        )

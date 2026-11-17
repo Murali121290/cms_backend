@@ -1,23 +1,37 @@
 /**
- * Sequential category-unlock workflow.
+ * Category-chip visibility for the Language Review sidebar.
  *
- * The Language Review sidebar reveals finding-category chips one at
- * a time so reviewers work through them in order. When the document
- * is first loaded, only the first unresolved category is visible;
- * as its findings are resolved, the next category appears.
+ * Current behaviour (reverted from the earlier sequential-unlock
+ * experiment): every actionable category chip is visible as soon as
+ * the document loads. Reviewers choose which category to work on,
+ * not the UI. The Inclusive + Comments view-only chips also show
+ * immediately — the sidebar no longer gates them behind an "all
+ * actionable categories complete" milestone.
  *
- * This module is a pure function over the live findings list — no
- * separate workflow state is stored. That means refresh, reopen,
- * and re-analysis "just work": re-computing against the authoritative
- * finding statuses always yields the correct visible / completed /
- * next-unlocked set. If a re-analysis makes an earlier finding
- * pending again, subsequent categories lock back up automatically.
+ * This module remains a pure function over the live findings list so
+ * downstream consumers can introspect resolution progress without
+ * tracking separate state:
  *
- * Non-finding sidebar tabs (``all``, ``comments``, ``rules``) are
- * NOT part of this workflow — they stay always visible. The spec's
- * "resolved" definition (Accept / Edit / Ignore) only applies to AI
- * findings; reviewer comments and the settings panel have different
- * lifecycles.
+ *   * ``visible`` — every entry in ``CATEGORY_UNLOCK_ORDER``. The
+ *     Language Review page uses this via ``isChipVisible`` and the
+ *     snap-back ``useEffect`` as a safe no-op; its membership check
+ *     always returns true. Kept as a Set (rather than removing the
+ *     field) so call sites that already type against ``WorkflowState``
+ *     don't need to change.
+ *   * ``completed`` — categories whose findings are ALL resolved
+ *     (Accept / Edit / Ignore). Not consumed by the chip bar anymore
+ *     but still accurate for tooling / telemetry.
+ *   * ``nextUnlocked`` — first non-empty, not-fully-resolved category
+ *     in ``CATEGORY_UNLOCK_ORDER``. The chip bar no longer reads this
+ *     either, but a ``null`` value is a useful "the reviewer has
+ *     cleared everything" signal.
+ *   * ``allActionableCategoriesComplete`` — always ``true`` so the
+ *     Inclusive + Comments JSX gates let them through from the start.
+ *     The name is a historical artefact; "complete" here just means
+ *     "unblocked".
+ *
+ * Non-finding sidebar tabs (``all``, ``comments``, ``rules``) have
+ * always rendered unconditionally and continue to.
  */
 
 /**
@@ -114,36 +128,30 @@ export function isInclusiveFinding(f: WorkflowFinding): boolean {
 export interface WorkflowState {
   /**
    * Categories the reviewer has fully resolved. Empty-finding
-   * categories are auto-skipped (not placed in completed because
-   * the reviewer didn't resolve anything — they simply have
-   * nothing to resolve).
+   * categories are not included (there was nothing to resolve).
+   * Not consumed by the chip bar anymore; retained for telemetry
+   * and any future "all done" UX.
    */
   completed: Set<UnlockCategory>
   /**
-   * The current category the reviewer is expected to work on.
-   * ``null`` once every non-empty category has been resolved.
+   * The first non-empty, not-fully-resolved category in
+   * ``CATEGORY_UNLOCK_ORDER``. ``null`` once every non-empty
+   * category is resolved. Not used for chip gating in the current
+   * UI but still a useful "is there any work left?" signal.
    */
   nextUnlocked: UnlockCategory | null
   /**
-   * The set of category chips to render. Always a subset of
-   * ``CATEGORY_UNLOCK_ORDER``. Empty categories do NOT appear
-   * (per spec rule 3: zero-finding categories are skipped,
-   * not revealed). Completed categories are also HIDDEN — the
-   * sidebar only ever shows the current actionable chip, so as
-   * each category hits zero pending/highlighted findings it
-   * disappears and the next category takes its place.
+   * The set of category chips to render. ALWAYS the full
+   * ``CATEGORY_UNLOCK_ORDER`` — every actionable chip shows from
+   * the moment the document loads. ``isChipVisible`` and the
+   * snap-back ``useEffect`` in the page remain correct no-ops.
    */
   visible: Set<UnlockCategory>
   /**
-   * True when every actionable (non-empty) category in
-   * ``CATEGORY_UNLOCK_ORDER`` is fully resolved. The page uses
-   * this flag to reveal the view-only ``Inclusive`` and
-   * ``Comments`` chips — they appear together once the seven
-   * actionable categories are complete.
-   *
-   * Zero-finding categories are treated as complete (per rule 3),
-   * so a document with no findings at all starts out with this
-   * flag ``true``.
+   * Always ``true`` now that the sidebar no longer gates Inclusive
+   * + Comments behind a progress milestone. Kept as a field so the
+   * ``WorkflowState`` type and existing JSX gates don't need to
+   * change at the call sites.
    */
   allActionableCategoriesComplete: boolean
 }
@@ -153,58 +161,39 @@ export interface WorkflowState {
  * current findings list. Pure function — call from a useMemo keyed
  * on the findings array and the result is stable across renders.
  *
- * Algorithm:
+ * Current algorithm (post-revert):
  *   1. Walk ``CATEGORY_UNLOCK_ORDER`` from first to last.
  *   2. For each category:
  *      a. Collect its findings via ``categoryMatches``.
- *      b. If empty → skip (not visible, not completed; auto-skip
- *         per rule 3 so the next non-empty category becomes
- *         the sequential target).
- *      c. If every finding is in ``RESOLVED_STATUSES`` → add to
- *         completed (NOT visible — completed chips are hidden)
- *         and continue walking so the next non-empty category
- *         becomes the new target.
- *      d. Otherwise (at least one pending or highlighted) → this
- *         is the single actionable chip; add to visible, mark as
- *         ``nextUnlocked``, and STOP walking. Later categories
- *         stay hidden until this one completes.
- *   3. Return the accumulated sets.
- *
- * Invariant: ``visible`` contains at most one category (the
- * active unlock target). Empty and completed categories are both
- * hidden so the sidebar always shows only the current step.
+ *      b. If every finding is in ``RESOLVED_STATUSES`` AND there
+ *         is at least one finding → add to ``completed``.
+ *      c. Otherwise, if any finding is unresolved and
+ *         ``nextUnlocked`` is still ``null``, record this category
+ *         as the first outstanding one.
+ *   3. ``visible`` is populated with every category in the order,
+ *      regardless of resolution state — the chip bar shows them all.
+ *   4. ``allActionableCategoriesComplete`` is hard-coded ``true``
+ *      so Inclusive + Comments show immediately.
  */
 export function computeCategoryWorkflow(findings: WorkflowFinding[]): WorkflowState {
   const completed = new Set<UnlockCategory>()
-  const visible = new Set<UnlockCategory>()
+  const visible = new Set<UnlockCategory>(CATEGORY_UNLOCK_ORDER)
   let nextUnlocked: UnlockCategory | null = null
   for (const cat of CATEGORY_UNLOCK_ORDER) {
     const members = findings.filter(f => categoryMatches(f, cat))
-    if (members.length === 0) {
-      // Rule 3: zero-finding categories are skipped automatically.
-      // Not visible, not placed in completed — they never enter the
-      // user-facing workflow.
-      continue
-    }
+    if (members.length === 0) continue
     if (members.every(f => isResolvedStatus(f.status))) {
-      // Completed: track for ``allActionableCategoriesComplete`` /
-      // telemetry but hide the chip — only the next actionable
-      // category should be visible to the reviewer.
       completed.add(cat)
       continue
     }
-    // First non-empty category with any unresolved (pending or
-    // highlighted) finding: this is the active unlock target and
-    // the only actionable chip the reviewer sees.
-    visible.add(cat)
-    nextUnlocked = cat
-    break
+    if (nextUnlocked === null) {
+      nextUnlocked = cat
+    }
   }
-  // Inclusive + Comments gate: true only when every actionable
-  // category has been walked through to the end of the chain
-  // without stopping on a non-empty unresolved one. ``nextUnlocked
-  // == null`` after a full walk means every category was either
-  // skipped-empty or fully resolved.
-  const allActionableCategoriesComplete = nextUnlocked === null
-  return { completed, nextUnlocked, visible, allActionableCategoriesComplete }
+  return {
+    completed,
+    nextUnlocked,
+    visible,
+    allActionableCategoriesComplete: true,
+  }
 }

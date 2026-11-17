@@ -1592,23 +1592,53 @@ def _first_definition_for(
     f: LanguageEditFinding, first_def_map: Optional[dict[str, dict]],
 ) -> Optional[dict]:
     """Return the first-in-document definition reference the frontend
-    should display at the top of an AB04 (repeated definition) card,
-    or ``None`` for every other case.
+    should display at the top of a repeated-occurrence AB card, or
+    ``None`` for every other case.
 
-    Scope: AB04 only. Other AB rules either represent the first use
-    themselves (AB01) or don't warrant a reference row by spec.
+    Scope: AB rules whose finding is a LATER occurrence of an
+    abbreviation whose first use the author already defined — the
+    reviewer needs the earlier definition visible for context:
+
+      * AB02 — repeated expansion ("intensive care unit" after the
+        document established ``intensive care unit (ICU)``). The
+        engine anchors each AB02 against ``first_def[0]`` — the
+        same per-abbreviation first-definition position this helper
+        returns — so the reference row shows the exact definition
+        the AB02 finding is a later occurrence of.
+      * AB04 — repeated definition (``intensive care unit (ICU)``
+        written a second time after the document established it).
+
+    Rules excluded (and why):
+      * AB01 IS the first use itself.
+      * AB03 points to a premature abbreviation use whose definition
+        is LATER in the document — a forward-reference is semantically
+        opposite to "first occurrence" and would mislead the reviewer.
+      * AB06 (inconsistent abbreviation) needs the first use of the
+        PREFERRED form, not the first definition — different data,
+        not available in ``first_def_map``.
+      * AB12 (abstract-only definition) needs the abstract-specific
+        definition position, not the general first definition.
+      * Every other AB rule (AB05 single use, AB07 ambiguous, AB09
+        apostrophe plural, AB10 article agreement, AB11 heading
+        use, AB13 periods, AB14 title case, AB15 table/figure) has
+        no "earlier definition" semantic.
+
     When no map was built (missing file, I/O error) or the finding's
     abbreviation couldn't be extracted, returns ``None`` — the UI
     then falls back to showing the group's own earliest item.
 
     Also returns ``None`` when the computed first definition's span
-    exactly equals the finding's own span: that means THIS AB04
-    finding IS the first definition (shouldn't happen under the
-    current engine, but the guard keeps the serializer robust in
-    case the state and the finding fall out of sync)."""
+    exactly equals the finding's own span: that means THIS finding
+    IS the first definition. For AB04 this guard shouldn't trigger
+    under the current engine; for AB02 the spans can never match
+    (AB02 is at the bare expansion, first definition is at the
+    ``expansion (ABBR)`` surface) but the guard stays in place so
+    the serializer is robust if state and findings fall out of
+    sync."""
+    _REFERENCE_RULES = {"AB02", "AB04"}
     if not first_def_map:
         return None
-    if f.rule_id != "AB04":
+    if f.rule_id not in _REFERENCE_RULES:
         return None
     abbr = abbreviations_metadata.extract_abbreviation(
         f.rule_id, f.original_text or "", f.suggestion or "",
@@ -1667,11 +1697,16 @@ def _reanalyze_abbreviations_for_job(
       * Only PENDING AB findings are deleted. Decided rows (accepted,
         edited, rejected, highlighted) survive so the reviewer's
         decision history isn't wiped.
-      * Prior Reject / Highlight decisions survive re-analysis — if
-        a re-analysis would re-emit the same (para_index, rule_id,
-        original_text) as an already-decided rejected/highlighted
-        row, the new finding is suppressed. This prevents an ignored
-        finding from silently coming back.
+      * ALL prior decisions (Accept, Edit, Reject, Highlight)
+        survive re-analysis — if a re-analysis would re-emit the
+        same (para_index, rule_id, original_text) as an already-
+        decided row, the new finding is suppressed. This covers two
+        cases: (1) explicitly ignored findings must not silently
+        come back, and (2) for AB rules where ``suggestion ==
+        original_text`` (AB07 ambiguous abbreviations) a bulk
+        Accept All leaves the virtual text unchanged, so the only
+        thing stopping a duplicate pending row from being inserted
+        is this suppression check.
       * New pending AB findings are inserted with virtual-text
         offsets (post-patch). The frontend's WysiwygEditor already
         applied each accepted replacement via ``replaceOccurrence()``,
@@ -1707,8 +1742,9 @@ def _reanalyze_abbreviations_for_job(
     ab_accepted_or_edited = [
         f for f in all_findings if _is_ab(f) and f.status in ("accepted", "edited")
     ]
-    ab_rejected_or_highlighted = [
-        f for f in all_findings if _is_ab(f) and f.status in ("rejected", "highlighted")
+    ab_decided = [
+        f for f in all_findings
+        if _is_ab(f) and f.status in ("accepted", "edited", "rejected", "highlighted")
     ]
 
     # Build patch map keyed by paragraph. ``edited`` findings use the
@@ -1769,12 +1805,25 @@ def _reanalyze_abbreviations_for_job(
         logger.warning("reanalyze_ab: failed to build doc state: %s", exc)
         abbr_state = {}
 
-    # Suppression index: (para_index, rule_id, original_text) of the
-    # reviewer's past Reject / Highlight decisions. Re-analysis must
-    # not resurrect a finding the reviewer explicitly ignored.
+    # Suppression index: (para_index, rule_id, original_text) of EVERY
+    # AB finding the reviewer has already acted on — accepted, edited,
+    # rejected, or highlighted. Re-analysis must not resurrect any
+    # decision the reviewer made.
+    #
+    # Why accepted/edited are here too: for rules whose replacement
+    # genuinely changes the text (AB01, AB02, AB09, AB10, AB13, …)
+    # the virtual-text patch alone keeps re-analysis from re-emitting
+    # them at the same span. But AB07 ("ambiguous abbreviation — ask
+    # the author") emits ``suggestion == original_text`` so a bulk
+    # Accept All (which doesn't pick a meaning) leaves the virtual
+    # text unchanged. Without suppression, re-analysis finds the same
+    # AB07 span again and inserts a fresh pending row with a new id —
+    # exactly the "accepted abbreviations reappear after Accept All"
+    # bug. Belt-and-suspenders for the other AB rules; load-bearing
+    # for AB07 and any other rule where ``suggestion == original_text``.
     suppressed_keys: set[tuple[int, str, str]] = {
         (f.para_index, f.rule_id, f.original_text)
-        for f in ab_rejected_or_highlighted
+        for f in ab_decided
     }
 
     # Produce the fresh pending-AB set from the virtual document.

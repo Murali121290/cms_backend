@@ -16,9 +16,10 @@ export interface GroupCardFinding extends GroupableFinding {
   edited_text?: string
   status: 'pending' | 'accepted' | 'edited' | 'rejected' | 'highlighted'
   problem_label?: string | null
-  /** Only populated by the backend on AB04 (repeated definition)
-   *  findings — identifies the document-first valid definition so
-   *  the card can prepend a non-interactive reference row. */
+  /** Populated by the backend on repeated-occurrence AB findings
+   *  (AB02 Repeated Expansion, AB04 Repeated Definition) — identifies
+   *  the document-first valid definition so the card can prepend a
+   *  non-interactive reference row. */
   first_definition?: {
     para_index: number
     start_offset: number
@@ -58,7 +59,7 @@ export interface AbbreviationGroupCardProps {
    *  to also clear other groups' selection). */
   onClearSelectionInGroup?: (ids: number[]) => void
   /** Jump the editor to a specific DOCX paragraph / character range.
-   *  Called when the reviewer clicks the "First Definition · Reference"
+   *  Called when the reviewer clicks the "First Occurrence · Reference"
    *  row at the top of the card. Falls through silently when no
    *  handler is wired (older tests / callers). */
   onJumpToDocPosition?: (paraIndex: number, startOffset?: number, endOffset?: number) => void
@@ -109,8 +110,9 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
   // Reference occurrence — prepended non-interactive row showing the
   // document-first valid definition for the abbreviation. Taken from
   // whichever group item carries ``first_definition`` (backend
-  // attaches it to AB04 findings when a valid earlier definition
-  // exists). Suppressed when:
+  // attaches it to AB02 Repeated Expansion and AB04 Repeated
+  // Definition findings when a valid earlier definition exists).
+  // Suppressed when:
   //   * no item has first_definition (no valid earlier def exists —
   //     spec: "do not fabricate a reference occurrence"), or
   //   * an existing item in the group is ALREADY that occurrence
@@ -254,7 +256,7 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
                 onKeyDown={canJump ? (e) => { if (e.key === 'Enter' || e.key === ' ') jump(e) } : undefined}
                 role={canJump ? 'button' : undefined}
                 tabIndex={canJump ? 0 : undefined}
-                title={canJump ? `Jump to the first definition in paragraph ${ref.para_index + 1}` : undefined}
+                title={canJump ? `Jump to the first occurrence in paragraph ${ref.para_index + 1}` : undefined}
               >
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <div className="flex items-center gap-2 min-w-0">
@@ -262,7 +264,7 @@ export function AbbreviationGroupCard(props: AbbreviationGroupCardProps): React.
                       Para {ref.para_index + 1}
                     </span>
                     <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      ★ First Definition · Reference
+                      ★ First Occurrence · Reference
                     </span>
                   </div>
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200">

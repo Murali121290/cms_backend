@@ -11,7 +11,6 @@ import {
   Download,
   Check,
   Edit3,
-  Sliders,
   FileText,
   Save,
   ChevronRight,
@@ -1074,6 +1073,12 @@ export function LanguageReviewPage() {
         variant_to_canonical: activeRulesConfig.variant_to_canonical,
         profile_name: activeRulesConfig.name
       })
+      // Re-fetch so ``activeRulesConfig`` picks up the just-saved
+      // ``is_user_selected: true`` + any server-side reconciliation
+      // (document_variant, profile_keys ordering). The editorial-style
+      // badge next to the filename is derived from this config and
+      // would otherwise stay stale until the next full page load.
+      await loadRulesConfig()
       toast.success('Language rules saved to project CE support directory!')
     } catch (err) {
       toast.error('Failed to save language rules.')
@@ -1133,7 +1138,7 @@ export function LanguageReviewPage() {
   const focusOccurrenceInEditor = useCallback((findingId: number) => {
     const occIdx = findings.findIndex(ff => ff.id === findingId)
     if (occIdx < 0) return
-    // Clicking a finding supersedes the "First Definition · Reference"
+    // Clicking a finding supersedes the "First Occurrence · Reference"
     // highlight — the user is moving focus to a real finding row.
     const ed: any = editorRef.current?.editor
     if (ed && !ed.isDestroyed) {
@@ -1155,7 +1160,7 @@ export function LanguageReviewPage() {
   }, [findings])
 
   // Scroll the editor to a DOCX paragraph / character range. Used by
-  // the AB04 "First Definition" reference rows, which carry no finding
+  // the AB02 + AB04 "First Occurrence" reference rows, which carry no finding
   // id (so ``focusOccurrenceInEditor`` can't be used). We walk the
   // TipTap doc for a block whose ``paraIdx`` attribute matches the
   // DOCX para, resolve ProseMirror positions for ``[startOffset,
@@ -1509,33 +1514,55 @@ export function LanguageReviewPage() {
   const remainingCount = Math.max(0, totalFindingsCount - resolvedCount)
   const progressPercentage = totalFindingsCount > 0 ? Math.min(100, Math.round((resolvedCount / totalFindingsCount) * 100)) : 0
 
-  // Sequential category-unlock workflow. Only the current "next"
-  // actionable chip is visible — once a category hits zero
-  // pending/highlighted findings it disappears and the next one
-  // in CATEGORY_UNLOCK_ORDER takes its place. "All" and "Rules"
-  // are not part of the chain and stay always visible; "Comments"
-  // + "Inclusive" unlock together once every actionable category
-  // is complete.
-  //
-  // Derived live from ``findings`` — no separate workflow state is
-  // persisted. That means refresh / reopen / re-analysis naturally
-  // restore the correct unlocked set: the same statuses that drove
-  // the previous session yield the same workflow on reload, and a
-  // re-analysis that resurrects a pending finding automatically
-  // re-locks subsequent categories.
+  // Editorial-style badge beside the filename. Shows the profile(s)
+  // the reviewer / PM explicitly saved on the project's Rules page —
+  // never the backend's UK fallback (``is_user_selected: false`` from
+  // ``get_project_language_rules``), and never a frontend-side default.
+  // Multiple selected profiles are joined (e.g. "APA · NE") per spec.
+  // Returns an empty array when no badge should render so the JSX can
+  // stay a single ``.length > 0`` gate.
+  const editorialStyleLabels = useMemo<string[]>(() => {
+    if (!activeRulesConfig?.is_user_selected) return []
+    const keysRaw: unknown = activeRulesConfig?.profile_keys
+    const keys: string[] = Array.isArray(keysRaw)
+      ? keysRaw.filter((k): k is string => typeof k === 'string' && k.length > 0)
+      : (typeof activeRulesConfig?.profile_key === 'string' && activeRulesConfig.profile_key)
+        ? [activeRulesConfig.profile_key]
+        : []
+    // Short display forms that match how the house styles are referred
+    // to in print (APA, AMA, NE, UK, US). Fallback is the key itself
+    // in UPPER CASE so a newly-added profile still renders a
+    // recognisable badge without a frontend change.
+    const SHORT: Record<string, string> = {
+      apa: 'APA',
+      ama: 'AMA',
+      uk: 'UK',
+      us: 'US',
+      ne: 'NE',
+      lww_ne: 'NE',
+      canadian: 'Canadian',
+      chicago: 'Chicago',
+      medical_pharmaceutical: 'Medical',
+    }
+    return keys.map((k) => SHORT[k.toLowerCase()] ?? k.toUpperCase())
+  }, [activeRulesConfig])
+
+  // Category chip visibility. Post-revert the sidebar renders every
+  // actionable chip from first load, and Inclusive + Comments appear
+  // alongside — no sequential unlock. ``computeCategoryWorkflow`` now
+  // reports ``visible`` as the full chain and
+  // ``allActionableCategoriesComplete`` as ``true`` always, so the
+  // JSX gates below become no-ops that stay in place for defensive
+  // consistency (and so any future per-chip hiding can key off the
+  // same hook). ``completed`` / ``nextUnlocked`` continue to track
+  // resolution progress for telemetry / tooling.
   const categoryWorkflow = useMemo(() => computeCategoryWorkflow(findings), [findings])
 
-  // Rule 7 cleanup: if the user was viewing a category chip that
-  // just locked (e.g. a re-analysis resurrected an earlier pending
-  // finding), snap them back to the always-accessible "All" view.
-  // Without this, the chip would disappear from the row while its
-  // filtered content panel kept rendering — effectively letting
-  // the user remain on a locked category.
-  //
-  // ``bias`` (Inclusive) and ``comments`` are view-only chips gated
-  // on ``allActionableCategoriesComplete`` — if a re-analysis makes
-  // the chain incomplete again, both chips disappear and the user
-  // must also be snapped back.
+  // Defensive snap-back: if the hook ever reports an active tab as
+  // not-visible (e.g. a future gated variant comes back), the panel
+  // returns the reviewer to the always-accessible "All" view so no
+  // orphan content keeps rendering under a hidden chip. With the
+  // current always-visible policy this effect is a no-op.
   useEffect(() => {
     const t = activeRightTab
     if (t === 'all' || t === 'rules') return
@@ -1550,9 +1577,10 @@ export function LanguageReviewPage() {
     }
   }, [categoryWorkflow, activeRightTab])
 
-  // Chip-visibility predicate used by the JSX below. ``rules`` is
-  // the always-visible settings cog; ``bias`` and ``comments`` are
-  // handled directly in JSX via allActionableCategoriesComplete.
+  // Chip-visibility predicate used by the JSX below. Post-revert
+  // this always returns true for every actionable category; kept
+  // so the JSX structure stays identical and a future per-chip
+  // hiding hook can plug straight back in.
   const isChipVisible = (cat: UnlockCategory): boolean => categoryWorkflow.visible.has(cat)
 
   // Thin wrapper: renders the presentational AbbreviationGroupCard
@@ -1814,20 +1842,19 @@ export function LanguageReviewPage() {
           </p>
         )}
 
-        {/* AB04 reference row — shows the document-first valid
-            definition for the abbreviation so the reviewer sees
-            exactly where it was already defined. Rendered for
-            every AB04 finding card (including singletons that
-            render as flat cards instead of grouped cards), per
-            spec: "every AB04 repeated-definition card shows the
-            first valid definition". Non-interactive — no
-            checkbox, no actions — and intentionally excluded
-            from Accept All / Ignore All / selection since it's
-            not a finding, just the reference. Suppressed when
-            the server already wrote this card itself as the
-            first-use position (``first_definition`` null) or
-            when no earlier valid definition exists. */}
-        {f.rule_id === 'AB04' && f.first_definition && (() => {
+        {/* Reference row for repeated-occurrence AB findings — shows
+            the document-first valid definition for the abbreviation so
+            the reviewer sees exactly where it was already defined.
+            Rendered for every AB02 (Repeated Expansion) and AB04
+            (Repeated Definition) finding card, including singletons
+            that render as flat cards instead of grouped cards.
+            Non-interactive — no checkbox, no actions — and
+            intentionally excluded from Accept All / Ignore All /
+            selection since it's not a finding, just the reference.
+            Suppressed when no earlier valid definition exists
+            (``first_definition`` null) or when the server detected
+            this card itself IS the first-use position. */}
+        {(f.rule_id === 'AB02' || f.rule_id === 'AB04') && f.first_definition && (() => {
           const ref = f.first_definition
           const jumpToReference = (e: React.MouseEvent | React.KeyboardEvent) => {
             e.stopPropagation()
@@ -1836,18 +1863,18 @@ export function LanguageReviewPage() {
           return (
             <div
               className="mt-2 px-3 py-2 rounded-lg bg-emerald-50/60 border border-emerald-100 text-xs cursor-pointer"
-              data-testid="flat-ab04-reference"
+              data-testid="flat-ab-reference"
               onClick={jumpToReference}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') jumpToReference(e)
               }}
               role="button"
               tabIndex={0}
-              title={`Jump to the first definition in paragraph ${ref.para_index + 1}`}
+              title={`Jump to the first occurrence in paragraph ${ref.para_index + 1}`}
             >
               <div className="flex items-center gap-2 mb-1">
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  ★ First Definition · Reference
+                  ★ First Occurrence · Reference
                 </span>
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700/80">
                   Para {ref.para_index + 1}
@@ -1858,7 +1885,7 @@ export function LanguageReviewPage() {
               </div>
               <div
                 className="text-slate-700 leading-snug"
-                data-testid="flat-ab04-reference-text"
+                data-testid="flat-ab-reference-text"
               >
                 {ref.text}
               </div>
@@ -2250,12 +2277,21 @@ export function LanguageReviewPage() {
             </div>
             <div className="flex items-center gap-2">
               <span
-                className="font-semibold text-slate-800 text-sm"
+                className="font-semibold text-slate-800 text-xs"
                 title={fileName || undefined}
               >
                 {fileName || (parsedFileId ? `File #${parsedFileId}` : 'Loading…')}
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-violet-100 text-violet-600">
+              {editorialStyleLabels.length > 0 && (
+                <span
+                  data-testid="editorial-style-badge"
+                  className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 border border-sky-200"
+                  title={`Editorial style: ${editorialStyleLabels.join(', ')}`}
+                >
+                  {editorialStyleLabels.join(' · ')}
+                </span>
+              )}
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-600">
                 Language Review
               </span>
             </div>
@@ -2313,32 +2349,10 @@ export function LanguageReviewPage() {
           {/* ── LEFT SIDE: WYSIWYG MANUSCRIPT CANVAS (FULL WIDTH) ── */}
           <main className="flex-1 bg-white flex flex-col border-r border-slate-200 overflow-hidden relative w-full h-full">
             <div className="w-full flex-1 flex flex-col overflow-hidden relative">
-              <div className="h-10 bg-slate-50 border-b border-slate-100 px-6 flex items-center justify-between text-xs text-slate-500 flex-shrink-0">
-                <span className="font-semibold text-slate-700">Document Manuscript Canvas</span>
-                <div className="flex items-center gap-3 text-[11px]">
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-orange-300"></span> Grammar
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-300"></span> Spelling
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-yellow-300"></span> Sentence
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-300"></span> Inclusive
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-violet-300"></span> Terms
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-red-300"></span> Spell Check
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-teal-300"></span> Hyphenation
-                  </span>
-                </div>
-              </div>
+              {/* Category legend bar removed per UX request — the chip
+                  colours are documented in the right-side category
+                  filter chips. Category filtering, highlights, and
+                  editor annotations are unaffected. */}
 
               <div className="flex-1 relative min-h-0 overflow-hidden bg-white text-slate-800">
                 {xhtmlQuery.isPending ? (
@@ -2415,16 +2429,14 @@ export function LanguageReviewPage() {
           {/* ── RIGHT SIDE: SIDE PANEL (CLARITY DESIGN) ── */}
           <aside className="w-[420px] bg-white border-l border-slate-100 flex flex-col flex-shrink-0 overflow-hidden">
             
-            {/* Header Greeting & Search & Chips */}
+            {/* Right-panel header — search + category filter chips.
+                Progress greeting removed per UX request; the overall
+                resolved progress bar in the top header already carries
+                the same signal. */}
             <div className="p-5 border-b border-slate-100 flex-shrink-0">
-              <p className="text-sm font-semibold text-slate-800">👋 Nice progress, Editor!</p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {remainingCount > 0 ? `${remainingCount} suggestions left to look at. You've got this.` : 'All suggestions reviewed! Excellent work.'}
-              </p>
-
               {/* Pill Search Input */}
               {activeRightTab !== 'rules' && activeRightTab !== 'comments' && (
-                <div className="relative mt-4">
+                <div className="relative">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <input
                     type="text"
@@ -2437,7 +2449,11 @@ export function LanguageReviewPage() {
               )}
 
               {/* Category Filter Chips */}
-              <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+              <div
+                className={`flex items-center gap-1.5 flex-wrap ${
+                  activeRightTab !== 'rules' && activeRightTab !== 'comments' ? 'mt-3' : ''
+                }`}
+              >
                 <button
                   onClick={() => setActiveRightTab('all')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-semibold ${
@@ -2450,7 +2466,7 @@ export function LanguageReviewPage() {
                   All {pendingFindings.length}
                 </button>
 
-                {/* Chip order (sequential unlock spec):
+                {/* Chip order:
                       1. Abbreviations       (actionable)
                       2. Medical Terms       (actionable)
                       3. Hyphenation         (actionable)
@@ -2459,15 +2475,15 @@ export function LanguageReviewPage() {
                       6. Punctuation and
                          Capitalization      (actionable; internal id "sentence")
                       7. Spell Check         (actionable; internal id "typo")
-                      8. Inclusive           (VIEW-ONLY; unlocks after all 7
-                                              actionable are complete)
-                      9. Comments            (VIEW-ONLY; unlocks with Inclusive)
-                    Chips 1–7 render via ``isChipVisible`` so each one
-                    unlocks sequentially; the Inclusive + Comments pair
-                    gates on ``categoryWorkflow.allActionableCategoriesComplete``.
-                    Backend ``category`` values and ``activeRightTab``
-                    identifiers unchanged — this is a presentation-only
-                    reshuffle. */}
+                      8. Inclusive           (VIEW-ONLY)
+                      9. Comments            (VIEW-ONLY)
+                    All chips render from first load. ``isChipVisible``
+                    always returns true for actionable categories, and
+                    ``allActionableCategoriesComplete`` is hard-coded
+                    true so the Inclusive + Comments gates below let
+                    them through immediately. Backend ``category``
+                    values and ``activeRightTab`` identifiers
+                    unchanged — this is a presentation-only policy. */}
                 {isChipVisible('abbreviations') && (
                 <button
                   onClick={() => setActiveRightTab('abbreviations')}
@@ -2610,17 +2626,11 @@ export function LanguageReviewPage() {
                 </button>
                 )}
 
-                <button
-                  onClick={() => setActiveRightTab('rules')}
-                  className={`chip p-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'rules'
-                      ? 'bg-violet-600 text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                  title="CE Support Rules Manager"
-                >
-                  <Sliders size={14} />
-                </button>
+                {/* CE Support Rules Manager chip (Sliders icon) removed
+                    from the badges row per UX request. The rules tab's
+                    content panel below stays wired up, so programmatic
+                    callers / Editorial Standards → Rules continue to
+                    manage the rule configuration. */}
               </div>
             </div>
 

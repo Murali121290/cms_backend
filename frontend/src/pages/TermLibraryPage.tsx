@@ -10,6 +10,16 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string }
 
+type UploadStatus = 'queued' | 'uploading' | 'success' | 'error'
+interface UploadRow {
+  id: number
+  name: string
+  size: number
+  status: UploadStatus
+  message?: string
+  result?: ImportResult
+}
+
 export function TermLibraryPage() {
   const navigate = useNavigate()
   const { roles } = useRBAC()
@@ -35,6 +45,8 @@ export function TermLibraryPage() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const toastSeq = useRef(0)
   const [showCreate, setShowCreate] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<TermList | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
 
   function pushToast(kind: Toast['kind'], text: string) {
     const id = ++toastSeq.current
@@ -53,6 +65,22 @@ export function TermLibraryPage() {
   }
 
   useEffect(() => { refresh() }, [])
+
+  async function performDelete(tl: TermList) {
+    setDeletingId(tl.id)
+    try {
+      await termListsApi.remove(tl.id)
+      pushToast('success', `Deleted '${tl.name}' and ${tl.term_count} term${tl.term_count === 1 ? '' : 's'}`)
+      setConfirmDelete(null)
+      // If the drawer was open on this list, close it.
+      if (selected?.id === tl.id) setSelected(null)
+      await refresh()
+    } catch (err: any) {
+      pushToast('error', err?.response?.data?.detail || 'Delete failed')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -122,7 +150,13 @@ export function TermLibraryPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((tl) => (
-              <TermListCard key={tl.id} list={tl} onOpen={() => setSelected(tl)} />
+              <TermListCard
+                key={tl.id}
+                list={tl}
+                canEdit={canEdit}
+                onOpen={() => setSelected(tl)}
+                onDelete={() => setConfirmDelete(tl)}
+              />
             ))}
             {filtered.length === 0 && (
               <div className="col-span-full text-center py-16 bg-white border rounded-2xl text-slate-500">
@@ -137,7 +171,18 @@ export function TermLibraryPage() {
         <TermListDetailDrawer
           list={selected} canEdit={canEdit}
           onClose={() => { setSelected(null); refresh() }}
-          onToast={pushToast} />
+          onToast={pushToast}
+          onDelete={() => setConfirmDelete(selected)}
+        />
+      )}
+
+      {confirmDelete && (
+        <DeleteTermListDialog
+          list={confirmDelete}
+          busy={deletingId === confirmDelete.id}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => performDelete(confirmDelete)}
+        />
       )}
 
       {showCreate && canEdit && (
@@ -164,20 +209,44 @@ export function TermLibraryPage() {
   )
 }
 
-function TermListCard({ list, onOpen }: { list: TermList; onOpen: () => void }) {
+function TermListCard({ list, canEdit, onOpen, onDelete }: {
+  list: TermList
+  canEdit: boolean
+  onOpen: () => void
+  onDelete: () => void
+}) {
   const scopeMeta = list.scope === 'generic'
     ? { Icon: Globe, label: 'Generic', cls: 'bg-sky-100 text-sky-700' }
     : { Icon: Users, label: 'Client', cls: 'bg-violet-100 text-violet-700' }
   return (
-    <button onClick={onOpen}
-      className="text-left bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-lg hover:border-violet-300 transition-all">
+    <div
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+      className="relative text-left bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-lg hover:border-violet-300 transition-all cursor-pointer"
+    >
       <div className="flex items-start justify-between">
         <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center">
           <FileSpreadsheet size={20} />
         </div>
-        <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 ${scopeMeta.cls}`}>
-          <scopeMeta.Icon size={10} /> {scopeMeta.label}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 ${scopeMeta.cls}`}>
+            <scopeMeta.Icon size={10} /> {scopeMeta.label}
+          </span>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete() }}
+              title="Delete this term list"
+              aria-label={`Delete term list ${list.name}`}
+              data-testid={`termlist-delete-${list.id}`}
+              className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 p-1.5 rounded-lg transition"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
       </div>
       <h3 className="font-semibold text-slate-900 mt-3 line-clamp-1">{list.name}</h3>
       {list.description && <p className="text-xs text-slate-500 mt-1 line-clamp-2">{list.description}</p>}
@@ -188,20 +257,92 @@ function TermListCard({ list, onOpen }: { list: TermList; onOpen: () => void }) 
           <span className="text-slate-400 truncate" title={list.source_file}>· {list.source_file}</span>
         )}
       </div>
-    </button>
+    </div>
   )
 }
 
-function TermListDetailDrawer({ list, canEdit, onClose, onToast }: {
-  list: TermList; canEdit: boolean; onClose: () => void; onToast: (k: Toast['kind'], t: string) => void
+function DeleteTermListDialog({ list, busy, onCancel, onConfirm }: {
+  list: TermList
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[60] flex items-center justify-center p-6"
+      onClick={busy ? undefined : onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-termlist-title"
+    >
+      <div
+        className="bg-white rounded-2xl p-6 w-[480px] max-w-full shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center flex-shrink-0">
+            <AlertCircle size={20} />
+          </div>
+          <div className="flex-1">
+            <h3 id="delete-termlist-title" className="font-semibold text-lg text-slate-900">
+              Delete '{list.name}'?
+            </h3>
+            <p className="text-sm text-slate-600 mt-1">
+              This permanently removes the term list and <strong>{list.term_count}</strong>{' '}
+              imported term{list.term_count === 1 ? '' : 's'}.
+              {list.assigned_project_ids && list.assigned_project_ids.length > 0 && (
+                <> It will also unassign the list from <strong>{list.assigned_project_ids.length}</strong>{' '}
+                project{list.assigned_project_ids.length === 1 ? '' : 's'}.</>
+              )}
+              {' '}Related findings in past language reviews will be detached but not deleted.
+              This action cannot be undone.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="px-3 py-2 rounded-lg border text-sm disabled:opacity-50"
+            data-testid="delete-termlist-cancel"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="px-4 py-2 rounded-lg bg-rose-600 text-white text-sm font-semibold hover:bg-rose-700 disabled:opacity-50 inline-flex items-center gap-1.5"
+            data-testid="delete-termlist-confirm"
+          >
+            {busy ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
+            Delete permanently
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TermListDetailDrawer({ list, canEdit, onClose, onToast, onDelete }: {
+  list: TermList
+  canEdit: boolean
+  onClose: () => void
+  onToast: (k: Toast['kind'], t: string) => void
+  onDelete: () => void
 }) {
   const [terms, setTerms] = useState<Term[]>([])
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [uploads, setUploads] = useState<UploadRow[]>([])
   const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  const replaceFileRef = useRef<HTMLInputElement | null>(null)
+  const uploadSeq = useRef(0)
   const LIMIT = 50
 
   async function loadTerms() {
@@ -216,18 +357,99 @@ function TermListDetailDrawer({ list, canEdit, onClose, onToast }: {
   }
   useEffect(() => { loadTerms() /* eslint-disable-next-line */ }, [list.id, search, offset])
 
-  async function handleUpload(file: File, replace: boolean) {
+  function queueFiles(files: File[]): UploadRow[] {
+    const accepted: UploadRow[] = []
+    const rejected: { name: string; reason: string }[] = []
+    // Build a set of (name,size) already queued or completed to warn on
+    // obvious duplicate picks — the real de-dup happens server-side on
+    // term content via UNIQUE(term_list_id, term).
+    const existing = new Set(uploads.map((u) => `${u.name}:${u.size}`))
+    const seenInPick = new Set<string>()
+    for (const file of files) {
+      const lower = (file.name || '').toLowerCase()
+      if (!lower.endsWith('.xlsx') && !lower.endsWith('.xlsm')) {
+        rejected.push({ name: file.name, reason: 'Only .xlsx / .xlsm files are supported' })
+        continue
+      }
+      const key = `${file.name}:${file.size}`
+      if (seenInPick.has(key) || existing.has(key)) {
+        rejected.push({ name: file.name, reason: 'Already in upload list — skipped to avoid duplicate import' })
+        continue
+      }
+      seenInPick.add(key)
+      accepted.push({
+        id: ++uploadSeq.current,
+        name: file.name,
+        size: file.size,
+        status: 'queued',
+      })
+    }
+    for (const r of rejected) onToast('error', `${r.name}: ${r.reason}`)
+    if (accepted.length) setUploads((p) => [...p, ...accepted])
+    // Caller needs the matched (file, row) pairs; return the rows and
+    // let the caller zip against the original File[] by name+size.
+    return accepted
+  }
+
+  async function uploadQueue(files: File[], rows: UploadRow[], replace: boolean) {
     setUploading(true)
     try {
-      const result: ImportResult = await termListsApi.importExcel(list.id, file, replace)
-      onToast('success', `Imported ${result.inserted} new terms (${result.total_in_list} total)`)
+      // Sequential to preserve the backend's per-list dedup semantics:
+      // UNIQUE(term_list_id, term) only sees committed rows, so running
+      // concurrent imports against the same list would race on the
+      // dedup check and risk IntegrityError or lost reports.
+      for (const row of rows) {
+        const file = files.find((f) => f.name === row.name && f.size === row.size)
+        if (!file) continue
+        setUploads((p) => p.map((u) => u.id === row.id ? { ...u, status: 'uploading' } : u))
+        try {
+          const result = await termListsApi.importExcel(list.id, file, replace)
+          setUploads((p) => p.map((u) => u.id === row.id
+            ? {
+                ...u,
+                status: 'success',
+                result,
+                message: `+${result.inserted} new, ${result.skipped_already_present} already present, ${result.skipped_duplicates_in_file} dup in file`,
+              }
+            : u,
+          ))
+          // After the first replace, subsequent files should append —
+          // otherwise each file would wipe the previous one.
+          replace = false
+        } catch (err: any) {
+          const msg = err?.response?.data?.detail || err?.message || 'Import failed'
+          setUploads((p) => p.map((u) => u.id === row.id
+            ? { ...u, status: 'error', message: msg }
+            : u,
+          ))
+        }
+      }
       await loadTerms()
-    } catch (err: any) {
-      onToast('error', err?.response?.data?.detail || 'Import failed')
+      // Read the just-settled statuses from the functional updater so
+      // the toast reflects the final state rather than a stale closure.
+      setUploads((p) => {
+        const ok = p.filter((u) => rows.some((r) => r.id === u.id) && u.status === 'success').length
+        const fail = p.filter((u) => rows.some((r) => r.id === u.id) && u.status === 'error').length
+        if (ok > 0) onToast('success', `Imported ${ok} file${ok === 1 ? '' : 's'}${fail > 0 ? ` (${fail} failed)` : ''}`)
+        else if (fail > 0) onToast('error', `${fail} file${fail === 1 ? '' : 's'} failed to import`)
+        return p
+      })
     } finally {
       setUploading(false)
-      if (fileRef.current) fileRef.current.value = ''
     }
+  }
+
+  async function handleUploadFiles(files: File[], replace: boolean) {
+    const rows = queueFiles(files)
+    if (rows.length === 0) return
+    if (replace && files.length > 1) {
+      onToast('info', 'Replace applies to the first file only; the rest append.')
+    }
+    await uploadQueue(files, rows, replace)
+  }
+
+  function clearFinishedUploads() {
+    setUploads((p) => p.filter((u) => u.status === 'uploading' || u.status === 'queued'))
   }
 
   async function handleDeleteTerm(t: Term) {
@@ -260,27 +482,132 @@ function TermListDetailDrawer({ list, canEdit, onClose, onToast }: {
             className="text-xs px-2.5 py-1.5 rounded-lg border bg-white hover:bg-slate-50 inline-flex items-center gap-1">
             <Download size={12} /> Excel
           </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={onDelete}
+              title="Delete this term list"
+              data-testid="termlist-delete-drawer"
+              className="text-xs px-2.5 py-1.5 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 inline-flex items-center gap-1"
+            >
+              <Trash2 size={12} /> Delete
+            </button>
+          )}
           <button onClick={onClose} className="w-8 h-8 rounded-md hover:bg-slate-100 text-slate-500 flex items-center justify-center">
             <X size={14} />
           </button>
         </header>
 
         {canEdit && (
-          <div className="px-6 py-3 border-b bg-slate-50/70 flex items-center gap-3 flex-wrap">
-            <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden
-                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f, false) }} />
-            <button onClick={() => fileRef.current?.click()} disabled={uploading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50">
-              {uploading ? <Loader2 className="animate-spin" size={12} /> : <Upload size={12} />}
-              Upload Excel (append)
-            </button>
-            <button onClick={() => {
-              if (!confirm('Replace will DELETE all existing terms before importing. Continue?')) return
-              fileRef.current?.click()
-              // Note: for simplicity we only wire append from the button; replace is less common and done via the API directly
-            }} className="text-xs px-2.5 py-1.5 rounded-lg border bg-white hover:bg-slate-50 text-rose-700">
-              Replace (danger)
-            </button>
+          <div
+            className={`px-6 py-3 border-b bg-slate-50/70 flex flex-col gap-3 ${dragOver ? 'ring-2 ring-violet-400 ring-inset bg-violet-50/70' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true) }}
+            onDragLeave={(e) => {
+              // Only clear when leaving the outer container, not child
+              // drags — compare related target.
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false)
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              const files = Array.from(e.dataTransfer.files || [])
+              if (files.length) void handleUploadFiles(files, false)
+            }}
+          >
+            <div className="flex items-center gap-3 flex-wrap">
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".xlsx,.xlsm"
+                multiple
+                hidden
+                data-testid="termlist-upload-input"
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files || [])
+                  if (picked.length) void handleUploadFiles(picked, false)
+                  if (fileRef.current) fileRef.current.value = ''
+                }}
+              />
+              <input
+                ref={replaceFileRef}
+                type="file"
+                accept=".xlsx,.xlsm"
+                multiple
+                hidden
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files || [])
+                  if (picked.length) void handleUploadFiles(picked, true)
+                  if (replaceFileRef.current) replaceFileRef.current.value = ''
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                data-testid="termlist-upload-button"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50"
+              >
+                {uploading ? <Loader2 className="animate-spin" size={12} /> : <Upload size={12} />}
+                Upload Excel (append)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!confirm('Replace will DELETE all existing terms in this list before importing the first selected file. Continue?')) return
+                  replaceFileRef.current?.click()
+                }}
+                disabled={uploading}
+                className="text-xs px-2.5 py-1.5 rounded-lg border bg-white hover:bg-slate-50 text-rose-700 disabled:opacity-50"
+              >
+                Replace (danger)
+              </button>
+              <span className="text-xs text-slate-500">
+                Select or drop one or more .xlsx / .xlsm files
+              </span>
+              {uploads.length > 0 && !uploading && (
+                <button
+                  type="button"
+                  onClick={clearFinishedUploads}
+                  className="ml-auto text-[11px] text-slate-500 hover:text-slate-800 underline decoration-dotted"
+                >
+                  Clear finished
+                </button>
+              )}
+            </div>
+
+            {uploads.length > 0 && (
+              <ul className="space-y-1.5" data-testid="termlist-upload-list">
+                {uploads.map((u) => (
+                  <li
+                    key={u.id}
+                    data-testid={`termlist-upload-row-${u.id}`}
+                    data-status={u.status}
+                    className="flex items-center gap-2 text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5"
+                  >
+                    <FileSpreadsheet size={12} className="text-slate-400 flex-shrink-0" />
+                    <span className="font-mono truncate min-w-0 flex-1" title={u.name}>{u.name}</span>
+                    {u.status === 'queued' && (
+                      <span className="text-slate-500">Queued…</span>
+                    )}
+                    {u.status === 'uploading' && (
+                      <span className="text-violet-700 inline-flex items-center gap-1">
+                        <Loader2 className="animate-spin" size={10} /> Uploading
+                      </span>
+                    )}
+                    {u.status === 'success' && (
+                      <span className="text-emerald-700 inline-flex items-center gap-1">
+                        <Check size={10} /> {u.message}
+                      </span>
+                    )}
+                    {u.status === 'error' && (
+                      <span className="text-rose-700 inline-flex items-center gap-1" title={u.message}>
+                        <AlertCircle size={10} /> {u.message}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
