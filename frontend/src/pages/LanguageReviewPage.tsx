@@ -11,7 +11,6 @@ import {
   Download,
   Check,
   Edit3,
-  Sliders,
   FileText,
   Save,
   ChevronRight,
@@ -26,7 +25,7 @@ import {
   Eye,
   Smile
 } from 'lucide-react'
-import apiClient from '@/api/client'
+import apiClient, { getApiErrorMessage } from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import { uiPaths } from '@/utils/appPaths'
 import { useJournalReviewMode } from '@/features/journals/useJournalReviewMode'
@@ -52,8 +51,15 @@ import {
   applyCasePreservingStructure,
 } from '@/features/language_edit/caseTransforms'
 import { replaceOptionsFor } from '@/features/language_edit/replaceOptions'
-import { isAdvisoryIdentity } from '@/features/language_edit/advisoryFinding'
+import { isAdvisoryIdentity, isSentenceAdvisory } from '@/features/language_edit/advisoryFinding'
+import { displayCategoryFor } from '@/features/language_edit/findingLabel'
 import { SaveRegexAsRuleDialog, type RegexDraft } from '@/features/language_edit/SaveRegexAsRuleDialog'
+import { buildAbbreviationGroups, isDisplayableGroup, type AbbreviationGroup } from '@/features/language_edit/abbreviationGroups'
+import { referenceHighlightKey } from '@/features/editor/ReferenceHighlight'
+import { AbbreviationGroupCard } from '@/features/language_edit/AbbreviationGroupCard'
+import { computeCategoryWorkflow, isInclusiveFinding, type UnlockCategory } from '@/features/language_edit/categoryWorkflow'
+import { IgnoredTermsPanel } from '@/features/language_edit/IgnoredTermsPanel'
+import { scanForChosenExpansion, extractParagraphsFromEditor } from '@/features/language_edit/ambiguousScan'
 
 interface Finding {
   id: number
@@ -83,6 +89,99 @@ interface Finding {
   // Accept/Edit actions when this is true so the finding presents as a
   // "consider revising" nudge; Highlight and Ignore stay available.
   advisory?: boolean
+  // Structured provenance badge set server-side. Currently only
+  // 'LWW-NE' is emitted (workbook-driven). Used by the card renderer
+  // to decide whether to display the finding's description — LWW-NE
+  // findings ship author-curated rationales worth showing; findings
+  // from other sources use the message internally but suppress it in
+  // the card so the diff stays the focus.
+  source_badge?: 'LWW-NE' | null
+  // Fine-grained source label populated by the Basic Grammar workbook
+  // serializer. One of 'Basic Grammar' / 'Article Usage' /
+  // 'Subject-Verb Agreement' / 'Common Misuse' / 'Word/Phrase Choice' /
+  // 'Sentence Structure' / 'Punctuation and Capitalization'. Replaces
+  // the generic engine-category text on the card header so reviewers
+  // can see which workbook section a finding came from. Null for non-
+  // workbook findings; the card then falls back to the existing
+  // displayCategory derivation.
+  subcategory?: string | null
+  // Phase-2 Abbreviations workbook metadata. Backend GET /findings
+  // enriches every row with these keys (nulls for non-Abbreviations
+  // rules) so the card renderer can key off them unconditionally.
+  // problem_label  — short README-§9 label ("First use", "Do not use",
+  //                  "Ambiguous", …) shown as a chip beside the rule_id.
+  // note           — per-row reviewer note from the workbook.
+  // mw_lookup      — Merriam-Webster URL for abbreviation findings.
+  // confidence     — "High" or "Medium - verify".
+  // tool_behaviour — workbook's recommended behaviour (DN rows).
+  // applies_in     — medication-context string (DN rows).
+  // notation       — the raw DN notation glyph ("U", "MS", …).
+  // meanings       — AB07 only; ordered best-match-first.
+  problem_label?: string | null
+  note?: string | null
+  mw_lookup?: string | null
+  confidence?: string | null
+  tool_behaviour?: string | null
+  applies_in?: string | null
+  notation?: string | null
+  source_sheet?: string | null
+  subject_area?: string | null
+  first_use_rule?: string | null
+  ambiguity?: string | null
+  meanings?: Array<{ meaning: string; is_best_match: boolean }> | null
+  // Grouping fields — populated only for AB rules by the backend's
+  // abbreviations_metadata.grouping_fields_for helper. Non-AB findings
+  // get all three set to null and the Abbreviations tab falls back to
+  // rendering them individually. The frontend groups solely by the
+  // opaque ``group_key`` string — mismatches in rule_id / abbreviation
+  // / canonical expansion make the key differ and the reducer buckets
+  // them separately (requirement: different rules or different
+  // expansions ⇒ different groups).
+  abbreviation?: string | null
+  expansion?: string | null
+  group_key?: string | null
+  // AB04 "Repeated Definition" only: the document-first valid
+  // definition for this abbreviation. Populated server-side via
+  // ``_build_first_definition_map`` + ``_first_definition_for``.
+  // The card renderer uses it to prepend a non-interactive
+  // reference block (grouped-card path) or inline a reference
+  // section near the top of the flat card (singleton AB04 path).
+  first_definition?: {
+    para_index: number
+    start_offset: number
+    end_offset: number
+    text: string
+  } | null
+  // Populated server-side only when ``status === 'rejected'``. 'once' =
+  // Ignore Once (this occurrence only). 'always' = Ignore Always (every
+  // sibling with the same rule_id + original_text was cascade-rejected
+  // by the backend). The Ignored Terms panel displays the scope badge
+  // and the restore handler uses it to decide whether a confirmation
+  // dialog is needed before the cascade restore.
+  ignore_scope?: 'once' | 'always' | null
+  // AB07 ambiguous-abbreviation manuscript scan. Populated server-side
+  // only when the reviewer has already picked a canonical meaning for
+  // this finding (``status === 'edited'`` with ``edited_text`` set).
+  // Each entry is a related occurrence the reviewer should know about:
+  // the first valid definition pattern, later definitions (repeated or
+  // inconsistent), standalone expansion phrases, and bare abbreviation
+  // tokens. ``null`` / omitted for every non-AB07 row and for AB07
+  // rows that have no chosen meaning yet. Pure presentation — the
+  // engine never emits ``Finding`` rows from this scan.
+  ambiguous_scan?: Array<{
+    kind:
+      | 'first_definition'
+      | 'repeated_definition'
+      | 'inconsistent_definition'
+      | 'expansion'
+      | 'abbreviation'
+    para_index: number
+    start_offset: number
+    end_offset: number
+    text: string
+    rule_id?: string | null
+    conflicting_expansion?: string | null
+  }> | null
 }
 
 // "Term from list: <name>" or "Term from list: <name> (also in: <names>)"
@@ -93,6 +192,56 @@ function parseTermMeta(message: string): { listName: string | null; alsoIn: stri
   const listName = m[1]?.trim() || null
   const alsoIn = m[2] ? m[2].split(',').map(s => s.trim()).filter(Boolean) : []
   return { listName, alsoIn }
+}
+
+// Walk up from ``el`` and return the first ancestor that actually
+// scrolls vertically. Used to centre a text range inside the editor's
+// own scroll pane rather than scrolling the page body.
+function findScrollableAncestor(el: HTMLElement | null): HTMLElement | null {
+  let node: HTMLElement | null = el?.parentElement ?? null
+  while (node) {
+    const s = getComputedStyle(node)
+    if (
+      (s.overflowY === 'auto' || s.overflowY === 'scroll') &&
+      node.scrollHeight > node.clientHeight
+    ) {
+      return node
+    }
+    node = node.parentElement
+  }
+  return null
+}
+
+// Scroll the editor's scrollable ancestor so ``rect`` (viewport-space
+// coords from getBoundingClientRect/getClientRects) sits in the
+// vertical centre of the visible area, with the scroller's sticky
+// toolbar excluded from the visible region. No DOM mutation — no
+// highlight, selection, or decoration is applied; the target simply
+// becomes visible, mimicking Word's Find navigation.
+function scrollRectIntoEditorCenter(editorDom: HTMLElement, rect: DOMRect): void {
+  const scroller = findScrollableAncestor(editorDom)
+  if (!scroller) {
+    // No internal scroll pane — fall back to window-level scroll.
+    const docEl = document.documentElement
+    const toolbarH = (document.querySelector('.sticky.top-0') as HTMLElement | null)?.offsetHeight ?? 0
+    const visibleH = window.innerHeight - toolbarH
+    const rectCenterAbs = rect.top + window.scrollY + rect.height / 2
+    const target = rectCenterAbs - toolbarH - visibleH / 2
+    window.scrollTo({ top: Math.max(0, Math.min(target, docEl.scrollHeight)), behavior: 'smooth' })
+    return
+  }
+  const stickyToolbar = scroller.querySelector(':scope > .sticky') as HTMLElement | null
+  const toolbarH = stickyToolbar?.offsetHeight ?? 0
+  const scRect = scroller.getBoundingClientRect()
+  const rectCenterInScroller =
+    rect.top - scRect.top + scroller.scrollTop + rect.height / 2
+  const visibleH = scRect.height - toolbarH
+  const target = rectCenterInScroller - toolbarH - visibleH / 2
+  const max = scroller.scrollHeight - scroller.clientHeight
+  scroller.scrollTo({
+    top: Math.max(0, Math.min(target, max)),
+    behavior: 'smooth',
+  })
 }
 
 interface JobData {
@@ -124,7 +273,36 @@ export function LanguageReviewPage() {
   // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
   const journal = useJournalReviewMode()
 
-  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'term' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules'>('all')
+  // ``bias`` is the Inclusive tab (it also folds in the former Terms
+  // findings — see the ``inclusiveFindings`` memo). ``sentence`` is the
+  // Punctuation and Capitalization tab. ``hyphenation`` is labelled
+  // "Hyphenated Words" in the UI. Backend finding categories stay the
+  // same — this change is presentation + grouping only.
+  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules' | 'ignored'>('all')
+  // Remembers which tab the reviewer was on when they clicked the
+  // ``Ignored Items`` button, so the panel's Back affordance returns
+  // them exactly where they came from. Falls back to 'all' when the
+  // user opens the Ignored view some other way (e.g. a direct deep
+  // link, or a browser back-navigation that skipped the entry point).
+  const [preIgnoredTab, setPreIgnoredTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules'>('all')
+  const openIgnoredPanel = useCallback(() => {
+    setActiveRightTab(prev => {
+      if (prev !== 'ignored') {
+        setPreIgnoredTab(prev as any)
+      }
+      return 'ignored'
+    })
+  }, [])
+  const closeIgnoredPanel = useCallback(() => {
+    setActiveRightTab(preIgnoredTab)
+  }, [preIgnoredTab])
+  // Ignored Terms panel local UI state. Kept at the page level (not inside
+  // the panel component) so the search/filter survive a tab switch and so
+  // the restore-confirmation modal can be rendered next to the editor
+  // modal stack instead of inside the scrollable sidebar.
+  const [ignoredSearchQuery, setIgnoredSearchQuery] = useState<string>('')
+  const [ignoredCategoryFilter, setIgnoredCategoryFilter] = useState<string>('all')
+  const [restoringFindingIds, setRestoringFindingIds] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
   // Three-phase loading message driven by the analyze endpoint's
   // behaviour: the POST both checks the cache and (on miss) runs the
@@ -448,71 +626,520 @@ export function LanguageReviewPage() {
     }
   }, [selectedFindingId])
 
+  // In-flight decide requests. Prevents the common "I clicked Accept
+  // but nothing happened, so I clicked again" failure mode we saw in
+  // nginx logs (five back-to-back POSTs to the same finding id within
+  // 18 seconds). Every pending decide is tracked here; the Accept /
+  // Edit / Highlight / Ignore buttons check this set to disable
+  // themselves until the backend confirms.
+  const [savingFindingIds, setSavingFindingIds] = useState<Set<number>>(new Set())
+  const isFindingSaving = useCallback(
+    (id: number) => savingFindingIds.has(id),
+    [savingFindingIds],
+  )
+
+  // Bulk-selection state. A single Set is shared across every card so
+  // category-level ``Accept Selected`` / ``Ignore Selected`` can
+  // aggregate choices across multiple group cards (useful when a
+  // reviewer wants to Accept, say, every pending first-use definition
+  // across three different abbreviations). Rows know they are selected
+  // when their ``f.id`` is in the Set; actions dispatch with the
+  // intersection of the Set and the current category's pending IDs.
+  const [selectedFindingIds, setSelectedFindingIds] = useState<Set<number>>(new Set())
+  const toggleFindingSelection = useCallback((id: number) => {
+    setSelectedFindingIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+  const addFindingsToSelection = useCallback((ids: number[]) => {
+    setSelectedFindingIds(prev => {
+      const next = new Set(prev)
+      for (const id of ids) next.add(id)
+      return next
+    })
+  }, [])
+  const removeFindingsFromSelection = useCallback((ids: number[]) => {
+    setSelectedFindingIds(prev => {
+      const next = new Set(prev)
+      for (const id of ids) next.delete(id)
+      return next
+    })
+  }, [])
+  const clearSelection = useCallback(() => setSelectedFindingIds(new Set()), [])
+
   // Handle Finding Decision
-  const handleDecide = async (findingId: number, status: 'accepted' | 'edited' | 'rejected' | 'highlighted') => {
+  //
+  // ``Ignore`` is now a single action — the backend defaults scope to
+  // 'once' when none is provided and never cascades without an
+  // explicit 'always' payload (dormant path kept for restore + any
+  // pre-existing 'always' rows).
+  const handleDecide = async (
+    findingId: number,
+    status: 'accepted' | 'edited' | 'rejected' | 'highlighted',
+  ) => {
+    // Duplicate-click guard: if a prior click's POST is still in
+    // flight for this finding, drop the new click. Browser Network
+    // tab shows one request, server receives one write, counters
+    // move once.
+    if (savingFindingIds.has(findingId)) return
     const finding = findings.find(f => f.id === findingId)
+    // Idempotency guard: if the finding is already in the requested
+    // state (a stale click on an already-handled card can reach this
+    // path during a re-analysis state-replace), skip. No visible UI
+    // change expected; the server shouldn't get the same decision
+    // twice. ``edited`` always re-submits because the editor may
+    // have entered new ``edited_text`` since the last save.
+    if (finding && finding.status === status && status !== 'edited') return
     const editedText = editedInputs[findingId] ?? finding?.suggestion ?? ''
 
-    try {
-      await apiClient.post(`/language-edit/findings/${findingId}/decide`, {
-        status,
-        edited_text: status === 'edited' ? editedText : undefined,
-        reviewer: 'editor'
-      })
+    setSavingFindingIds(prev => {
+      const next = new Set(prev)
+      next.add(findingId)
+      return next
+    })
 
-      // Replace text or apply highlight directly inside WysiwygEditor
-      if (editorRef.current && finding) {
-        const occ: Occurrence = {
-          para_index: finding.para_index,
-          match_start: finding.start_offset,
-          match_end: finding.end_offset,
-          surface: finding.original_text,
-          category: finding.category
+    // ── Snapshot for rollback on backend failure ────────────────────
+    const prevStatus = finding?.status
+    const prevEditedText = finding?.edited_text
+    const prevJobSnapshot = job
+      ? {
+          accepted_count: job.accepted_count,
+          edited_count: job.edited_count,
+          rejected_count: job.rejected_count,
+          total_findings: job.total_findings,
         }
+      : null
+
+    // ── OPTIMISTIC UPDATES — apply before the network hop so the
+    //    reviewer sees the accepted / edited / highlighted / ignored
+    //    change immediately. The backend confirmation still arrives
+    //    asynchronously; the Accept button keeps its spinner until
+    //    then. On failure the catch block rolls every bit of this
+    //    back.
+
+    // 1) Editor replacement / highlight overlay — must NOT wait on the
+    //    HTTP round-trip or the server-side AB re-analysis (which can
+    //    take seconds on large documents). The reviewer sees the
+    //    document mutate the moment they click.
+    let editorMutated = false
+    if (editorRef.current && finding) {
+      const occ: Occurrence = {
+        para_index: finding.para_index,
+        match_start: finding.start_offset,
+        match_end: finding.end_offset,
+        surface: finding.original_text,
+        category: finding.category,
+      }
+      try {
         if (status === 'highlighted') {
-          editorRef.current.replaceOccurrence(occ, '', replaceOptionsFor('highlighted', false))
+          editorMutated = editorRef.current.replaceOccurrence(
+            occ, '', replaceOptionsFor('highlighted', false),
+          ) !== false
         } else if (status === 'accepted' || status === 'edited') {
           const repText = status === 'edited' ? editedText : (finding.suggestion || '')
           // Honor the editor's TC toggle: ON ⇒ record a del+ins pair so the
           // original stays visible as a tracked deletion and the new text is
           // an identifiable insertion; OFF ⇒ plain in-place replace.
-          editorRef.current.replaceOccurrence(
-            occ,
-            repText,
-            replaceOptionsFor(status, isTrackChangesEnabled()),
-          )
+          editorMutated = editorRef.current.replaceOccurrence(
+            occ, repText, replaceOptionsFor(status, isTrackChangesEnabled()),
+          ) !== false
         }
+      } catch {
+        // replaceOccurrence throws should not block the decide call —
+        // the server still owns the authoritative state. Continue.
+        editorMutated = false
       }
+    }
 
-      setFindings(prev =>
-        prev.map(f => (f.id === findingId ? { ...f, status, edited_text: editedText } : f))
-      )
+    // 2) Optimistically update the finding so the sidebar card
+    //    transitions out of pending at the same moment. The real
+    //    backend response may replace this later with a full
+    //    re-analysed list (AB only).
+    setFindings(prev =>
+      prev.map(f => (f.id === findingId
+        ? { ...f, status, edited_text: editedText }
+        : f))
+    )
 
-      setJob(prev => {
-        if (!prev) return prev
-        const oldStatus = findings.find(f => f.id === findingId)?.status
-        let accepted = prev.accepted_count
-        let edited = prev.edited_count
-        let rejected = prev.rejected_count
+    // 3) Optimistic job-counter delta so the header progress bar
+    //    moves instantly. The backend's refreshed job counters still
+    //    overwrite this when they arrive.
+    setJob(prev => {
+      if (!prev) return prev
+      let accepted = prev.accepted_count
+      let edited = prev.edited_count
+      let rejected = prev.rejected_count
+      if (prevStatus === 'accepted') accepted--
+      if (prevStatus === 'edited') edited--
+      if (prevStatus === 'rejected') rejected--
+      if (status === 'accepted') accepted++
+      if (status === 'edited') edited++
+      if (status === 'rejected') rejected++
+      return { ...prev, accepted_count: accepted, edited_count: edited, rejected_count: rejected }
+    })
 
-        if (oldStatus === 'accepted') accepted--
-        if (oldStatus === 'edited') edited--
-        if (oldStatus === 'rejected') rejected--
+    if (editingFindingId === findingId) {
+      setEditingFindingId(null)
+    }
 
-        if (status === 'accepted') accepted++
-        if (status === 'edited') edited++
-        if (status === 'rejected') rejected++
-
-        return { ...prev, accepted_count: accepted, edited_count: edited, rejected_count: rejected }
+    try {
+      const resp = await apiClient.post(`/language-edit/findings/${findingId}/decide`, {
+        status,
+        edited_text: status === 'edited' ? editedText : undefined,
+        reviewer: 'editor',
       })
 
-      if (editingFindingId === findingId) {
-        setEditingFindingId(null)
+      // AB Accept / Edit triggers a server-side re-analysis
+      // (``_reanalyze_abbreviations_for_job``). The response carries
+      // ``reanalyzed: true`` and a refreshed ``findings`` list.
+      // Replace local state atomically so group cards reflect the
+      // post-edit document — unchanged pending AB rows keep their
+      // ids (the diff-based re-analysis preserves them), so the
+      // user's current card references stay valid. Non-AB decides
+      // leave the optimistic patch untouched.
+      const refreshed = (resp?.data && Array.isArray((resp.data as any).findings))
+        ? ((resp.data as any).findings as Finding[])
+        : null
+      if (refreshed) {
+        setFindings(refreshed)
       }
 
-      toast.success(`Finding ${status}`)
+      // Trust the backend's job counters whenever they come back so
+      // the dashboard stays accurate after re-analysis.
+      const refreshedJob = (resp?.data && (resp.data as any).job) || null
+      if (refreshedJob) {
+        setJob(prev => prev ? {
+          ...prev,
+          total_findings: refreshedJob.total_findings ?? prev.total_findings,
+          accepted_count: refreshedJob.accepted_count ?? prev.accepted_count,
+          edited_count: refreshedJob.edited_count ?? prev.edited_count,
+          rejected_count: refreshedJob.rejected_count ?? prev.rejected_count,
+        } : prev)
+      }
+
+      toast.success(status === 'rejected' ? 'Ignored' : `Finding ${status}`)
     } catch (err) {
-      toast.error('Failed to save decision')
+      // ── Rollback every optimistic mutation so the UI matches the
+      //    unchanged server state and the reviewer can retry. ──
+      // 1) Finding status reverts to its prior value.
+      setFindings(prev =>
+        prev.map(f =>
+          f.id === findingId
+            ? { ...f, status: prevStatus as Finding['status'], edited_text: prevEditedText }
+            : f,
+        ),
+      )
+      // 2) Job counters revert to their pre-click snapshot.
+      if (prevJobSnapshot) {
+        setJob(prev => prev ? { ...prev, ...prevJobSnapshot } : prev)
+      }
+      // 3) Editor replacement revert via the TipTap history. We only
+      //    call undo when the optimistic replace actually mutated the
+      //    doc (replaceOccurrence returned truthy). The duplicate-
+      //    click guard above means no other finding's transaction can
+      //    have been interleaved between our dispatch and this
+      //    rollback, so the TipTap history's last entry IS our
+      //    transaction and ``undo()`` reverses exactly it.
+      if (editorMutated) {
+        try {
+          editorRef.current?.editor?.commands?.undo?.()
+        } catch {
+          // Nothing more we can do — reviewer sees the toast; they
+          // can use the editor's native Undo or re-trigger the
+          // analyse to resync.
+        }
+      }
+      toast.error(getApiErrorMessage(err, 'Failed to save decision'))
+    } finally {
+      // Always clear the in-flight marker so retries and subsequent
+      // actions are possible whether the call succeeded or failed.
+      setSavingFindingIds(prev => {
+        if (!prev.has(findingId)) return prev
+        const next = new Set(prev)
+        next.delete(findingId)
+        return next
+      })
+    }
+  }
+
+  // ── Restore (Ignored Terms → Pending) ───────────────────────────
+  // Reverses an earlier Ignore decision. On an Ignore Once row this is
+  // a single-finding flip; on an Ignore Always row the backend cascade-
+  // restores every sibling that shares (rule_id, original_text). The
+  // caller (the Ignored Terms panel's Restore button) decides whether
+  // to open a confirmation modal first — see ``requestRestore`` below.
+  const executeRestore = useCallback(async (finding: Finding) => {
+    if (restoringFindingIds.has(finding.id)) return
+    setRestoringFindingIds(prev => {
+      const next = new Set(prev)
+      next.add(finding.id)
+      return next
+    })
+    try {
+      const resp = await apiClient.post(`/language-edit/findings/${finding.id}/restore`)
+      const data = resp?.data as any
+      // Preferred shape when the cascade touched more than one row: the
+      // backend sends ``findings`` for atomic client-side replace.
+      if (Array.isArray(data?.findings)) {
+        setFindings(data.findings as Finding[])
+      } else if (data?.finding) {
+        setFindings(prev =>
+          prev.map(f => (f.id === data.finding.id ? (data.finding as Finding) : f)),
+        )
+      } else {
+        // Minimal fallback — just flip our local state. Covers the case
+        // where the backend returned an older shape (shouldn't happen
+        // but keeps the UI consistent).
+        setFindings(prev =>
+          prev.map(f => (f.id === finding.id
+            ? { ...f, status: 'pending', reviewer: undefined, decided_at: undefined, ignore_scope: null }
+            : f)),
+        )
+      }
+      if (data?.job) {
+        setJob(prev => prev ? {
+          ...prev,
+          total_findings: data.job.total_findings ?? prev.total_findings,
+          accepted_count: data.job.accepted_count ?? prev.accepted_count,
+          edited_count: data.job.edited_count ?? prev.edited_count,
+          rejected_count: data.job.rejected_count ?? prev.rejected_count,
+        } : prev)
+      }
+      const restoredCount = Array.isArray(data?.restored_ids) ? data.restored_ids.length : 1
+      toast.success(
+        restoredCount > 1
+          ? `Restored ${restoredCount} findings to pending`
+          : 'Finding restored to pending',
+      )
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to restore finding'))
+    } finally {
+      setRestoringFindingIds(prev => {
+        if (!prev.has(finding.id)) return prev
+        const next = new Set(prev)
+        next.delete(finding.id)
+        return next
+      })
+    }
+  }, [restoringFindingIds])
+
+  // Entry point used by the Ignored Items panel. Always a single-row
+  // restore now — the UI no longer surfaces Ignore Always, so there's
+  // no cascade to confirm. The backend still cascade-restores any
+  // pre-existing 'always'-scoped sibling rows if a legacy database
+  // carried them; the response's ``findings`` array is applied
+  // atomically either way.
+  const requestRestore = useCallback((finding: Finding) => {
+    executeRestore(finding)
+  }, [executeRestore])
+
+  const isRestoringFinding = useCallback(
+    (id: number) => restoringFindingIds.has(id),
+    [restoringFindingIds],
+  )
+
+  // Category-level bulk decide. Calls the single-shot
+  // ``POST /jobs/{job_id}/batch-decide`` endpoint which wraps every
+  // row in one DB transaction and runs the AB re-analysis AT MOST
+  // once per batch (regardless of how many AB findings are in the
+  // list). The frontend applies the editor replacements optimistically
+  // before the network hop so bulk Accept feels instant for the
+  // reviewer; on partial failure the failed ids are rolled back
+  // individually and reported in a toast.
+  //
+  // ``onlyPending`` is enforced client-side AND server-side: the
+  // helper filters ``ids`` through ``findings`` first, and the
+  // backend additionally skips any row whose status is already
+  // accepted/edited/rejected (``already_resolved`` in the ``failed``
+  // list of the response).
+  const handleBulkDecide = async (
+    ids: number[],
+    status: 'accepted' | 'rejected',
+  ) => {
+    if (!job?.job_id) return
+    // Resolve the ids against current findings — skip anything
+    // already decided, already saving, or absent from state.
+    const targets = findings.filter(
+      (f) =>
+        ids.includes(f.id) &&
+        f.status !== 'accepted' &&
+        f.status !== 'edited' &&
+        f.status !== 'rejected' &&
+        !savingFindingIds.has(f.id),
+    )
+    if (targets.length === 0) {
+      toast.info('No pending findings selected.')
+      return
+    }
+
+    // Mark every target as in-flight so individual cards show the
+    // Saving… spinner for the duration of the batch call.
+    const targetIds = new Set(targets.map((f) => f.id))
+    setSavingFindingIds((prev) => {
+      const next = new Set(prev)
+      for (const id of targetIds) next.add(id)
+      return next
+    })
+
+    // Snapshot for rollback on failure.
+    const prevStatuses = new Map(targets.map((f) => [f.id, f.status]))
+    const prevEdited = new Map(targets.map((f) => [f.id, f.edited_text]))
+    const prevJob = job
+      ? { ...job }
+      : null
+
+    // ── Optimistic updates ─────────────────────────────────────────
+    // Editor replacements for every accepted target, applied in
+    // document order so earlier changes don't shift later ranges.
+    if (status === 'accepted' && editorRef.current) {
+      const sorted = [...targets].sort((a, b) => {
+        if (a.para_index !== b.para_index) return a.para_index - b.para_index
+        return a.start_offset - b.start_offset
+      })
+      // Apply from LAST to FIRST so each replacement's offsets stay
+      // valid: later positions don't get disturbed by earlier text
+      // length changes.
+      for (const f of [...sorted].reverse()) {
+        try {
+          editorRef.current.replaceOccurrence(
+            {
+              para_index: f.para_index,
+              match_start: f.start_offset,
+              match_end: f.end_offset,
+              surface: f.original_text,
+              category: f.category,
+            },
+            f.suggestion || '',
+            replaceOptionsFor('accepted', isTrackChangesEnabled()),
+          )
+        } catch {
+          // Single-replace failures are non-fatal; the backend still
+          // owns the authoritative state and will report any issues
+          // in the ``failed`` list.
+        }
+      }
+    }
+
+    // Finding state: flip every target to the new status.
+    setFindings((prev) =>
+      prev.map((f) => (targetIds.has(f.id) ? { ...f, status } : f)),
+    )
+
+    try {
+      const resp = await apiClient.post(
+        `/language-edit/jobs/${job.job_id}/batch-decide`,
+        {
+          status,
+          decisions: targets.map((f) => ({ finding_id: f.id })),
+        },
+      )
+      const data: any = resp?.data || {}
+      const processed: number[] = Array.isArray(data.processed) ? data.processed : []
+      const failedList: Array<{ finding_id: number; reason: string }> =
+        Array.isArray(data.failed) ? data.failed : []
+      const refreshed: Finding[] | null = Array.isArray(data.findings)
+        ? (data.findings as Finding[])
+        : null
+      const refreshedJob = data.job || null
+
+      // Backend's refreshed findings take precedence over the
+      // optimistic patch when an AB re-analysis ran.
+      if (refreshed) {
+        setFindings(refreshed)
+      } else if (failedList.length > 0) {
+        // Roll back only the failed subset — processed ones stay
+        // in their new status from the optimistic patch above.
+        const failedIds = new Set(failedList.map((x) => x.finding_id))
+        setFindings((prev) =>
+          prev.map((f) =>
+            failedIds.has(f.id)
+              ? {
+                  ...f,
+                  status: (prevStatuses.get(f.id) as Finding['status']) || f.status,
+                  edited_text: prevEdited.get(f.id) ?? f.edited_text,
+                }
+              : f,
+          ),
+        )
+      }
+      if (refreshedJob) {
+        setJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                total_findings:
+                  refreshedJob.total_findings ?? prev.total_findings,
+                accepted_count:
+                  refreshedJob.accepted_count ?? prev.accepted_count,
+                edited_count:
+                  refreshedJob.edited_count ?? prev.edited_count,
+                rejected_count:
+                  refreshedJob.rejected_count ?? prev.rejected_count,
+              }
+            : prev,
+        )
+      }
+      // Drop the bulk selection — everyone's been actioned.
+      clearSelection()
+      const pLabel = status === 'accepted' ? 'accepted' : 'ignored'
+      if (failedList.length === 0) {
+        toast.success(`${processed.length} finding${processed.length === 1 ? '' : 's'} ${pLabel}`)
+      } else {
+        toast.info(
+          `${processed.length} ${pLabel}; ${failedList.length} skipped (${failedList
+            .map((x) => x.reason)
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .join(', ')})`,
+        )
+      }
+    } catch (err) {
+      // Full rollback: restore every target's prior status + the job
+      // counter snapshot. Editor changes are reverted via TipTap's
+      // undo (one call per replacement).
+      setFindings((prev) =>
+        prev.map((f) =>
+          targetIds.has(f.id)
+            ? {
+                ...f,
+                status: (prevStatuses.get(f.id) as Finding['status']) || f.status,
+                edited_text: prevEdited.get(f.id) ?? f.edited_text,
+              }
+            : f,
+        ),
+      )
+      if (prevJob) {
+        setJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                accepted_count: prevJob.accepted_count,
+                edited_count: prevJob.edited_count,
+                rejected_count: prevJob.rejected_count,
+                total_findings: prevJob.total_findings,
+              }
+            : prev,
+        )
+      }
+      if (status === 'accepted' && editorRef.current?.editor?.commands?.undo) {
+        for (let i = 0; i < targets.length; i++) {
+          try {
+            editorRef.current.editor.commands.undo()
+          } catch {
+            break
+          }
+        }
+      }
+      toast.error(getApiErrorMessage(err, 'Bulk action failed'))
+    } finally {
+      setSavingFindingIds((prev) => {
+        if (!targetIds.size) return prev
+        const next = new Set(prev)
+        for (const id of targetIds) next.delete(id)
+        return next
+      })
     }
   }
 
@@ -588,6 +1215,12 @@ export function LanguageReviewPage() {
         variant_to_canonical: activeRulesConfig.variant_to_canonical,
         profile_name: activeRulesConfig.name
       })
+      // Re-fetch so ``activeRulesConfig`` picks up the just-saved
+      // ``is_user_selected: true`` + any server-side reconciliation
+      // (document_variant, profile_keys ordering). The editorial-style
+      // badge next to the filename is derived from this config and
+      // would otherwise stay stale until the next full page load.
+      await loadRulesConfig()
       toast.success('Language rules saved to project CE support directory!')
     } catch (err) {
       toast.error('Failed to save language rules.')
@@ -640,6 +1273,55 @@ export function LanguageReviewPage() {
     return findings.findIndex((f) => f.id === selectedFindingId)
   }, [findings, selectedFindingId])
 
+  // Which occurrence categories the editor should paint highlights for,
+  // driven by the sidebar category badge.
+  //   * ``null`` ⇒ no filter (All) — the OccurrenceHighlight plugin
+  //     reverts to its historical "decorate everything" behaviour.
+  //   * array ⇒ only occurrences whose ``category`` is in the list get
+  //     a decoration. Buckets mirror the sidebar's own category groups
+  //     (Hyphenated Words absorbs legacy ``compounds`` / ``compound``;
+  //     Inclusive folds in ``article`` and the term-matcher category
+  //     ``term`` so clicking Inclusive highlights match the
+  //     ``inclusiveFindings`` filter).
+  //   * ``[]`` ⇒ hide every finding highlight (Comments / Rules tabs
+  //     have no occurrence-backed highlights of their own; Comment
+  //     marks remain visible because they live in document content,
+  //     not in this decoration set).
+  //
+  // Filtering happens inside the ProseMirror plugin, so switching tabs
+  // only triggers a decoration recompute — the document is not
+  // reloaded, findings/statuses/counts are untouched, and Accept /
+  // Edit / Highlight / Ignore keep their existing wiring (clicks still
+  // land on ``findings[idx]`` via the decoration's ``data-occ-index``).
+  const allowedOccurrenceCategories = useMemo<string[] | null>(() => {
+    switch (activeRightTab) {
+      case 'all':
+        return null
+      case 'grammar':
+        return ['grammar']
+      case 'spelling':
+        return ['spelling']
+      case 'sentence':
+        return ['sentence']
+      case 'typo':
+        return ['typo']
+      case 'hyphenation':
+        return ['hyphenation', 'compounds', 'compound']
+      case 'abbreviations':
+        return ['abbreviations']
+      case 'medical_terms':
+        return ['medical_terms']
+      case 'bias':
+        return ['bias', 'article', 'term']
+      case 'comments':
+      case 'rules':
+      case 'ignored':
+        return []
+      default:
+        return null
+    }
+  }, [activeRightTab])
+
   // Direct scroll-to-span via the OccurrenceHighlight decoration's data-occ-index
   // attribute. This bypasses the WysiwygEditor useEffect roundtrip (which can
   // miss when selectedFindingId doesn't change value or when the found block
@@ -647,12 +1329,18 @@ export function LanguageReviewPage() {
   const focusOccurrenceInEditor = useCallback((findingId: number) => {
     const occIdx = findings.findIndex(ff => ff.id === findingId)
     if (occIdx < 0) return
+    // Clicking a finding supersedes the "First Occurrence · Reference"
+    // highlight — the user is moving focus to a real finding row.
+    const ed: any = editorRef.current?.editor
+    if (ed && !ed.isDestroyed) {
+      ed.view.dispatch(ed.state.tr.setMeta(referenceHighlightKey, null))
+    }
     const tryScroll = () => {
       const editorDom = (editorRef.current?.editor as any)?.view?.dom as HTMLElement | undefined
       if (!editorDom) return false
       const el = editorDom.querySelector<HTMLElement>(`[data-occ-index="${occIdx}"]`)
       if (!el) return false
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      scrollRectIntoEditorCenter(editorDom, el.getBoundingClientRect())
       return true
     }
     // Two RAFs: first lets React commit, second lets ProseMirror re-render decorations.
@@ -661,6 +1349,94 @@ export function LanguageReviewPage() {
       requestAnimationFrame(() => { tryScroll() })
     })
   }, [findings])
+
+  // Scroll the editor to a DOCX paragraph / character range. Used by
+  // the AB02 + AB04 "First Occurrence" reference rows, which carry no finding
+  // id (so ``focusOccurrenceInEditor`` can't be used). We walk the
+  // TipTap doc for a block whose ``paraIdx`` attribute matches the
+  // DOCX para, resolve ProseMirror positions for ``[startOffset,
+  // endOffset)``, build a DOM Range spanning that exact text, and
+  // centre its bounding rect in the editor's scroll container —
+  // emulating Word's Find navigation. No highlight, selection, or
+  // decoration is applied.
+  const scrollEditorToParaIndex = useCallback(
+    (paraIndex: number, startOffset?: number, endOffset?: number) => {
+      const ed: any = editorRef.current?.editor
+      if (!ed || ed.isDestroyed) return
+      const doc = ed.state.doc
+      let blockPos: number | null = null
+      let blockSize = 0
+      doc.descendants((node: any, pos: number) => {
+        if (blockPos !== null) return false
+        if (
+          node.isBlock &&
+          (node.type.name === 'paragraph' || node.type.name.startsWith('heading'))
+        ) {
+          const raw = node.attrs?.paraIdx
+          const pi = raw != null ? parseInt(String(raw), 10) : NaN
+          if (Number.isFinite(pi) && pi === paraIndex) {
+            blockPos = pos
+            blockSize = node.content.size
+            return false
+          }
+        }
+        return true
+      })
+      if (blockPos === null) return
+
+      const clampedStart = Math.max(0, Math.min(blockSize, startOffset ?? 0))
+      const clampedEnd =
+        endOffset != null
+          ? Math.max(clampedStart, Math.min(blockSize, endOffset))
+          : clampedStart
+      const fromPos = blockPos + 1 + clampedStart
+      const toPos = blockPos + 1 + clampedEnd
+      const editorDom = ed.view.dom as HTMLElement
+
+      // Paint the reference range with the same visual as a selected
+      // finding (green outline + fill) so clicking the "First Definition
+      // · Reference" row surfaces the exact phrase exactly like clicking
+      // a Repeated Definition row does. ``null`` signals "no target"
+      // and is used by focusOccurrenceInEditor to clear it.
+      if (clampedEnd > clampedStart) {
+        ed.view.dispatch(
+          ed.state.tr.setMeta(referenceHighlightKey, {
+            paraIndex,
+            startOffset: clampedStart,
+            endOffset: clampedEnd,
+          }),
+        )
+      } else {
+        ed.view.dispatch(ed.state.tr.setMeta(referenceHighlightKey, null))
+      }
+
+      try {
+        if (clampedEnd > clampedStart) {
+          const fromInfo = ed.view.domAtPos(fromPos)
+          const toInfo = ed.view.domAtPos(toPos)
+          const range = document.createRange()
+          range.setStart(fromInfo.node, fromInfo.offset)
+          range.setEnd(toInfo.node, toInfo.offset)
+          const rects = range.getClientRects()
+          const rect = rects.length > 0 ? rects[0] : range.getBoundingClientRect()
+          if (rect && (rect.width > 0 || rect.height > 0)) {
+            scrollRectIntoEditorCenter(editorDom, rect)
+            return
+          }
+        }
+        const info = ed.view.domAtPos(fromPos)
+        const el: Element | null =
+          info?.node?.nodeType === Node.TEXT_NODE
+            ? info.node.parentElement
+            : (info?.node as Element)
+        if (el) scrollRectIntoEditorCenter(editorDom, el.getBoundingClientRect())
+      } catch {
+        // Positions can briefly fall outside the mapped doc during
+        // re-renders; swallow and let the next click retry.
+      }
+    },
+    [],
+  )
 
   // Close inline popover: clear state + input.
   const closeInlinePopover = useCallback(() => {
@@ -751,13 +1527,19 @@ export function LanguageReviewPage() {
     const target = findings[idx]
     if (!target) return
     setSelectedFindingId(target.id)
-    // Legacy 'compounds' / 'compound' category findings (from pre-merge
-    // analyze runs) share the Hyphenation tab now, so map them to the
-    // right tab on click rather than trying to switch to a tab that no
-    // longer exists.
-    const legacyCompoundCat = target.category === 'compounds' || target.category === 'compound'
-    const resolvedCat = legacyCompoundCat ? 'hyphenation' : target.category
-    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'bias', 'term', 'typo', 'hyphenation', 'abbreviations', 'medical_terms'].includes(resolvedCat)) {
+    // Map finding categories to the tab that now holds them:
+    //   * Legacy 'compounds' / 'compound' (pre-merge analyze runs)
+    //     share the Hyphenated Words tab.
+    //   * 'term' and 'article' were folded into the Inclusive tab
+    //     ('bias'), so a click on a term-list highlight or an article
+    //     finding selects Inclusive instead of a now-removed tab.
+    let resolvedCat = target.category
+    if (resolvedCat === 'compounds' || resolvedCat === 'compound') {
+      resolvedCat = 'hyphenation'
+    } else if (resolvedCat === 'term' || resolvedCat === 'article') {
+      resolvedCat = 'bias'
+    }
+    if (activeRightTab !== 'all' && ['grammar', 'spelling', 'sentence', 'bias', 'typo', 'hyphenation', 'abbreviations', 'medical_terms'].includes(resolvedCat)) {
       setActiveRightTab(resolvedCat as any)
     }
 
@@ -821,9 +1603,24 @@ export function LanguageReviewPage() {
   )
   const grammarFindings = useMemo(() => pendingFindings.filter(f => f.category === 'grammar'), [pendingFindings])
   const spellingFindings = useMemo(() => pendingFindings.filter(f => f.category === 'spelling'), [pendingFindings])
+  // "Punctuation and Capitalization" is the display label — the chip
+  // still keys off ``category === 'sentence'`` so the existing engine
+  // and persisted findings stay untouched.
   const sentenceFindings = useMemo(() => pendingFindings.filter(f => f.category === 'sentence'), [pendingFindings])
-  const biasFindings = useMemo(() => pendingFindings.filter(f => f.category === 'bias' || f.category === 'article'), [pendingFindings])
-  const termFindings = useMemo(() => pendingFindings.filter(f => f.category === 'term' || f.source === 'term'), [pendingFindings])
+  // Inclusive now folds in what used to be the standalone Terms chip:
+  // both backend categories ``bias`` / ``article`` AND term-matcher
+  // highlights (``category === 'term'`` or ``source === 'term'``) land
+  // here so reviewers see one combined bucket. Rule IDs, actions and
+  // review status are all preserved on each finding.
+  const inclusiveFindings = useMemo(
+    () => pendingFindings.filter(
+      f => f.category === 'bias'
+        || f.category === 'article'
+        || f.category === 'term'
+        || f.source === 'term',
+    ),
+    [pendingFindings],
+  )
   const typoFindings = useMemo(() => pendingFindings.filter(f => f.category === 'typo'), [pendingFindings])
   // Hyphenation absorbs the old Compounds category (single tab per the
   // Option B merge). Legacy jobs persisted with category='compounds' /
@@ -849,14 +1646,48 @@ export function LanguageReviewPage() {
     [pendingFindings],
   )
 
+  // Ignored Terms list — every finding the reviewer has ignored
+  // (status === 'rejected'). Sourced from the full ``findings`` array,
+  // not ``pendingFindings`` (which excludes rejected rows by design), so
+  // the panel surfaces the complete ignored set regardless of scope.
+  // Preserves individual occurrences — abbreviation group rows each
+  // have their own Finding record and therefore appear as separate
+  // Ignored Terms entries.
+  const ignoredFindings = useMemo(
+    () => findings.filter(f => f.status === 'rejected'),
+    [findings],
+  )
+  const filteredIgnoredFindings = useMemo(() => {
+    const q = ignoredSearchQuery.trim().toLowerCase()
+    return ignoredFindings.filter(f => {
+      if (ignoredCategoryFilter !== 'all' && f.category !== ignoredCategoryFilter) return false
+      if (!q) return true
+      return (
+        (f.original_text || '').toLowerCase().includes(q) ||
+        (f.suggestion || '').toLowerCase().includes(q) ||
+        (f.rule_id || '').toLowerCase().includes(q) ||
+        (f.message || '').toLowerCase().includes(q)
+      )
+    })
+  }, [ignoredFindings, ignoredSearchQuery, ignoredCategoryFilter])
+  // Category options derived from the actual ignored set so the dropdown
+  // only lists categories that have at least one ignored finding — avoids
+  // a confusing filter with empty results.
+  const ignoredCategoryOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const f of ignoredFindings) {
+      if (f.category) set.add(f.category)
+    }
+    return Array.from(set).sort()
+  }, [ignoredFindings])
+
   const activeCategoryFindings = useMemo(() => {
     let list: Finding[] = []
     if (activeRightTab === 'all') list = pendingFindings
     else if (activeRightTab === 'grammar') list = grammarFindings
     else if (activeRightTab === 'spelling') list = spellingFindings
     else if (activeRightTab === 'sentence') list = sentenceFindings
-    else if (activeRightTab === 'bias') list = biasFindings
-    else if (activeRightTab === 'term') list = termFindings
+    else if (activeRightTab === 'bias') list = inclusiveFindings
     else if (activeRightTab === 'typo') list = typoFindings
     else if (activeRightTab === 'hyphenation') list = hyphenationFindings
     else if (activeRightTab === 'abbreviations') list = abbreviationFindings
@@ -870,7 +1701,38 @@ export function LanguageReviewPage() {
         f.message.toLowerCase().includes(q) ||
         f.rule_id.toLowerCase().includes(q),
     )
-  }, [activeRightTab, pendingFindings, grammarFindings, spellingFindings, sentenceFindings, biasFindings, termFindings, typoFindings, hyphenationFindings, abbreviationFindings, medicalTermsFindings, searchQuery])
+  }, [activeRightTab, pendingFindings, grammarFindings, spellingFindings, sentenceFindings, inclusiveFindings, typoFindings, hyphenationFindings, abbreviationFindings, medicalTermsFindings, searchQuery])
+
+  // Abbreviation grouping — AB-tab only. Coalesces occurrences that
+  // share (rule_id, abbreviation, canonical expansion) into a single
+  // visual card. The backend sets ``group_key`` on AB findings only;
+  // anything without a group_key (non-AB rows that slip into the
+  // panel, or AB findings whose abbreviation couldn't be extracted)
+  // falls back to its own singleton group and renders as today.
+  //
+  // Single-occurrence groups also render flat (no header, no
+  // collapse) — a group header for a lone finding is noise.
+  //
+  // The result is a document-order-sorted array of groups; within
+  // each group, members are also in document order. The sort key is
+  // the paragraph index of the earliest member.
+  const abbreviationGroups = useMemo(() => {
+    if (activeRightTab !== 'abbreviations') return []
+    return buildAbbreviationGroups(activeCategoryFindings)
+  }, [activeRightTab, activeCategoryFindings])
+
+  // Collapse state for AB groups. Empty by default — groups start
+  // expanded so the reviewer sees every occurrence; clicking the
+  // header toggles. Keyed by group_key.
+  const [collapsedAbbrGroups, setCollapsedAbbrGroups] = useState<Set<string>>(new Set())
+  const toggleAbbrGroup = useCallback((key: string) => {
+    setCollapsedAbbrGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
 
   // Realtime progress statistics
   const totalFindingsCount = job?.total_findings || findings.length || 0
@@ -878,13 +1740,781 @@ export function LanguageReviewPage() {
   const remainingCount = Math.max(0, totalFindingsCount - resolvedCount)
   const progressPercentage = totalFindingsCount > 0 ? Math.min(100, Math.round((resolvedCount / totalFindingsCount) * 100)) : 0
 
+  // Editorial-style badge beside the filename. Shows the profile(s)
+  // the reviewer / PM explicitly saved on the project's Rules page —
+  // never the backend's UK fallback (``is_user_selected: false`` from
+  // ``get_project_language_rules``), and never a frontend-side default.
+  // Multiple selected profiles are joined (e.g. "APA · NE") per spec.
+  // Returns an empty array when no badge should render so the JSX can
+  // stay a single ``.length > 0`` gate.
+  const editorialStyleLabels = useMemo<string[]>(() => {
+    if (!activeRulesConfig?.is_user_selected) return []
+    const keysRaw: unknown = activeRulesConfig?.profile_keys
+    const keys: string[] = Array.isArray(keysRaw)
+      ? keysRaw.filter((k): k is string => typeof k === 'string' && k.length > 0)
+      : (typeof activeRulesConfig?.profile_key === 'string' && activeRulesConfig.profile_key)
+        ? [activeRulesConfig.profile_key]
+        : []
+    // Short display forms that match how the house styles are referred
+    // to in print (APA, AMA, NE, UK, US). Fallback is the key itself
+    // in UPPER CASE so a newly-added profile still renders a
+    // recognisable badge without a frontend change.
+    const SHORT: Record<string, string> = {
+      apa: 'APA',
+      ama: 'AMA',
+      uk: 'UK',
+      us: 'US',
+      ne: 'NE',
+      lww_ne: 'NE',
+      canadian: 'Canadian',
+      chicago: 'Chicago',
+      medical_pharmaceutical: 'Medical',
+    }
+    return keys.map((k) => SHORT[k.toLowerCase()] ?? k.toUpperCase())
+  }, [activeRulesConfig])
+
+  // Category chip visibility. Post-revert the sidebar renders every
+  // actionable chip from first load, and Inclusive + Comments appear
+  // alongside — no sequential unlock. ``computeCategoryWorkflow`` now
+  // reports ``visible`` as the full chain and
+  // ``allActionableCategoriesComplete`` as ``true`` always, so the
+  // JSX gates below become no-ops that stay in place for defensive
+  // consistency (and so any future per-chip hiding can key off the
+  // same hook). ``completed`` / ``nextUnlocked`` continue to track
+  // resolution progress for telemetry / tooling.
+  const categoryWorkflow = useMemo(() => computeCategoryWorkflow(findings), [findings])
+
+  // Defensive snap-back: if the hook ever reports an active tab as
+  // not-visible (e.g. a future gated variant comes back), the panel
+  // returns the reviewer to the always-accessible "All" view so no
+  // orphan content keeps rendering under a hidden chip. With the
+  // current always-visible policy this effect is a no-op.
+  useEffect(() => {
+    const t = activeRightTab
+    if (t === 'all' || t === 'rules' || t === 'ignored') return
+    if (t === 'bias' || t === 'comments') {
+      if (!categoryWorkflow.allActionableCategoriesComplete) {
+        setActiveRightTab('all')
+      }
+      return
+    }
+    if (!categoryWorkflow.visible.has(t as UnlockCategory)) {
+      setActiveRightTab('all')
+    }
+  }, [categoryWorkflow, activeRightTab])
+
+  // Chip-visibility predicate used by the JSX below. Post-revert
+  // this always returns true for every actionable category; kept
+  // so the JSX structure stays identical and a future per-chip
+  // hiding hook can plug straight back in.
+  const isChipVisible = (cat: UnlockCategory): boolean => categoryWorkflow.visible.has(cat)
+
+  // Thin wrapper: renders the presentational AbbreviationGroupCard
+  // with the page's handlers wired in. Kept as a function so the
+  // JSX render path can call it as ``renderAbbreviationGroupCard(group)``
+  // uniformly with ``renderFlatFindingCard(f)``.
+  const renderAbbreviationGroupCard = (group: AbbreviationGroup<Finding>) => (
+    <AbbreviationGroupCard
+      key={group.key}
+      group={group}
+      collapsed={collapsedAbbrGroups.has(group.key)}
+      onToggleCollapse={toggleAbbrGroup}
+      selectedFindingId={selectedFindingId}
+      editingFindingId={editingFindingId}
+      editedInputs={editedInputs}
+      onSelectFinding={(id) => {
+        setSelectedFindingId(id)
+        focusOccurrenceInEditor(id)
+      }}
+      onDecide={handleDecide}
+      onToggleEdit={(id) => setEditingFindingId(prev => prev === id ? null : id)}
+      onEditInputChange={(id, value) => setEditedInputs({ ...editedInputs, [id]: value })}
+      onRowMount={(id, el) => { cardRefs.current[id] = el as any }}
+      isFindingSaving={isFindingSaving}
+      selectedFindingIds={selectedFindingIds}
+      onToggleSelect={toggleFindingSelection}
+      onSelectAllInGroup={addFindingsToSelection}
+      onClearSelectionInGroup={removeFindingsFromSelection}
+      onJumpToDocPosition={scrollEditorToParaIndex}
+    />
+  )
+
+
+  // Extracted from the former inline ``activeCategoryFindings.map(f => {...})``
+  // body. Rendering logic for a single flat finding card — used by
+  // every non-Abbreviations tab AND by the Abbreviations tab for
+  // singleton AB groups / findings without a group_key (DN rules,
+  // findings whose abbreviation couldn't be extracted). The AB tab's
+  // multi-occurrence groups render via ``renderAbbreviationGroupCard``
+  // above — a single outer card containing compact occurrence rows,
+  // not the flat per-card layout.
+  const renderFlatFindingCard = (f: Finding) => {
+    const isSelected = f.id === selectedFindingId
+    const isAccepted = f.status === 'accepted'
+    const isEdited = f.status === 'edited'
+    const isRejected = f.status === 'rejected'
+    const isTerm = f.category === 'term' || f.source === 'term'
+
+    const catColorMap: Record<string, { border: string; text: string; bg: string }> = {
+      grammar: { border: 'border-l-orange-400', text: 'text-orange-600', bg: 'bg-orange-50' },
+      spelling: { border: 'border-l-sky-400', text: 'text-sky-600', bg: 'bg-sky-50' },
+      sentence: { border: 'border-l-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
+      // Hyphenation absorbs the old Compounds category. Legacy
+      // category values stay in the map (teal) so pre-merge
+      // jobs render consistently alongside new findings.
+      hyphenation: { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
+      compounds:   { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
+      compound:    { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
+      bias: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
+      article: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
+      term: { border: 'border-l-violet-400', text: 'text-violet-700', bg: 'bg-violet-50' },
+      typo: { border: 'border-l-red-400', text: 'text-red-600', bg: 'bg-red-50' },
+      medical_terms: { border: 'border-l-green-500', text: 'text-green-700', bg: 'bg-green-50' },
+      abbreviations: { border: 'border-l-indigo-400', text: 'text-indigo-600', bg: 'bg-indigo-50' },
+    }
+
+    const catStyle = catColorMap[f.category] || { border: 'border-l-violet-400', text: 'text-violet-600', bg: 'bg-violet-50' }
+    // Card header label — delegates to the shared helper
+    // so the logic is unit-tested in isolation. Sidebar
+    // grouping is driven by ``f.category`` upstream,
+    // not by this label.
+    const displayCategory = displayCategoryFor(f)
+    // Provenance badge: distinguishes rule sources without
+    // needing separate filter tabs. Hyphenation findings
+    // get "Workbook" (hyphen/dash workbook) vs "LWW list"
+    // (hardcoded compound_* rules). All categories gain
+    // an "LWW-NE" badge when the finding came from the
+    // LWW-NE workbook — identified via the structured
+    // ``source_badge`` field set server-side in the GET
+    // /findings serializer, not by prefix-matching on
+    // the rule name here.
+    const isLwwNe = f.source_badge === 'LWW-NE'
+    const hyphSource = isLwwNe
+      ? 'LWW-NE'
+      : displayCategory === 'hyphenation'
+        ? (f.rule_id?.startsWith('compound_') ? 'LWW list' : 'Workbook')
+        : null
+
+    // Phase-3 Abbreviations UI flags. DN rules are
+    // patient-safety notations (DN01-DN32) — rendered
+    // with a red stripe + "Do not use" banner so they
+    // stand out from style/grammar findings. AB07 is
+    // the ambiguous-abbreviation rule and gets a
+    // meaning picker instead of a single-suggestion
+    // diff.
+    const isDnRule = !!f.rule_id && f.rule_id.startsWith('DN')
+    const isAb07 = f.rule_id === 'AB07'
+    const meanings = Array.isArray(f.meanings) ? f.meanings : []
+    const hasAb07Meanings = isAb07 && meanings.length > 0
+
+    // AB07 ambiguous scan — related occurrences shown beneath the
+    // meaning picker once the reviewer has chosen a canonical meaning.
+    // Prefers the backend's serialized scan (``f.ambiguous_scan``) for
+    // already-edited rows; falls back to a live editor scan while the
+    // reviewer is still previewing their pick (``editedInputs[f.id]``
+    // set but Accept hasn't fired yet). ``f.abbreviation`` +
+    // ``f.meanings`` come from the backend AB07 payload so the scan
+    // stays generic — never hardcoding any specific term.
+    const chosenMeaningRaw = (editedInputs[f.id] ?? f.edited_text ?? '').trim()
+    const ab07Scan: Array<{
+      kind: 'first_definition' | 'repeated_definition' | 'inconsistent_definition' | 'expansion' | 'abbreviation'
+      para_index: number
+      start_offset: number
+      end_offset: number
+      text: string
+      rule_id?: string | null
+      conflicting_expansion?: string | null
+    }> | null = (() => {
+      if (!hasAb07Meanings) return null
+      // Prefer the authoritative server scan when the row has been
+      // persisted — it uses the real DOCX text + engine exclusions.
+      if (Array.isArray(f.ambiguous_scan) && f.ambiguous_scan.length > 0) {
+        return f.ambiguous_scan
+      }
+      if (!chosenMeaningRaw) return null
+      const abbr = (f.abbreviation || f.original_text || '').trim()
+      if (!abbr) return null
+      const otherExpansions = meanings
+        .map(m => m.meaning)
+        .filter(m => m && m.trim().toLowerCase() !== chosenMeaningRaw.toLowerCase())
+      const paragraphs = extractParagraphsFromEditor(editorRef.current?.editor)
+      if (paragraphs.length === 0) return null
+      try {
+        return scanForChosenExpansion({
+          paragraphs,
+          abbreviation: abbr,
+          chosenExpansion: chosenMeaningRaw,
+          otherExpansions,
+        })
+      } catch {
+        return null
+      }
+    })()
+
+    if (isTerm) {
+      const { listName, alsoIn } = parseTermMeta(f.message)
+      return (
+        <div
+          key={f.id}
+          ref={(el) => (cardRefs.current[f.id] = el)}
+          onClick={() => {
+            setSelectedFindingId(f.id)
+            focusOccurrenceInEditor(f.id)
+          }}
+          className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${catStyle.border} ${
+            isSelected ? 'ring-2 ring-violet-400 border-violet-400 shadow-md' : ''
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
+              Term
+            </span>
+            <span className="text-[11px] text-slate-400">
+              Para {f.para_index + 1}
+            </span>
+          </div>
+
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center px-2 py-1 rounded-lg bg-violet-100 text-violet-800 text-sm font-semibold">
+              {f.original_text}
+            </span>
+            {listName && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-violet-200 bg-white text-violet-700 text-[11px] font-medium">
+                {listName}
+              </span>
+            )}
+          </div>
+
+          {alsoIn.length > 0 && (
+            <p className="text-[11px] text-slate-500 mt-2">
+              Also in: {alsoIn.join(', ')}
+            </p>
+          )}
+
+          {/* Description (``f.message``) is shown only
+              for LWW-NE findings across every category.
+              Other sources (term_matcher, workbook,
+              profile rules, …) suppress the description
+              so the card stays focused on the surface
+              + replacement. */}
+          {!listName && isLwwNe && (
+            <p className="text-xs text-slate-500 mt-2 leading-snug">{f.message}</p>
+          )}
+        </div>
+      )
+    }
+
+    return (
+      <div
+        key={f.id}
+        ref={(el) => (cardRefs.current[f.id] = el)}
+        onClick={() => {
+          setSelectedFindingId(f.id)
+          focusOccurrenceInEditor(f.id)
+        }}
+        className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${isDnRule ? 'border-l-rose-500 bg-rose-50/30' : catStyle.border} ${
+          isSelected
+            ? 'ring-2 ring-violet-400 border-violet-400 shadow-md'
+            : isAccepted
+            ? 'bg-emerald-50/40 opacity-70 border-emerald-200'
+            : isEdited
+            ? 'bg-amber-50/40 opacity-80 border-amber-200'
+            : isRejected
+            ? 'bg-slate-100/60 opacity-40'
+            : ''
+        }`}
+      >
+        {/* Card Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`text-[11px] font-bold uppercase tracking-wide ${isDnRule ? 'text-rose-700' : catStyle.text}`}>
+              {displayCategory}
+            </span>
+            {/* Phase 3 — README §9 problem label chip
+                (First use / Do not use / Ambiguous / …).
+                Falls back silently for non-Abbreviations
+                findings whose problem_label is null. DN
+                rows get a red chip so patient-safety
+                flags remain visually distinct even when
+                scanning the sidebar. */}
+            {f.problem_label && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border ${
+                  isDnRule
+                    ? 'bg-rose-100 text-rose-700 border-rose-300'
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                }`}
+                title={
+                  isDnRule
+                    ? 'Do-not-use notation — patient-safety flag from the Abbreviations workbook'
+                    : 'Abbreviations rule category (README §9)'
+                }
+              >
+                {f.problem_label}
+              </span>
+            )}
+            {hyphSource && (
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
+                title={
+                  hyphSource === 'Workbook'
+                    ? 'Rule from the hyphen & en-dash workbook'
+                    : hyphSource === 'LWW list'
+                      ? 'Rule from the LWW curated compound list'
+                      : hyphSource === 'LWW-NE'
+                        ? 'Rule from the LWW-NE language-tool workbook'
+                        : ''
+                }
+              >
+                {hyphSource}
+              </span>
+            )}
+            {isAdvisoryIdentity(f) && (
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
+                title="Advisory finding — highlights a passage for your judgement without proposing a specific rewrite. Use Highlight to flag it or Ignore to dismiss."
+              >
+                Advisory
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Rule ID — muted monospace label so QC
+                reviewers can reference a specific rule
+                when discussing findings. */}
+            {f.rule_id && (
+              <span
+                className="text-[10px] font-mono text-slate-400"
+                title={`Rule ID: ${f.rule_id}`}
+              >
+                {f.rule_id}
+              </span>
+            )}
+            <span className="text-[11px] text-slate-400">
+              Para {f.para_index + 1}
+            </span>
+          </div>
+        </div>
+
+        {/* Finding description — displayed ONLY for
+            LWW-NE findings (identified via the
+            ``source_badge`` provenance field). Every
+            other source suppresses the description so
+            the diff + actions stay the primary focus.
+            Scope is category-agnostic: a LWW-NE rule in
+            Hyphenation, Grammar, Spelling, Inclusive,
+            Abbreviations, Medical Terms, Punctuation
+            etc. all surface their description; a
+            non-LWW-NE finding in any category hides it. */}
+        {isLwwNe && (
+          <p className="text-sm text-slate-700 mt-1.5 font-medium leading-snug">
+            {f.message}
+          </p>
+        )}
+
+        {/* Reference row for repeated-occurrence AB findings — shows
+            the document-first valid definition for the abbreviation so
+            the reviewer sees exactly where it was already defined.
+            Rendered for every AB02 (Repeated Expansion) and AB04
+            (Repeated Definition) finding card, including singletons
+            that render as flat cards instead of grouped cards.
+            Non-interactive — no checkbox, no actions — and
+            intentionally excluded from Accept All / Ignore All /
+            selection since it's not a finding, just the reference.
+            Suppressed when no earlier valid definition exists
+            (``first_definition`` null) or when the server detected
+            this card itself IS the first-use position. */}
+        {(f.rule_id === 'AB02' || f.rule_id === 'AB04') && f.first_definition && (() => {
+          const ref = f.first_definition
+          const jumpToReference = (e: React.MouseEvent | React.KeyboardEvent) => {
+            e.stopPropagation()
+            scrollEditorToParaIndex(ref.para_index, ref.start_offset)
+          }
+          return (
+            <div
+              className="mt-2 px-3 py-2 rounded-lg bg-emerald-50/60 border border-emerald-100 text-xs cursor-pointer"
+              data-testid="flat-ab-reference"
+              onClick={jumpToReference}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') jumpToReference(e)
+              }}
+              role="button"
+              tabIndex={0}
+              title={`Jump to the first occurrence in paragraph ${ref.para_index + 1}`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  ★ First Occurrence · Reference
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700/80">
+                  Para {ref.para_index + 1}
+                </span>
+                <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200">
+                  View only
+                </span>
+              </div>
+              <div
+                className="text-slate-700 leading-snug"
+                data-testid="flat-ab-reference-text"
+              >
+                {ref.text}
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* DN notation banner — the workbook's
+            intended-meaning + applies_in context are
+            the key patient-safety signals. Shown only
+            for DN rows so style/grammar findings stay
+            visually quiet. */}
+        {isDnRule && (f.applies_in || f.tool_behaviour) && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-rose-700">
+            {f.applies_in && (
+              <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-200">
+                Applies in: {f.applies_in}
+              </span>
+            )}
+            {f.tool_behaviour && (
+              <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-200">
+                {f.tool_behaviour}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Visual Diff Box.
+            Case 1 — AB07 (ambiguous abbreviation):
+              render a meaning picker instead of a
+              fixed diff. Reviewer must choose which
+              meaning the author intended; Accept
+              applies the chosen meaning. Best-cue
+              match is badged but NEVER pre-selected
+              (per README §7 — defaulting a meaning
+              would mask reviewer judgement).
+            Case 2 — advisory identity: show the
+              referenced phrase once, muted italic.
+            Case 3 — replacement: standard red→green diff. */}
+        {hasAb07Meanings ? (
+          <div data-testid="ab07-meanings" className="mt-3">
+            <div className="flex items-center gap-2 text-sm font-medium flex-wrap">
+              <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
+                {f.original_text}
+              </span>
+              <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
+              <span className="text-[11px] text-slate-500 italic">choose a meaning</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {meanings.map((m, idx) => {
+                const isChosen = editedInputs[f.id] === m.meaning
+                return (
+                  <button
+                    key={`${f.id}-meaning-${idx}`}
+                    data-testid="ab07-meaning"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditedInputs({ ...editedInputs, [f.id]: m.meaning })
+                    }}
+                    className={`px-2 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                      isChosen
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:border-indigo-300'
+                    }`}
+                    title={m.is_best_match ? 'Best contextual match from cue words nearby' : undefined}
+                  >
+                    {m.meaning}
+                    {m.is_best_match && (
+                      <span className={`ml-1 text-[9px] font-semibold uppercase ${isChosen ? 'text-indigo-100' : 'text-indigo-500'}`}>
+                        best match
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* AB07 related-occurrence scan. Fires the moment the
+                reviewer picks a meaning; stays visible after Accept
+                via the backend-serialized ``ambiguous_scan`` payload.
+                Nothing is rendered when the chosen expansion + its
+                abbreviation never appear elsewhere in the manuscript
+                — ``no false findings`` per spec. */}
+            {chosenMeaningRaw && ab07Scan && ab07Scan.length > 0 && (
+              <div
+                className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 overflow-hidden"
+                data-testid="ab07-ambiguous-scan"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 bg-white border-b border-slate-200 flex items-center justify-between">
+                  <span>
+                    Occurrences of “{(f.abbreviation || f.original_text || '').trim()}” /{' '}
+                    “{chosenMeaningRaw}”
+                  </span>
+                  <span className="text-slate-400 font-normal">
+                    {ab07Scan.length} found
+                  </span>
+                </div>
+                <ul className="divide-y divide-slate-200">
+                  {ab07Scan.map((hit, hitIdx) => {
+                    const kindMeta: Record<typeof hit.kind, { label: string; cls: string }> = {
+                      first_definition: { label: 'First definition', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                      repeated_definition: { label: 'Repeated definition', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+                      inconsistent_definition: { label: 'Inconsistent definition', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+                      expansion: { label: 'Expansion', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
+                      abbreviation: { label: 'Abbreviation', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+                    }
+                    const meta = kindMeta[hit.kind]
+                    return (
+                      <li
+                        key={`${f.id}-scan-${hitIdx}`}
+                        data-testid="ab07-scan-row"
+                        data-finding-id={f.id}
+                        data-kind={hit.kind}
+                        className="px-3 py-2 hover:bg-white transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                            <span
+                              className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide ${meta.cls}`}
+                              data-testid="ab07-scan-kind"
+                            >
+                              {meta.label}
+                            </span>
+                            {hit.rule_id && (
+                              <span className="font-mono text-slate-400">{hit.rule_id}</span>
+                            )}
+                            <button
+                              type="button"
+                              data-testid="ab07-scan-goto"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                scrollEditorToParaIndex(hit.para_index, hit.start_offset, hit.end_offset)
+                              }}
+                              className="text-slate-500 hover:text-indigo-700 underline decoration-dotted"
+                              title="Jump to this occurrence in the editor"
+                            >
+                              Para {hit.para_index + 1}
+                            </button>
+                            {hit.conflicting_expansion && (
+                              <span className="italic text-rose-600">
+                                (defines “{hit.conflicting_expansion}”)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-1 text-[12.5px] text-slate-700 leading-snug" data-testid="ab07-scan-text">
+                          {hit.text}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : isAdvisoryIdentity(f) ? (
+          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
+            <span
+              data-testid="advisory-phrase"
+              className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 italic"
+            >
+              {f.original_text}
+            </span>
+          </div>
+        ) : (
+          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
+            <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
+              {f.original_text}
+            </span>
+            <ArrowRight size={14} className="text-slate-300 flex-shrink-0" data-testid="diff-arrow" />
+            <span data-testid="diff-new" className="diff-new px-2 py-1 rounded-lg">
+              {f.edited_text || f.suggestion}
+            </span>
+          </div>
+        )}
+
+        {/* Phase-3 — workbook note + Merriam-Webster
+            lookup + confidence pill. All three are
+            optional: keys are null for non-Abbreviations
+            findings. Rendered as one soft row below the
+            diff so the reviewer sees the "why" without
+            opening a tooltip. */}
+        {(f.note || f.mw_lookup || f.confidence) && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+            {f.note && (
+              <span data-testid="finding-note" className="text-slate-600 italic leading-snug">
+                {f.note}
+              </span>
+            )}
+            {f.mw_lookup && (
+              <a
+                data-testid="mw-lookup"
+                href={f.mw_lookup}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="underline decoration-dotted text-indigo-600 hover:text-indigo-800"
+              >
+                Merriam-Webster
+              </a>
+            )}
+            {f.confidence && (
+              <span
+                data-testid="confidence-pill"
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                  /verify/i.test(f.confidence)
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}
+                title="Workbook confidence level"
+              >
+                {f.confidence}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Action Buttons — Case 2 (advisory identity)
+            drops Accept + Edit (nothing to apply /
+            replace) and keeps Highlight + Ignore only.
+            View-only (Inclusive) findings drop Accept +
+            Edit + Ignore; Highlight remains because the
+            spec explicitly scopes "view-only" to the
+            three resolution actions only. */}
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          {!isAdvisoryIdentity(f) && !isInclusiveFinding(f) && (() => {
+            // AB07 accepts the reviewer's chosen meaning
+            // (stored in editedInputs on click) by routing
+            // through the 'edited' decision so the server
+            // records the specific meaning the editor
+            // picked. Disabled until a meaning is picked
+            // — never pre-select, per README §7.
+            const ab07NeedsChoice = hasAb07Meanings && !editedInputs[f.id]
+            const acceptStatus: 'accepted' | 'edited' = hasAb07Meanings ? 'edited' : 'accepted'
+            const saving = isFindingSaving(f.id)
+            const acceptDisabled = ab07NeedsChoice || saving
+            return (
+              <>
+                <button
+                  data-testid="action-accept"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDecide(f.id, acceptStatus)
+                  }}
+                  disabled={acceptDisabled}
+                  aria-busy={saving}
+                  title={
+                    saving ? 'Saving…'
+                      : ab07NeedsChoice ? 'Pick a meaning above to continue'
+                      : undefined
+                  }
+                  className={`flex-1 py-1.5 rounded-full text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm ${
+                    acceptDisabled
+                      ? 'bg-slate-300 cursor-not-allowed'
+                      : 'bg-emerald-600 hover:bg-emerald-500'
+                  }`}
+                >
+                  {saving ? (
+                    <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Check size={13} />
+                  )}
+                  {saving ? 'Saving…' : 'Accept'}
+                </button>
+
+                <button
+                  data-testid="action-edit"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditingFindingId(prev => prev === f.id ? null : f.id)
+                  }}
+                  disabled={saving}
+                  className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-slate-600 transition-colors"
+                >
+                  Edit
+                </button>
+              </>
+            )
+          })()}
+
+          {/* Highlight — hidden for sentence
+              advisories (passive_voice,
+              max_sentence_length, SL001, SL005).
+              Those findings have no meaningful
+              "highlight in document" action; Ignore
+              is the only action the reviewer takes.
+              Highlight stays available for Inclusive
+              findings — only Accept/Edit/Ignore are
+              suppressed there. */}
+          {!isSentenceAdvisory(f) && (
+            <button
+              data-testid="action-highlight"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleDecide(f.id, 'highlighted')
+              }}
+              disabled={isFindingSaving(f.id)}
+              className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-amber-700 transition-colors`}
+            >
+              Highlight
+            </button>
+          )}
+
+          {!isInclusiveFinding(f) && (
+            <button
+              data-testid="action-ignore"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleDecide(f.id, 'rejected')
+              }}
+              disabled={isFindingSaving(f.id)}
+              aria-busy={isFindingSaving(f.id)}
+              className={`${isSentenceAdvisory(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-slate-400 transition-colors`}
+            >
+              {isFindingSaving(f.id) ? 'Saving…' : 'Ignore'}
+            </button>
+          )}
+        </div>
+
+        {/* Inline Custom Edit Row — Case 2 findings
+            never open the Edit input (Edit button is
+            hidden above). */}
+        {!isAdvisoryIdentity(f) && editingFindingId === f.id && (
+          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="text"
+              value={editedInputs[f.id] ?? f.suggestion}
+              onChange={(e) => setEditedInputs({ ...editedInputs, [f.id]: e.target.value })}
+              className="flex-1 text-sm border border-violet-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-200 bg-slate-50"
+              placeholder="Type custom text..."
+            />
+            <button
+              onClick={() => handleDecide(f.id, 'edited')}
+              className="px-3.5 py-1.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-colors"
+            >
+              Save Edit
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="h-screen flex flex-col bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden">
       
       {/* Dynamic CSS for Clarity design system highlights & diffs */}
       <style>{`
-        .diff-old { text-decoration: line-through; color: #b91c1c; background-color: #fee2e2; }
-        .diff-new { color: #047857; background-color: #d1fae5; }
+        /* Replacement diff styling (finding cards, actual
+           replacements only — advisory findings render as muted
+           italic text without the diff). Red strikethrough for the
+           original, green for the suggestion. No background colors
+           so the diff reads cleanly against the card without visual
+           weight competing with the finding message above. Padding
+           + rounded corners are kept so layout spacing is unchanged;
+           only the fills are removed. */
+        .diff-old { text-decoration: line-through; color: #b91c1c; background-color: transparent; }
+        .diff-new { color: #047857; background-color: transparent; }
         .chip { transition: all 0.15s ease; }
         .card-enter { animation: cardIn 0.25s ease; }
         @keyframes cardIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
@@ -996,12 +2626,21 @@ export function LanguageReviewPage() {
             </div>
             <div className="flex items-center gap-2">
               <span
-                className="font-semibold text-slate-800 text-sm"
+                className="font-semibold text-slate-800 text-xs"
                 title={fileName || undefined}
               >
                 {fileName || (parsedFileId ? `File #${parsedFileId}` : 'Loading…')}
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-violet-100 text-violet-600">
+              {editorialStyleLabels.length > 0 && (
+                <span
+                  data-testid="editorial-style-badge"
+                  className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 border border-sky-200"
+                  title={`Editorial style: ${editorialStyleLabels.join(', ')}`}
+                >
+                  {editorialStyleLabels.join(' · ')}
+                </span>
+              )}
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-600">
                 Language Review
               </span>
             </div>
@@ -1059,32 +2698,10 @@ export function LanguageReviewPage() {
           {/* ── LEFT SIDE: WYSIWYG MANUSCRIPT CANVAS (FULL WIDTH) ── */}
           <main className="flex-1 bg-white flex flex-col border-r border-slate-200 overflow-hidden relative w-full h-full">
             <div className="w-full flex-1 flex flex-col overflow-hidden relative">
-              <div className="h-10 bg-slate-50 border-b border-slate-100 px-6 flex items-center justify-between text-xs text-slate-500 flex-shrink-0">
-                <span className="font-semibold text-slate-700">Document Manuscript Canvas</span>
-                <div className="flex items-center gap-3 text-[11px]">
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-orange-300"></span> Grammar
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-300"></span> Spelling
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-yellow-300"></span> Sentence
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-300"></span> Inclusive
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-violet-300"></span> Terms
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-red-300"></span> Spell Check
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-teal-300"></span> Hyphenation
-                  </span>
-                </div>
-              </div>
+              {/* Category legend bar removed per UX request — the chip
+                  colours are documented in the right-side category
+                  filter chips. Category filtering, highlights, and
+                  editor annotations are unaffected. */}
 
               <div className="flex-1 relative min-h-0 overflow-hidden bg-white text-slate-800">
                 {xhtmlQuery.isPending ? (
@@ -1127,6 +2744,7 @@ export function LanguageReviewPage() {
                     occurrences={editorOccurrences}
                     selectedOccurrenceIndex={selectedOccurrenceIndex}
                     onOccurrenceClick={handleOccurrenceClick}
+                    allowedOccurrenceCategories={allowedOccurrenceCategories}
                     onSelectionChange={(text) => setSelectedEditorText(text)}
                     onCommentClick={(commentId) => {
                       setActiveRightTab('comments')
@@ -1158,19 +2776,18 @@ export function LanguageReviewPage() {
             />
           )}
 
+
           {/* ── RIGHT SIDE: SIDE PANEL (CLARITY DESIGN) ── */}
           <aside className="w-[420px] bg-white border-l border-slate-100 flex flex-col flex-shrink-0 overflow-hidden">
             
-            {/* Header Greeting & Search & Chips */}
+            {/* Right-panel header — search + category filter chips.
+                Progress greeting removed per UX request; the overall
+                resolved progress bar in the top header already carries
+                the same signal. */}
             <div className="p-5 border-b border-slate-100 flex-shrink-0">
-              <p className="text-sm font-semibold text-slate-800">👋 Nice progress, Editor!</p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {remainingCount > 0 ? `${remainingCount} suggestions left to look at. You've got this.` : 'All suggestions reviewed! Excellent work.'}
-              </p>
-
               {/* Pill Search Input */}
-              {activeRightTab !== 'rules' && activeRightTab !== 'comments' && (
-                <div className="relative mt-4">
+              {activeRightTab !== 'rules' && activeRightTab !== 'comments' && activeRightTab !== 'ignored' && (
+                <div className="relative">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <input
                     type="text"
@@ -1183,7 +2800,11 @@ export function LanguageReviewPage() {
               )}
 
               {/* Category Filter Chips */}
-              <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+              <div
+                className={`flex items-center gap-1.5 flex-wrap ${
+                  activeRightTab !== 'rules' && activeRightTab !== 'comments' && activeRightTab !== 'ignored' ? 'mt-3' : ''
+                }`}
+              >
                 <button
                   onClick={() => setActiveRightTab('all')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-semibold ${
@@ -1191,65 +2812,30 @@ export function LanguageReviewPage() {
                       ? 'bg-violet-600 text-white shadow-sm'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
+                  data-testid="chip-all"
                 >
                   All {pendingFindings.length}
                 </button>
 
-                <button
-                  onClick={() => setActiveRightTab('grammar')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'grammar'
-                      ? 'bg-orange-500 text-white shadow-sm'
-                      : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
-                  }`}
-                >
-                  Grammar {grammarFindings.length}
-                </button>
-
-                <button
-                  onClick={() => setActiveRightTab('spelling')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'spelling'
-                      ? 'bg-sky-500 text-white shadow-sm'
-                      : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
-                  }`}
-                >
-                  Spelling {spellingFindings.length}
-                </button>
-
-                <button
-                  onClick={() => setActiveRightTab('sentence')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'sentence'
-                      ? 'bg-yellow-500 text-white shadow-sm'
-                      : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
-                  }`}
-                >
-                  Sentence {sentenceFindings.length}
-                </button>
-
-                <button
-                  onClick={() => setActiveRightTab('bias')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'bias'
-                      ? 'bg-rose-500 text-white shadow-sm'
-                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-                  }`}
-                >
-                  Inclusive {biasFindings.length}
-                </button>
-
-                <button
-                  onClick={() => setActiveRightTab('term')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'term'
-                      ? 'bg-violet-600 text-white shadow-sm'
-                      : 'bg-violet-50 text-violet-700 hover:bg-violet-100'
-                  }`}
-                >
-                  Terms {termFindings.length}
-                </button>
-
+                {/* Chip order:
+                      1. Abbreviations       (actionable)
+                      2. Medical Terms       (actionable)
+                      3. Hyphenation         (actionable)
+                      4. Grammar             (actionable)
+                      5. Spelling            (actionable)
+                      6. Punctuation and
+                         Capitalization      (actionable; internal id "sentence")
+                      7. Spell Check         (actionable; internal id "typo")
+                      8. Inclusive           (VIEW-ONLY)
+                      9. Comments            (VIEW-ONLY)
+                    All chips render from first load. ``isChipVisible``
+                    always returns true for actionable categories, and
+                    ``allActionableCategoriesComplete`` is hard-coded
+                    true so the Inclusive + Comments gates below let
+                    them through immediately. Backend ``category``
+                    values and ``activeRightTab`` identifiers
+                    unchanged — this is a presentation-only policy. */}
+                {isChipVisible('abbreviations') && (
                 <button
                   onClick={() => setActiveRightTab('abbreviations')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1258,10 +2844,13 @@ export function LanguageReviewPage() {
                       : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                   }`}
                   title="Abbreviation expansion and first-use rules (workbook-driven)"
+                  data-testid="chip-abbreviations"
                 >
                   Abbreviations {abbreviationFindings.length}
                 </button>
+                )}
 
+                {isChipVisible('medical_terms') && (
                 <button
                   onClick={() => setActiveRightTab('medical_terms')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1270,22 +2859,13 @@ export function LanguageReviewPage() {
                       : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                   }`}
                   title="Medical Terminology workbook rules"
+                  data-testid="chip-medical_terms"
                 >
                   Medical Terms {medicalTermsFindings.length}
                 </button>
+                )}
 
-                <button
-                  onClick={() => setActiveRightTab('typo')}
-                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'typo'
-                      ? 'bg-red-500 text-white shadow-sm'
-                      : 'bg-red-50 text-red-700 hover:bg-red-100'
-                  }`}
-                  title="Likely typos detected by the spell checker"
-                >
-                  Spell Check {typoFindings.length}
-                </button>
-
+                {isChipVisible('hyphenation') && (
                 <button
                   onClick={() => setActiveRightTab('hyphenation')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -1294,10 +2874,95 @@ export function LanguageReviewPage() {
                       : 'bg-teal-50 text-teal-700 hover:bg-teal-100'
                   }`}
                   title="Hyphen and en-dash workbook rules"
+                  data-testid="chip-hyphenation"
                 >
-                  Hyphenation {hyphenationFindings.length}
+                  Hyphenated Words {hyphenationFindings.length}
                 </button>
+                )}
 
+                {isChipVisible('grammar') && (
+                <button
+                  onClick={() => setActiveRightTab('grammar')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'grammar'
+                      ? 'bg-orange-500 text-white shadow-sm'
+                      : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
+                  }`}
+                  data-testid="chip-grammar"
+                >
+                  Grammar {grammarFindings.length}
+                </button>
+                )}
+
+                {isChipVisible('spelling') && (
+                <button
+                  onClick={() => setActiveRightTab('spelling')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'spelling'
+                      ? 'bg-sky-500 text-white shadow-sm'
+                      : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
+                  }`}
+                  data-testid="chip-spelling"
+                >
+                  Spelling {spellingFindings.length}
+                </button>
+                )}
+
+                {isChipVisible('sentence') && (
+                <button
+                  onClick={() => setActiveRightTab('sentence')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'sentence'
+                      ? 'bg-yellow-500 text-white shadow-sm'
+                      : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
+                  }`}
+                  title="Punctuation and capitalization (long sentences, passive voice, terminal punctuation, start capital, …)"
+                  data-testid="chip-sentence"
+                >
+                  Punctuation and Capitalization {sentenceFindings.length}
+                </button>
+                )}
+
+                {isChipVisible('typo') && (
+                <button
+                  onClick={() => setActiveRightTab('typo')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'typo'
+                      ? 'bg-red-500 text-white shadow-sm'
+                      : 'bg-red-50 text-red-700 hover:bg-red-100'
+                  }`}
+                  title="Likely typos detected by the spell checker"
+                  data-testid="chip-typo"
+                >
+                  Spell Check {typoFindings.length}
+                </button>
+                )}
+
+                {/* Inclusive — VIEW-ONLY. Hidden until every actionable
+                    category chip is fully resolved. Accept/Edit/Ignore
+                    are suppressed inside the Inclusive tab (see the
+                    renderFlatFindingCard view-only branch). Highlight
+                    stays available because the spec explicitly covers
+                    only the three resolution actions. */}
+                {categoryWorkflow.allActionableCategoriesComplete && (
+                <button
+                  onClick={() => setActiveRightTab('bias')}
+                  className={`chip px-3 py-1.5 rounded-full text-xs font-medium ${
+                    activeRightTab === 'bias'
+                      ? 'bg-rose-500 text-white shadow-sm'
+                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                  }`}
+                  title="Inclusive language findings + term-list highlights (view-only)"
+                  data-testid="chip-bias"
+                >
+                  Inclusive {inclusiveFindings.length}
+                </button>
+                )}
+
+                {/* Comments — VIEW-ONLY reviewer annotations. Follows
+                    Inclusive in the chain: unlocks once every actionable
+                    category is complete. */}
+                {categoryWorkflow.allActionableCategoriesComplete && (
                 <button
                   onClick={() => setActiveRightTab('comments')}
                   className={`chip px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1 ${
@@ -1305,22 +2970,18 @@ export function LanguageReviewPage() {
                       ? 'bg-indigo-600 text-white shadow-sm'
                       : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                   }`}
+                  data-testid="chip-comments"
                 >
                   <MessageSquare size={12} />
                   Comments {comments.length}
                 </button>
+                )}
 
-                <button
-                  onClick={() => setActiveRightTab('rules')}
-                  className={`chip p-1.5 rounded-full text-xs font-medium ${
-                    activeRightTab === 'rules'
-                      ? 'bg-violet-600 text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                  title="CE Support Rules Manager"
-                >
-                  <Sliders size={14} />
-                </button>
+                {/* CE Support Rules Manager chip (Sliders icon) removed
+                    from the badges row per UX request. The rules tab's
+                    content panel below stays wired up, so programmatic
+                    callers / Editorial Standards → Rules continue to
+                    manage the rule configuration. */}
               </div>
             </div>
 
@@ -1491,269 +3152,176 @@ export function LanguageReviewPage() {
                       ))
                   )}
                 </div>
+              ) : activeRightTab === 'ignored' ? (
+                <IgnoredTermsPanel
+                  findings={filteredIgnoredFindings}
+                  totalCount={ignoredFindings.length}
+                  categoryOptions={ignoredCategoryOptions}
+                  searchQuery={ignoredSearchQuery}
+                  onSearchChange={setIgnoredSearchQuery}
+                  categoryFilter={ignoredCategoryFilter}
+                  onCategoryFilterChange={setIgnoredCategoryFilter}
+                  onRestore={(ignored) => {
+                    // The panel's narrower ``IgnoredFinding`` shape is a
+                    // structural subset of ``Finding``; look up the full
+                    // record so ``requestRestore`` can inspect fields the
+                    // panel doesn't carry (e.g. the live ``ignore_scope``
+                    // + any sibling references used to decide whether to
+                    // confirm the cascade).
+                    const full = findings.find(f => f.id === ignored.id)
+                    if (full) requestRestore(full)
+                  }}
+                  isRestoring={isRestoringFinding}
+                  onBack={closeIgnoredPanel}
+                />
               ) : activeRightTab !== 'rules' ? (
                 activeCategoryFindings.length === 0 ? (
                   <div className="py-12 text-center text-slate-400 text-xs">
                     No suggestions found in this category.
                   </div>
                 ) : (
-                  activeCategoryFindings.map(f => {
-                    const isSelected = f.id === selectedFindingId
-                    const isAccepted = f.status === 'accepted'
-                    const isEdited = f.status === 'edited'
-                    const isRejected = f.status === 'rejected'
-                    const isTerm = f.category === 'term' || f.source === 'term'
-
-                    const catColorMap: Record<string, { border: string; text: string; bg: string }> = {
-                      grammar: { border: 'border-l-orange-400', text: 'text-orange-600', bg: 'bg-orange-50' },
-                      spelling: { border: 'border-l-sky-400', text: 'text-sky-600', bg: 'bg-sky-50' },
-                      sentence: { border: 'border-l-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
-                      // Hyphenation absorbs the old Compounds category. Legacy
-                      // category values stay in the map (teal) so pre-merge
-                      // jobs render consistently alongside new findings.
-                      hyphenation: { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
-                      compounds:   { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
-                      compound:    { border: 'border-l-teal-400', text: 'text-teal-600', bg: 'bg-teal-50' },
-                      bias: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
-                      article: { border: 'border-l-rose-400', text: 'text-rose-600', bg: 'bg-rose-50' },
-                      term: { border: 'border-l-violet-400', text: 'text-violet-700', bg: 'bg-violet-50' },
-                      typo: { border: 'border-l-red-400', text: 'text-red-600', bg: 'bg-red-50' },
-                      medical_terms: { border: 'border-l-green-500', text: 'text-green-700', bg: 'bg-green-50' },
-                      abbreviations: { border: 'border-l-indigo-400', text: 'text-indigo-600', bg: 'bg-indigo-50' },
-                    }
-
-                    const catStyle = catColorMap[f.category] || { border: 'border-l-violet-400', text: 'text-violet-600', bg: 'bg-violet-50' }
-                    // Rename legacy "compounds"/"compound" labels to "HYPHENATION"
-                    // in the card header so the unified category reads consistently
-                    // regardless of when the job was analysed.
-                    const displayCategory = (f.category === 'compounds' || f.category === 'compound')
-                      ? 'hyphenation'
-                      : f.category === 'medical_terms'
-                        ? 'medical'
-                        : f.category
-                    // Provenance badge: distinguishes rule sources without
-                    // needing separate filter tabs. Hyphenation findings
-                    // get "Workbook" (hyphen/dash workbook) vs "LWW list"
-                    // (hardcoded compound_* rules). All categories gain
-                    // an "LWW-NE" badge when the finding came from the
-                    // LWW-NE workbook (rule_id prefix 'LWW-NE-').
-                    const isLwwNe = f.rule_id?.startsWith('LWW-NE-')
-                    const hyphSource = isLwwNe
-                      ? 'LWW-NE'
-                      : displayCategory === 'hyphenation'
-                        ? (f.rule_id?.startsWith('compound_') ? 'LWW list' : 'Workbook')
-                        : null
-
-                    if (isTerm) {
-                      const { listName, alsoIn } = parseTermMeta(f.message)
+                  <>
+                    {(() => {
+                      // Category-level action bar. Rendered for every
+                      // ACTIONABLE finding category — not for ``all``,
+                      // ``bias`` (Inclusive is view-only per spec), or
+                      // ``comments``. Shows Accept All / Ignore All
+                      // against the full pending set, plus Accept
+                      // Selected / Ignore Selected when the user has
+                      // ticked individual checkboxes.
+                      const ACTIONABLE_TABS = new Set([
+                        'abbreviations', 'medical_terms', 'hyphenation',
+                        'grammar', 'spelling', 'sentence', 'typo',
+                      ])
+                      if (!ACTIONABLE_TABS.has(activeRightTab)) return null
+                      const pendingIds = activeCategoryFindings
+                        .filter(f => f.status !== 'accepted' && f.status !== 'edited' && f.status !== 'rejected')
+                        .map(f => f.id)
+                      const selectedInCategory = pendingIds.filter(id => selectedFindingIds.has(id))
+                      if (pendingIds.length === 0) return null
                       return (
                         <div
-                          key={f.id}
-                          ref={(el) => (cardRefs.current[f.id] = el)}
-                          onClick={() => {
-                            setSelectedFindingId(f.id)
-                            focusOccurrenceInEditor(f.id)
-                          }}
-                          className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${catStyle.border} ${
-                            isSelected ? 'ring-2 ring-violet-400 border-violet-400 shadow-md' : ''
-                          }`}
+                          className="sticky top-0 z-10 mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white/95 backdrop-blur-sm shadow-sm"
+                          data-testid="category-action-bar"
                         >
-                          <div className="flex items-center justify-between">
-                            <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
-                              Term
+                          <div className="flex items-center gap-2 text-xs text-slate-600">
+                            <span className="font-semibold text-slate-800">
+                              {pendingIds.length} pending
                             </span>
-                            <span className="text-[11px] text-slate-400">
-                              Para {f.para_index + 1}
-                            </span>
-                          </div>
-
-                          <div className="mt-2 flex items-center gap-2 flex-wrap">
-                            <span className="inline-flex items-center px-2 py-1 rounded-lg bg-violet-100 text-violet-800 text-sm font-semibold">
-                              {f.original_text}
-                            </span>
-                            {listName && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-violet-200 bg-white text-violet-700 text-[11px] font-medium">
-                                {listName}
+                            {selectedInCategory.length > 0 && (
+                              <span className="text-indigo-600 font-medium">
+                                · {selectedInCategory.length} selected
                               </span>
                             )}
                           </div>
-
-                          {alsoIn.length > 0 && (
-                            <p className="text-[11px] text-slate-500 mt-2">
-                              Also in: {alsoIn.join(', ')}
-                            </p>
-                          )}
-
-                          {!listName && (
-                            <p className="text-xs text-slate-500 mt-2 leading-snug">{f.message}</p>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            {selectedInCategory.length > 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleBulkDecide(selectedInCategory, 'accepted')}
+                                  className="px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold"
+                                  data-testid="category-accept-selected"
+                                >
+                                  Accept Selected ({selectedInCategory.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        `Ignore ${selectedInCategory.length} selected finding${selectedInCategory.length === 1 ? '' : 's'}?`,
+                                      )
+                                    ) {
+                                      handleBulkDecide(selectedInCategory, 'rejected')
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 rounded-full border border-slate-200 hover:bg-slate-50 text-[11px] font-semibold text-slate-600"
+                                  data-testid="category-ignore-selected"
+                                >
+                                  Ignore Selected ({selectedInCategory.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={clearSelection}
+                                  className="px-2.5 py-1 text-[11px] text-slate-400 hover:text-slate-600 underline decoration-dotted"
+                                  data-testid="category-clear-selection"
+                                >
+                                  Clear
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleBulkDecide(pendingIds, 'accepted')}
+                                  className="px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold"
+                                  data-testid="category-accept-all"
+                                >
+                                  Accept All ({pendingIds.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        `Ignore all ${pendingIds.length} pending finding${pendingIds.length === 1 ? '' : 's'} in this category?`,
+                                      )
+                                    ) {
+                                      handleBulkDecide(pendingIds, 'rejected')
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 rounded-full border border-slate-200 hover:bg-slate-50 text-[11px] font-semibold text-slate-600"
+                                  data-testid="category-ignore-all"
+                                >
+                                  Ignore All ({pendingIds.length})
+                                </button>
+                                {/* Ignored Items — the ignored queue lives
+                                    on this bar per the revised spec, not
+                                    the category-chip row. Count reflects
+                                    every ignored finding across the whole
+                                    document (not just this category) so
+                                    the reviewer sees the full backlog from
+                                    any actionable tab. Muted-indigo fill
+                                    distinguishes it from the emerald
+                                    Accept All and the outline-only Ignore
+                                    All without reusing the amber reserved
+                                    for Highlight actions. */}
+                                <button
+                                  type="button"
+                                  onClick={openIgnoredPanel}
+                                  className="px-2.5 py-1 rounded-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-[11px] font-semibold text-indigo-700 flex items-center gap-1 transition-colors"
+                                  data-testid="category-ignored-items"
+                                  title="Review and restore ignored findings"
+                                >
+                                  <XCircle size={11} />
+                                  Ignored Items ({ignoredFindings.length})
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
                       )
-                    }
-
-                    return (
-                      <div
-                        key={f.id}
-                        ref={(el) => (cardRefs.current[f.id] = el)}
-                        onClick={() => {
-                          setSelectedFindingId(f.id)
-                          focusOccurrenceInEditor(f.id)
-                        }}
-                        className={`finding-card card-enter p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer border-l-4 ${catStyle.border} ${
-                          isSelected
-                            ? 'ring-2 ring-violet-400 border-violet-400 shadow-md'
-                            : isAccepted
-                            ? 'bg-emerald-50/40 opacity-70 border-emerald-200'
-                            : isEdited
-                            ? 'bg-amber-50/40 opacity-80 border-amber-200'
-                            : isRejected
-                            ? 'bg-slate-100/60 opacity-40'
-                            : ''
-                        }`}
-                      >
-                        {/* Card Header */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`text-[11px] font-bold uppercase tracking-wide ${catStyle.text}`}>
-                              {displayCategory}
-                            </span>
-                            {hyphSource && (
-                              <span
-                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
-                                title={
-                                  hyphSource === 'Workbook'
-                                    ? 'Rule from the hyphen & en-dash workbook'
-                                    : hyphSource === 'LWW list'
-                                      ? 'Rule from the LWW curated compound list'
-                                      : hyphSource === 'LWW-NE'
-                                        ? 'Rule from the LWW-NE language-tool workbook'
-                                        : ''
-                                }
-                              >
-                                {hyphSource}
-                              </span>
-                            )}
-                            {isAdvisoryIdentity(f) && (
-                              <span
-                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
-                                title="Advisory finding — highlights a passage for your judgement without proposing a specific rewrite. Use Highlight to flag it or Ignore to dismiss."
-                              >
-                                Advisory
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[11px] text-slate-400">
-                            Para {f.para_index + 1}
-                          </span>
-                        </div>
-
-                        {/* Finding Message */}
-                        <p className="text-sm text-slate-700 mt-1.5 font-medium leading-snug">
-                          {f.message}
-                        </p>
-
-                        {/* Visual Diff Box — Case 1 (replacement) shows
-                            the red-strikethrough → green diff. Case 2
-                            (advisory finding with original == suggestion)
-                            shows just the referenced phrase once, as
-                            muted italic text, with no arrow. */}
-                        {isAdvisoryIdentity(f) ? (
-                          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
-                            <span
-                              data-testid="advisory-phrase"
-                              className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 italic"
-                            >
-                              {f.original_text}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
-                            <span data-testid="diff-old" className="diff-old px-2 py-1 rounded-lg">
-                              {f.original_text}
-                            </span>
-                            <ArrowRight size={14} className="text-slate-300 flex-shrink-0" data-testid="diff-arrow" />
-                            <span data-testid="diff-new" className="diff-new px-2 py-1 rounded-lg">
-                              {f.edited_text || f.suggestion}
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Action Buttons — Case 2 (advisory identity)
-                            drops Accept + Edit (nothing to apply /
-                            replace) and keeps Highlight + Ignore only. */}
-                        <div className="mt-3 flex items-center gap-2 flex-wrap">
-                          {!isAdvisoryIdentity(f) && (
-                            <>
-                              <button
-                                data-testid="action-accept"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleDecide(f.id, 'accepted')
-                                }}
-                                className="flex-1 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1 shadow-sm"
-                              >
-                                <Check size={13} /> Accept
-                              </button>
-
-                              <button
-                                data-testid="action-edit"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setEditingFindingId(prev => prev === f.id ? null : f.id)
-                                }}
-                                className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 transition-colors"
-                              >
-                                Edit
-                              </button>
-                            </>
-                          )}
-
-                          <button
-                            data-testid="action-highlight"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDecide(f.id, 'highlighted')
-                            }}
-                            className={`${isAdvisoryIdentity(f) ? 'flex-1' : 'px-3'} py-1.5 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-700 transition-colors`}
-                          >
-                            Highlight
-                          </button>
-
-                          <button
-                            data-testid="action-ignore"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDecide(f.id, 'rejected')
-                            }}
-                            className="px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-400 transition-colors"
-                          >
-                            Ignore
-                          </button>
-                        </div>
-
-                        {/* Inline Custom Edit Row — Case 2 findings
-                            never open the Edit input (Edit button is
-                            hidden above). */}
-                        {!isAdvisoryIdentity(f) && editingFindingId === f.id && (
-                          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="text"
-                              value={editedInputs[f.id] ?? f.suggestion}
-                              onChange={(e) => setEditedInputs({ ...editedInputs, [f.id]: e.target.value })}
-                              className="flex-1 text-sm border border-violet-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-200 bg-slate-50"
-                              placeholder="Type custom text..."
-                            />
-                            <button
-                              onClick={() => handleDecide(f.id, 'edited')}
-                              className="px-3.5 py-1.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-colors"
-                            >
-                              Save Edit
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })
+                    })()}
+                    {activeRightTab === 'abbreviations' ? (
+                  // Grouped-card render path — multi-occurrence AB
+                  // groups render as ONE outer card containing a
+                  // header and compact occurrence rows (see
+                  // ``renderAbbreviationGroupCard`` just above the
+                  // return). Singleton AB groups and findings
+                  // without a group_key (ungrouped) fall through
+                  // to the flat ``renderFlatFindingCard`` renderer
+                  // so DN rules and lone abbreviations keep their
+                  // existing look.
+                  abbreviationGroups.flatMap(group =>
+                    isDisplayableGroup(group)
+                      ? [renderAbbreviationGroupCard(group)]
+                      : group.items.map(renderFlatFindingCard)
+                  )
+                ) : (
+                  activeCategoryFindings.map(renderFlatFindingCard)
+                )}
+                  </>
                 )
               ) : (
                 /* ── CE SUPPORT RULES MANAGER TAB ── */

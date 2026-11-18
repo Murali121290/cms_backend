@@ -963,6 +963,46 @@ export function PostProdEpubValidatorFiles() {
   const handleExportConfirmed = () => { setExportConfirmMsg(null); doExport(true); };
 
   const [isCompletingBod, setIsCompletingBod] = useState(false);
+  const [showBodCompleteModal, setShowBodCompleteModal] = useState(false);
+  const [manualVerified, setManualVerified] = useState(false);
+  const [qcReadiness, setQcReadiness] = useState<any>(null);
+  const [isCheckingQc, setIsCheckingQc] = useState(false);
+  const [revealedStage, setRevealedStage] = useState<number>(0);
+
+  // Trigger sequential stage evaluation when modal opens
+  useEffect(() => {
+    if (!showBodCompleteModal) {
+      setRevealedStage(0);
+      setManualVerified(false);
+      setQcReadiness(null);
+      setIsCheckingQc(false);
+      return;
+    }
+
+    let isMounted = true;
+    setIsCheckingQc(true);
+    setRevealedStage(0);
+
+    api.get(`/post-prod/epub-validator/projects/${folderName}/qc-status`)
+      .then((res) => {
+        if (!isMounted) return;
+        setQcReadiness(res.data);
+        setIsCheckingQc(false);
+        // Animate sequential revealing of stages
+        setTimeout(() => { if (isMounted) setRevealedStage(1); }, 400);
+        setTimeout(() => { if (isMounted) setRevealedStage(2); }, 900);
+        setTimeout(() => { if (isMounted) setRevealedStage(3); }, 1400);
+        setTimeout(() => { if (isMounted) setRevealedStage(4); }, 1900);
+        setTimeout(() => { if (isMounted) setRevealedStage(5); }, 2200);
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        setIsCheckingQc(false);
+        toast.error("Could not fetch QC readiness status");
+      });
+
+    return () => { isMounted = false; };
+  }, [showBodCompleteModal, folderName]);
 
   const completeBodQC = async () => {
     if (!bodJobId) return;
@@ -1167,6 +1207,7 @@ export function PostProdEpubValidatorFiles() {
                 : undefined
             }
             onRenameSuccess={(newName) => {
+              queryClient.invalidateQueries({ queryKey: ['epub-projects'] });
               refetchFiles();
               setSelectedFile(prev => prev ? { ...prev, file_name: newName } : prev);
             }}
@@ -1228,6 +1269,280 @@ export function PostProdEpubValidatorFiles() {
                   Cancel
                 </Button>
                 <Button onClick={handleExportConfirmed}>Proceed</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── BOD Complete QC Confirmation Modal ────────────────────────────── */}
+      <AnimatePresence>
+        {showBodCompleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+            <motion.div
+              className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-lg overflow-hidden"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="p-6">
+                <div className="flex items-center gap-3 pb-4 border-b border-border/60">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground m-0">Quality Control (Books on Demand)</h3>
+                    <p className="text-xs text-muted-foreground m-0 mt-0.5">Final verification before advancing to Ready to Dispatch</p>
+                  </div>
+                </div>
+
+                <div className="my-5">
+                  <p className="text-xs text-foreground font-medium mb-3">
+                    Ensure all stages pass verification before advancing:
+                  </p>
+
+                  <div className="space-y-2.5 bg-background/60 border border-border/60 rounded-xl p-3.5">
+                    {/* ── Stage 1: EPUBCheck Validation ── */}
+                    <div className="p-2.5 rounded-lg border bg-card/60 border-border/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5 text-xs text-foreground">
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${revealedStage < 1
+                              ? 'bg-muted text-muted-foreground border-border'
+                              : qcReadiness?.stages?.epubcheck?.status === 'passed'
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                            }`}>
+                            1
+                          </div>
+                          <span className="font-semibold">Stage 1:</span>
+                          <span className="text-foreground">EPUBCheck Validation</span>
+                        </div>
+                        {revealedStage < 1 ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                            <span>Verifying...</span>
+                          </div>
+                        ) : qcReadiness?.stages?.epubcheck?.status === 'passed' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" /> Valid (0 errors)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                            <XCircle className="w-3 h-3" /> Errors detected
+                          </span>
+                        )}
+                      </div>
+                      {revealedStage >= 1 && qcReadiness?.stages?.epubcheck && (
+                        <p className={`text-[11px] mt-1.5 ml-7.5 ${qcReadiness.stages.epubcheck.status === 'passed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                          }`}>
+                          {qcReadiness.stages.epubcheck.message}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* ── Stage 2: ACE Validation ── */}
+                    <div className="p-2.5 rounded-lg border bg-card/60 border-border/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5 text-xs text-foreground">
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${revealedStage < 2
+                              ? 'bg-muted text-muted-foreground border-border'
+                              : qcReadiness?.stages?.ace?.status === 'passed'
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                            }`}>
+                            2
+                          </div>
+                          <span className="font-semibold">Stage 2:</span>
+                          <span className="text-foreground">ACE Validation</span>
+                        </div>
+                        {revealedStage < 2 ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            {revealedStage === 1 ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                                <span>Checking totals...</span>
+                              </>
+                            ) : (
+                              <span>Waiting...</span>
+                            )}
+                          </div>
+                        ) : qcReadiness?.stages?.ace?.status === 'passed' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" /> 0 Violations
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                            <XCircle className="w-3 h-3" /> Violations found
+                          </span>
+                        )}
+                      </div>
+                      {revealedStage >= 2 && qcReadiness?.stages?.ace && (
+                        <p className={`text-[11px] mt-1.5 ml-7.5 ${qcReadiness.stages.ace.status === 'passed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                          }`}>
+                          {qcReadiness.stages.ace.message}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* ── Stage 3: Customised Check ── */}
+                    <div className="p-2.5 rounded-lg border bg-card/60 border-border/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5 text-xs text-foreground">
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${revealedStage < 3
+                              ? 'bg-muted text-muted-foreground border-border'
+                              : qcReadiness?.stages?.customised_check?.status === 'passed'
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                            }`}>
+                            3
+                          </div>
+                          <span className="font-semibold">Stage 3:</span>
+                          <span className="text-foreground">Customised check</span>
+                        </div>
+                        {revealedStage < 3 ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            {revealedStage === 2 ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                                <span>Verifying all issues = 0...</span>
+                              </>
+                            ) : (
+                              <span>Waiting...</span>
+                            )}
+                          </div>
+                        ) : qcReadiness?.stages?.customised_check?.status === 'passed' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" /> All rules passed (0)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                            <XCircle className="w-3 h-3" /> {qcReadiness?.stages?.customised_check?.failed_count || 1} rule(s) failed
+                          </span>
+                        )}
+                      </div>
+                      {revealedStage >= 3 && qcReadiness?.stages?.customised_check && (
+                        <p className={`text-[11px] mt-1.5 ml-7.5 ${qcReadiness.stages.customised_check.status === 'passed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                          }`}>
+                          {qcReadiness.stages.customised_check.message}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* ── Stage 4: Output EPUB Check ── */}
+                    <div className="p-2.5 rounded-lg border bg-card/60 border-border/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5 text-xs text-foreground">
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${revealedStage < 4
+                              ? 'bg-muted text-muted-foreground border-border'
+                              : qcReadiness?.stages?.output_epub?.status === 'passed'
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                            }`}>
+                            4
+                          </div>
+                          <span className="font-semibold">Stage 4:</span>
+                          <span className="text-foreground">Output EPUB Size Check</span>
+                        </div>
+                        {revealedStage < 4 ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            {revealedStage === 3 ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                                <span>Checking size...</span>
+                              </>
+                            ) : (
+                              <span>Waiting...</span>
+                            )}
+                          </div>
+                        ) : qcReadiness?.stages?.output_epub?.status === 'passed' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" /> {qcReadiness?.stages?.output_epub?.file_size_mb} MB (&le; 100 MB)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                            <XCircle className="w-3 h-3" /> Exceeds size limit
+                          </span>
+                        )}
+                      </div>
+                      {revealedStage >= 4 && qcReadiness?.stages?.output_epub && (
+                        <p className={`text-[11px] mt-1.5 ml-7.5 ${qcReadiness.stages.output_epub.status === 'passed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                          }`}>
+                          {qcReadiness.stages.output_epub.message}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* ── Stage 5: Manual Verification ── */}
+                    <div className="p-2.5 rounded-lg border bg-card/60 border-border/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5 text-xs text-foreground">
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${manualVerified
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                            }`}>
+                            5
+                          </div>
+                          <span className="font-semibold">Stage 5:</span>
+                          <span className="text-foreground">Manual Verification</span>
+                        </div>
+                        {manualVerified ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" /> Confirmed
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                            Pending confirmation
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-2 ml-7.5 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="manual-verify-check"
+                          checked={manualVerified}
+                          onChange={(e) => setManualVerified(e.target.checked)}
+                          className="rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer h-3.5 w-3.5"
+                        />
+                        <label htmlFor="manual-verify-check" className="text-[11px] text-foreground cursor-pointer select-none">
+                          I have performed manual verification and visual checks.
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground mt-3 italic">
+                    Clicking "Yes, Complete QC" will generate <span className="font-semibold text-foreground">history.csv</span>, package latest QC reports, and move the job to <span className="font-semibold text-emerald-600 dark:text-emerald-400">Ready to Dispatch</span>.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border/60">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowBodCompleteModal(false)}
+                    disabled={isCompletingBod}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className={`text-white font-semibold ${qcReadiness?.all_passed && manualVerified
+                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        : 'bg-muted text-muted-foreground opacity-60 cursor-not-allowed'
+                      }`}
+                    onClick={async () => {
+                      if (!qcReadiness?.all_passed || !manualVerified) return;
+                      setShowBodCompleteModal(false);
+                      await completeBodQC();
+                    }}
+                    disabled={isCompletingBod || isCheckingQc || !qcReadiness?.all_passed || !manualVerified}
+                    leftIcon={isCompletingBod ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  >
+                    {isCompletingBod ? 'Completing QC…' : 'Yes, Complete QC'}
+                  </Button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -1352,9 +1667,9 @@ export function PostProdEpubValidatorFiles() {
                         <span className="flex-1">All Categories</span>
                         {validationCategory === '' && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
                       </DropdownMenu.Item>
-                      
+
                       {availableCategories.length > 0 && <DropdownMenu.Separator className="h-px bg-border/60 my-1 mx-1" />}
-                      
+
                       {availableCategories.map((cat) => (
                         <DropdownMenu.Item
                           key={cat}
@@ -1442,7 +1757,7 @@ export function PostProdEpubValidatorFiles() {
 
                 {fromSource === 'bod' && bodJobId && (
                   <button
-                    onClick={completeBodQC}
+                    onClick={() => setShowBodCompleteModal(true)}
                     disabled={isCompletingBod || isValidating || isAceRunning || isEpubCheckRunning}
                     className="inline-flex flex-row items-center justify-center gap-2 px-3.5 py-1.5 h-8 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
                     title="Update latest EPUB, ACE report, and EPUBCheck to BOD folder, archive previous files to _before, and move job to Dispatch"
@@ -1452,7 +1767,7 @@ export function PostProdEpubValidatorFiles() {
                     ) : (
                       <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                     )}
-                    <span className="whitespace-nowrap">{isCompletingBod ? 'Completing QC…' : 'Complete QC & Return to BOD'}</span>
+                    <span className="whitespace-nowrap">{isCompletingBod ? 'Completing QC…' : 'Completed QC '}</span>
                   </button>
                 )}
 
@@ -1771,7 +2086,7 @@ export function PostProdEpubValidatorFiles() {
                           return !existsInEpub;
                         }
                       ) ?? [];
-                      
+
                       const allIssues = bookEntries.flatMap((e) => e.result.issues).filter(i => !i.is_ignored);
                       if (allIssues.length === 0) return null; // Don't show panel if no book-scope issues exist
 
@@ -2756,7 +3071,7 @@ export function PostProdEpubValidatorFiles() {
                                       errors={agg?.errors ?? 0}
                                       warnings={agg?.warnings ?? 0}
                                       infos={agg?.infos ?? 0}
-                                    ignored={agg?.ignored ?? 0}
+                                      ignored={agg?.ignored ?? 0}
                                       isValidating={validatingFiles.has(file.file_name)}
                                       onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
                                       onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2810,7 +3125,7 @@ export function PostProdEpubValidatorFiles() {
                                       errors={agg?.errors ?? 0}
                                       warnings={agg?.warnings ?? 0}
                                       infos={agg?.infos ?? 0}
-                                    ignored={agg?.ignored ?? 0}
+                                      ignored={agg?.ignored ?? 0}
                                       isValidating={validatingFiles.has(file.file_name)}
                                       onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
                                       onOpen={() => {

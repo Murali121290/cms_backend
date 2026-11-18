@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     INDESIGN_SERVER_URL: str = "http://10.1.6.24:5555"
     WORD_TO_XML_SERVER_URL: str = ""
     WORD_TO_XML_TIMEOUT_SECONDS: int = 3600
+    PDF2XML_API_URL: str = "http://10.1.6.181:8087/convert"
+    PDF2XML_TIMEOUT_SECONDS: int = 1800
+    PDF2XML_CONNECT_TIMEOUT_SECONDS: int = 30
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:8085",
         "http://localhost:8080",
@@ -102,13 +105,18 @@ class Settings(BaseSettings):
     BOD_FTP_PORT: int = 21
     BOD_FTP_TIMEOUT: int = 15
     BOD_FTP_WATCH_ENABLED: bool = True
+    BOD_FTP_USE_TLS: bool = True
+    BOD_FTP_PASSIVE: bool = True
+    BOD_FTP_SSL_VERIFY: bool = False
+    BOD_FTP_CA_FILE: str = ""
     BOD_FTP_USERNAME: str = ""
     BOD_FTP_PASSWORD: str = ""
     BOD_FTP_BASE_PATH: str = "Input"
     BOD_FTP_PRODUCTION_PATH: str = "Production"
     BOD_FTP_DELIVERY_PATH: str = "Delivery"
     BOD_MANAGER_EMAIL: str = ""
-    BOD_CUSTOM_STAGES: str = "Add job,Production,QC,Ready to Dispatch,Archive"
+    BOD_DAILY_SUMMARY_TIME: Optional[str] = None
+    BOD_CUSTOM_STAGES: str = "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
 
     def __init__(self, **values):
         super().__init__(**values)

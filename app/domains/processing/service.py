@@ -98,6 +98,8 @@ PROCESS_PERMISSIONS = {
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "word_to_indesign": ["Admin", "Compositor", "Senior Compositor", "Production Manager", "Non-XML Manager", "Non-XML Operator", "XML Manager", "XML Operator", "Senior XML Operator"],
+    "indesign_to_xhtml": ["Admin", "Compositor", "Senior Compositor", "Production Manager", "XML Manager", "XML Operator", "Senior XML Operator", "Author", "Editor"],
+    "xhtml_to_indesign": ["Admin", "Compositor", "Senior Compositor", "Production Manager", "XML Manager", "XML Operator", "Senior XML Operator", "Author", "Editor"],
     "xml_to_indesign": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "indesign_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Compositor", "Senior Compositor", "Production Manager"],
     "extract_design_css": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
@@ -296,9 +298,29 @@ def background_processing_task(
                     generated_files = ppd_engine_cls().process_document(file_path, user_username)
                     success_msg = "Manuscript Analysis & QA processing completed"
 
+                if process_type == "manuscript_analysis_qa":
+                    try:
+                        from app.processing.manuscript_analysis_qa import generate_manuscript_analysis_qa_report
+                        dir_name = os.path.dirname(file_path)
+                        base_name = os.path.splitext(os.path.basename(file_path))[0]
+                        qa_report_path = os.path.join(dir_name, f"{base_name}_Manuscript_Analysis_QA_Report.html")
+                        if qa_report_path not in generated_files:
+                            generate_manuscript_analysis_qa_report(
+                                docx_path=file_path,
+                                output_html_path=qa_report_path,
+                                analyst_name=user_username,
+                            )
+                            if qa_report_path not in generated_files:
+                                generated_files.append(qa_report_path)
+                            logger.info(f"Generated Manuscript Analysis QA Report: {qa_report_path}")
+                    except Exception as qae:
+                        logger.warning(f"Could not generate Manuscript Analysis QA Report: {qae}")
+
             elif process_type == "technical":
                 update_job_status(db, job_id, "processing", "Scanning technical style errors...", 30)
-                generated_files = technical_engine_cls().process_document(file_path)
+                generated_files = technical_engine_cls().process_document(
+                    file_path, project_id=file_record.project_id if file_record else None, db=db
+                )
                 success_msg = "Technical Editing completed successfully"
 
             elif process_type in [
@@ -543,6 +565,36 @@ def background_processing_task(
                     job_id=job_id
                 )
                 success_msg = "Word to InDesign conversion completed"
+
+            elif process_type == "indesign_to_xhtml":
+                update_job_status(db, job_id, "processing", "Extracting InDesign layout to editorial XHTML (Stage R1)...", 30)
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.indesign_to_xhtml_engine import InDesignToXHTMLEngine
+                generated_files = InDesignToXHTMLEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                success_msg = "InDesign to XHTML extraction completed (Stage R1)"
+
+            elif process_type == "xhtml_to_indesign":
+                update_job_status(db, job_id, "processing", "Applying reviewed XHTML corrections to InDesign...", 30)
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.xhtml_to_indesign_engine import XHTMLToInDesignEngine
+                generated_files = XHTMLToInDesignEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                success_msg = "XHTML to InDesign update completed"
 
             elif process_type == "indesign_to_xml":
                 update_job_status(db, job_id, "processing", "Processing InDesign to XML conversion...", 30)
@@ -1140,8 +1192,8 @@ def background_processing_task(
                             else "Misc" if (process_type == "extract_design_css" or is_misc_delivery_file)
                             else "Manuscript" if (process_type in ("style_validation", "style_match_design", "ppd") or processed_filename.lower().endswith(("_dashboard.html", "_style_match_report.html", "_style_match_report.json")))
                             else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html")) and process_type != "word_to_indesign"
-                            else "InDesign" if process_type in ("xml_to_indesign", "word_to_indesign") and processed_filename.lower().endswith((".indd", ".idml"))
-                            else "Proof" if process_type == "word_to_indesign" and processed_filename.lower().endswith(".pdf")
+                            else "InDesign" if process_type in ("xml_to_indesign", "word_to_indesign", "indesign_to_xhtml", "xhtml_to_indesign") and processed_filename.lower().endswith((".indd", ".idml"))
+                            else "Proof" if process_type in ("word_to_indesign", "indesign_to_xhtml", "xhtml_to_indesign") and processed_filename.lower().endswith((".pdf", ".xhtml"))
                             else "Manuscript" if process_type == "word_to_indesign" and processed_filename.lower().endswith(".html")
                             else "XML" if process_type == "word_to_xml"
                             else file_record.category

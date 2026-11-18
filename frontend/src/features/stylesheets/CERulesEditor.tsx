@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Eye,
   SlidersHorizontal,
+  Play,
 } from "lucide-react";
 
 import type { CERule, CERuleSettings, CESeverity } from "@/types/api";
@@ -28,7 +29,7 @@ import {
 
 interface CERulesEditorProps {
   rules: CERule[];
-  selectedRows: CELinkedRow[];
+  selectedRows?: CELinkedRow[];
   settings: CERuleSettings;
   onChange: (settings: CERuleSettings) => void;
   isFullPage?: boolean;
@@ -37,7 +38,7 @@ interface CERulesEditorProps {
 
 export function CERulesEditor({
   rules,
-  selectedRows,
+  selectedRows = [],
   settings,
   onChange,
   isFullPage = true,
@@ -52,7 +53,55 @@ export function CERulesEditor({
   const [activePreviewRuleId, setActivePreviewRuleId] = useState<number>(6);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
 
+  // Live Test Sandbox State
+  const [showSandbox, setShowSandbox] = useState(true);
+  const [sandboxText, setSandboxText] = useState(
+    "Patient presented with Parkinson's disease, experiencing 25 percent tremor reduction at 15 °C. Followed ASKED model."
+  );
+
   const { derived } = useMemo(() => deriveFromRows(selectedRows), [selectedRows]);
+
+  const renderedSandboxDiff = useMemo(() => {
+    let html = sandboxText;
+
+    // Check Rule 6: Percentage
+    const r6 = resolveRule(rules.find((r) => r.sno === 6) || ({} as CERule), derived, settings);
+    if (r6.enabled) {
+      const target = r6.option === 1 ? "25%" : r6.option === 2 ? "25 %" : r6.option === 3 ? "25 percent" : r6.option === 4 ? "25 per cent" : "25 percentage points";
+      html = html.replace(/\b25\s*(?:%|percent|per cent|percentage points|percentage|per|pct\.?)\b/gi, (match) => {
+        if (match.trim() === target) return `<span class="text-emerald-400 font-bold">${match}</span>`;
+        return `<span class="line-through text-rose-400 opacity-80">${match}</span> <span class="text-emerald-400 font-bold underline">${target}</span>`;
+      });
+    }
+
+    // Check Rule 5: Temperature
+    const r5 = resolveRule(rules.find((r) => r.sno === 5) || ({} as CERule), derived, settings);
+    if (r5.enabled) {
+      const target = r5.option === 1 ? "15 °C" : "15°C";
+      html = html.replace(/\b15\s*°C\b/g, (match) => {
+        if (match.trim() === target) return `<span class="text-emerald-400 font-bold">${match}</span>`;
+        return `<span class="line-through text-rose-400 opacity-80">${match}</span> <span class="text-emerald-400 font-bold underline">${target}</span>`;
+      });
+    }
+
+    // Check Rule 124: Eponyms
+    const r124 = resolveRule(rules.find((r) => r.sno === 124) || ({} as CERule), derived, settings);
+    if (r124.enabled) {
+      html = html.replace(/\bParkinson's disease\b/gi, (match) => {
+        return `<span class="line-through text-rose-400 opacity-80">${match}</span> <span class="text-emerald-400 font-bold underline">Parkinson disease</span>`;
+      });
+    }
+
+    // Check Rule 125: Red Flags
+    const r125 = resolveRule(rules.find((r) => r.sno === 125) || ({} as CERule), derived, settings);
+    if (r125.enabled) {
+      html = html.replace(/\b(ASKED model|Campinha-Bacote|DSM-5|Wikipedia)\b/gi, (match) => {
+        return `<mark class="bg-rose-500/30 text-rose-200 border border-rose-500 px-1 py-0.5 rounded font-bold">${match} [AQ Required: Permissions/Sensitivity]</mark>`;
+      });
+    }
+
+    return html;
+  }, [sandboxText, rules, derived, settings]);
 
   // Group rules by domain
   const groups = useMemo(() => {
@@ -240,6 +289,12 @@ export function CERulesEditor({
       }));
     }
 
+    // The catalog's option forms follow the engine's option order: Option N is the form
+    // the Technical Edit writes; every other form in the manuscript is flagged as an error.
+    if (activeRule.forms && activeRule.forms.length > 0) {
+      optionsList = activeRule.forms.map((f, i) => ({ optVal: i + 1, label: f.label, preview: f.preview }));
+    }
+
     // Determine current replacement text
     let currentReplacement = target;
     const matchOpt = optionsList.find((o) => o.optVal === activeResolved.option);
@@ -264,6 +319,63 @@ export function CERulesEditor({
   ) => {
     onChange(updateSetting(settings, rule, derived, field, value));
   };
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = (document.activeElement?.tagName || "").toLowerCase();
+      const isInput =
+        activeTag === "input" ||
+        activeTag === "textarea" ||
+        (document.activeElement as HTMLElement)?.isContentEditable;
+
+      // "/" focuses search box
+      if (e.key === "/" && !isInput) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (isInput) return;
+
+      // "j" navigates to next rule, "k" navigates to previous rule
+      if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        const currentIdx = rules.findIndex((r) => r.sno === activePreviewRuleId);
+        if (currentIdx < rules.length - 1) {
+          setActivePreviewRuleId(rules[currentIdx + 1].sno);
+        }
+      } else if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        const currentIdx = rules.findIndex((r) => r.sno === activePreviewRuleId);
+        if (currentIdx > 0) {
+          setActivePreviewRuleId(rules[currentIdx - 1].sno);
+        }
+      } else if (e.key >= "1" && e.key <= "6") {
+        // "1"-"6" select options on active preview rule
+        const optNum = Number(e.key);
+        const curRule = rules.find((r) => r.sno === activePreviewRuleId);
+        if (curRule && optNum <= (curRule.options?.length || 5)) {
+          e.preventDefault();
+          setRuleField(curRule, "option", optNum);
+          showNotification(`R${curRule.sno} option set to ${optNum}`);
+        }
+      } else if (e.key === " ") {
+        // Space toggles on/off on active preview rule
+        e.preventDefault();
+        const curRule = rules.find((r) => r.sno === activePreviewRuleId);
+        if (curRule) {
+          const res = resolveRule(curRule, derived, settings);
+          setRuleField(curRule, "enabled", !res.enabled);
+          showNotification(`R${curRule.sno} ${!res.enabled ? "enabled" : "disabled"}`);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [rules, activePreviewRuleId, settings, derived]);
 
   /* -------------------------------------------------------------------------- */
   /* Reusable Sub-Components                                                    */
@@ -310,10 +422,11 @@ export function CERulesEditor({
       <div className="relative">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
+          ref={searchInputRef}
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search 72 checklist rules (e.g. percent, dash, units, date, minus, latin)..."
+          placeholder="Search checklist and house-style rules (e.g. percent, dash, units, date, minus, latin)..."
           className="w-full pl-9 pr-8 py-2 rounded-md border border-slate-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-xs"
         />
         {searchQuery && (
@@ -327,44 +440,54 @@ export function CERulesEditor({
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
-        <button
-          type="button"
-          onClick={() => setActiveCategory("all")}
-          className={`px-2.5 py-1 rounded border whitespace-nowrap font-medium transition-colors ${
-            activeCategory === "all"
-              ? "bg-slate-800 text-white border-slate-800 font-semibold"
-              : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
-          }`}
-        >
-          All ({rules.length})
-        </button>
-        {categories.map((cat) => (
+      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 text-[11px]">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
           <button
-            key={cat}
             type="button"
-            onClick={() => setActiveCategory(cat)}
+            onClick={() => setActiveCategory("all")}
             className={`px-2.5 py-1 rounded border whitespace-nowrap font-medium transition-colors ${
-              activeCategory === cat
+              activeCategory === "all"
                 ? "bg-slate-800 text-white border-slate-800 font-semibold"
                 : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
             }`}
           >
-            {cat}
+            All ({rules.length})
           </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setShowCustomOnly(!showCustomOnly)}
-          className={`ml-auto px-2.5 py-1 rounded border whitespace-nowrap font-medium text-[11px] transition-colors ${
-            showCustomOnly
-              ? "bg-amber-100 text-amber-900 border-amber-300 font-semibold"
-              : "bg-white text-slate-500 hover:bg-slate-100 border-slate-200"
-          }`}
-        >
-          <Filter className="w-3 h-3 inline mr-1" />
-          Modified Only ({totalModified})
-        </button>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setActiveCategory(cat)}
+              className={`px-2.5 py-1 rounded border whitespace-nowrap font-medium transition-colors ${
+                activeCategory === cat
+                  ? "bg-slate-800 text-white border-slate-800 font-semibold"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setShowCustomOnly(!showCustomOnly)}
+            className={`px-2.5 py-1 rounded border whitespace-nowrap font-medium text-[11px] transition-colors ${
+              showCustomOnly
+                ? "bg-amber-100 text-amber-900 border-amber-300 font-semibold"
+                : "bg-white text-slate-500 hover:bg-slate-100 border-slate-200"
+            }`}
+          >
+            <Filter className="w-3 h-3 inline mr-1" />
+            Modified Only ({totalModified})
+          </button>
+        </div>
+
+        <div className="hidden xl:flex items-center gap-2 text-[10px] text-slate-400 shrink-0 select-none">
+          <span className="font-semibold text-slate-500">Shortcuts:</span>
+          <span><kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">/</kbd> Search</span>
+          <span><kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">J</kbd>/<kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">K</kbd> Prev/Next</span>
+          <span><kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">1-6</kbd> Option</span>
+          <span><kbd className="px-1 py-0.2 bg-slate-100 border border-slate-300 rounded font-mono">Space</kbd> Toggle</span>
+        </div>
       </div>
     </div>
   );
@@ -471,10 +594,112 @@ export function CERulesEditor({
           </div>
         </div>
 
+        {/* Forms flagged as errors under the selected option */}
+        {simulatedFinding.optionsList.length > 1 && (
+          <div className="p-2 bg-white rounded-md border border-slate-200 text-[11px] text-slate-700">
+            <span className="font-bold uppercase tracking-wider text-[10px] text-slate-500 block mb-1">
+              Flagged as errors and replaced with {simulatedFinding.currentReplacement}:
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {simulatedFinding.optionsList
+                .filter((o) => o.optVal !== activeResolved.option && o.preview !== simulatedFinding.currentReplacement && o.preview !== "AQ")
+                .map((o) => (
+                  <span key={String(o.optVal)} className="font-mono bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded line-through decoration-red-300">
+                    {o.preview}
+                  </span>
+                ))}
+              {activeRule.sno === 6 && (
+                <>
+                  <span className="font-mono bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded line-through decoration-red-300">
+                    25 percentage
+                  </span>
+                  <span className="font-mono bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded line-through decoration-red-300">
+                    25 per
+                  </span>
+                  <span className="font-mono bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded line-through decoration-red-300">
+                    25 pct
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Editorial Guideline Tip */}
         <div className="p-2.5 bg-amber-50/50 rounded-md border border-amber-200/80 text-[11px] text-amber-950 flex items-start gap-2">
           <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <p className="leading-snug">{simulatedFinding.styleGuidance}</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  // 4. Live Manuscript Test Sandbox
+  const SandboxCard = (
+    <div className="border border-slate-300 rounded-lg overflow-hidden bg-white shadow-xs">
+      <div className="px-3.5 py-2 bg-slate-900 text-white flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Play className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-[11px] font-bold uppercase tracking-wider">
+            Live Manuscript Test Sandbox
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() =>
+              setSandboxText(
+                "Trials reported 25 percentage in Group A, 25 percent in Group B, 25 per in Group C, 25 % in Group D, and 25% in Group E."
+              )
+            }
+            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+          >
+            % Variants
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setSandboxText(
+                "Patient presented with Parkinson's disease, experiencing 25 percent tremor reduction at 15 °C. Followed ASKED model."
+              )
+            }
+            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+          >
+            Clinical
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setSandboxText(
+                "We will discuss the treatment of the elderly using an iPad as described on Wikipedia."
+              )
+            }
+            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+          >
+            Sensitive &amp; Brands
+          </button>
+        </div>
+      </div>
+      <div className="p-3 space-y-2.5 bg-slate-50/50">
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+            Author Sample Text (Editable):
+          </label>
+          <textarea
+            rows={2}
+            value={sandboxText}
+            onChange={(e) => setSandboxText(e.target.value)}
+            placeholder="Type or paste sample manuscript text..."
+            className="w-full p-2 text-xs font-serif border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 leading-relaxed"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+            Live Transformed Manuscript Output:
+          </label>
+          <div className="p-2.5 bg-slate-950 text-slate-100 rounded-lg text-xs font-serif leading-relaxed min-h-[44px] border border-slate-800 shadow-inner">
+            <div dangerouslySetInnerHTML={{ __html: renderedSandboxDiff }} />
+          </div>
         </div>
       </div>
     </div>
@@ -628,10 +853,54 @@ export function CERulesEditor({
                           </div>
                         </div>
 
-                        {resolved.fromIaRow && (
-                          <p className="text-[11px] text-amber-700 font-medium">
-                            From IA row: {resolved.fromIaRow}
-                          </p>
+                        {/* Expandable IA Patterns detected by this rule */}
+                        {rule.ia_patterns && rule.ia_patterns.length > 0 && (
+                          <div onClick={(e) => e.stopPropagation()} className="pt-1">
+                            <details className="text-[11px] text-slate-500 group/pat">
+                              <summary className="cursor-pointer select-none hover:text-slate-800 font-medium inline-flex items-center gap-1">
+                                <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded border border-slate-200">
+                                  {rule.ia_patterns.length} pattern{rule.ia_patterns.length === 1 ? "" : "s"} detected
+                                </span>
+                              </summary>
+                              <div className="mt-1.5 p-2 bg-slate-50 border border-slate-200 rounded text-[11px] font-mono space-y-1 max-h-36 overflow-y-auto">
+                                {rule.ia_patterns.map((p, pIdx) => {
+                                  const isMatchedOption =
+                                    p.option !== null &&
+                                    p.option !== undefined &&
+                                    p.option === resolved.option;
+                                  return (
+                                    <div
+                                      key={pIdx}
+                                      className={`flex items-center justify-between px-1.5 py-0.5 rounded ${
+                                        isMatchedOption
+                                          ? "bg-emerald-50 text-emerald-800 font-semibold border border-emerald-200"
+                                          : "text-slate-600"
+                                      }`}
+                                    >
+                                      <span className="truncate pr-2">
+                                        {p.element} &gt; {p.pattern}
+                                      </span>
+                                      {p.option ? (
+                                        <span
+                                          className={`text-[10px] px-1 rounded shrink-0 ${
+                                            isMatchedOption
+                                              ? "bg-emerald-200 text-emerald-900"
+                                              : "bg-slate-200 text-slate-700"
+                                          }`}
+                                        >
+                                          Opt {p.option}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] text-slate-400 shrink-0">
+                                          detect-only
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </details>
+                          </div>
                         )}
                       </div>
                     );
@@ -672,6 +941,7 @@ export function CERulesEditor({
           {/* Right Column (40%): Sticky Studio Live Preview Panel */}
           <div className="lg:col-span-5 space-y-4 sticky top-0">
             {ReviewerCardPreview}
+            {SandboxCard}
           </div>
         </div>
       </div>
@@ -683,41 +953,7 @@ export function CERulesEditor({
     <div className="space-y-3">
       {PresetsBar}
       {SearchAndFilterBar}
-
-      {/* Collapsible Sandbox for Drawer Mode */}
-      <div className="border border-slate-200 rounded-md overflow-hidden bg-white">
-        <button
-          type="button"
-          onClick={() => setShowSandbox(!showSandbox)}
-          className="w-full flex items-center justify-between px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-left border-b border-slate-200"
-        >
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-            <Play className="w-3 h-3 text-emerald-600" />
-            Try-it-Out Live Preview Sandbox
-          </span>
-          <span className="text-[10px] text-slate-500">
-            {showSandbox ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </span>
-        </button>
-        {showSandbox && (
-          <div className="p-3 space-y-2 bg-slate-50/50">
-            <textarea
-              rows={2}
-              value={sandboxText}
-              onChange={(e) => setSandboxText(e.target.value)}
-              placeholder="Type or paste sample text..."
-              className="w-full p-2 text-xs font-serif border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-            />
-            <div className="p-2 bg-slate-900 text-slate-100 rounded text-xs font-serif leading-relaxed">
-              <span className="text-[10px] uppercase font-sans font-bold tracking-wider text-slate-400 block mb-1">
-                Live Transformed Diff:
-              </span>
-              <div dangerouslySetInnerHTML={{ __html: renderedSandboxDiff }} />
-            </div>
-          </div>
-        )}
-      </div>
-
+      {SandboxCard}
       {RulesAccordionList}
     </div>
   );

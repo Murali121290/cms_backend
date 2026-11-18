@@ -1,8 +1,16 @@
 import { apiClient } from "@/api/client";
 import type { TechnicalApplyResponse, TechnicalScanResponse, XhtmlSaveResponse } from "@/types/api";
 
-export async function getTechnicalReview(fileId: number, stylesheetId?: number) {
-  const params = stylesheetId ? `?stylesheet_id=${stylesheetId}` : "";
+export async function getTechnicalReview(
+  fileId: number,
+  stylesheetId?: number,
+  options?: { rescan?: boolean; reload_rules?: boolean }
+) {
+  const query = new URLSearchParams();
+  if (stylesheetId) query.set("stylesheet_id", String(stylesheetId));
+  if (options?.rescan) query.set("rescan", "true");
+  if (options?.reload_rules) query.set("reload_rules", "true");
+  const params = query.toString() ? `?${query.toString()}` : "";
   const response = await apiClient.get<TechnicalScanResponse>(`/files/${fileId}/technical-review${params}`);
   return response.data;
 }

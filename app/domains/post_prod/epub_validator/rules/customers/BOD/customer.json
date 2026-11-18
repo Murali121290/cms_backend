@@ -38,10 +38,256 @@
       "category": "Structure Check"
     },
     {
+      "id": "BOD-FN-001",
+      "name": "Do not use unicode in file names",
+      "scope": "book",
+      "enabled": true,
+      "category": "Structure Check"
+    },
+    {
+      "id": "BOD-FM-001",
+      "name": "If half title and title page are part of the source files’ front matter, they must be removed from the E-Book",
+      "scope": "book",
+      "enabled": true,
+      "rule_config": {
+        "forbidden_terms_by_language": {
+          "en": "Half title / Title Page",
+          "de": "Vortitel / Titelseite",
+          "fr": "Faux-titre / Page de titre",
+          "da": "Smudstitel / Titelside",
+          "sv": "Halvtitel / Titelsida",
+          "fi": "Esinimiö / Nimiösivu",
+          "it": "Occhietto / Frontespizio",
+          "es": "Portadilla / Portada",
+          "pt": "Falsa folha de rosto / Frontispício",
+          "no": "Smusstittel / Tittelside",
+          "nl": "Franse pagina / Titelpagina",
+          "ca": "Portadella / Portada",
+          "va": "Portadella / Portada"
+        },
+        "forbidden_terms_pattern": "\\b(half[\\s\\-]?title|title[\\s\\-]?page|vortitel|vor[\\s\\-]?titel|schmutztitel|schmutz[\\s\\-]?titel|titelseite|titel[\\s\\-]?seite|titelblatt|titel[\\s\\-]?blatt|haupttitel|haupt[\\s\\-]?titel|portadilla|portada|faux[\\s\\-]?titre|page[\\s\\-]?de[\\s\\-]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontisp[ií]cio|folha[\\s\\-]?de[\\s\\-]?rosto|franse[\\s\\-]?pagina|titelpagina|nimiösivu|esinimiö)\\b|^title$|^titel$",
+        "forbidden_file_stem_pattern": "(half[\\s\\-_]?title|title[\\s\\-_]?page|vortitel|vor[\\s\\-_]?titel|schmutztitel|schmutz[\\s\\-_]?titel|titelseite|titel[\\s\\-_]?seite|titelblatt|titel[\\s\\-_]?blatt|haupttitel|haupt[\\s\\-_]?titel|portadilla|portada|faux[\\s\\-_]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontispicio|frontispício|rosto|franse[\\s\\-_]?pagina|titelpagina|nimiosivu|nimiösivu|esinymio|esinimiö)|^title$|^titel$"
+      },
+      "category": "Structure Check"
+    },
+    {
+      "id": "BOD-COPY-001",
+      "name": "The copyright page must be placed as last page of the ePub file",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_term_by_language": {
+          "de": "Impressum",
+          "en": "Copyright",
+          "fr": "Page de copyright",
+          "da": "Kolofon",
+          "fi": "Valmistusmerkinnät",
+          "es": "Pie de Imprenta",
+          "pt": "Pé-de-Imprensa",
+          "sv": "Kolofonside",
+          "no": "Kolofonside",
+          "ca": "Drets d’autor",
+          "va": "Drets d’autor",
+          "it": "Colophon",
+          "nl": "Colofon"
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-002",
+      "name": "Alignment of the copyright page should be top aligned (Control in CSS)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "allowed_classes": [
+          "cpytxt",
+          "cpytxt-top-space"
+        ],
+        "required_classes": [
+          "cpytxt-top-space"
+        ],
+        "min_required_count": {
+          "cpytxt-top-space": 1,
+          "cpytxt": 0
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-003",
+      "name": "Copyright should fit on one page",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-004",
+      "name": "Copyright statement check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_statement_by_language": {
+          "de": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen gemäß § 44b UrhG („Text und Data Mining“) zu gewinnen, ist untersagt.",
+          "ch": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen („Text und Data Mining“) zu gewinnen, ist untersagt.",
+          "da": "Den automatiserede analyse af et værk med henblik på at indhente oplysninger, især om mønstre, tendenser og sammenhænge (”Text and Datamining”) er forbudt.",
+          "fi": "Työn automaattinen analysointi tietojen saamiseksi erityisesti kuvioista, suuntauksista ja korrelaatioista (”tekstin ja tietojen hakeminen”) on kielletty.",
+          "fr": "L’analyse automatique du travail, pour obtenir des informations, notamment sur les motifs, les tendances et les corrélations («data and text mining») est interdite.",
+          "sv": "Automatiserad teknik vilken används för att analysera text och data i digital form i syfte att generera information, enligt 15a, 15b och 15c §§ upphovsrättslagen (text- och datautvinning), är förbjuden.",
+          "es": "El análisis automatizado del trabajo para obtener información en particular sobre patrones, tendencias y correlaciones („minería de datos y textos“) está prohibido.",
+          "no": "Automatisert analyse av verket for å innhente informasjon, særlig om mønstre, trender og sammenhenger („tekst- og datautvinning“) er forbudt."
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-005",
+      "name": "Copyright publisher sentence check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher_by_language": {
+          "de": "Herstellung und Verlag:",
+          "ch": "Herstellung und Verlag:",
+          "da": [
+            "Forlag:",
+            "Fremstilling:"
+          ],
+          "fi": [
+            "Kustantaja:",
+            "Valmistaja:"
+          ],
+          "fr": "Édition et impression :",
+          "sv": [
+            "Förlag:",
+            "Produktion:"
+          ],
+          "es": "Producción y editorial:",
+          "no": [
+            "Forlag:",
+            "Produksjon:"
+          ]
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-006",
+      "name": "Copyright publisher address check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher_address_by_language": {
+          "de": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg",
+          "ch": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Deutschland",
+          "da": [
+            "BoD · Books on Demand GmbH, Hellerup, Danmark",
+            "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamborg, Tyskland"
+          ],
+          "fi": [
+            "BoD · Books on Demand GmbH, Helsinki, Suomi",
+            "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Saksa"
+          ],
+          "fr": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Allemagne",
+          "sv": [
+            "BoD · Books on Demand, Stockholm, Sverige",
+            "BoD · Books on Demand, Hamburg, Tyskland"
+          ],
+          "es": "BoD · Books on Demand GmbH Überseering 33, 22297 Hamburgo, Alemania",
+          "no": [
+            "BoD · Books on Demand, Oslo, Norge",
+            "BoD · Books on Demand, Überseering 33, 22297 Hamburg, Tyskland"
+          ]
+        }
+      },
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-007",
+      "name": "Copyright 13-digit eISBN check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-008",
+      "name": "Copyright author notice check (© Year Author)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
+      "id": "BOD-COPY-009",
+      "name": "French copyright Dépôt légal check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml"
+      ],
+      "enabled": true,
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
+      "id": "XHTML006",
+      "name": "Single <h1> per page and no adjacent headings",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "[0-9]*.xhtml",
       "enabled": true,
       "category": "XHTML Check"
     },
@@ -58,13 +304,21 @@
     },
     {
       "id": "BOD-ENC-001",
-      "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp; and &lt; allowed)",
+      "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp;, &lt;, &gt;, &#8617; allowed)",
       "target_path": "OEBPS",
       "file_name_pattern": [
         "*.xhtml",
         "*.ncx"
       ],
       "enabled": true,
+      "rule_config": {
+        "allowed_entities": [
+          "&amp;",
+          "&lt;",
+          "&gt;",
+          "&#8617;"
+        ]
+      },
       "category": "Encoding Check"
     },
     {
@@ -523,13 +777,14 @@
     }
   ],
   "export": {
-    "filename_format": "{eisbn}_1_ePub_all.ePub"
+    "filename_format": "{eisbn}_ePub_all.ePub"
   },
   "upload": {
-    "filename_format": "{eisbn}_1_ePub_all.ePub"
+    "filename_format": "{eisbn}_ePub_all.ePub"
   },
   "category_order": [
     "STRUCTURE CHECK",
+    "COPYRIGHT CHECK",
     "METADATA CHECK",
     "CSS CHECK",
     "XHTML CHECK",

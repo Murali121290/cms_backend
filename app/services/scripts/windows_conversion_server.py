@@ -962,22 +962,15 @@ def convert_word_to_indesign(file: UploadFile = File(...), client: str = None, p
     session_id = str(uuid.uuid4())
     workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
 
-    # Locate d2id directory (check local Windows path first, then network share)
-    d2id_candidates = [
-        r"C:\Users\muraliba\Documents\word to Indesign",
-        r"\\10.1.1.100\common_share\sadha\Docx_to_Indesign",
-        r"\\10.1.1.100\common_share\sadha\d2id_v0.1.0",
-        os.path.abspath("word to Indesign"),
-        os.path.abspath("d2id"),
-    ]
-    d2id_dir = None
-    for cand in d2id_candidates:
-        if os.path.exists(cand) and (os.path.exists(os.path.join(cand, "d2id")) or os.path.exists(os.path.join(cand, "requirements.txt"))):
-            d2id_dir = cand
-            break
-
-    if not d2id_dir:
-        raise HTTPException(status_code=500, detail="Word to InDesign tool directory (d2id) not found on Windows server.")
+    # Locate d2id directory
+    d2id_dir = r"\\10.1.1.100\common_share\sadha\d2id"
+    if not os.path.exists(d2id_dir):
+        if os.path.exists(r"C:\Users\muraliba\Documents\d2id"):
+            d2id_dir = r"C:\Users\muraliba\Documents\d2id"
+        elif os.path.exists(r"C:\Users\muraliba\Documents\word to Indesign\d2id"):
+            d2id_dir = r"C:\Users\muraliba\Documents\word to Indesign\d2id"
+        elif os.path.exists(os.path.abspath("d2id")):
+            d2id_dir = os.path.abspath("d2id")
 
     # Terminate zombie InDesign processes
     import subprocess
@@ -1049,7 +1042,18 @@ def convert_word_to_indesign(file: UploadFile = File(...), client: str = None, p
 
     # Build command for d2id auto with explicit quotes around all paths to safely handle spaces
     import sys
-    cmd_str = f'"{sys.executable}" -m d2id auto --template "{indt_path}" --docx "{docx_path}" --output "{output_dir}"'
+    python_bin = sys.executable
+    for venv_cand in [
+        os.path.join(d2id_dir, ".venv", "Scripts", "python.exe"),
+        os.path.join(d2id_dir, "venv", "Scripts", "python.exe"),
+        os.path.join(os.path.dirname(d2id_dir), ".venv", "Scripts", "python.exe"),
+        os.path.join(os.path.dirname(d2id_dir), "venv", "Scripts", "python.exe"),
+    ]:
+        if os.path.exists(venv_cand):
+            python_bin = venv_cand
+            break
+
+    cmd_str = f'"{python_bin}" -m d2id auto --template "{indt_path}" --docx "{docx_path}" --output "{output_dir}"'
     if assets_dir:
         cmd_str += f' --assets "{assets_dir}"'
 
@@ -1123,6 +1127,470 @@ def convert_word_to_indesign(file: UploadFile = File(...), client: str = None, p
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="word_to_indesign_{session_id}.zip"'}
     )
+
+
+# ---------------------------------------------------------------------------
+# Part 2: InDesign to XHTML (Stage R1 - indd-to-xhtml)
+# ---------------------------------------------------------------------------
+@app.post("/convert-indesign-to-xhtml")
+@app.post("/stage/indd-to-xhtml")
+def convert_indesign_to_xhtml(file: UploadFile = File(...), client: str = None, progid: str = "InDesign.Application"):
+    """
+    Part 2: InDesign -> XHTML (d2id indd-to-xhtml)
+    Accepts ZIP containing <filename>.indd and artfile/ Links.
+    Executes: python -m d2id indd-to-xhtml --indd <filename>.indd --output output/r1
+    Returns ZIP containing <filename>.xhtml, <filename>.pdf, <filename>.idml, <filename>.indd, revision.json
+    """
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+
+    # Locate d2id directory
+    d2id_dir = r"\\10.1.1.100\common_share\sadha\d2id"
+    if not os.path.exists(d2id_dir):
+        if os.path.exists(r"C:\Users\muraliba\Documents\d2id"):
+            d2id_dir = r"C:\Users\muraliba\Documents\d2id"
+        elif os.path.exists(r"C:\Users\muraliba\Documents\word to Indesign\d2id"):
+            d2id_dir = r"C:\Users\muraliba\Documents\word to Indesign\d2id"
+        elif os.path.exists(os.path.abspath("d2id")):
+            d2id_dir = os.path.abspath("d2id")
+
+    import subprocess
+    logger.info(f"[{session_id}] Cleaning up zombie InDesign processes before indd-to-xhtml...")
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as tk_ex:
+        logger.warning(f"[{session_id}] taskkill cleanup failed: {str(tk_ex)}")
+
+    temp_dir = os.path.join(workflow_base_dir, f"indd2xhtml_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    logger.info(f"[{session_id}] Received indd-to-xhtml request: {file.filename}")
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        logger.info(f"[{session_id}] Saved uploaded package to {uploaded_file_path}")
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded package: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    import zipfile
+    try:
+        with zipfile.ZipFile(uploaded_file_path, "r") as z:
+            z.extractall(temp_dir)
+        logger.info(f"[{session_id}] Unzipped indd-to-xhtml package successfully")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+        raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
+
+    # Locate source .indd file
+    indd_path = None
+    for root, dirs, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            if fname.lower().endswith(".indd") and not fname.startswith("~$") and "output" not in root.lower():
+                indd_path = os.path.abspath(os.path.join(root, fname))
+                break
+        if indd_path:
+            break
+
+    if not indd_path:
+        raise HTTPException(status_code=400, detail="No source InDesign file (.indd) found in uploaded package.")
+
+    base_name = os.path.splitext(os.path.basename(indd_path))[0]
+    output_dir = os.path.join(temp_dir, "output", "r1")
+    os.makedirs(output_dir, exist_ok=True)
+
+    python_bin = sys.executable
+    for venv_cand in [
+        os.path.join(d2id_dir, ".venv", "Scripts", "python.exe"),
+        os.path.join(d2id_dir, "venv", "Scripts", "python.exe"),
+        os.path.join(os.path.dirname(d2id_dir), ".venv", "Scripts", "python.exe"),
+        os.path.join(os.path.dirname(d2id_dir), "venv", "Scripts", "python.exe"),
+    ]:
+        if os.path.exists(venv_cand):
+            python_bin = venv_cand
+            break
+
+    cmd = [python_bin, "-m", "d2id", "indd-to-xhtml", "--indd", indd_path, "--output", output_dir]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = d2id_dir + os.pathsep + env.get("PYTHONPATH", "")
+    env["NODE_OPTIONS"] = "--use-system-ca"
+
+    logger.info(f"[{session_id}] Running indd-to-xhtml: {' '.join(cmd)} (cwd={d2id_dir})")
+    try:
+        proc_res = subprocess.run(
+            cmd,
+            cwd=d2id_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            check=False
+        )
+        logger.info(f"[{session_id}] indd-to-xhtml stdout: {proc_res.stdout}")
+        if proc_res.stderr:
+            logger.warning(f"[{session_id}] indd-to-xhtml stderr: {proc_res.stderr}")
+
+        if proc_res.returncode != 0:
+            raise RuntimeError(f"d2id indd-to-xhtml failed with code {proc_res.returncode}: {proc_res.stderr or proc_res.stdout}")
+    except subprocess.TimeoutExpired:
+        logger.error(f"[{session_id}] indd-to-xhtml timed out after 1800s")
+        raise HTTPException(status_code=504, detail="InDesign to XHTML conversion timed out on Windows server")
+    except Exception as run_err:
+        logger.error(f"[{session_id}] indd-to-xhtml execution error: {str(run_err)}")
+        raise HTTPException(status_code=500, detail=f"indd-to-xhtml failed: {str(run_err)}")
+
+    # Normalize file names to <base_name>.* matching word-to-indd convention
+    if os.path.exists(os.path.join(output_dir, "book.xhtml")):
+        shutil.copy2(os.path.join(output_dir, "book.xhtml"), os.path.join(output_dir, f"{base_name}.xhtml"))
+    if os.path.exists(os.path.join(output_dir, "layout.pdf")):
+        shutil.copy2(os.path.join(output_dir, "layout.pdf"), os.path.join(output_dir, f"{base_name}.pdf"))
+    if os.path.exists(os.path.join(output_dir, "layout.idml")):
+        shutil.copy2(os.path.join(output_dir, "layout.idml"), os.path.join(output_dir, f"{base_name}.idml"))
+    if os.path.exists(os.path.join(output_dir, "layout.indd")):
+        shutil.copy2(os.path.join(output_dir, "layout.indd"), os.path.join(output_dir, f"{base_name}.indd"))
+    if os.path.exists(os.path.join(output_dir, "revision.json")):
+        shutil.copy2(os.path.join(output_dir, "revision.json"), os.path.join(output_dir, f"{base_name}_revision.json"))
+
+    # Package output files into response ZIP
+    out_zip_path = os.path.join(temp_dir, f"indd_to_xhtml_{base_name}_{session_id}.zip")
+    with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+        for root, _, files in os.walk(output_dir):
+            for f in files:
+                fpath = os.path.join(root, f)
+                rel = os.path.relpath(fpath, output_dir)
+                out_zf.write(fpath, rel)
+                logger.info(f"[{session_id}] Packaged R1 artifact: {rel}")
+
+    with open(out_zip_path, "rb") as fh:
+        zip_bytes = fh.read()
+
+    processing_time = time.time() - start_time
+    logger.info(f"[{session_id}] InDesign to XHTML completed successfully in {processing_time:.2f}s")
+    logger.info(f"[{session_id}] Retained indd-to-xhtml workspace on Windows server: {temp_dir}")
+
+    from starlette.responses import Response
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{base_name}_r1.zip"'}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part 3: XHTML to InDesign + PDF (Stage R2 - xhtml-to-indd)
+# ---------------------------------------------------------------------------
+@app.post("/convert-xhtml-to-indesign")
+@app.post("/stage/xhtml-to-indd")
+def convert_xhtml_to_indesign(file: UploadFile = File(...), client: str = None, progid: str = "InDesign.Application"):
+    """
+    Part 3: XHTML -> InDesign + PDF (d2id xhtml-to-indd)
+    Accepts ZIP containing stage/ folder (<filename>.indd + revision.json), reviewed <filename>.xhtml, and artfile/ Links.
+    Executes: python -m d2id xhtml-to-indd --stage stage --xhtml <filename>_reviewed.xhtml --output output/r2 --accept-pending --rebase
+    Returns ZIP containing revised <filename>.indd, <filename>.idml, <filename>.pdf, fresh <filename>.xhtml, revision.json
+    """
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+
+    # Locate d2id directory
+    d2id_dir = r"\\10.1.1.100\common_share\sadha\d2id"
+    if not os.path.exists(d2id_dir):
+        if os.path.exists(r"C:\Users\muraliba\Documents\d2id"):
+            d2id_dir = r"C:\Users\muraliba\Documents\d2id"
+        elif os.path.exists(r"C:\Users\muraliba\Documents\word to Indesign\d2id"):
+            d2id_dir = r"C:\Users\muraliba\Documents\word to Indesign\d2id"
+        elif os.path.exists(os.path.abspath("d2id")):
+            d2id_dir = os.path.abspath("d2id")
+
+    import subprocess
+    logger.info(f"[{session_id}] Cleaning up zombie InDesign processes before xhtml-to-indd...")
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as tk_ex:
+        logger.warning(f"[{session_id}] taskkill cleanup failed: {str(tk_ex)}")
+
+    temp_dir = os.path.join(workflow_base_dir, f"xhtml2indd_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    logger.info(f"[{session_id}] Received xhtml-to-indd request: {file.filename}")
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        logger.info(f"[{session_id}] Saved uploaded package to {uploaded_file_path}")
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded package: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    import zipfile
+    try:
+        with zipfile.ZipFile(uploaded_file_path, "r") as z:
+            z.extractall(temp_dir)
+        logger.info(f"[{session_id}] Unzipped xhtml-to-indd package successfully")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+        raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
+
+    # Locate stage folder and reviewed XHTML file
+    stage_dir = None
+    xhtml_path = None
+    base_name = None
+
+    # Find stage directory (must contain revision.json or layout.indd or <name>.indd)
+    candidate_stage_dirs = [
+        os.path.join(temp_dir, "stage"),
+        os.path.join(temp_dir, "r1"),
+        temp_dir
+    ]
+    for c_dir in candidate_stage_dirs:
+        if os.path.exists(c_dir):
+            has_rev = any(f.endswith("revision.json") for f in os.listdir(c_dir))
+            has_indd = any(f.endswith(".indd") for f in os.listdir(c_dir))
+            if has_rev or has_indd:
+                stage_dir = c_dir
+                break
+
+    if not stage_dir:
+        # Recursive search for folder with revision.json
+        for root, dirs, files in os.walk(temp_dir):
+            if any(f.endswith("revision.json") for f in files) and "output" not in root.lower():
+                stage_dir = root
+                break
+
+    if not stage_dir:
+        raise HTTPException(status_code=400, detail="Previous stage directory with revision manifest not found in package.")
+
+    # Ensure stage_dir has layout.indd and revision.json for d2id checksum validation
+    stage_files = os.listdir(stage_dir)
+    source_indd = next((f for f in stage_files if f.lower().endswith(".indd")), None)
+    if source_indd:
+        base_name = os.path.splitext(source_indd)[0]
+        if base_name == "layout":
+            # Attempt to determine real base name from other files
+            other_name = next((os.path.splitext(f)[0] for f in stage_files if f.endswith(".xhtml") or f.endswith(".pdf")), None)
+            if other_name:
+                base_name = other_name
+        if "layout.indd" not in stage_files and source_indd != "layout.indd":
+            shutil.copy2(os.path.join(stage_dir, source_indd), os.path.join(stage_dir, "layout.indd"))
+            logger.info(f"[{session_id}] Created layout.indd alias in stage folder for d2id checksum verification")
+
+    rev_file = next((f for f in stage_files if f.endswith("revision.json")), None)
+    if rev_file and rev_file != "revision.json" and "revision.json" not in stage_files:
+        shutil.copy2(os.path.join(stage_dir, rev_file), os.path.join(stage_dir, "revision.json"))
+
+    # Locate reviewed XHTML file
+    for root, dirs, files in os.walk(temp_dir):
+        for fname in files:
+            fname_lower = fname.lower()
+            if (fname_lower.endswith(".xhtml") or fname_lower.endswith(".html")) and "output" not in root.lower() and root != stage_dir:
+                xhtml_path = os.path.abspath(os.path.join(root, fname))
+                if not base_name:
+                    base_name = os.path.splitext(fname)[0].replace("_reviewed", "")
+                break
+        if xhtml_path:
+            break
+
+    # If not found outside stage, check if an edited xhtml was placed directly in temp_dir or stage_dir
+    if not xhtml_path:
+        for fname in stage_files:
+            if fname.lower().endswith(".xhtml") and (fname.lower() != "book.xhtml" or not base_name or fname.lower() != f"{base_name.lower()}.xhtml"):
+                xhtml_path = os.path.abspath(os.path.join(stage_dir, fname))
+                break
+
+    if not xhtml_path:
+        # Fallback: look for any .xhtml in package
+        for root, dirs, files in os.walk(temp_dir):
+            for fname in files:
+                if fname.lower().endswith(".xhtml") and "output" not in root.lower():
+                    xhtml_path = os.path.abspath(os.path.join(root, fname))
+                    break
+            if xhtml_path:
+                break
+
+    if not xhtml_path:
+        raise HTTPException(status_code=400, detail="Reviewed XHTML file (.xhtml) not found in uploaded package.")
+
+    if not base_name:
+        base_name = os.path.splitext(os.path.basename(xhtml_path))[0].replace("_reviewed", "")
+
+    # Sanitize reviewed XHTML for d2id: remove unsupported elements (e.g., <link>) and restore stage metadata if missing
+    try:
+        import xml.etree.ElementTree as ET
+        with open(xhtml_path, "r", encoding="utf-8", errors="ignore") as xf:
+            x_content = xf.read()
+        x_root = ET.fromstring(x_content)
+        x_head = x_root.find("{http://www.w3.org/1999/xhtml}head")
+        if x_head is None:
+            x_head = x_root.find("head")
+        if x_head is not None:
+            for child in list(x_head):
+                ctag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+                if ctag.lower() in ["link", "script", "style"]:
+                    x_head.remove(child)
+
+        # Check if stage directory has book.xhtml or base_name.xhtml to recover data-revision or meta tags
+        if stage_dir and os.path.exists(stage_dir):
+            stage_cands = [
+                os.path.join(stage_dir, "book.xhtml"),
+                os.path.join(stage_dir, f"{base_name}.xhtml"),
+            ]
+            for s_cand in stage_cands:
+                if os.path.exists(s_cand):
+                    try:
+                        with open(s_cand, "r", encoding="utf-8", errors="ignore") as sc_f:
+                            sc_root = ET.fromstring(sc_f.read())
+                        if "data-revision" in sc_root.attrib and "data-revision" not in x_root.attrib:
+                            x_root.attrib["data-revision"] = sc_root.attrib["data-revision"]
+                        sc_head = sc_root.find("{http://www.w3.org/1999/xhtml}head")
+                        if sc_head is None:
+                            sc_head = sc_root.find("head")
+                        if sc_head is not None and x_head is not None:
+                            existing_meta_names = {m.attrib.get("name") for m in x_head.findall("{http://www.w3.org/1999/xhtml}meta")}
+                            for sc_meta in sc_head:
+                                mtag = sc_meta.tag.split("}")[-1] if "}" in sc_meta.tag else sc_meta.tag
+                                if mtag.lower() == "meta" and sc_meta.attrib.get("name") not in existing_meta_names:
+                                    x_head.append(sc_meta)
+                                elif mtag.lower() == "title" and x_head.find("{http://www.w3.org/1999/xhtml}title") is None:
+                                    x_head.insert(0, sc_meta)
+
+                        # Restore protected markers from stage baseline (web editors often strip BOM \ufeff or special chars)
+                        stage_prot_map = {}
+                        for sc_p in sc_root.iter("{http://www.w3.org/1999/xhtml}p"):
+                            pid = sc_p.attrib.get("data-paragraph")
+                            if pid:
+                                for sc_c in sc_p.iter():
+                                    if sc_c.attrib.get("data-protected") == "true":
+                                        stage_prot_map[(pid, sc_c.attrib.get("data-run", "0"))] = (sc_c.text, sc_c.tail)
+                        
+                        restored_markers = 0
+                        for xp in x_root.iter("{http://www.w3.org/1999/xhtml}p"):
+                            pid = xp.attrib.get("data-paragraph")
+                            if pid:
+                                for xc in xp.iter():
+                                    if xc.attrib.get("data-protected") == "true":
+                                        key = (pid, xc.attrib.get("data-run", "0"))
+                                        if key in stage_prot_map:
+                                            orig_t, orig_tail = stage_prot_map[key]
+                                            if xc.text != orig_t or xc.tail != orig_tail:
+                                                xc.text = orig_t
+                                                xc.tail = orig_tail
+                                                restored_markers += 1
+
+                        # Sequential fallback if counts match
+                        sc_all_prot = [c for c in sc_root.iter() if c.attrib.get("data-protected") == "true"]
+                        x_all_prot = [c for c in x_root.iter() if c.attrib.get("data-protected") == "true"]
+                        if len(sc_all_prot) == len(x_all_prot):
+                            for s_el, x_el in zip(sc_all_prot, x_all_prot):
+                                if x_el.text != s_el.text or x_el.tail != s_el.tail:
+                                    x_el.text = s_el.text
+                                    x_el.tail = s_el.tail
+                                    restored_markers += 1
+
+                        if restored_markers > 0:
+                            logger.info(f"[{session_id}] Restored {restored_markers} protected markers from stage baseline")
+                        break
+                    except Exception as s_ex:
+                        logger.warning(f"[{session_id}] Could not inherit stage xhtml metadata: {str(s_ex)}")
+
+        ET.register_namespace("", "http://www.w3.org/1999/xhtml")
+        ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
+        ET.ElementTree(x_root).write(xhtml_path, encoding="utf-8", xml_declaration=True)
+        logger.info(f"[{session_id}] Sanitized reviewed XHTML to ensure clean d2id compatibility")
+    except Exception as san_ex:
+        logger.warning(f"[{session_id}] XHTML sanitization skipped: {str(san_ex)}")
+
+    output_dir = os.path.join(temp_dir, "output", "r2")
+    os.makedirs(output_dir, exist_ok=True)
+
+    python_bin = sys.executable
+    for venv_cand in [
+        os.path.join(d2id_dir, ".venv", "Scripts", "python.exe"),
+        os.path.join(d2id_dir, "venv", "Scripts", "python.exe"),
+        os.path.join(os.path.dirname(d2id_dir), ".venv", "Scripts", "python.exe"),
+        os.path.join(os.path.dirname(d2id_dir), "venv", "Scripts", "python.exe"),
+    ]:
+        if os.path.exists(venv_cand):
+            python_bin = venv_cand
+            break
+
+    cmd = [
+        python_bin, "-m", "d2id", "xhtml-to-indd",
+        "--stage", stage_dir,
+        "--xhtml", xhtml_path,
+        "--output", output_dir,
+        "--accept-pending",
+        "--rebase"
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = d2id_dir + os.pathsep + env.get("PYTHONPATH", "")
+    env["NODE_OPTIONS"] = "--use-system-ca"
+
+    logger.info(f"[{session_id}] Running xhtml-to-indd: {' '.join(cmd)} (cwd={d2id_dir})")
+    try:
+        proc_res = subprocess.run(
+            cmd,
+            cwd=d2id_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            check=False
+        )
+        logger.info(f"[{session_id}] xhtml-to-indd stdout: {proc_res.stdout}")
+        if proc_res.stderr:
+            logger.warning(f"[{session_id}] xhtml-to-indd stderr: {proc_res.stderr}")
+
+        if proc_res.returncode != 0:
+            raise RuntimeError(f"d2id xhtml-to-indd failed with code {proc_res.returncode}: {proc_res.stderr or proc_res.stdout}")
+    except subprocess.TimeoutExpired:
+        logger.error(f"[{session_id}] xhtml-to-indd timed out after 1800s")
+        raise HTTPException(status_code=504, detail="XHTML to InDesign conversion timed out on Windows server")
+    except Exception as run_err:
+        logger.error(f"[{session_id}] xhtml-to-indd execution error: {str(run_err)}")
+        raise HTTPException(status_code=500, detail=f"xhtml-to-indd failed: {str(run_err)}")
+
+    # Normalize file names to <base_name>.* matching word-to-indd convention
+    if os.path.exists(os.path.join(output_dir, "layout.indd")):
+        shutil.copy2(os.path.join(output_dir, "layout.indd"), os.path.join(output_dir, f"{base_name}.indd"))
+    if os.path.exists(os.path.join(output_dir, "layout.idml")):
+        shutil.copy2(os.path.join(output_dir, "layout.idml"), os.path.join(output_dir, f"{base_name}.idml"))
+    if os.path.exists(os.path.join(output_dir, "layout.pdf")):
+        shutil.copy2(os.path.join(output_dir, "layout.pdf"), os.path.join(output_dir, f"{base_name}.pdf"))
+    if os.path.exists(os.path.join(output_dir, "book.xhtml")):
+        shutil.copy2(os.path.join(output_dir, "book.xhtml"), os.path.join(output_dir, f"{base_name}.xhtml"))
+    if os.path.exists(os.path.join(output_dir, "revision.json")):
+        shutil.copy2(os.path.join(output_dir, "revision.json"), os.path.join(output_dir, f"{base_name}_revision.json"))
+    if os.path.exists(os.path.join(output_dir, "reviewed.xhtml")):
+        shutil.copy2(os.path.join(output_dir, "reviewed.xhtml"), os.path.join(output_dir, f"{base_name}_reviewed.xhtml"))
+
+    # Package output files into response ZIP
+    out_zip_path = os.path.join(temp_dir, f"xhtml_to_indd_{base_name}_{session_id}.zip")
+    with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+        for root, _, files in os.walk(output_dir):
+            for f in files:
+                fpath = os.path.join(root, f)
+                rel = os.path.relpath(fpath, output_dir)
+                out_zf.write(fpath, rel)
+                logger.info(f"[{session_id}] Packaged R2 artifact: {rel}")
+
+    with open(out_zip_path, "rb") as fh:
+        zip_bytes = fh.read()
+
+    processing_time = time.time() - start_time
+    logger.info(f"[{session_id}] XHTML to InDesign completed successfully in {processing_time:.2f}s")
+    logger.info(f"[{session_id}] Retained xhtml-to-indd workspace on Windows server: {temp_dir}")
+
+    from starlette.responses import Response
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{base_name}_r2.zip"'}
+    )
+
 
 @app.post("/convert-indesign-to-xml")
 def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):

@@ -36,17 +36,17 @@ DEFAULT_STAGE_ACTIONS = {
     ],
     'XML Conversion': [
         'styleValidation', 'artValidation', 'wordToXml', 'wordToIndesign',
-        'xmlToIndesign', 'indesignToXml', 'viewProof'
+        'xmlToIndesign', 'indesignToXml', 'indesignToXhtml', 'xhtmlToIndesign', 'viewProof'
     ],
     'Non-XML Processing': [
         'styleValidation', 'artValidation', 'wordToXml', 'wordToIndesign',
-        'xmlToIndesign', 'indesignToXml', 'viewProof'
+        'xmlToIndesign', 'indesignToXml', 'indesignToXhtml', 'xhtmlToIndesign', 'viewProof'
     ],
     'Typesetting': [
-        'wordToXml', 'wordToIndesign', 'xmlToIndesign', 'indesignToXml', 'viewProof'
+        'wordToXml', 'wordToIndesign', 'xmlToIndesign', 'indesignToXml', 'indesignToXhtml', 'xhtmlToIndesign', 'viewProof'
     ],
     'Proofreading': [
-        'wordToXml', 'wordToIndesign', 'xmlToIndesign', 'indesignToXml', 'viewProof'
+        'wordToXml', 'wordToIndesign', 'xmlToIndesign', 'indesignToXml', 'indesignToXhtml', 'xhtmlToIndesign', 'viewProof'
     ],
 }
 

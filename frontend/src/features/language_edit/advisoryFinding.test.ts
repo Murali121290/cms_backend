@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { isAdvisoryIdentity } from './advisoryFinding'
+import { isAdvisoryIdentity, isSentenceAdvisory } from './advisoryFinding'
 
 /**
  * Regression tests for the two-mode finding card UI predicate.
@@ -136,5 +136,76 @@ describe('isAdvisoryIdentity — the Case-2 trigger', () => {
       original_text: '',
       suggestion: '',
     })).toBe(true)
+  })
+})
+
+
+describe('isSentenceAdvisory — Ignore-only action gate', () => {
+  it('returns true for passive_voice (sentence advisory)', () => {
+    expect(isSentenceAdvisory({
+      advisory: true,
+      category: 'sentence',
+      original_text: 'was considered',
+      suggestion: 'was considered',
+    })).toBe(true)
+  })
+
+  it('returns true for max_sentence_length (sentence advisory)', () => {
+    const long = 'A long sentence that exceeds the configured length limit for the project.'
+    expect(isSentenceAdvisory({
+      advisory: true,
+      category: 'sentence',
+      original_text: long,
+      suggestion: long,
+    })).toBe(true)
+  })
+
+  it('returns false for term-matcher advisory (still shows Highlight + Ignore)', () => {
+    // Term-list highlights are advisory but live in category='term';
+    // they keep the Highlight action.
+    expect(isSentenceAdvisory({
+      advisory: true,
+      category: 'term',
+      original_text: 'neoplasm',
+      suggestion: 'neoplasm',
+    })).toBe(false)
+  })
+
+  it('returns false for non-advisory sentence finding (real replacement)', () => {
+    // A sentence-category finding with a real text change — Accept /
+    // Edit / Highlight / Ignore all show, not just Ignore.
+    expect(isSentenceAdvisory({
+      advisory: false,
+      category: 'sentence',
+      original_text: 'walked briskly',
+      suggestion: 'strode',
+    })).toBe(false)
+  })
+
+  it('returns false when advisory flag is missing', () => {
+    expect(isSentenceAdvisory({
+      category: 'sentence',
+      original_text: 'word',
+      suggestion: 'word',
+    })).toBe(false)
+  })
+
+  it('returns false for grammar / spelling / other categories even when advisory', () => {
+    for (const category of ['grammar', 'spelling', 'typo', 'hyphenation', 'abbreviations']) {
+      expect(isSentenceAdvisory({
+        advisory: true,
+        category,
+        original_text: 'word',
+        suggestion: 'word',
+      })).toBe(false)
+    }
+  })
+
+  it('returns false when category is missing (safety default)', () => {
+    expect(isSentenceAdvisory({
+      advisory: true,
+      original_text: 'word',
+      suggestion: 'word',
+    })).toBe(false)
   })
 })

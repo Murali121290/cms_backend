@@ -11,11 +11,12 @@ from datetime import datetime, timezone, timedelta
 from app.database import get_db, SessionLocal
 from app.domains.books_on_demand.models import BodJob
 from app.domains.books_on_demand.services.ftp_service import BodFtpService
-from app.domains.books_on_demand.utils import calculate_bod_due_date
+from app.domains.books_on_demand.utils import calculate_bod_due_date, generate_bod_history_csv
 from app.domains.notifications.email_service import (
     send_bod_qc_ready_email,
     send_bod_new_job_email,
     send_bod_job_completed_email,
+    send_bod_ready_to_dispatch_email,
     send_bod_fastrack_alert_email
 )
 from pydantic import BaseModel
@@ -34,16 +35,36 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
         query = query.filter(BodJob.status == status)
     
     jobs = query.all()
-    # Serialize to include client_name
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+
+    # Serialize to include client_name and deliverable readiness flags
     result = []
     for job in jobs:
         prod_info = (job.stage_history or {}).get("Production", {})
         pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
+
+        has_epub = bool(job.epub_filepath and os.path.exists(job.epub_filepath))
+        has_ace = bool(job.ace_report_filepath and os.path.exists(job.ace_report_filepath))
+        has_epubcheck = bool(job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath))
+
+        bod_proj_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name) if job.project_name else None
+        history_csv_path = os.path.join(bod_proj_dir, "history.csv") if bod_proj_dir else None
+        has_history_csv = bool(history_csv_path and os.path.exists(history_csv_path))
+        if not has_history_csv and job.epub_filepath:
+            alt_csv = os.path.join(os.path.dirname(job.epub_filepath), "history.csv")
+            has_history_csv = os.path.exists(alt_csv)
+
+        is_dispatchable = bool(
+            has_epub and has_ace and has_epubcheck and has_history_csv
+        )
+
         job_dict = {
             "id": job.id,
             "project_name": job.project_name,
             "pdf_filename": job.pdf_filename,
             "pdf_filepath": job.pdf_filepath,
+            "eisbn": getattr(job, "eisbn", None),
             "cover_filename": getattr(job, "cover_filename", None),
             "cover_filepath": getattr(job, "cover_filepath", None),
             "pdf_page_count": job.pdf_page_count,
@@ -51,6 +72,11 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "pdf_language": job.pdf_language,
             "epub_filename": job.epub_filename,
             "epub_filepath": job.epub_filepath,
+            "has_epub": has_epub,
+            "has_ace": has_ace,
+            "has_epubcheck": has_epubcheck,
+            "has_history_csv": has_history_csv,
+            "is_dispatchable": is_dispatchable,
             "current_stage_index": job.current_stage_index,
             "current_stage_name": job.current_stage_name,
             "current_assignee": job.current_assignee,
@@ -71,6 +97,7 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "is_fastrack": bool(job.is_fastrack),
             "fastrack_requested_date": job.fastrack_requested_date,
             "file_history": job.file_history or [],
+            "hold_support_history": job.hold_support_history or [],
             "epubcheck_report_filepath": job.epubcheck_report_filepath,
             "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
         }
@@ -87,11 +114,19 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         
     prod_info = (job.stage_history or {}).get("Production", {})
     pdf_downloaded = bool(prod_info.get("pdf_downloaded") or prod_info.get("pdf_downloaded_at"))
+
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_proj_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name) if job.project_name else None
+    history_csv_path = os.path.join(bod_proj_dir, "history.csv") if bod_proj_dir else None
+    has_history_csv = bool(history_csv_path and os.path.exists(history_csv_path))
+
     return {
         "id": job.id,
         "project_name": job.project_name,
         "pdf_filename": job.pdf_filename,
         "pdf_filepath": job.pdf_filepath,
+        "eisbn": getattr(job, "eisbn", None),
         "cover_filename": getattr(job, "cover_filename", None),
         "cover_filepath": getattr(job, "cover_filepath", None),
         "pdf_page_count": job.pdf_page_count,
@@ -119,8 +154,11 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "is_fastrack": bool(job.is_fastrack),
         "fastrack_requested_date": job.fastrack_requested_date,
         "file_history": job.file_history or [],
+        "hold_support_history": job.hold_support_history or [],
         "epubcheck_report_filepath": job.epubcheck_report_filepath,
-        "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None
+        "epubcheck_report_filename": os.path.basename(job.epubcheck_report_filepath) if job.epubcheck_report_filepath else None,
+        "has_history_csv": has_history_csv,
+        "history_csv_filename": "history.csv" if has_history_csv else None
     }
 
 @router.get("/jobs/{job_id}/download-pdf")
@@ -202,6 +240,144 @@ def download_epubcheck(job_id: int, db: Session = Depends(get_db)):
     return FileResponse(path=job.epubcheck_report_filepath, filename=os.path.basename(job.epubcheck_report_filepath), media_type='text/plain')
 
 
+@router.get("/jobs/{job_id}/download-history-csv")
+def download_history_csv(job_id: int, db: Session = Depends(get_db)):
+    """Download history.csv for a job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_proj_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name) if job.project_name else None
+    history_csv_path = os.path.join(bod_proj_dir, "history.csv") if bod_proj_dir else None
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        if job.epub_filepath and os.path.exists(job.epub_filepath):
+            history_csv_path = os.path.join(os.path.dirname(job.epub_filepath), "history.csv")
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        raise HTTPException(
+            status_code=404,
+            detail="history.csv not found. Please complete QC to generate history.csv first."
+        )
+    return FileResponse(path=history_csv_path, filename="history.csv", media_type="text/csv")
+
+
+@router.get("/jobs/{job_id}/download-dispatch-package")
+def download_dispatch_package(job_id: int, db: Session = Depends(get_db)):
+    """
+    Builds and downloads the full dispatch package ZIP containing:
+      1. ePub file OR ePDF ({eisbn}_ePub_all.epub)
+      2. history.csv (with WCAG Conformance level)
+      3. ACE_report.zip
+      4. EPUB-checker_log.txt
+    Allows the user to inspect the exact archive that will be sent to the FTP server.
+    """
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    settings = get_settings()
+
+    has_epub = bool(job.epub_filepath and os.path.exists(job.epub_filepath))
+    has_pdf = bool(job.pdf_filepath and os.path.exists(job.pdf_filepath))
+    if not (has_epub or has_pdf):
+        raise HTTPException(status_code=400, detail="Cannot build package: ePub file or ePDF is missing.")
+
+    if not (job.ace_report_filepath and os.path.exists(job.ace_report_filepath)):
+        raise HTTPException(status_code=400, detail="Cannot build package: ACE report is missing.")
+
+    if not (job.epubcheck_report_filepath and os.path.exists(job.epubcheck_report_filepath)):
+        raise HTTPException(status_code=400, detail="Cannot build package: EPUBCheck log is missing.")
+
+    if job.pdf_filename:
+        zip_filename = job.pdf_filename.replace('.pdf', '.zip')
+    else:
+        zip_filename = (job.epub_filename or f"deliverable_{job.id}").replace('.epub', '.zip')
+
+    if job.epub_filepath and os.path.exists(job.epub_filepath):
+        local_dir = os.path.dirname(job.epub_filepath)
+    elif job.pdf_filepath and os.path.exists(job.pdf_filepath):
+        local_dir = os.path.dirname(job.pdf_filepath)
+    else:
+        upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+        local_dir = os.path.join(upload_dir, "bod")
+    os.makedirs(local_dir, exist_ok=True)
+    zip_filepath = os.path.join(local_dir, zip_filename)
+
+    # Determine eisbn
+    eisbn = getattr(job, "eisbn", None) or ""
+    if not eisbn:
+        for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
+            if candidate:
+                m_isbn = re.search(r'(\d{10,13})', candidate)
+                if m_isbn:
+                    eisbn = m_isbn.group(1)
+                    break
+
+    if not eisbn:
+        if job.pdf_filename:
+            eisbn = job.pdf_filename.rsplit('.', 1)[0].strip()
+        elif job.project_name:
+            eisbn = str(job.project_name).strip()
+        elif job.epub_filename:
+            eisbn = job.epub_filename.rsplit('.', 1)[0].strip()
+
+    target_epub_entry_name = f"{eisbn}_ePub_all.epub" if eisbn else (os.path.basename(job.epub_filepath) if has_epub else os.path.basename(job.pdf_filepath))
+    target_ace_entry_name = "ACE_report.zip"
+    target_epubcheck_entry_name = "EPUB-checker_log.txt"
+
+    # Verify history.csv generated during QC completion exists
+    history_csv_filepath = os.path.join(local_dir, "history.csv")
+    if not os.path.exists(history_csv_filepath):
+        upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+        alt_path = os.path.join(upload_dir, "bod", "BOD", job.project_name or "", "history.csv")
+        if os.path.exists(alt_path):
+            history_csv_filepath = alt_path
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="history.csv not found. Please complete QC to generate history.csv before downloading the dispatch package."
+            )
+
+    import zipfile
+    with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        if has_epub:
+            zipf.write(job.epub_filepath, target_epub_entry_name)
+        elif has_pdf:
+            zipf.write(job.pdf_filepath, target_epub_entry_name)
+        zipf.write(job.ace_report_filepath, target_ace_entry_name)
+        zipf.write(job.epubcheck_report_filepath, target_epubcheck_entry_name)
+        zipf.write(history_csv_filepath, "history.csv")
+
+    return FileResponse(path=zip_filepath, filename=zip_filename, media_type="application/zip")
+
+
+@router.get("/jobs/{job_id}/view-history-csv")
+def view_history_csv(job_id: int, db: Session = Depends(get_db)):
+    """View content of history.csv for a job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_proj_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name) if job.project_name else None
+    history_csv_path = os.path.join(bod_proj_dir, "history.csv") if bod_proj_dir else None
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        if job.epub_filepath and os.path.exists(job.epub_filepath):
+            history_csv_path = os.path.join(os.path.dirname(job.epub_filepath), "history.csv")
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        target_dir = bod_proj_dir or (os.path.dirname(job.epub_filepath) if job.epub_filepath and os.path.exists(job.epub_filepath) else (os.path.dirname(job.pdf_filepath) if job.pdf_filepath and os.path.exists(job.pdf_filepath) else os.path.join(upload_dir, "bod", "BOD", f"bod_job_{job.id}")))
+        try:
+            history_csv_path = generate_bod_history_csv(job, target_dir)
+        except Exception as e:
+            logger.error(f"Error generating history.csv for job {job_id}: {e}")
+    if not history_csv_path or not os.path.exists(history_csv_path):
+        raise HTTPException(status_code=404, detail="history.csv could not be located or generated")
+    with open(history_csv_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return {"content": content, "filename": "history.csv"}
+
+
+
 @router.get("/report")
 def get_customer_report(
     status: str = None, 
@@ -249,6 +425,7 @@ def get_customer_report(
             "client_name": "BOD",
             "project_name": job.project_name,
             "pdf_filename": job.pdf_filename,
+            "eisbn": getattr(job, "eisbn", None),
             "cover_filename": getattr(job, "cover_filename", None),
             "cover_filepath": getattr(job, "cover_filepath", None),
             "pdf_type": job.pdf_type,
@@ -448,6 +625,136 @@ class BodDueDateRequest(BaseModel):
     due_date: str | None
     reason: str
 
+
+class BodHoldSupportRequest(BaseModel):
+    status: str # "Hold", "Support", or "Active"
+    description: str # query reason or resolution notes
+
+
+@router.put("/jobs/{job_id}/hold-support")
+def update_job_hold_support(
+    job_id: int,
+    payload: BodHoldSupportRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Update job status to Hold, Support, or resolve back to Active with reason and resolution history."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    target_status = payload.status.strip()
+    valid_statuses = ["Hold", "Support", "Active"]
+    if target_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+
+    description = payload.description.strip() if payload.description else ""
+    if not description:
+        raise HTTPException(status_code=400, detail="Description / query reason or resolution is required.")
+
+    fn = (getattr(current_user, "first_name", None) or "").strip()
+    ln = (getattr(current_user, "last_name", None) or "").strip()
+    if fn and ln:
+        full_name = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
+    else:
+        full_name = fn or ln or getattr(current_user, "username", getattr(current_user, "user_name", "Unknown"))
+
+    old_status = job.status or "Active"
+    job.status = target_status
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 1. Update hold_support_history
+    hold_history = list(job.hold_support_history) if job.hold_support_history else []
+
+    if target_status in ["Hold", "Support"]:
+        # If there was an open item of another type or same type, we resolve it first
+        for item in hold_history:
+            if item.get("status") == "Open":
+                item["status"] = "Resolved"
+                item["resolved_at"] = now_iso
+                item["resolved_by"] = full_name
+                item["resolution_notes"] = f"Superceded by {target_status}: {description}"
+
+        # Create new Hold / Support ticket/record
+        record_id = f"HS-{job.id}-{len(hold_history) + 1}"
+        new_record = {
+            "id": record_id,
+            "type": target_status,
+            "status": "Open",
+            "query_reason": description,
+            "created_by": full_name,
+            "created_at": now_iso,
+            "stage_at_hold": job.current_stage_name,
+            "resolution_notes": None,
+            "resolved_by": None,
+            "resolved_at": None,
+        }
+        hold_history.append(new_record)
+    elif target_status == "Active":
+        # Resolve any currently Open Hold or Support records
+        resolved_any = False
+        for item in hold_history:
+            if item.get("status") == "Open":
+                item["status"] = "Resolved"
+                item["resolved_at"] = now_iso
+                item["resolved_by"] = full_name
+                item["resolution_notes"] = description
+                resolved_any = True
+
+        if not resolved_any:
+            # If no open record was found (e.g. legacy), record a resolution entry
+            record_id = f"HS-{job.id}-{len(hold_history) + 1}"
+            hold_history.append({
+                "id": record_id,
+                "type": old_status if old_status in ["Hold", "Support"] else "Status Change",
+                "status": "Resolved",
+                "query_reason": "Previously marked as hold/support",
+                "created_by": full_name,
+                "created_at": now_iso,
+                "stage_at_hold": job.current_stage_name,
+                "resolution_notes": description,
+                "resolved_by": full_name,
+                "resolved_at": now_iso,
+            })
+
+    job.hold_support_history = hold_history
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(job, "hold_support_history")
+
+    # 2. Also keep timeline entry in due_date_history for unified auditing
+    history_entry = {
+        "field": "Status",
+        "old_status": old_status,
+        "new_status": target_status,
+        "reason": description,
+        "action": "Resolve" if target_status == "Active" else f"Report {target_status}",
+        "changed_by": full_name,
+        "timestamp": now_iso,
+        "changes": [
+            {
+                "field": "Status",
+                "old": old_status,
+                "new": target_status
+            }
+        ]
+    }
+    due_history = list(job.due_date_history) if job.due_date_history else []
+    due_history.append(history_entry)
+    job.due_date_history = due_history
+    flag_modified(job, "due_date_history")
+
+    db.commit()
+    db.refresh(job)
+
+    return {
+        "status": "success",
+        "job_id": job.id,
+        "new_status": job.status,
+        "hold_support_history": job.hold_support_history,
+        "due_date_history": job.due_date_history
+    }
+
+
 @router.put("/jobs/{job_id}/due-date")
 def update_due_date(
     job_id: int, 
@@ -511,6 +818,7 @@ class BodAnalysisUpdateRequest(BaseModel):
     pdf_page_count: Optional[int] = None
     pdf_type: Optional[str] = None
     pdf_language: Optional[str] = None
+    eisbn: Optional[str] = None
     due_date: Optional[str] = None
     due_date_reason: Optional[str] = None
 
@@ -569,7 +877,19 @@ def update_job_analysis(
             })
             job.pdf_language = new_lang or None
 
-    # 4. Due Date
+    # 4. eISBN
+    if payload.eisbn is not None:
+        new_eisbn = payload.eisbn.strip() if payload.eisbn else ""
+        old_eisbn = (getattr(job, "eisbn", None) or "").strip()
+        if new_eisbn != old_eisbn:
+            changes.append({
+                "field": "eISBN",
+                "old": old_eisbn if old_eisbn else None,
+                "new": new_eisbn if new_eisbn else None
+            })
+            job.eisbn = new_eisbn or None
+
+    # 5. Due Date
     if payload.due_date is not None and payload.due_date.strip():
         new_due_date = None
         try:
@@ -644,6 +964,7 @@ def update_job_analysis(
             "id": job.id,
             "pdf_filename": job.pdf_filename,
             "pdf_filepath": job.pdf_filepath,
+            "eisbn": getattr(job, "eisbn", None),
             "pdf_page_count": job.pdf_page_count,
             "pdf_type": job.pdf_type,
             "pdf_language": job.pdf_language,
@@ -747,7 +1068,7 @@ def advance_job_stage(job_id: int, background_tasks: BackgroundTasks, db: Sessio
 
 def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Session):
     settings = get_settings()
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     
     try:
@@ -782,10 +1103,45 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     # Set start time for next stage
     new_stage_data = history.get(new_stage, {})
     new_stage_data["start_time"] = now_iso
+
+    # When moving from 'Add job' to 'Job Analysis', recalculate due date from now (move date)
+    if new_stage == "Job Analysis":
+        job.due_date = calculate_bod_due_date(job.pdf_type, job.pdf_page_count, datetime.now(timezone.utc))
     
     from sqlalchemy.orm.attributes import flag_modified
-    if new_stage in ("Production", "Ready to Dispatch") or current_stage == "QC":
-        # Unassign assignee when moving to Production or when QC is completed
+    if new_stage == "Ready to Dispatch":
+        # Auto-assign to BOD Manager (resolved via BOD_MANAGER_EMAIL or fallback to manager username/email)
+        from app.domains.auth.models import User
+        manager_email = getattr(settings, "BOD_MANAGER_EMAIL", None)
+        manager_user = None
+        if manager_email:
+            manager_user = db.query(User).filter(User.email.ilike(manager_email.strip())).first()
+        
+        manager_assignee = manager_user.username if manager_user else (manager_email or "System")
+        manager_full_name = ""
+        if manager_user:
+            fn = (manager_user.first_name or "").strip()
+            ln = (manager_user.last_name or "").strip()
+            manager_full_name = f"{fn} {ln}".strip() or manager_assignee
+        else:
+            manager_full_name = manager_assignee
+
+        job.current_assignee = manager_assignee
+        new_stage_data["assignee"] = manager_assignee
+
+        history_list = job.assigned_users if isinstance(job.assigned_users, list) else []
+        new_history = list(history_list)
+        new_history.append({
+            "user_id": manager_assignee,
+            "stage": new_stage,
+            "time": now_iso,
+            "assigned_by": "System",
+            "action": f"Auto-assigned to BOD Manager ({manager_full_name}) on move to Ready to Dispatch"
+        })
+        job.assigned_users = new_history
+        flag_modified(job, "assigned_users")
+    elif new_stage == "Production" or current_stage == "QC":
+        # Unassign assignee when moving to Production
         job.current_assignee = None
         new_stage_data["assignee"] = None
         
@@ -817,9 +1173,11 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     
     manager_email = settings.BOD_MANAGER_EMAIL
     
-    # Send email if moving to QC or Archive
+    # Send email if moving to QC, Ready to Dispatch, or Archive
     if job.current_stage_name == "QC" and manager_email:
         send_bod_qc_ready_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
+    elif job.current_stage_name == "Ready to Dispatch" and manager_email:
+        send_bod_ready_to_dispatch_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
     elif job.current_stage_name == "Archive" and manager_email:
         send_bod_job_completed_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
         
@@ -878,14 +1236,15 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
         zip_filepath = os.path.join(local_dir, zip_filename)
 
         # Determine eisbn base:
-        # First priority: find 10 to 13 digits (ISBN) in pdf_filename, epub_filename, or project_name
-        eisbn = ""
-        for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
-            if candidate:
-                m_isbn = re.search(r'(\d{10,13})', candidate)
-                if m_isbn:
-                    eisbn = m_isbn.group(1)
-                    break
+        # First priority: job.eisbn if set, else find 10 to 13 digits (ISBN) in pdf_filename, epub_filename, or project_name
+        eisbn = getattr(job, "eisbn", None) or ""
+        if not eisbn:
+            for candidate in (job.pdf_filename, job.epub_filename, job.project_name):
+                if candidate:
+                    m_isbn = re.search(r'(\d{10,13})', candidate)
+                    if m_isbn:
+                        eisbn = m_isbn.group(1)
+                        break
 
         # Fallback if no numeric ISBN found (e.g. non-standard or test names)
         if not eisbn:
@@ -897,43 +1256,23 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
                 eisbn = job.epub_filename.rsplit('.', 1)[0].strip()
 
         # Target entry names inside the deliverable ZIP:
-        # 1. {eisbn}_1_ePub_all.epub (or ePDF if only PDF exists)
+        # 1. {eisbn}_ePub_all.epub (or ePDF if only PDF exists)
         # 2. history.csv (single-line comma-separated record without line breaks)
         # 3. ACE_report.zip
         # 4. EPUB-checker_log.txt
-        target_epub_entry_name = f"{eisbn}_1_ePub_all.epub" if eisbn else (os.path.basename(job.epub_filepath) if has_epub else os.path.basename(job.pdf_filepath))
+        target_epub_entry_name = f"{eisbn}_ePub_all.epub" if eisbn else (os.path.basename(job.epub_filepath) if has_epub else os.path.basename(job.pdf_filepath))
         target_ace_entry_name = "ACE_report.zip"
         target_epubcheck_entry_name = "EPUB-checker_log.txt"
 
-        # Determine file size for history.csv
-        file_size = 0
-        if has_epub:
-            try:
-                file_size = os.path.getsize(job.epub_filepath)
-            except Exception:
-                file_size = 0
-        elif has_pdf:
-            try:
-                file_size = os.path.getsize(job.pdf_filepath)
-            except Exception:
-                file_size = 0
-
-        file_size_str = str(file_size) if file_size > 0 else "1111"
-
-        # Generate history.csv (Must NOT contain any line break in the data row)
-        history_header = "Project,Status,Format,Layout,User,Correction Type,Correction Request,File Size,Conformity level WCAG,Level of Complexity,Non-Accessible Elements,Primary Content Type,Content Type"
-        history_row = f"{eisbn},y,ePub all,Reflowable,,,,{file_size_str},A,simple,n,textual,textual visual"
-        # Ensure pure single-line data row without internal linebreaks
-        history_row_clean = history_row.replace("\r", " ").replace("\n", " ").strip()
-        history_csv_content = f"{history_header}\n{history_row_clean}\n"
-
+        # Verify history.csv generated during QC completion exists
         history_csv_filepath = os.path.join(local_dir, "history.csv")
-        with open(history_csv_filepath, "w", encoding="utf-8") as f_hist:
-            f_hist.write(history_csv_content)
-
-        # Validate that history.csv was generated
         if not os.path.exists(history_csv_filepath):
-            return False, "Cannot dispatch: Failed to generate history.csv."
+            upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+            alt_path = os.path.join(upload_dir, "bod", "BOD", job.project_name or "", "history.csv")
+            if os.path.exists(alt_path):
+                history_csv_filepath = alt_path
+            else:
+                return False, "Cannot dispatch: history.csv not found. Please complete QC to generate history.csv first."
 
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # 1. ePub file OR ePDF
@@ -957,7 +1296,11 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
             settings.BOD_FTP_USERNAME,
             settings.BOD_FTP_PASSWORD,
             port=getattr(settings, "BOD_FTP_PORT", 21),
-            timeout=getattr(settings, "BOD_FTP_TIMEOUT", 30)
+            timeout=getattr(settings, "BOD_FTP_TIMEOUT", 30),
+            use_tls=getattr(settings, "BOD_FTP_USE_TLS", True),
+            passive=getattr(settings, "BOD_FTP_PASSIVE", True),
+            ssl_verify=getattr(settings, "BOD_FTP_SSL_VERIFY", True),
+            ca_file=getattr(settings, "BOD_FTP_CA_FILE", None) or None
         ) as ftp:
             ftp.ensure_dir(delivery_dir)
             ftp.upload_file(zip_filepath, zip_filename)
@@ -967,7 +1310,7 @@ def _execute_dispatch_and_upload(job: BodJob, db: Session, settings, dispatched_
         return False, f"FTP upload failed: {str(e)}"
 
     # ONLY AFTER FTP SUCCEEDS: Update stage to Archive and status to Completed
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     archive_index = stages.index("Archive") if "Archive" in stages else len(stages) - 1
 
@@ -1249,7 +1592,7 @@ def upload_epub(
     now_iso = datetime.now(timezone.utc).isoformat()
     history = dict(job.stage_history)
     
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     
     qc_index = stages.index("QC") if "QC" in stages else 2
@@ -1285,9 +1628,92 @@ def upload_epub(
     return {"message": "EPUB uploaded and moved to QC", "job": job}
 
 
+@router.post("/jobs/{job_id}/upload-cover")
+def upload_cover(
+    job_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Upload or replace the cover image for a Books on Demand job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    allowed_exts = ('.jpg', '.jpeg')
+    if ext not in allowed_exts:
+        raise HTTPException(status_code=400, detail=f"Cover file must be an image ({', '.join(allowed_exts)})")
+
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    bod_upload_dir = os.path.join(upload_dir, "bod")
+    project_dir = os.path.join(bod_upload_dir, "BOD", job.project_name or f"job_{job.id}")
+    os.makedirs(project_dir, exist_ok=True)
+
+    # Determine user identifier for backup/audit
+    user_identifier = None
+    if current_user:
+        first_name = current_user.get("first_name") if isinstance(current_user, dict) else getattr(current_user, "first_name", None)
+        last_name = current_user.get("last_name") if isinstance(current_user, dict) else getattr(current_user, "last_name", None)
+        full_name = f"{first_name or ''} {last_name or ''}".strip()
+        user_identifier = full_name or (current_user.get("username") if isinstance(current_user, dict) else getattr(current_user, "username", None))
+    if not user_identifier:
+        user_identifier = job.current_assignee or "System"
+
+    # Backup existing cover if present
+    if job.cover_filepath and os.path.exists(job.cover_filepath):
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        old_basename = os.path.basename(job.cover_filepath)
+        name_no_ext, old_ext = os.path.splitext(old_basename)
+        backup_filename = f"{name_no_ext}_{re.sub(r'[^a-zA-Z0-9_-]', '_', user_identifier)}_{timestamp_str}{old_ext}"
+        backup_dir = os.path.join(project_dir, "backup")
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(backup_dir, backup_filename)
+        try:
+            shutil.move(job.cover_filepath, backup_path)
+            logger.info(f"Backed up existing cover to {backup_path}")
+        except Exception as e:
+            logger.warning(f"Could not backup existing cover image: {e}")
+
+    cover_filename = file.filename
+    target_cover_path = os.path.join(project_dir, cover_filename)
+    with open(target_cover_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    job.cover_filename = cover_filename
+    job.cover_filepath = target_cover_path
+
+    # Record in file history
+    from sqlalchemy.orm.attributes import flag_modified
+    now_iso = datetime.now(timezone.utc).isoformat()
+    file_hist = list(job.file_history or [])
+    file_hist.append({
+        "action": "upload_cover",
+        "cover_filename": cover_filename,
+        "cover_filepath": target_cover_path,
+        "user": user_identifier,
+        "timestamp": now_iso,
+        "stage": job.current_stage_name or "Production"
+    })
+    job.file_history = file_hist
+    flag_modified(job, "file_history")
+
+    db.commit()
+    db.refresh(job)
+
+    return {
+        "status": True,
+        "message": "Cover image uploaded successfully",
+        "cover_filename": job.cover_filename,
+        "job": job
+    }
+
+
 @router.post("/jobs")
 def create_job(
     file: UploadFile = File(...),
+    cover_file: Optional[UploadFile] = File(None),
     is_fastrack: bool = Form(False),
     db: Session = Depends(get_db)
 ):
@@ -1340,7 +1766,7 @@ def create_job(
     except Exception as e:
         logger.error(f"Failed to extract page count and type for {file.filename}: {e}")
         
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Ready to Dispatch,Archive"
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
     stages = [s.strip() for s in stages_str.split(",")]
     first_stage = stages[0]
     
@@ -1354,10 +1780,33 @@ def create_job(
         }
     }
     
+    # Handle optional cover image upload during job creation
+    cover_filename = None
+    cover_filepath = None
+    if cover_file and cover_file.filename:
+        c_ext = os.path.splitext(cover_file.filename)[1].lower()
+        if c_ext in ('.jpg', '.jpeg'):
+            cover_filename = cover_file.filename
+            cover_filepath = os.path.join(project_dir, cover_filename)
+            with open(cover_filepath, "wb") as c_buf:
+                shutil.copyfileobj(cover_file.file, c_buf)
+
+    # Automatically extract eISBN if present in filename or project_name
+    extracted_eisbn = None
+    for cand in (file.filename, project_name):
+        if cand:
+            m_isbn = re.search(r'(\d{10,13})', cand)
+            if m_isbn:
+                extracted_eisbn = m_isbn.group(1)
+                break
+
     new_job = BodJob(
         project_name=project_name,
         pdf_filename=file.filename,
         pdf_filepath=local_path,
+        eisbn=extracted_eisbn,
+        cover_filename=cover_filename,
+        cover_filepath=cover_filepath,
         pdf_page_count=page_count,
         pdf_type=pdf_type,
         pdf_language=pdf_language,
@@ -1375,7 +1824,7 @@ def create_job(
     
     # Send email
     if settings.BOD_MANAGER_EMAIL:
-        send_bod_new_job_email(settings.BOD_MANAGER_EMAIL, new_job.project_name, file.filename)
+        send_bod_new_job_email(settings.BOD_MANAGER_EMAIL, new_job.project_name, file.filename, cover_filename=cover_filename)
     
     return {"message": "Job created successfully", "job": new_job}
 
@@ -1452,11 +1901,12 @@ def sync_job_to_validator(
 
     total_files = sum(len(files) for _, _, files in os.walk(epub_extract_path))
 
-    # Extract eisbn if present in filename
-    eisbn_extracted = None
-    m = re.search(r'(\d{10,13})', job.epub_filename or "")
-    if m:
-        eisbn_extracted = m.group(1)
+    # Priority source: eisbn from bod_jobs table (always synced to EPUB Validator)
+    job_eisbn = (getattr(job, "eisbn", None) or "").strip() or None
+    if not job_eisbn:
+        m = re.search(r'(\d{10,13})', job.epub_filename or "")
+        if m:
+            job_eisbn = m.group(1)
 
     user_id = current_user.get("id") if isinstance(current_user, dict) else getattr(current_user, "id", None)
     username = current_user.get("username") if isinstance(current_user, dict) else getattr(current_user, "username", None)
@@ -1470,8 +1920,8 @@ def sync_job_to_validator(
         existing_proj.updated_at = datetime.now(timezone.utc)
         if assignee_to_set:
             existing_proj.assignee = assignee_to_set
-        if eisbn_extracted:
-            existing_proj.eisbn = eisbn_extracted
+        # Every time EPUB validator is opened/synced, update eisbn from BoD
+        existing_proj.eisbn = job_eisbn
         db.commit()
         db.refresh(existing_proj)
         proj_data = ev_projects_db._serialize(existing_proj)
@@ -1486,7 +1936,7 @@ def sync_job_to_validator(
             total_files=total_files,
             user_id=user_id,
             assignee=assignee_to_set,
-            eisbn=eisbn_extracted,
+            eisbn=job_eisbn,
         )
 
     return {
@@ -1614,14 +2064,29 @@ def sync_qc_reports_and_complete(
     except Exception as e:
         logger.warning(f"EPUBCheck report sync skipped: {e}")
 
+    # 5. Generate history.csv for the job
+    try:
+        generate_bod_history_csv(job, bod_project_dir)
+        logger.info(f"Generated history.csv for job {job.id} ({job.project_name})")
+    except Exception as e:
+        logger.warning(f"Could not generate history.csv during QC complete: {e}")
+
     db.commit()
     db.refresh(job)
 
-    # 5. Advance stage to Ready to Dispatch if in QC & unassign
+    # 6. Advance stage to Ready to Dispatch if in QC & auto-assign to BOD Manager
     if job.current_stage_name == "QC":
         _advance_job_logic(job, background_tasks, db)
     else:
-        job.current_assignee = None
+        from app.domains.auth.models import User
+        settings = get_settings()
+        manager_email = getattr(settings, "BOD_MANAGER_EMAIL", None)
+        manager_user = None
+        if manager_email:
+            manager_user = db.query(User).filter(User.email.ilike(manager_email.strip())).first()
+        manager_assignee = manager_user.username if manager_user else (manager_email or "System")
+
+        job.current_assignee = manager_assignee
         db.commit()
         db.refresh(job)
 
@@ -1640,3 +2105,20 @@ def sync_qc_reports_and_complete(
         "message": "EPUB and QC reports updated to BOD folder, old files archived to _before, stage moved to Ready to Dispatch, and job unassigned.",
         "job": job
     }
+
+
+@router.post("/send-daily-summary")
+def trigger_daily_summary(
+    date: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Manually triggers the daily BOD Job Receipt Summary email for a given date (default today).
+    """
+    from app.domains.books_on_demand.tasks import send_bod_daily_receipt_summary
+    try:
+        res = send_bod_daily_receipt_summary(target_date_str=date)
+        return {"status": True, "data": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

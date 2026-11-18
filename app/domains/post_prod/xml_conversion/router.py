@@ -123,7 +123,7 @@ async def update_project(project_id: int, project_data: dict, db: Session = Depe
 @router.post("/projects/{project_id}/convert")
 def trigger_conversion(project_id: int, db: Session = Depends(database.get_db), current_user: dict = Depends(get_current_user_from_cookie)):
     """
-    Triggers the Celery background task to process the PDF -> XML conversion.
+    Triggers the Celery background task to process the PDF -> XML conversion with Redis queue & locking.
     """
     project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
     if not project:
@@ -131,19 +131,71 @@ def trigger_conversion(project_id: int, db: Session = Depends(database.get_db), 
         
     project.conversion_status = "Pending"
     
+    # Create or update ProcessingJob for dashboard visibility and priority queue
+    from app.models import ProcessingJob
+    job = ProcessingJob(
+        file_id=None,
+        process_type="post_prod_xml_conversion",
+        status="pending",
+        current_step="Pending queue execution",
+        progress_pct=0,
+        user_id=current_user.id if current_user and hasattr(current_user, "id") else None,
+        project_code=project.project_name,
+        filename=project.filename,
+        options={"project_id": project.id, "client_code": project.client_code},
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    user_name = getattr(current_user, "username", "System") if current_user else "System"
     history = PostProdXMLConversionHistory(
         project_id=project.id,
         action="Conversion Started",
         details={
             "message": "XML Conversion background task triggered",
-            "triggered_by": current_user.username if current_user else "System"
+            "job_id": job.id,
+            "triggered_by": user_name
         }
     )
     db.add(history)
     db.commit()
     
-    run_xml_conversion_celery_task.delay(project.id)
-    return {"message": "Conversion started", "project_id": project.id}
+    run_xml_conversion_celery_task.delay(project.id, job.id)
+    return {"message": "Conversion started", "project_id": project.id, "job_id": job.id}
+
+@router.get("/projects/{project_id}/progress")
+def get_conversion_progress(project_id: int, db: Session = Depends(database.get_db)):
+    """
+    Returns real-time progress of PDF -> XML conversion from Redis, falling back to DB.
+    """
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    settings = get_settings()
+    import redis
+    import json
+    try:
+        redis_client = redis.from_url(settings.REDIS_URL)
+        cached = redis_client.get(f"pdf2xml_progress:{project_id}")
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        pass
+
+    conv_status = (project.conversion_status or "YTS").lower()
+    is_done = conv_status == "completed"
+    is_failed = conv_status == "failed"
+    is_processing = conv_status in ("processing", "in-progress")
+
+    return {
+        "project_id": project.id,
+        "status": conv_status,
+        "step": "Completed" if is_done else ("Processing conversion..." if is_processing else f"Status: {project.conversion_status}"),
+        "progress_pct": 100 if is_done else (50 if is_processing else 0),
+        "error": None if not is_failed else "Conversion failed"
+    }
 
 @router.get("/projects/{project_id}/download")
 def download_xml(project_id: int, db: Session = Depends(database.get_db)):
@@ -233,8 +285,9 @@ def _extract_and_save_pdf2xml_zip(zip_bytes: bytes, out_dir: str, base_name: str
     }
 
 
-def _call_pdf2xml_api(filepath: str, return_xml: str = "all") -> requests.Response:
-    url = os.environ.get("PDF2XML_API_URL")
+def _call_pdf2xml_api(filepath: str, return_xml: str = "all", project: PostProdXMLConversionProject | None = None) -> requests.Response:
+    settings = get_settings()
+    url = (getattr(settings, "PDF2XML_API_URL", None) or os.environ.get("PDF2XML_API_URL") or "").strip()
     if not url:
         raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
 
@@ -243,69 +296,66 @@ def _call_pdf2xml_api(filepath: str, return_xml: str = "all") -> requests.Respon
         "targets": "json,xml,jats,bits",
         "return_xml": return_xml
     }
+    headers = {}
+    if project:
+        headers = {
+            "X-Project-ID": str(project.id),
+            "X-Project-Name": str(project.project_name),
+            "X-Client-Code": str(project.client_code),
+        }
 
     with open(filepath, 'rb') as f:
         files = {'file': (os.path.basename(filepath), f, 'application/pdf')}
-        response = requests.post(url, params=params, files=files)
+        response = requests.post(
+            url,
+            params=params,
+            files=files,
+            headers=headers,
+            timeout=(settings.PDF2XML_CONNECT_TIMEOUT_SECONDS, settings.PDF2XML_TIMEOUT_SECONDS)
+        )
 
     return response
 
 
 @router.post("/projects/{project_id}/s4c-convert")
-def s4c_convert(project_id: int, db: Session = Depends(database.get_db)):
+def s4c_convert(project_id: int, db: Session = Depends(database.get_db), current_user: dict = Depends(get_current_user_from_cookie)):
     project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    out_dir = os.path.dirname(project.filepath)
-    base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+    out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+    base_name = os.path.splitext(os.path.basename(project.filepath))[0] if project.filepath else ""
+    raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml") if out_dir else ""
 
-    response = _call_pdf2xml_api(project.filepath, return_xml="all")
-    if response.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"PDF2XML API Error: {response.text}")
+    # If already converted and present on disk, return immediately
+    if raw_filepath and os.path.exists(raw_filepath):
+        with open(raw_filepath, "r", encoding="utf-8") as f:
+            xml_content = f.read()
+        return {"status": "completed", "xml": xml_content, "raw_filepath": raw_filepath}
 
-    content_type = response.headers.get("Content-Type", "")
-    if "zip" in content_type or response.content[:4] == b"PK\x03\x04":
-        saved = _extract_and_save_pdf2xml_zip(
-            response.content,
-            out_dir,
-            base_name,
-            target_format=project.target_format or "XML"
-        )
-        xml_content = saved["raw_xml"]
-        raw_filepath = saved["raw_filepath"]
-        if saved.get("final_filepath") and os.path.exists(saved["final_filepath"]):
-            project.final_xml_status = "Completed"
-            project.result_filepath = saved["final_filepath"]
-    else:
-        # Fallback if server returned plain xml
-        xml_content = response.text
-        raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
-        with open(raw_filepath, "w", encoding="utf-8") as f:
-            f.write(xml_content)
+    # If currently in progress, report queued/processing
+    if project.conversion_status == "Processing":
+        return {"status": "processing", "message": "Conversion is currently in progress"}
 
-    project.raw_xml_status = "Completed"
-    if project.conversion_status == "YTS":
-        project.conversion_status = "In-progress"
-    db.commit()
-    
-    return {"xml": xml_content, "raw_filepath": raw_filepath}
+    # Enqueue background conversion
+    trigger_conversion(project_id, db=db, current_user=current_user)
+    return {"status": "queued", "message": "Conversion started in background", "project_id": project.id}
 
 @router.post("/projects/{project_id}/target-convert")
-def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(database.get_db)):
+def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(database.get_db), current_user: dict = Depends(get_current_user_from_cookie)):
     project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
         
     project.target_format = format
-    out_dir = os.path.dirname(project.filepath)
-    base_name = os.path.splitext(os.path.basename(project.filepath))[0]
-    final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+    out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+    base_name = os.path.splitext(os.path.basename(project.filepath))[0] if project.filepath else ""
+    final_filepath = os.path.join(out_dir, f"{base_name}_final.xml") if out_dir else ""
 
     # Check if this format was already extracted and saved from the ZIP
     fmt_lower = format.lower()
-    specific_filepath = os.path.join(out_dir, f"{base_name}_{fmt_lower}.xml")
-    if os.path.exists(specific_filepath):
+    specific_filepath = os.path.join(out_dir, f"{base_name}_{fmt_lower}.xml") if out_dir else ""
+    if specific_filepath and os.path.exists(specific_filepath):
         with open(specific_filepath, "r", encoding="utf-8") as f:
             xml_content = f.read()
         with open(final_filepath, "w", encoding="utf-8") as f:
@@ -313,39 +363,30 @@ def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(
         project.final_xml_status = "Completed"
         project.result_filepath = final_filepath
         db.commit()
-        return {"xml": xml_content, "final_filepath": final_filepath}
+        return {"status": "completed", "xml": xml_content, "final_filepath": final_filepath}
 
-    # If not already present on disk, call API
-    try:
-        response = _call_pdf2xml_api(project.filepath, return_xml="all")
-        if response.status_code != 200:
-            raise HTTPException(status_code=500, detail=f"PDF2XML API Error: {response.text}")
+    # Check if raw XML exists on disk: if so, convert directly using local format_mapper
+    raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml") if out_dir else ""
+    if raw_filepath and os.path.exists(raw_filepath):
+        from app.domains.post_prod.xml_conversion.engine.format_mapper import convert_s4c_to_target
+        with open(raw_filepath, "r", encoding="utf-8") as f:
+            raw_content = f.read()
+        target_xml = convert_s4c_to_target(raw_content, format)
+        with open(specific_filepath, "w", encoding="utf-8") as f:
+            f.write(target_xml)
+        with open(final_filepath, "w", encoding="utf-8") as f:
+            f.write(target_xml)
+        project.final_xml_status = "Completed"
+        project.result_filepath = final_filepath
+        db.commit()
+        return {"status": "completed", "xml": target_xml, "final_filepath": final_filepath}
 
-        content_type = response.headers.get("Content-Type", "")
-        if "zip" in content_type or response.content[:4] == b"PK\x03\x04":
-            saved = _extract_and_save_pdf2xml_zip(
-                response.content,
-                out_dir,
-                base_name,
-                target_format=format
-            )
-            xml_content = saved["final_xml"]
-            final_filepath = saved["final_filepath"]
-        else:
-            xml_content = response.text
-            with open(final_filepath, "w", encoding="utf-8") as f:
-                f.write(xml_content)
+    # If raw XML does not exist either, start the background conversion
+    if project.conversion_status == "Processing":
+        return {"status": "processing", "message": "Conversion is currently in progress"}
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to convert to target format: {str(e)}")
-        
-    project.final_xml_status = "Completed"
-    project.result_filepath = final_filepath
-    db.commit()
-    
-    return {"xml": xml_content, "final_filepath": final_filepath}
+    trigger_conversion(project_id, db=db, current_user=current_user)
+    return {"status": "queued", "message": "Conversion started in background", "project_id": project.id}
 
 
 

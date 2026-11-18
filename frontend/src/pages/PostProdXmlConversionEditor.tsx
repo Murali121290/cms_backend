@@ -21,6 +21,7 @@ export function PostProdXmlConversionEditor() {
   const [targetFormat, setTargetFormat] = useState('JATS')
   const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false)
   const [xmlType, setXmlType] = useState<'s4c' | 'final' | null>(null)
+  const [conversionStepText, setConversionStepText] = useState<string>('')
 
   const [isQcModalOpen, setIsQcModalOpen] = useState(false)
   const [isQcRunning, setIsQcRunning] = useState(false)
@@ -121,47 +122,93 @@ export function PostProdXmlConversionEditor() {
     }
   }
 
+  const pollConversionUntilDone = async (formatToLoad: string): Promise<boolean> => {
+    const startTime = Date.now()
+    const maxWaitMs = 1800 * 1000 // 30 minutes
+    const pollInterval = 2500 // 2.5 seconds
+
+    while (Date.now() - startTime < maxWaitMs) {
+      await new Promise((r) => setTimeout(r, pollInterval))
+      try {
+        const progRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/progress`)
+        const data = progRes.data
+        if (data.step) {
+          setConversionStepText(data.step)
+        }
+        if (data.status === 'completed') {
+          const loaded = await loadFormatXml(formatToLoad)
+          if (!loaded) {
+            await loadFormatXml('s4c')
+          }
+          await fetchProject()
+          toast.success('Conversion completed and XML loaded!')
+          return true
+        } else if (data.status === 'failed') {
+          toast.error(data.error || 'Conversion failed')
+          return false
+        }
+      } catch (pollErr) {
+        console.error('Error polling progress:', pollErr)
+      }
+    }
+    toast.error('Conversion timed out')
+    return false
+  }
+
   const handleRunS4c = async () => {
     setIsS4cConverting(true)
+    setConversionStepText('Initiating conversion...')
     try {
       const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/s4c-convert`)
-      setXmlContent(res.data.xml)
-      setXmlType('s4c')
+      if (res.data?.status === 'completed' && res.data.xml) {
+        setXmlContent(res.data.xml)
+        setXmlType('s4c')
 
-      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html?format=s4c`)
-      if (htmlRes.data?.html) {
-        setHtmlContent(htmlRes.data.html)
-        setViewMode('html')
+        const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html?format=s4c`)
+        if (htmlRes.data?.html) {
+          setHtmlContent(htmlRes.data.html)
+          setViewMode('html')
+        }
+        toast.success('Converted and extracted all XMLs (S4C, JATS, BITS) successfully')
+      } else {
+        toast.info('Conversion queued in background. Tracking progress...')
+        await pollConversionUntilDone('s4c')
       }
-
-      toast.success('Converted and extracted all XMLs (S4C, JATS, BITS) successfully')
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      toast.error('Failed to run conversion')
+      toast.error(err?.response?.data?.detail || 'Failed to run conversion')
     } finally {
       setIsS4cConverting(false)
+      setConversionStepText('')
     }
   }
 
   const handleTargetConversion = async () => {
     setIsTargetConverting(true)
+    setConversionStepText(`Initiating ${targetFormat} conversion...`)
     try {
       const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/target-convert?format=${targetFormat}`)
-      setXmlContent(res.data.xml)
-      setXmlType(targetFormat.toLowerCase() as any)
-      setProject((prev: any) => prev ? { ...prev, target_format: targetFormat } : prev)
+      if (res.data?.status === 'completed' && res.data.xml) {
+        setXmlContent(res.data.xml)
+        setXmlType(targetFormat.toLowerCase() as any)
+        setProject((prev: any) => prev ? { ...prev, target_format: targetFormat } : prev)
 
-      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html?format=${targetFormat.toLowerCase()}`)
-      if (htmlRes.data?.html) {
-        setHtmlContent(htmlRes.data.html)
-        setViewMode('html')
+        const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html?format=${targetFormat.toLowerCase()}`)
+        if (htmlRes.data?.html) {
+          setHtmlContent(htmlRes.data.html)
+          setViewMode('html')
+        }
+        toast.success(`Converted ${targetFormat} XML successfully`)
+      } else {
+        toast.info(`Conversion queued in background. Tracking progress...`)
+        await pollConversionUntilDone(targetFormat)
       }
-      toast.success(`Converted ${targetFormat} XML successfully`)
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      toast.error(`Failed to run ${targetFormat} conversion`)
+      toast.error(err?.response?.data?.detail || `Failed to run ${targetFormat} conversion`)
     } finally {
       setIsTargetConverting(false)
+      setConversionStepText('')
     }
   }
 
@@ -274,6 +321,12 @@ export function PostProdXmlConversionEditor() {
         </div>
 
         <div className="flex items-center gap-2">
+          {(isS4cConverting || isTargetConverting) && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-primary bg-primary/10 rounded-md border border-primary/20 animate-pulse mr-1">
+              <Loader2 size={13} className="animate-spin text-primary" />
+              <span className="font-medium max-w-[250px] truncate">{conversionStepText || 'Processing conversion...'}</span>
+            </div>
+          )}
           {xmlContent && (
             <div className="flex bg-card rounded-md border p-0.5 mr-2">
               <button

@@ -273,7 +273,8 @@ function StageModal({
     const matchSearch = !actionSearch.trim() ||
       d.label.toLowerCase().includes(actionSearch.toLowerCase()) ||
       d.description.toLowerCase().includes(actionSearch.toLowerCase()) ||
-      d.key.toLowerCase().includes(actionSearch.toLowerCase())
+      d.key.toLowerCase().includes(actionSearch.toLowerCase()) ||
+      (d.category && d.category.toLowerCase().includes(actionSearch.toLowerCase()))
     return matchSearch
   })
 
@@ -713,9 +714,21 @@ function StageModal({
                         {isSelected && <Check size={10} />}
                       </span>
                       <div className="min-w-0">
-                        <p className={`text-xs font-semibold leading-tight ${isSelected ? 'text-primary' : 'text-text'}`}>
-                          {action.label}
-                        </p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className={`text-xs font-semibold leading-tight ${isSelected ? 'text-primary' : 'text-text'}`}>
+                            {action.label}
+                          </p>
+                          {action.category && (
+                            <span className="text-[9px] px-1 py-0.2 rounded bg-surface border border-border text-muted">
+                              {action.category}
+                            </span>
+                          )}
+                          {(action.key === 'indesignToXhtml' || action.key === 'xhtmlToIndesign') && (
+                            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              Proof folder
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[10px] font-mono text-muted truncate mt-0.5">{action.key}</p>
                       </div>
                     </button>
@@ -928,9 +941,14 @@ function ExpandedStageRow({ stage, definitions }: { stage: Stage; definitions: P
                 {stageActions.map(actionKey => {
                   const def = definitions.find(d => d.key === actionKey)
                   return (
-                    <span key={actionKey} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border bg-card text-xs text-text font-medium shadow-2xs">
+                    <span key={actionKey} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border bg-card text-xs text-text font-medium shadow-2xs">
                       <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-                      {def?.label || actionKey}
+                      <span>{def?.label || actionKey}</span>
+                      {(actionKey === 'indesignToXhtml' || actionKey === 'xhtmlToIndesign') && (
+                        <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-normal">
+                          Proof
+                        </span>
+                      )}
                     </span>
                   )
                 })}
@@ -988,7 +1006,7 @@ export function StageManagement() {
           ...roleNames,
           ...stageOwners,
         ])
-      ).filter(Boolean).sort((a, b) => a.localeCompare(b))
+      ).filter((x): x is string => Boolean(x)).sort((a, b) => a.localeCompare(b))
 
       setDesignationsList(merged)
       await fetchMapping(true)

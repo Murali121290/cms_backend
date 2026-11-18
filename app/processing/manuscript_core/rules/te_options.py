@@ -23,8 +23,12 @@ MOJIBAKE = {
     "Ã¶": "ö", "Ã¤": "ä", "Â°": "°", "Â±": "±",
     "Âµ": "μ", "Ã—": "×",
 }
-GREEK = {"alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "kappa": "κ",
-         "lambda": "λ", "mu": "μ", "sigma": "σ", "tau": "τ", "omega": "ω"}
+GREEK = {"alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε", "zeta": "ζ", "eta": "η",
+         "theta": "θ", "iota": "ι", "kappa": "κ", "lambda": "λ", "mu": "μ", "nu": "ν", "xi": "ξ", "pi": "π",
+         "rho": "ρ", "sigma": "σ", "tau": "τ", "phi": "φ", "chi": "χ", "psi": "ψ", "omega": "ω"}
+GREEK_NAMES = {v: k for k, v in GREEK.items()}
+GREEK_NAMES.update({"ς": "sigma", "Α": "Alpha", "Β": "Beta", "Γ": "Gamma", "Δ": "Delta", "Θ": "Theta",
+                    "Λ": "Lambda", "Σ": "Sigma", "Φ": "Phi", "Ψ": "Psi", "Ω": "Omega"})
 _MONTH_NUM = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8,
               "sep": 9, "oct": 10, "nov": 11, "dec": 12}
 _MONTH_FULL = ["", "January", "February", "March", "April", "May", "June", "July", "August",
@@ -75,6 +79,33 @@ def _words_to_int(word: str) -> int | None:
     return None
 
 
+def _numbering_forms(num_part: str) -> tuple[str, str]:
+    """(period numbering, hyphen numbering) of a figure/table number: 1.2 / 1-2.
+
+    A hyphen between two dotted numbers is a range connector and becomes an en dash
+    in both forms (Figures 2.1–2.4)."""
+    if re.fullmatch(r"\d+-\d+", num_part):
+        return num_part.replace("-", "."), num_part
+    if re.fullmatch(r"\d+\.\d+", num_part):
+        return num_part, num_part.replace(".", "-")
+    ranged = re.sub(r"(?<=\d)-(?=\d+\.\d)", "–", num_part)
+    return ranged, ranged
+
+
+def _genus_options(rule_id: str, s: str) -> dict:
+    parts = s.split()
+    if len(parts) < 2:
+        return _opts()
+    genus, rest = parts[0], " ".join(parts[1:])
+    if rule_id == "genus_species_full":
+        return _opts(s, s, QUERY, s)  # first use is correct; later uses are set by house_style.document_pass
+    if rule_id == "genus_species_abbr":
+        return _opts(None, None, QUERY, f"{genus.rstrip('.')} {rest}")
+    if rule_id == "genus_species_nodot":
+        return _opts(None, f"{genus}. {rest}", QUERY, None)
+    return _opts()
+
+
 def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
     """Literal replacement for each workbook option of the checklist rule behind `rule_id`."""
     s = m.group(0)
@@ -82,11 +113,13 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
 
     # R6 percentage: 25% / 25 % / 25 percent / 25 per cent / 25 percentage points / percentage
     sentence_start = bool(_SENTENCE_START_RE.search(_before(m, 80)))
-    if rule_id in ("percent_symbol", "percent_word", "per_cent_word"):
+    if rule_id in ("percent_symbol", "percent_word", "per_cent_word", "percent_number_word"):
         w_us = "Percent" if sentence_start else "percent"
         w_uk = "Per cent" if sentence_start else "per cent"
         if not nums:
-            return _opts(None, None, w_us, w_uk, "percentage points", "Percentage" if sentence_start else "percentage")
+            # Without a number the word stays a word: "percentage" for the symbol styles.
+            p_word = "Percentage" if sentence_start else "percentage"
+            return _unless_same(_opts(p_word, p_word, w_us, w_uk, p_word), s)
         n = nums[0]
         return _unless_same(_opts(
             f"{n}%",
@@ -94,11 +127,37 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
             f"{n} {w_us}",
             f"{n} {w_uk}",
             f"{n} percentage points",
-            "Percentage" if sentence_start else "percentage",
         ), s)
     if rule_id == "percent_percentage":
-        p_word = "Percentage" if sentence_start else "percentage"
-        return _opts(p_word, p_word, p_word, p_word, p_word, p_word)
+        return _opts(None, None, None, None, None)  # the word itself is always acceptable
+
+    # R92 ellipsis
+    if rule_id.startswith("ellipsis_"):
+        return _unless_same(_opts("…", ". . .", "..."), s)
+
+    # R97 positional references, R117 run-in list markers, R103 colon case (flag and suggest)
+    if rule_id.startswith("pos_"):
+        return _opts(QUERY, None, QUERY)
+    if rule_id.startswith("list_") and rule_id != "list_punct":
+        letter = re.search(r"[A-Za-z]+|\d+", s)
+        tok = letter.group(0) if letter else ""
+        if tok.isdigit():
+            n = int(tok)
+            alpha = chr(ord("a") + n - 1) if 1 <= n <= 26 else None
+        elif len(tok) == 1:
+            alpha, n = tok.lower(), ord(tok.lower()) - ord("a") + 1
+        else:
+            return _opts()
+        return _unless_same(_opts(f"({alpha})" if alpha else None, f"({n})", f"{alpha})" if alpha else None), s)
+    if rule_id in ("caps_after_colon", "lowercase_after_colon"):
+        rest = m.string[m.end() - 1:]
+        sentence = re.match(r"[^.!?]*", rest).group(0)
+        complete = len(sentence.split()) >= 5 and bool(
+            re.search(r"\b(?:is|are|was|were|has|have|had|will|can|may|must|should|does|do|did)\b", sentence))
+        letter = s[-1]
+        # Suggest a capital for a complete sentence; never lowercase a capital (stubs, names).
+        want = letter.upper() if complete else letter
+        return _unless_same(_opts(s[:-1] + want, s[:-1] + letter.upper(), s[:-1] + letter.lower()), s)
 
     # R14 number ranges: 10–15 / 10 to 15 / from 10 to 15 / 10 – 15 / 10-15
     if rule_id in ("range_to", "range_endash", "range_hyphen") and len(nums) >= 2:
@@ -171,7 +230,14 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
     # R8 Greek letters spelled out in scientific names (TNF-alpha, alpha-1)
     if rule_id == "greek_spelled":
         g = GREEK.get(s.lower())
+        if g and s[0].isupper():
+            g = g.upper()
         return _opts(g, None, QUERY) if g else _opts()
+    if rule_id in ("greek_lowercase", "greek_uppercase"):
+        if s in ("μ", "µ"):
+            return _opts()  # micro prefix: R9
+        name = GREEK_NAMES.get(s)
+        return _opts(None, name, QUERY) if name else _opts()
 
     # R10 gas formulae with plain digits
     if rule_id.startswith("gas_") and rule_id.endswith("_inline"):
@@ -197,10 +263,16 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         return _opts("−" + num_part, "–" + num_part, "-" + num_part, f"negative {num_part}")
 
     # R17 date format: 10 October 2026 (UK) / October 10, 2026 (US) / 2026-10-10 (ISO) / ordinal / abbreviated
-    if rule_id in ("date_uk_long", "date_us_long"):
+    if rule_id in ("date_uk_long", "date_us_long", "date_us_abbr", "date_iso"):
         mon = re.search(r"[A-Za-z]+", s)
         day = re.search(r"\b(\d{1,2})\b", s)
         year = re.search(r"\b(\d{4})\b", s)
+        iso = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)
+        if iso and 1 <= int(iso.group(2)) <= 12:
+            mi, d, y = int(iso.group(2)), int(iso.group(3)), iso.group(1)
+            full_m = _MONTH_FULL[mi]
+            return _unless_same(_opts(f"{d} {full_m} {y}", f"{full_m} {d}, {y}", s, f"{d}th {full_m} {y}",
+                                      f"{full_m[:3]}. {d}, {y}"), s)
         if mon and day and year and mon.group(0)[:3].lower() in _MONTH_NUM:
             mi = _MONTH_NUM[mon.group(0)[:3].lower()]
             d, y = int(day.group(1)), year.group(1)
@@ -248,7 +320,9 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         sym, op, val = sm.groups()
         if rule_id == "stat_p_value":
             short = val[1:] if val.startswith("0.") else val
-            return _opts(f"{sym.lower()} {op} {val}", f"{sym.upper()} {op} {short}", QUERY)
+            full = "0" + val if val.startswith(".") else val
+            return _unless_same(_opts(f"{sym.lower()} {op} {short}", f"{sym.upper()} {op} {short}", QUERY,
+                                      f"{sym.lower()} {op} {full}"), s)
         return _opts(f"{sym} {op} {val}", f"{sym} {op} {val}", QUERY)
 
     # R29 tolerance: 5 ± 0.2
@@ -282,9 +356,52 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
     if rule_id in ("latin_ie_nodots", "latin_ie_dots"):
         return _unless_same(_opts("i.e.,", "i.e.", "that is,", "ie.", "ie"), s)
     if rule_id == "latin_etc_nodot":
-        return _opts("etc.", "etc", "and so on")
+        return _opts("etc.", None, "and so forth")
+    if rule_id == "latin_etc_dot":
+        return _opts(None, None, "and so forth")
+    if rule_id == "latin_etal_nodot":
+        return _opts("et al.", "et al.", "et al.")
     if rule_id.startswith("versus_"):
         return _unless_same(_opts("vs.", "vs", "versus", "v."), s)
+
+    # R31 First-Use Abbreviation Definition / R34 Heading / R81 Table
+    if rule_id in ("abbrev_body", "abbrev_heading", "abbrev_table", "abbrev_caption"):
+        abbr = s.strip()
+        expansion = None
+        try:
+            from app.processing.language_editing.abbreviations import (
+                get_abbreviation_expansion,
+                _dnu_data,
+            )
+            # 1. Check Do Not Use notations (e.g. 10 U, QD, etc.)
+            dnu_rules = _dnu_data().get("rules", [])
+            for dnu in dnu_rules:
+                pat = dnu.get("pattern")
+                if pat and re.search(pat, m.string):
+                    sugg = dnu.get("suggestion_1") or dnu.get("intended_meaning")
+                    if sugg:
+                        return _opts(sugg, None, QUERY)
+
+            # 2. Get abbreviation expansion from language editing module
+            expansion = get_abbreviation_expansion(abbr, m.string, m.start())
+        except Exception:
+            expansion = None
+
+        if expansion:
+            clean_exp = re.sub(r'^(?:The|the|A|a|An|an)\s+', '', expansion).strip()
+            if rule_id == "abbrev_heading":
+                return _opts(abbr, clean_exp, QUERY)
+            elif rule_id == "abbrev_table":
+                return _opts(f"{abbr}: {clean_exp}", clean_exp, QUERY)
+            else:
+                return _opts(f"{clean_exp} ({abbr})", None, clean_exp)
+        else:
+            if rule_id == "abbrev_heading":
+                return _opts(abbr, None, QUERY)
+            elif rule_id == "abbrev_table":
+                return _opts(abbr, None, QUERY)
+            else:
+                return _opts(None, None, None)
 
     # R4 unit abbreviation consistency: symbol after a number. Option 2 (the form the
     # manuscript uses most) is filled in document-wide by the analyzer.
@@ -322,11 +439,14 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         label_lc = "figures" if is_plural else "figure"
         num_m = re.search(r"^(?:Figures?|Figs?\.?|figures?|figs?\.?)\s*(.*)$", s, re.IGNORECASE)
         num_part = num_m.group(1).strip() if num_m else ""
+        dot_n, hyph_n = _numbering_forms(num_part)
         return _unless_same(_opts(
             f"{label_full} {num_part}".strip(),
             f"{label_dot} {num_part}".strip(),
             f"{label_nodot} {num_part}".strip(),
             f"{label_lc} {num_part}".strip(),
+            f"{label_full} {dot_n}".strip(),
+            f"{label_full} {hyph_n}".strip(),
         ), s)
 
     # R76 Figure Caption Consistency:
@@ -340,10 +460,13 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         label_nodot = "Figs" if is_plural else "Fig"
         num_m = re.search(r"^(?:Figures?|Figs?\.?|figures?|figs?\.?)\s*(.*)$", s, re.IGNORECASE)
         num_part = num_m.group(1).strip() if num_m else ""
+        dot_n, hyph_n = _numbering_forms(num_part)
         return _unless_same(_opts(
             f"{label_full} {num_part}".strip(),
             f"{label_dot} {num_part}".strip(),
             f"{label_nodot} {num_part}".strip(),
+            f"{label_full} {dot_n}".strip(),
+            f"{label_full} {hyph_n}".strip(),
         ), s)
 
     # R71 Table Numbering & Citations:
@@ -358,11 +481,14 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         label_lc = "tables" if is_plural else "table"
         num_m = re.search(r"^(?:Tables?|Tabs?\.?|tables?|tabs?\.?)\s*(.*)$", s, re.IGNORECASE)
         num_part = num_m.group(1).strip() if num_m else ""
+        dot_n, hyph_n = _numbering_forms(num_part)
         return _unless_same(_opts(
             f"{label_full} {num_part}".strip(),
             f"{label_dot} {num_part}".strip(),
             f"{label_nodot} {num_part}".strip(),
             f"{label_lc} {num_part}".strip(),
+            f"{label_full} {dot_n}".strip(),
+            f"{label_full} {hyph_n}".strip(),
         ), s)
 
     # R75 Table Caption Consistency:
@@ -373,19 +499,27 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         label_nodot = "Tabs" if is_plural else "Tab"
         num_m = re.search(r"^(?:Tables?|Tabs?\.?|tables?|tabs?\.?)\s*(.*)$", s, re.IGNORECASE)
         num_part = num_m.group(1).strip() if num_m else ""
+        dot_n, hyph_n = _numbering_forms(num_part)
         return _unless_same(_opts(
             f"{label_full} {num_part}".strip(),
             f"{label_dot} {num_part}".strip(),
             f"{label_nodot} {num_part}".strip(),
+            f"{label_full} {dot_n}".strip(),
+            f"{label_full} {hyph_n}".strip(),
         ), s)
 
     # R40 Medical Terminology (-al endings: pathologic vs pathological):
     # Option 1: -ic ending (e.g. pathologic)
     # Option 2: -al ending (e.g. pathological)
     # Option 3: Query author
+    if rule_id.startswith("genus_species_"):
+        return _genus_options(rule_id, s)
+
     if rule_id == "al_endings":
         w = s.strip()
         wl = w.lower()
+        if wl.startswith(("biolog", "econom", "empiric", "histor", "periodic")):
+            return _opts(QUERY, QUERY, QUERY)  # -ic and -ical differ in meaning: never change silently
         if wl.endswith("ical"):
             stem = w[:-4]
             ic_form = stem + "ic"
@@ -409,7 +543,11 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         "⅔": ("2/3", "two-thirds"), "2/3": ("2/3", "two-thirds"),
     }
     if rule_id.startswith("fract"):
-        fm = _fract_map.get(s.strip())
+        key = s.strip()
+        fm = _fract_map.get(key)
+        if not fm:
+            spelled_key = re.sub(r"\s+", "-", key.lower())
+            fm = next((v for v in _fract_map.values() if v[1] == spelled_key), None)
         if fm:
             slash, spelled = fm
             return _unless_same(_opts(slash, spelled, QUERY), s)
@@ -421,6 +559,15 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
             dec = dm.group(1)
             return _unless_same(_opts(f"0{dec}", dec, QUERY), s)
 
+    # R13 Ordinals spelled out: first-ninth are correct when one to nine are spelled out
+    if rule_id == "ordinal_spelled":
+        words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"]
+        low = s.lower()
+        if low in words:
+            n = words.index(low) + 1
+            num = f"{n}{'st' if n == 1 else 'nd' if n == 2 else 'rd' if n == 3 else 'th'}"
+            return _opts(s, num, s)
+        return _opts(s, None, s)
     # R13 Ordinals:
     if rule_id.startswith("ordinal_") and nums:
         n = int(nums[0])
@@ -435,10 +582,90 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         label_dot = "B.C." if is_bc else "A.D."
         return _unless_same(_opts(label_nodot, label_dot, QUERY), s)
 
-    # Quotation marks: curly vs straight
+    # Quotation marks: curly vs straight (R131)
     if rule_id.startswith("quote_"):
         inside = s.strip('\"\'\u201c\u201d\u2018\u2019')
-        return _unless_same(_opts(f"“{inside}”", f'\"{inside}\"', QUERY), s)
+        return _unless_same(_opts(f"“{inside}”", f'\"{inside}\"', f"‘{inside}’"), s)
+
+    # R126 Other Element References
+    if any(rule_id.startswith(p) for p in ("ref_box_", "cap_box_", "ref_chart", "cap_chart", "ref_section", "ref_chapter", "ref_diagram", "ref_image", "ref_illustration")):
+        parts = s.split()
+        if len(parts) >= 2:
+            cap = f"{parts[0].capitalize()} {' '.join(parts[1:])}"
+            low = f"{parts[0].lower()} {' '.join(parts[1:])}"
+            return _unless_same(_opts(cap, low, QUERY), s)
+        return _unless_same(_opts(s.capitalize(), s.lower(), QUERY), s)
+
+    # R127 Auxiliary Verbs in Headings and Captions
+    if rule_id.startswith("aux_verb_"):
+        return _opts(QUERY, None, QUERY)
+
+    # R128 Century Style
+    if rule_id.startswith("century_"):
+        plural = "centuries" if "centuries" in s.lower() else "century"
+        _ORD_WORDS = {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth",
+                      7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth", 11: "eleventh", 12: "twelfth",
+                      13: "thirteenth", 14: "fourteenth", 15: "fifteenth", 16: "sixteenth",
+                      17: "seventeenth", 18: "eighteenth", 19: "nineteenth", 20: "twentieth",
+                      21: "twenty-first", 22: "twenty-second"}
+        if nums:
+            n = int(nums[0])
+            suff = "st" if n % 10 == 1 and n % 100 != 11 else "nd" if n % 10 == 2 and n % 100 != 12 else "rd" if n % 10 == 3 and n % 100 != 13 else "th"
+            num_form = f"{n}{suff} {plural}"
+            spelled_form = f"{_ORD_WORDS.get(n, f'{n}{suff}')} {plural}"
+            return _unless_same(_opts(num_form, spelled_form, QUERY), s)
+        for num_val, word_val in _ORD_WORDS.items():
+            if word_val in s.lower():
+                suff = "st" if num_val % 10 == 1 and num_val % 100 != 11 else "nd" if num_val % 10 == 2 and num_val % 100 != 12 else "rd" if num_val % 10 == 3 and num_val % 100 != 13 else "th"
+                return _unless_same(_opts(f"{num_val}{suff} {plural}", f"{word_val} {plural}", QUERY), s)
+        return _opts(s, s, QUERY)
+
+    # R129 "-fold" Style
+    if rule_id.startswith("fold_"):
+        _FOLD_WORDS = {1: "onefold", 2: "twofold", 3: "threefold", 4: "fourfold", 5: "fivefold",
+                       6: "sixfold", 7: "sevenfold", 8: "eightfold", 9: "ninefold", 10: "tenfold"}
+        if nums:
+            n = int(nums[0])
+            o1 = _FOLD_WORDS.get(n, f"{n}-fold") if n < 10 else f"{n}-fold"
+            o2 = f"{n}-fold"
+            return _unless_same(_opts(o1, o2, QUERY), s)
+        return _opts(s, s, QUERY)
+
+    # R130 "times" Style
+    if rule_id.startswith("times_"):
+        if nums:
+            n = int(nums[0])
+            word = _ONES[n] if n < 10 else str(n)
+            return _unless_same(_opts(f"{n} times", f"{word} times", QUERY), s)
+        if "twice" in s.lower():
+            return _unless_same(_opts("2 times", "two times", QUERY), s)
+        return _opts(s, s, QUERY)
+
+    # R132 Paragraph End Punctuation
+    if rule_id == "para_no_full_stop":
+        return _opts(QUERY, None, QUERY)
+
+    # R133 "per" and Slash
+    if rule_id in ("per_word", "virgule_slash"):
+        if rule_id == "per_word":
+            return _unless_same(_opts(None, "/", QUERY), s)
+        return _unless_same(_opts(None, "/", QUERY), s)
+
+    # R134 Spaced Hyphens
+    if rule_id == "spaced_hyphens":
+        return _unless_same(_opts("—", " – ", QUERY), s)
+
+    # R135 Spelling Variety
+    if rule_id in ("spelling_uk", "spelling_us"):
+        return _opts(get_te_replacement(rule_id, m), None, QUERY)
+
+    # R136 Wrong Usage and Typos
+    if rule_id == "wrong_usage":
+        return _opts(get_te_replacement(rule_id, m), None, QUERY)
+
+    # R137 Clinical Jargon and Euphemisms
+    if rule_id in ("clinical_jargon", "death_euphemism", "subject_terms"):
+        return _opts(get_te_replacement(rule_id, m), None, QUERY)
 
     # R70 Heading Capitalisation:
     # Option 1: Sentence case

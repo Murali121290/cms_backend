@@ -23,7 +23,7 @@ import {
   Code2, Download, ExternalLink, Eye, File, FileCode, FileOutput, FilePen, FileText,
   FolderOpen, History, Image, Languages, Layers, Loader2, LogIn, LogOut,
   ScanLine, Search, ShieldCheck, Sparkles, Trash2,
-  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer, BookOpen,
+  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer, BookOpen, RotateCcw,
 } from 'lucide-react'
 import { FOLDER_CONFIG, COLUMN_DEFINITIONS, fileTypeIcon, isProcessingActionVisibleForStage, getFolderConfigForChapter } from '@/config/fileManagerConfig'
 import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
@@ -43,6 +43,7 @@ import {
   startLanguageEdit,
   startPpdGeneration, startManuscriptAnalysisQa, startPreEditingQa, startPermissionsCheck, startCreditExtraction,
   startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof, startInddToProof,
+  startIndesignToXhtml, startXhtmlToIndesign,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -118,6 +119,9 @@ interface ChapterFilePageProps {
   isAssigned?: boolean
   onRefresh?: () => void
   onProceed?: () => void
+  onRevert?: () => void
+  prevStageName?: string | null
+  isReverting?: boolean
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -482,7 +486,22 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {(showAction('manuscriptAnalysis') || showAction('manuscriptAnalysisQa')) && (
+        {showAction('manuscriptAnalysis') && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Manuscript Analysis',
+              jobFn: () => startPpdGeneration(fid),
+              pollFileId: fid,
+              pollProcessType: 'ppd'
+            })}
+          >
+            <FileOutput size={12} /> Manuscript Analysis
+          </button>
+        )}
+
+        {showAction('manuscriptAnalysisQa') && (
           <button
             disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
@@ -493,7 +512,7 @@ function ProcessingActionsMenu({
               pollProcessType: 'manuscript_analysis_qa'
             })}
           >
-            <FileOutput size={12} className="text-sky-600" /> Run Manuscript Analysis QA
+            <ShieldCheck size={12} className="text-sky-600" /> Manuscript Analysis QA
           </button>
         )}
 
@@ -618,6 +637,21 @@ function ProcessingActionsMenu({
           </button>
         )}
 
+        {showAction('indesignToXhtml') && row?.subfolder?.toLowerCase() === 'indesign' && (
+          <button
+            disabled={!fid || !fname.endsWith('.indd')}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'InDesign to XHTML (Stage R1)',
+              jobFn: () => startIndesignToXhtml(fid),
+              pollFileId: fid,
+              pollProcessType: 'indesign_to_xhtml'
+            })}
+          >
+            <FileCode size={12} className="text-emerald-500" /> Export to XHTML (R1)
+          </button>
+        )}
+
         {showAction('inddToProof') && isIndesignFolder && (
           <button
             disabled={!targetInddFid}
@@ -680,6 +714,21 @@ function ProcessingActionsMenu({
             <FileCode size={12} /> View Proof
           </button>
         )}
+
+        {showAction('xhtmlToIndesign') && (row?.subfolder?.toLowerCase() === 'proof' || row?.subfolder?.toLowerCase() === 'xml') && (
+          <button
+            disabled={!fid || (!fname.endsWith('.xhtml') && !fname.endsWith('.html'))}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Apply XHTML to InDesign (Stage R2)',
+              jobFn: () => startXhtmlToIndesign(fid),
+              pollFileId: fid,
+              pollProcessType: 'xhtml_to_indesign'
+            })}
+          >
+            <Layers size={12} className="text-indigo-500" /> Apply to InDesign (R2)
+          </button>
+        )}
       </div>
 
       {confirmStep && (
@@ -725,6 +774,9 @@ export function ChapterFilePage({
   isAssigned: propIsAssigned,
   onRefresh,
   onProceed,
+  onRevert,
+  prevStageName,
+  isReverting,
 }: ChapterFilePageProps) {
   const navigate = useNavigate()
   const { isAdmin: isAdminUser } = useRBAC()
@@ -1117,25 +1169,35 @@ export function ChapterFilePage({
             )}
             <FolderIcon name={icon} size={14} color={color} />
             {fid && activeFolder !== 'backup' ? (
-              <button
-                type="button"
-                disabled={!resolvedIsAssigned}
-                onClick={e => {
-                  e.stopPropagation()
-                  if (isHtmlRow) {
-                    window.open(`/api/v2/files/${fid}/download?inline=true`, '_blank')
-                    return
-                  }
-                  navigate(openTarget)
-                }}
-                title={isHtmlRow ? `${name} (Click to open QA report in new tab)` : name}
-                className={resolvedIsAssigned
-                  ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer flex items-center gap-1.5"
-                  : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
-              >
-                <span>{name}</span>
-                {isHtmlRow && <ExternalLink size={11} className="text-muted shrink-0" />}
-              </button>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <button
+                  type="button"
+                  disabled={!resolvedIsAssigned}
+                  onClick={e => {
+                    e.stopPropagation()
+                    navigate(openTarget)
+                  }}
+                  title={name}
+                  className={resolvedIsAssigned
+                    ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+                    : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
+                >
+                  {name}
+                </button>
+                {isHtmlRow && (
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation()
+                      window.open(`/api/v2/files/${fid}/download?inline=true`, '_blank')
+                    }}
+                    title="Open in new browser tab"
+                    className="p-0.5 text-muted hover:text-primary hover:bg-accent rounded shrink-0"
+                  >
+                    <ExternalLink size={12} />
+                  </button>
+                )}
+              </div>
             ) : (
               <span className="font-medium text-text truncate max-w-[2000px]" title={name}>{name}</span>
             )}
@@ -1401,7 +1463,7 @@ export function ChapterFilePage({
     }
   }
 
-  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation' | 'word_to_indesign') {
+  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation' | 'word_to_indesign' | 'indesign_to_xhtml' | 'xhtml_to_indesign') {
     if (selectedCount === 0 || batchBusy) return
     setBatchBusy(processType)
     try {
@@ -1409,13 +1471,25 @@ export function ChapterFilePage({
         ? startWordToXml
         : processType === 'word_to_indesign'
           ? startWordToIndesign
-          : startStyleValidation
+          : processType === 'indesign_to_xhtml'
+            ? startIndesignToXhtml
+            : processType === 'xhtml_to_indesign'
+              ? startXhtmlToIndesign
+              : startStyleValidation
       await Promise.all(
         selectedRows
           .filter(r => r.db_id)
           .map(r => apiFn(r.db_id!))
       )
-      const label = processType === 'word_to_xml' ? 'Word to XML' : processType === 'word_to_indesign' ? 'Word to InDesign' : 'Style Validation'
+      const label = processType === 'word_to_xml'
+        ? 'Word to XML'
+        : processType === 'word_to_indesign'
+          ? 'Word to InDesign'
+          : processType === 'indesign_to_xhtml'
+            ? 'InDesign to XHTML'
+            : processType === 'xhtml_to_indesign'
+              ? 'XHTML to InDesign'
+              : 'Style Validation'
       toast.success(
         `Successfully started ${label} for ${selectedCount} file(s)`
       )
@@ -1556,6 +1630,36 @@ export function ChapterFilePage({
           </button>
         )}
 
+        {/* Batch InDesign to XHTML - InDesign folder only */}
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'indesign' && isProcessingActionVisibleForStage('indesignToXhtml', resolvedStageName) && (
+          <button
+            onClick={() => void handleBatchProcess('indesign_to_xhtml')}
+            disabled={!!batchBusy}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+              ${!batchBusy
+                ? 'border-primary text-primary hover:bg-accent'
+                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+          >
+            {batchBusy === 'indesign_to_xhtml' ? <Loader2 size={12} className="animate-spin" /> : <FileCode size={12} />}
+            {batchBusy === 'indesign_to_xhtml' ? 'Processing…' : 'Batch Export to XHTML'}
+          </button>
+        )}
+
+        {/* Batch Apply XHTML to InDesign - Proof folder only */}
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'proof' && isProcessingActionVisibleForStage('xhtmlToIndesign', resolvedStageName) && (
+          <button
+            onClick={() => void handleBatchProcess('xhtml_to_indesign')}
+            disabled={!!batchBusy}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+              ${!batchBusy
+                ? 'border-primary text-primary hover:bg-accent'
+                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+          >
+            {batchBusy === 'xhtml_to_indesign' ? <Loader2 size={12} className="animate-spin" /> : <Layers size={12} />}
+            {batchBusy === 'xhtml_to_indesign' ? 'Processing…' : 'Batch Apply to InDesign'}
+          </button>
+        )}
+
         {/* Generate Proof + Generate Assessment — Art track only */}
         {activeFolder === 'art' && (() => {
           const only = selectedRows.length === 1 ? selectedRows[0] : null
@@ -1634,6 +1738,19 @@ export function ChapterFilePage({
         )}
 
 
+
+        {/* Revert Stage - Admin only */}
+        {isAdminUser && onRevert && prevStageName && (
+          <button
+            onClick={onRevert}
+            disabled={isReverting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title={`Revert to ${prevStageName} (Admin only)`}
+          >
+            {isReverting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+            Revert to {prevStageName}
+          </button>
+        )}
 
         {/* Proceed */}
         {onProceed && (
@@ -1916,7 +2033,7 @@ export function ChapterFilePage({
             </div>
             <div className="max-h-48 overflow-y-auto mb-5 bg-surface rounded-lg p-2.5 space-y-1 divide-y divide-border/40 text-xs">
               {selectedRows.map(r => (
-                <div key={r.file_id || r.file_name} className="py-1 px-1 font-mono text-text truncate">
+                <div key={r.db_id || r.id || r.file_name} className="py-1 px-1 font-mono text-text truncate">
                   {r.file_name}
                 </div>
               ))}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X, Image as ImageIcon, PauseCircle, HelpCircle, AlertTriangle } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -41,11 +41,18 @@ export function BodInternalJobPage() {
   const [loading, setLoading] = useState(true)
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [isUploadingCover, setIsUploadingCover] = useState(false)
   const [isOpeningValidator, setIsOpeningValidator] = useState(false)
-  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files'>('stage')
+  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files' | 'status'>('stage')
   const [aceFile, setAceFile] = useState<File | null>(null)
   const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
   const [isUploadingReports, setIsUploadingReports] = useState(false)
+
+  // Hold / Support Modal State
+  const [showHoldSupportModal, setShowHoldSupportModal] = useState(false)
+  const [holdSupportType, setHoldSupportType] = useState<'Hold' | 'Support' | 'Active'>('Hold')
+  const [holdSupportDescription, setHoldSupportDescription] = useState('')
+  const [isSubmittingHoldSupport, setIsSubmittingHoldSupport] = useState(false)
 
   const [showQCModal, setShowQCModal] = useState(false)
   const [qcChecks, setQcChecks] = useState({
@@ -165,6 +172,20 @@ export function BodInternalJobPage() {
     }
   }
 
+  const proceedToJobAnalysis = async () => {
+    if (!job) return
+    setIsAdvancing(true)
+    try {
+      await api.post(`/bod/jobs/${jobId}/advance`)
+      toast.success("Job moved to Job Analysis stage")
+      fetchJob()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to proceed to Job Analysis")
+    } finally {
+      setIsAdvancing(false)
+    }
+  }
+
   const proceedToProduction = async () => {
     if (!job) return
     setIsAdvancing(true)
@@ -193,6 +214,7 @@ export function BodInternalJobPage() {
   const [isEditingAnalysis, setIsEditingAnalysis] = useState(false)
   const [isSavingAnalysis, setIsSavingAnalysis] = useState(false)
   const [analysisPages, setAnalysisPages] = useState<number | string>('')
+  const [analysisEisbn, setAnalysisEisbn] = useState<string>('')
   const [analysisType, setAnalysisType] = useState<string>('Text PDF')
   const [analysisLanguage, setAnalysisLanguage] = useState<string>('English')
   const [analysisDueDate, setAnalysisDueDate] = useState<string>('')
@@ -210,6 +232,7 @@ export function BodInternalJobPage() {
   const startEditingAnalysis = () => {
     if (!job) return
     setAnalysisPages(job.pdf_page_count ?? '')
+    setAnalysisEisbn(job.eisbn || '')
     setAnalysisType(job.pdf_type || 'Text PDF')
     setAnalysisLanguage(job.pdf_language || 'English')
     const dStr = job.due_date ? (parseUtcDate(job.due_date)?.toISOString().slice(0, 10) || '') : ''
@@ -231,6 +254,7 @@ export function BodInternalJobPage() {
 
       await api.put(`/bod/jobs/${job.id}/analysis`, {
         pdf_page_count: isNaN(pageCountNum as any) ? null : pageCountNum,
+        eisbn: analysisEisbn.trim() || null,
         pdf_type: analysisType,
         pdf_language: analysisLanguage,
         due_date: formattedDueDate,
@@ -243,6 +267,28 @@ export function BodInternalJobPage() {
       toast.error(err.response?.data?.detail || "Failed to update job analysis")
     } finally {
       setIsSavingAnalysis(false)
+    }
+  }
+
+  const uploadCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return
+    const file = e.target.files[0]
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    setIsUploadingCover(true)
+    try {
+      await api.post(`/bod/jobs/${jobId}/upload-cover`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      toast.success("Cover image uploaded successfully")
+      fetchJob()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to upload cover image")
+    } finally {
+      setIsUploadingCover(false)
+      if (e.target) e.target.value = ''
     }
   }
 
@@ -349,6 +395,82 @@ export function BodInternalJobPage() {
     }
   }
 
+  const [historyCsvContent, setHistoryCsvContent] = useState<string | null>(null)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+
+  const downloadHistoryCsv = async () => {
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/download-history-csv`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', 'history.csv')
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+    } catch (err) {
+      toast.error("Failed to download history.csv")
+    }
+  }
+
+  const viewHistoryCsv = async () => {
+    setLoadingHistory(true)
+    try {
+      const response = await api.get(`/bod/jobs/${jobId}/view-history-csv`)
+      setHistoryCsvContent(response.data?.content || '')
+      setShowHistoryModal(true)
+    } catch (err) {
+      toast.error("Failed to load history.csv content")
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  const handleHoldSupportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!holdSupportDescription.trim()) {
+      toast.error('Please enter a description or reason.')
+      return
+    }
+
+    try {
+      setIsSubmittingHoldSupport(true)
+      const res = await api.put(`/bod/jobs/${job.id}/hold-support`, {
+        status: holdSupportType,
+        description: holdSupportDescription.trim()
+      })
+      toast.success(`Job status updated to ${holdSupportType}`)
+      setShowHoldSupportModal(false)
+      setHoldSupportDescription('')
+      if (res.data) {
+        setJob((prev: any) => ({
+          ...prev,
+          status: holdSupportType,
+          hold_support_history: res.data.hold_support_history || prev.hold_support_history,
+          due_date_history: res.data.due_date_history || prev.due_date_history
+        }))
+      } else {
+        await fetchJob()
+      }
+    } catch (err: any) {
+      console.error('Failed to update job status:', err)
+      toast.error(err.response?.data?.detail || 'Failed to update job status')
+    } finally {
+      setIsSubmittingHoldSupport(false)
+    }
+  }
+
+  const openHoldSupportModal = () => {
+    if (job.status === 'Hold' || job.status === 'Support') {
+      setHoldSupportType('Active')
+    } else {
+      setHoldSupportType('Hold')
+    }
+    setHoldSupportDescription('')
+    setShowHoldSupportModal(true)
+  }
+
   if (loading) {
     return <div className="p-6 text-muted">Loading...</div>
   }
@@ -392,9 +514,13 @@ export function BodInternalJobPage() {
         <div>
           <h1 className="text-2xl font-bold font-serif text-text m-0 flex items-center gap-3">
             {job.pdf_filename}
-            <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider ${isCompleted
+            <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider ${job.status === 'Completed'
               ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
-              : 'bg-primary/10 border-primary/20 text-primary'
+              : job.status === 'Hold'
+                ? 'bg-fuchsia-500/15 border-fuchsia-500/40 text-fuchsia-600 dark:text-fuchsia-400'
+                : job.status === 'Support'
+                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-400'
+                  : 'bg-primary/10 border-primary/20 text-primary'
               }`}>
               {job.status}
             </span>
@@ -437,7 +563,38 @@ export function BodInternalJobPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {!isCompleted && (
+            <Button
+              variant="outline"
+              onClick={openHoldSupportModal}
+              className={job.status === 'Hold'
+                ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400 font-semibold"
+                : job.status === 'Support'
+                  ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400 font-semibold"
+                  : "border-border text-text hover:bg-accent"
+              }
+              leftIcon={
+                job.status === 'Hold' || job.status === 'Support'
+                  ? <CheckCircle size={14} className="text-emerald-500" />
+                  : <AlertTriangle size={14} />
+              }
+            >
+              {job.status === 'Hold' || job.status === 'Support' ? 'Resolve' : 'Report / Status'}
+            </Button>
+          )}
+
           {!isCompleted && job.current_stage_name === 'Add job' && (
+            <Button
+              variant="primary"
+              onClick={proceedToJobAnalysis}
+              disabled={isAdvancing}
+              rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}
+            >
+              {isAdvancing ? 'Proceeding...' : 'Proceed to Job Analysis'}
+            </Button>
+          )}
+
+          {!isCompleted && job.current_stage_name === 'Job Analysis' && (
             <Button
               variant="primary"
               onClick={proceedToProduction}
@@ -496,7 +653,6 @@ export function BodInternalJobPage() {
         </div>
       </div>
 
-
       {/* Ready to Dispatch Stage Card */}
       {job.current_stage_name === 'Ready to Dispatch' && !isCompleted && (
         <div className="bg-card border rounded-xl p-5 shadow-sm transition-all border-emerald-500/40 ring-1 ring-emerald-500/20">
@@ -527,7 +683,7 @@ export function BodInternalJobPage() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-4">
             <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
               <div className="min-w-0 pr-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">Processed EPUB</span>
@@ -567,27 +723,91 @@ export function BodInternalJobPage() {
                 </Button>
               )}
             </div>
+
+            <div className="p-3 bg-background/70 border border-border/60 rounded-lg flex items-center justify-between">
+              <div className="min-w-0 pr-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-0.5">History CSV</span>
+                <p className="text-xs font-semibold text-text truncate m-0">
+                  {job.has_history_csv || job.history_csv_filename ? 'history.csv' : 'Generated on QC'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={viewHistoryCsv}
+                  disabled={loadingHistory}
+                  className="h-7 px-2 text-xs text-primary"
+                  title="View history.csv"
+                >
+                  {loadingHistory ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={downloadHistoryCsv}
+                  className="h-7 px-2 text-xs text-emerald-600"
+                  title="Download history.csv"
+                >
+                  <Download size={13} />
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Job Analysis Step Card (Only shown in Add job stage) */}
+      {/* Add Job Stage Card (Waiting for CSV on FTP or manual move) */}
       {job.current_stage_name === 'Add job' && (
-        <div className="bg-card border rounded-xl p-5 shadow-sm transition-all border-amber-500/40 ring-1 ring-amber-500/20">
+        <div className="bg-card border rounded-xl p-5 shadow-sm transition-all border-blue-500/40 ring-1 ring-blue-500/20">
           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/60">
             <div className="flex items-center gap-2.5">
-              <div className="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg">
+              <div className="p-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg">
+                <FileText size={18} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-text m-0">Add Job Stage</h3>
+                  <span className="text-[10px] bg-blue-500/10 border border-blue-500/30 text-blue-600 dark:text-blue-400 font-bold px-2 py-0.5 rounded-full">
+                    Awaiting CSV Match
+                  </span>
+                </div>
+                <p className="text-xs text-muted m-0 mt-0.5">
+                  PDF fetched from FTP. Once matching CSV with ISBN is found on FTP, it moves to Job Analysis. Or click Proceed to advance manually.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={proceedToJobAnalysis}
+              disabled={isAdvancing}
+              rightIcon={!isAdvancing ? <ArrowRight size={13} /> : undefined}
+            >
+              {isAdvancing ? 'Moving...' : 'Move to Job Analysis'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Job Analysis Step Card (Shown in Job Analysis stage) */}
+      {job.current_stage_name === 'Job Analysis' && (
+        <div className="bg-card border rounded-xl p-5 shadow-sm transition-all border-cyan-500/40 ring-1 ring-cyan-500/20">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/60">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 rounded-lg">
                 <FileText size={18} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-text m-0">Job Analysis Step</h3>
-                  <span className="text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold px-2 py-0.5 rounded-full">
-                    Add Job Analysis
+                  <span className="text-[10px] bg-cyan-500/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 font-bold px-2 py-0.5 rounded-full">
+                    Review & Verify
                   </span>
                 </div>
                 <p className="text-xs text-muted m-0 mt-0.5">
-                  Review and update document specifications (Pages, Type, Language, Due Date).
+                  Review and update document specifications (eISBN, Pages, Type, Language, Due Date). Due date is computed from the date moved to Job Analysis.
                 </p>
               </div>
             </div>
@@ -611,7 +831,14 @@ export function BodInternalJobPage() {
           </div>
 
           {!isEditingAnalysis ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 pt-4">
+              <div className="bg-background/70 border border-border/60 rounded-lg p-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">eISBN</span>
+                <p className="text-base font-bold text-text mt-1 m-0 truncate" title={job.eisbn || ''}>
+                  {job.eisbn || <span className="text-muted font-normal italic">Not set</span>}
+                </p>
+              </div>
+
               <div className="bg-background/70 border border-border/60 rounded-lg p-3">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Pages</span>
                 <p className="text-base font-bold text-text mt-1 m-0">
@@ -655,7 +882,18 @@ export function BodInternalJobPage() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-muted">eISBN</label>
+                <input
+                  type="text"
+                  value={analysisEisbn}
+                  onChange={(e) => setAnalysisEisbn(e.target.value)}
+                  placeholder="e.g. 9783696305819"
+                  className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-primary transition-colors"
+                />
+              </div>
+
               <div className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted">Pages</label>
                 <input
@@ -726,7 +964,7 @@ export function BodInternalJobPage() {
                 />
               </div>
 
-              <div className="col-span-1 sm:col-span-2 lg:col-span-4 space-y-1">
+              <div className="col-span-1 sm:col-span-2 lg:col-span-5 space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
                   Update Reason <span className="text-rose-500 font-bold">*</span>
                 </label>
@@ -761,17 +999,54 @@ export function BodInternalJobPage() {
               </Button>
             </div>
 
-            {job.cover_filename && (
+            {job.cover_filename ? (
               <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Cover Image</p>
                   <p className="text-sm font-semibold truncate text-emerald-600 dark:text-emerald-400">{job.cover_filename}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={downloadCover} leftIcon={<Download size={14} />}>
-                  Download
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={downloadCover} leftIcon={<Download size={14} />}>
+                    Download
+                  </Button>
+                  {!isCompleted && (
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg"
+                        onChange={uploadCover}
+                        disabled={isUploadingCover}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
+                        title="Replace Cover Image"
+                      />
+                      <Button size="sm" variant="outline" disabled={isUploadingCover} leftIcon={<Upload size={14} />}>
+                        {isUploadingCover ? '...' : 'Replace'}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            ) : !isCompleted ? (
+              <div className="bg-background/60 border border-dashed border-border hover:border-primary/50 rounded-lg p-3 flex items-center justify-between transition-colors">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Cover Image</p>
+                  <p className="text-xs text-muted">No cover image uploaded yet</p>
+                </div>
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg"
+                    onChange={uploadCover}
+                    disabled={isUploadingCover}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
+                    title="Upload Cover Image"
+                  />
+                  <Button size="sm" variant="outline" disabled={isUploadingCover} leftIcon={<Upload size={14} />}>
+                    {isUploadingCover ? 'Uploading...' : 'Upload Cover'}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             {job.epub_filename && (
               <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
@@ -808,6 +1083,23 @@ export function BodInternalJobPage() {
                 </Button>
               </div>
             )}
+
+            {(job.has_history_csv || job.history_csv_filename) && (
+              <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">BOD History CSV</p>
+                  <p className="text-sm font-semibold truncate">{job.history_csv_filename || 'history.csv'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={viewHistoryCsv} leftIcon={<Eye size={14} />}>
+                    View
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={downloadHistoryCsv} leftIcon={<Download size={14} />}>
+                    Download
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -833,25 +1125,25 @@ export function BodInternalJobPage() {
             {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
               (!h.changes || h.changes.length === 0) || h.changes.some((c: any) => c.field === 'Due Date')
             ) && (
-              <button
-                onClick={() => setActiveTab('duedate')}
-                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-                  }`}
-              >
-                Due Date History
-              </button>
-            )}
+                <button
+                  onClick={() => setActiveTab('duedate')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Due Date History
+                </button>
+              )}
             {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
               h.changes && h.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
             ) && (
-              <button
-                onClick={() => setActiveTab('priority')}
-                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-                  }`}
-              >
-                Priority History
-              </button>
-            )}
+                <button
+                  onClick={() => setActiveTab('priority')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Priority History
+                </button>
+              )}
             {job.file_history && Array.isArray(job.file_history) && job.file_history.length > 0 && (
               <button
                 onClick={() => setActiveTab('files')}
@@ -861,6 +1153,22 @@ export function BodInternalJobPage() {
                 File History
               </button>
             )}
+            {((job.hold_support_history && job.hold_support_history.length > 0) || (job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
+              h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status'))
+            ))) && (
+                <button
+                  onClick={() => setActiveTab('status')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 flex items-center gap-1.5 ${activeTab === 'status' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Hold & Support History
+                  {job.hold_support_history && job.hold_support_history.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-accent border border-border text-text font-mono font-normal">
+                      {job.hold_support_history.length}
+                    </span>
+                  )}
+                </button>
+              )}
           </div>
 
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
@@ -938,7 +1246,9 @@ export function BodInternalJobPage() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-text m-0">
-                          {assignment.action || `Assigned to: ${getUserDisplayName(assignment.user_id)}`}
+                          {assignment.action && assignment.user_id
+                            ? assignment.action.replace(new RegExp(`\\b${assignment.user_id}\\b`, 'g'), getUserDisplayName(assignment.user_id))
+                            : (assignment.action || `Assigned to: ${getUserDisplayName(assignment.user_id)}`)}
                         </p>
                         <p className="text-[10px] text-muted m-0 mt-0.5">
                           Stage: {assignment.stage} {assignment.assigned_by ? `• By: ${getUserDisplayName(assignment.assigned_by)}` : ''}
@@ -1092,6 +1402,150 @@ export function BodInternalJobPage() {
                 ))}
               </div>
             )}
+
+            {activeTab === 'status' && (
+              <div className="space-y-4">
+                {/* 1. Structured Hold & Support Resolution History */}
+                {job.hold_support_history && Array.isArray(job.hold_support_history) && job.hold_support_history.length > 0 ? (
+                  <div className="space-y-3">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-2">
+                      Hold & Support Tickets ({job.hold_support_history.length})
+                    </span>
+                    {[...job.hold_support_history].reverse().map((record: any, idx: number) => {
+                      const isOpen = record.status === 'Open'
+                      const isHold = record.type === 'Hold'
+                      const isSupport = record.type === 'Support'
+
+                      return (
+                        <div
+                          key={record.id || idx}
+                          className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
+                              ? isHold
+                                ? 'border-amber-500/50 ring-1 ring-amber-500/20'
+                                : 'border-indigo-500/50 ring-1 ring-indigo-500/20'
+                              : 'border-border'
+                            }`}
+                        >
+                          {/* Header */}
+                          <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
+                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                                  : isSupport
+                                    ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400'
+                                    : 'bg-accent border-border text-text'
+                                }`}>
+                                {record.type}
+                              </span>
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isOpen
+                                  ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 animate-pulse'
+                                  : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                                }`}>
+                                {isOpen ? '● Pending / Open' : '✓ Resolved'}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono text-muted">
+                              {record.id}
+                            </span>
+                          </div>
+
+                          {/* Query Reason */}
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Query / Reason</p>
+                            <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
+                              {record.query_reason}
+                            </p>
+                            <p className="text-[10px] text-muted m-0 pt-0.5">
+                              Reported by <strong className="text-text/90">{record.created_by || 'Unknown'}</strong> at stage "{record.stage_at_hold || job.current_stage_name}" • {formatDateTime(record.created_at)}
+                            </p>
+                          </div>
+
+                          {/* Resolution Details */}
+                          {record.status === 'Resolved' && (
+                            <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                <CheckCircle size={12} /> Resolution Notes
+                              </p>
+                              <p className="text-xs text-text leading-relaxed m-0 break-words font-sans">
+                                {record.resolution_notes || <span className="text-muted italic">No resolution notes recorded</span>}
+                              </p>
+                              <p className="text-[10px] text-muted m-0 pt-0.5">
+                                Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : null}
+
+                {/* 2. Timeline fallback / Status transitions */}
+                {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) => h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status'))) && (
+                  <div className="space-y-2 pt-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted block">
+                      Status Change Activity Log
+                    </span>
+                    {[...job.due_date_history]
+                      .filter((h: any) => h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status')))
+                      .reverse()
+                      .map((historyItem: any, idx: number) => {
+                        const statusChange = historyItem.changes?.find((c: any) => c.field === 'Status')
+                        const newSt = statusChange?.new || historyItem.new_status
+                        const oldSt = statusChange?.old || historyItem.old_status
+
+                        const isHold = newSt === 'Hold'
+                        const isSupport = newSt === 'Support'
+
+                        return (
+                          <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-2.5 gap-3">
+                            <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                              <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${isHold ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                  : isSupport ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                                    : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                }`}>
+                                {isHold ? <PauseCircle size={13} /> : isSupport ? <HelpCircle size={13} /> : <CheckCircle size={13} />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-1.5 text-xs mb-0.5">
+                                  {oldSt ? (
+                                    <>
+                                      <span className="text-muted line-through text-[11px]">{oldSt}</span>
+                                      <span className="text-muted text-[9px]">→</span>
+                                    </>
+                                  ) : null}
+                                  <span className={`font-bold text-xs ${isHold ? 'text-amber-600 dark:text-amber-400'
+                                      : isSupport ? 'text-indigo-600 dark:text-indigo-400'
+                                        : 'text-emerald-600 dark:text-emerald-400'
+                                    }`}>
+                                    {newSt}
+                                  </span>
+                                  {historyItem.action && (
+                                    <span className="text-[10px] text-muted">({historyItem.action})</span>
+                                  )}
+                                </div>
+
+                                {historyItem.reason && (
+                                  <p className="text-[11px] text-text/80 m-0 break-words">
+                                    <span className="text-muted font-medium">Notes:</span> {historyItem.reason}
+                                  </p>
+                                )}
+
+                                <p className="text-[10px] text-muted m-0 mt-1">
+                                  User: <span className="font-medium text-text/90">{historyItem.changed_by || 'Unknown'}</span>
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-[10px] text-muted font-medium shrink-0 pt-0.5 text-right whitespace-nowrap">
+                              {formatDateTime(historyItem.timestamp)}
+                            </div>
+                          </div>
+                        )
+                      })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1195,6 +1649,202 @@ export function BodInternalJobPage() {
                 )}
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* History CSV Preview Modal */}
+      {showHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-muted/10">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                  <FileSpreadsheet size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-text m-0">history.csv Preview</h3>
+                  <p className="text-xs text-muted m-0">Generated deliverable metadata record for BOD dispatch</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="p-1 rounded-lg hover:bg-accent text-muted hover:text-text transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4">
+              {historyCsvContent ? (
+                (() => {
+                  const lines = historyCsvContent.trim().split('\n')
+                  const headers = lines[0] ? lines[0].split(',') : []
+                  const values = lines[1] ? lines[1].split(',') : []
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="border border-border/80 rounded-xl overflow-hidden shadow-xs">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-muted/40 text-[10px] uppercase font-bold tracking-wider text-muted border-b border-border/70">
+                              <tr>
+                                {headers.map((h, idx) => (
+                                  <th key={idx} className="px-3 py-2.5 whitespace-nowrap">
+                                    {h.trim()}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/60 bg-background/50 font-mono text-xs">
+                              <tr>
+                                {values.map((v, idx) => (
+                                  <td key={idx} className="px-3 py-2.5 whitespace-nowrap text-text font-medium">
+                                    {v.trim() || <span className="text-muted/50 italic">—</span>}
+                                  </td>
+                                ))}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-1">
+                          Raw CSV Content
+                        </span>
+                        <pre className="p-3 bg-muted/20 border border-border/60 rounded-lg text-xs font-mono text-text whitespace-pre-wrap break-all">
+                          {historyCsvContent}
+                        </pre>
+                      </div>
+                    </div>
+                  )
+                })()
+              ) : (
+                <div className="p-8 text-center text-muted text-sm">
+                  No content found in history.csv
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 border-t border-border flex items-center justify-between bg-muted/5">
+              <span className="text-xs text-muted">Ready for delivery verification</span>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setShowHistoryModal(false)}>
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={downloadHistoryCsv}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                  leftIcon={<Download size={14} />}
+                >
+                  Download CSV
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hold / Support Status Modal */}
+      {showHoldSupportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowHoldSupportModal(false)} />
+          <div className="relative bg-card rounded-xl shadow-2xl w-full max-w-lg flex flex-col border border-border animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/5 rounded-t-xl">
+              <h2 className="text-lg font-bold flex items-center gap-2 text-text m-0">
+                {holdSupportType === 'Active' ? (
+                  <>
+                    <CheckCircle className="text-emerald-500" size={20} />
+                    Resolve Query / Resume Job
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="text-amber-500" size={20} />
+                    Report Query / Hold Job
+                  </>
+                )}
+              </h2>
+              <button
+                onClick={() => setShowHoldSupportModal(false)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleHoldSupportSubmit}>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Action / Target Status <span className="text-rose-500">*</span>
+                  </label>
+                  <Dropdown
+                    value={holdSupportType}
+                    onChange={(val) => setHoldSupportType(val as any)}
+                    options={[
+                      { value: 'Hold', label: 'Hold (Customer Support Query / External Hold)' },
+                      { value: 'Support', label: 'Support (Internal Help / Technical Support)' },
+                      { value: 'Active', label: 'Active (Resolve Query & Resume Work)' }
+                    ]}
+                    className="w-full"
+                  />
+                  <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
+                    {holdSupportType === 'Hold' && 'Puts job on Hold due to query with customer support or waiting for customer clarification.'}
+                    {holdSupportType === 'Support' && 'Marks job as needing internal technical assistance or team support.'}
+                    {holdSupportType === 'Active' && 'Resolves any pending query and returns job to normal active workflow.'}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1.5">
+                    {holdSupportType === 'Active' ? 'Resolution Notes / Reason' : 'Description / Query Reason'} <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    placeholder={
+                      holdSupportType === 'Active'
+                        ? 'Explain how the query was resolved or why the job is resuming...'
+                        : 'Describe the query, customer issue, or internal assistance required...'
+                    }
+                    value={holdSupportDescription}
+                    onChange={(e) => setHoldSupportDescription(e.target.value)}
+                    className="w-full p-3 bg-background border border-border rounded-lg text-sm text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-y"
+                  />
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-border flex justify-end gap-3 bg-muted/5 rounded-b-xl">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowHoldSupportModal(false)}
+                  disabled={isSubmittingHoldSupport}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmittingHoldSupport || !holdSupportDescription.trim()}
+                  className={
+                    holdSupportType === 'Hold'
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white min-w-[120px]'
+                      : holdSupportType === 'Support'
+                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white min-w-[120px]'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white min-w-[120px]'
+                  }
+                >
+                  {isSubmittingHoldSupport ? (
+                    <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Submitting...</span>
+                  ) : (
+                    <span>{holdSupportType === 'Active' ? 'Resolve & Resume' : 'Submit'}</span>
+                  )}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

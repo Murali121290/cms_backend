@@ -348,7 +348,8 @@ async def download_backup_or_folder_file(
         ).first()
 
         if file_record:
-            file_path = os.path.join(UPLOAD_DIR, file_record.path)
+            from app.domains.processing.service import resolve_physical_file_path
+            file_path = resolve_physical_file_path(file_record.path, UPLOAD_DIR)
             if not os.path.exists(file_path):
                 file_path = os.path.join(UPLOAD_DIR, project.client_name or "unknown", project.code, chapter.chapters, subfolder, file_name)
         else:
@@ -362,7 +363,7 @@ async def download_backup_or_folder_file(
 
     return FileResponse(
         path=file_path,
-        filename=file_name,
+        filename=None if ext in PREVIEWABLE_EXTS else file_name,
         media_type='text/html; charset=utf-8' if ext in ('.html', '.htm') else None,
         content_disposition_type='inline' if ext in PREVIEWABLE_EXTS else 'attachment',
         headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}

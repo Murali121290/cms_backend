@@ -24,6 +24,7 @@ import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { uiPaths } from '@/utils/appPaths'
 import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
 import { ProjectInfoModal } from './ProjectInfoModal'
+import { ProjectBookMapModal } from './ProjectBookMapModal'
 import { Modal } from '@/components/ui/Modal'
 import { UploadZone } from '@/components/ui/UploadZone'
 import { getApiErrorMessage } from '@/api/client'
@@ -364,8 +365,8 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
                     key={u.id}
                     type="button"
                     className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground hover:bg-muted/40'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-muted/40'
                       }`}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -485,8 +486,8 @@ function FilterAssigneeDropdown({
                     key={u}
                     type="button"
                     className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground hover:bg-muted/40'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-muted/40'
                       }`}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -581,8 +582,8 @@ function StageSelectDropdown({
                   key={s}
                   type="button"
                   className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-foreground hover:bg-muted/40'
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-foreground hover:bg-muted/40'
                     }`}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -613,17 +614,72 @@ interface ChapterCardProps {
   users: AppUser[]
   plannedDueDates: Map<string, StageInfo>
   stageRolesMap: Map<string, string[]>
+  stageDetails?: any[]
   onAssigneeChange: (chapter: Chapter, val: string) => Promise<boolean>
   onViewDetails: (chapter: Chapter) => void
+  onOpenDelaySummary?: (chapter: Chapter) => void
   onDelete?: (chapter: Chapter) => void
   canDelete?: boolean
 }
 
-function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigneeChange, onViewDetails, onDelete, canDelete }: ChapterCardProps) {
+function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, stageDetails, onAssigneeChange, onViewDetails, onOpenDelaySummary, onDelete, canDelete }: ChapterCardProps) {
   const [updating, setUpdating] = useState(false)
 
   const status = statusMeta(chapter.status)
   const { due: effectiveDue, delayed } = getEffectiveDue(chapter, plannedDueDates)
+
+  // Compute delayed stages for this chapter (only previous completed stages and current active stage)
+  const delayedStagesList = useMemo(() => {
+    if (!stageDetails || stageDetails.length === 0) return []
+    const todayStr = new Date().toISOString().split('T')[0]
+    const chDetails = stageDetails.filter((d: any) => d.chapters === chapter.chapters)
+    const sorted = [...chDetails].sort((a: any, b: any) => (a.id || 0) - (b.id || 0))
+
+    // Determine current active stage index:
+    // First stage matching chapter.stage_name, or first uncompleted stage
+    let activeIdx = -1
+    if (chapter.stage_name) {
+      activeIdx = sorted.findIndex(s => s.stage_name?.trim().toLowerCase() === chapter.stage_name?.trim().toLowerCase())
+    }
+    if (activeIdx === -1) {
+      activeIdx = sorted.findIndex(s => {
+        const st = (s.stage_status || '').toLowerCase()
+        return st !== 'completed' && st !== 'complete' && !s.actual_end_date
+      })
+    }
+    if (activeIdx === -1) {
+      activeIdx = sorted.length - 1
+    }
+
+    const list: { stageName: string; delayDays: number; wasCompletedWithDelay: boolean }[] = []
+    sorted.forEach((s, idx) => {
+      // Ignore future stages (stages occurring after the current active stage)
+      if (idx > activeIdx) return
+
+      const sEnd = s.planned_end_date ? s.planned_end_date.split('T')[0] : ''
+      const aEnd = s.actual_end_date ? s.actual_end_date.split('T')[0] : ''
+      const isCompleted = Boolean(aEnd || (s.stage_status || '').toLowerCase() === 'completed')
+
+      if (isCompleted && sEnd && aEnd && aEnd > sEnd) {
+        // Previous stage completed with delay
+        const diff = Math.floor((new Date(aEnd).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+        list.push({
+          stageName: s.stage_name,
+          delayDays: Math.max(1, diff),
+          wasCompletedWithDelay: true,
+        })
+      } else if (!isCompleted && idx === activeIdx && sEnd && sEnd < todayStr) {
+        // Current active stage is overdue
+        const diff = Math.floor((new Date(todayStr).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+        list.push({
+          stageName: s.stage_name,
+          delayDays: Math.max(1, diff),
+          wasCompletedWithDelay: false,
+        })
+      }
+    })
+    return list
+  }, [stageDetails, chapter.chapters, chapter.stage_name])
 
   async function handleAssignee(val: string) {
     setUpdating(true)
@@ -670,13 +726,27 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
               )}
             </div>
             {delayed && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
-                <AlertCircle size={8} /> Delayed
-              </span>
+              <div className="flex flex-col items-end">
+                <span
+                  className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"
+                >
+                  <AlertCircle size={8} /> Delayed
+                </span>
+                {(() => {
+                  const currentOverdue = delayedStagesList.find(ds => !ds.wasCompletedWithDelay)
+                  return currentOverdue ? (
+                    <span className="text-[10px] font-medium text-red-600 dark:text-red-400 mt-0.5 whitespace-nowrap">
+                      {currentOverdue.delayDays} day{currentOverdue.delayDays > 1 ? 's' : ''} overdue
+                    </span>
+                  ) : null
+                })()}
+              </div>
             )}
-            {!delayed && Object.keys(chapter.delayed_stages ?? {}).length > 0 && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-200">
-                <AlertCircle size={8} /> {Object.keys(chapter.delayed_stages!).length} stage{Object.keys(chapter.delayed_stages!).length > 1 ? 's' : ''} delayed
+            {!delayed && delayedStagesList.length > 0 && (
+              <span
+                className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-200"
+              >
+                <AlertCircle size={8} /> {delayedStagesList.length} stage{delayedStagesList.length > 1 ? 's' : ''} delayed
               </span>
             )}
           </div>
@@ -791,6 +861,34 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
         </div>
       )}
 
+      {/* Delayed Stages Breakdown directly on the card (only shows previous stages completed late) */}
+      {(() => {
+        const completedWithDelayList = delayedStagesList.filter(ds => ds.wasCompletedWithDelay)
+        if (completedWithDelayList.length === 0) return null
+
+        return (
+          <div className="mx-4 my-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs">
+            <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300 mb-1.5">
+              <AlertCircle size={13} className="flex-shrink-0" />
+              <span>Delay Summary</span>
+            </div>
+            <ul className="space-y-1 pl-1">
+              {completedWithDelayList.map((ds, idx) => (
+                <li key={idx} className="flex items-start gap-1.5 text-[11px] leading-tight text-amber-800 dark:text-amber-200">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 mt-1 flex-shrink-0" />
+                  <span>
+                    <strong className="font-semibold text-text">{ds.stageName}</strong>:{' '}
+                    <span className="text-amber-700 dark:text-amber-400 font-medium">
+                      Completed with {ds.delayDays} day{ds.delayDays > 1 ? 's' : ''} delay
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })()}
+
       {/* Fields */}
       <div className="px-4 pb-3 space-y-1.5 text-xs flex-1">
 
@@ -838,6 +936,8 @@ export function ProjectWorkflow() {
   const [combineSelectedChapterIds, setCombineSelectedChapterIds] = useState<Set<number>>(new Set())
   const [users, setUsers] = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
+  const [allStageDetails, setAllStageDetails] = useState<any[]>([])
+  const [delayModalChapter, setDelayModalChapter] = useState<Chapter | null>(null)
   // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
   const [cmsChapterIdMap, setCmsChapterIdMap] = useState<Map<string, number>>(new Map())
   const [loading, setLoading] = useState(true)
@@ -845,6 +945,7 @@ export function ProjectWorkflow() {
 
   const [isInfoOpen, setIsInfoOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
+  const [isBookMapOpen, setIsBookMapOpen] = useState(false)
 
 
   const stylesheetsQuery = useStylesheetsQuery(id || null)
@@ -973,6 +1074,7 @@ export function ProjectWorkflow() {
         ])
 
         setChapters(chs)
+        setAllStageDetails(details || [])
         setStageRolesMap(new Map((allStages || []).map(s => [s.stage_name, s.roles])))
 
         // Fetch all system workflows to allow track workflow selection
@@ -1655,6 +1757,13 @@ export function ProjectWorkflow() {
                 >
                   <Calendar size={14} />
                 </button>
+                <button
+                  onClick={() => setIsBookMapOpen(true)}
+                  title="Book Map"
+                  className="p-1 rounded text-muted hover:text-primary hover:bg-surface transition-colors"
+                >
+                  <BookMarked size={14} />
+                </button>
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 mt-0.5 truncate text-xs text-muted">
@@ -1701,7 +1810,7 @@ export function ProjectWorkflow() {
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors shrink-0 shadow-2xs"
             >
               <BookMarked size={13} className="text-primary" />
-              <span>Editorial Standards</span>
+              <span>Editorial Hub</span>
               {activeStylesheet ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -2034,8 +2143,10 @@ export function ProjectWorkflow() {
                   <ChapterCard key={ch.id} chapter={ch} users={users}
                     plannedDueDates={plannedDueDates}
                     stageRolesMap={stageRolesMap}
+                    stageDetails={allStageDetails}
                     onAssigneeChange={handleAssigneeChange}
                     onViewDetails={openChapter}
+                    onOpenDelaySummary={setDelayModalChapter}
                     canDelete={canAccess(['admin'])}
                     onDelete={setChapterToDelete} />
                 ))}
@@ -2080,7 +2191,18 @@ export function ProjectWorkflow() {
                             stageRolesMap={stageRolesMap}
                           />
                         </div>
-                        <span className={`flex-shrink-0 ${delayed ? 'text-red-500 font-semibold' : ''}`}>{formatDate(due)}</span>
+                        {delayed ? (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); setDelayModalChapter(ch) }}
+                            title="View delayed stages summary"
+                            className="flex-shrink-0 text-red-500 font-semibold hover:underline"
+                          >
+                            {formatDate(due)}
+                          </button>
+                        ) : (
+                          <span className="flex-shrink-0">{formatDate(due)}</span>
+                        )}
                       </div>
                     </div>
                   )
@@ -2119,7 +2241,18 @@ export function ProjectWorkflow() {
                         stageName={ch.stage_name}
                         stageRolesMap={stageRolesMap}
                       />
-                      <span className={`text-xs flex-shrink-0 ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</span>
+                      {delayed ? (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setDelayModalChapter(ch) }}
+                          title="View delayed stages summary"
+                          className="text-xs flex-shrink-0 text-red-600 font-semibold hover:underline"
+                        >
+                          {formatDate(due)}
+                        </button>
+                      ) : (
+                        <span className="text-xs flex-shrink-0 text-muted">{formatDate(due)}</span>
+                      )}
                       {canAccess(['admin']) && (
                         <button
                           type="button"
@@ -2179,9 +2312,17 @@ export function ProjectWorkflow() {
                           <td className={`px-4 py-3 text-xs whitespace-nowrap ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</td>
                           <td className="px-4 py-3 text-xs text-center text-muted">{ch.manuscript_pages ?? '—'}</td>
                           <td className="px-4 py-3 text-center">
-                            {delayed
-                              ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">Delayed</span>
-                              : <span className="text-[10px] text-muted">—</span>}
+                            {delayed ? (
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setDelayModalChapter(ch) }}
+                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors"
+                              >
+                                Delayed
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-muted">—</span>
+                            )}
                           </td>
                           {canAccess(['admin']) && (
                             <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
@@ -2226,6 +2367,147 @@ export function ProjectWorkflow() {
           setIsEditOpen(false)
         }}
       />
+
+      {/* Book Map Modal */}
+      {project && (
+        <ProjectBookMapModal
+          isOpen={isBookMapOpen}
+          onClose={() => setIsBookMapOpen(false)}
+          project={project}
+          onSuccess={() => {
+            if (id) {
+              projectsApi.getById(id).then(res => {
+                const updated = (res as any)?.project || res
+                if (updated?.id) setProject(updated)
+              }).catch(() => {})
+            }
+          }}
+        />
+      )}
+
+      {/* Chapter Delay Summary Modal */}
+      {delayModalChapter && (
+        <Modal
+          isOpen={delayModalChapter !== null}
+          onClose={() => setDelayModalChapter(null)}
+          title={`Stage Progression: ${delayModalChapter.chapters === 'FM' ? 'Front matter' : delayModalChapter.chapters === 'BM' ? 'Back matter' : /^\d+$/.test(delayModalChapter.chapters) ? `Chapter ${delayModalChapter.chapters}` : delayModalChapter.chapters}`}
+          size="lg"
+        >
+          {(() => {
+            const todayStr = new Date().toISOString().split('T')[0]
+            const chName = delayModalChapter.chapters
+            // Filter all stage details for this specific chapter
+            const chDetails = allStageDetails.filter((d: any) => d.chapters === chName)
+            const sorted = [...chDetails].sort((a: any, b: any) => (a.id || 0) - (b.id || 0))
+
+            const delayedStages: {
+              stageName: string
+              delayDays: number
+              wasCompletedWithDelay: boolean
+            }[] = []
+
+            let activeIdx = -1
+            if (delayModalChapter.stage_name) {
+              activeIdx = sorted.findIndex(s => s.stage_name?.trim().toLowerCase() === delayModalChapter.stage_name?.trim().toLowerCase())
+            }
+            if (activeIdx === -1) {
+              activeIdx = sorted.findIndex(s => {
+                const st = (s.stage_status || '').toLowerCase()
+                return st !== 'completed' && st !== 'complete' && !s.actual_end_date
+              })
+            }
+            if (activeIdx === -1) {
+              activeIdx = sorted.length - 1
+            }
+
+            sorted.forEach((s, idx) => {
+              if (idx > activeIdx) return
+
+              const sEnd = s.planned_end_date ? s.planned_end_date.split('T')[0] : ''
+              const aEnd = s.actual_end_date ? s.actual_end_date.split('T')[0] : ''
+              const isCompleted = Boolean(aEnd || (s.stage_status || '').toLowerCase() === 'completed')
+
+              if (isCompleted && sEnd && aEnd && aEnd > sEnd) {
+                const diff = Math.floor((new Date(aEnd).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+                delayedStages.push({
+                  stageName: s.stage_name,
+                  delayDays: Math.max(1, diff),
+                  wasCompletedWithDelay: true,
+                })
+              } else if (!isCompleted && idx === activeIdx && sEnd && sEnd < todayStr) {
+                const diff = Math.floor((new Date(todayStr).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+                delayedStages.push({
+                  stageName: s.stage_name,
+                  delayDays: Math.max(1, diff),
+                  wasCompletedWithDelay: false,
+                })
+              }
+            })
+
+            const { due: effectiveDue } = getEffectiveDue(delayModalChapter, plannedDueDates)
+
+            return (
+              <div className="space-y-4">
+                {/* Header Info */}
+                <div className="p-3.5 rounded-xl bg-surface border border-border/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-text">
+                        {delayModalChapter.chapters === 'FM' ? 'Front matter' : delayModalChapter.chapters === 'BM' ? 'Back matter' : /^\d+$/.test(delayModalChapter.chapters) ? `Chapter ${delayModalChapter.chapters}` : delayModalChapter.chapters}
+                      </span>
+                      {project && (
+                        <span className="font-mono text-muted">• {project.code || project.project_code}</span>
+                      )}
+                    </div>
+                    <p className="text-muted mt-1">
+                      Active Stage: <strong className="text-text">{delayModalChapter.stage_name || '—'}</strong> | Due Date:{' '}
+                      <strong className="text-text font-mono">{formatDate(effectiveDue)}</strong>
+                    </p>
+                  </div>
+
+                  {delayedStages.length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30">
+                      <AlertTriangle size={13} />{' '}
+                      {delayedStages.length === 1
+                        ? '1 stage delayed'
+                        : `${delayedStages.length} stages delayed`}
+                    </span>
+                  )}
+                </div>
+
+                {/* Delay Warning Callout */}
+                {delayedStages.length > 0 ? (
+                  <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/25 flex items-start gap-2.5 text-xs text-red-700 dark:text-red-300">
+                    <AlertTriangle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="font-bold">
+                        {delayedStages.length === 1
+                          ? '1 stage delayed:'
+                          : `${delayedStages.length} stages delayed:`}
+                      </strong>
+                      <ul className="list-disc list-inside mt-1.5 space-y-1 font-medium">
+                        {delayedStages.map((ds, idx) => (
+                          <li key={idx}>
+                            <span className="font-bold">{ds.stageName}</span>:{" "}
+                            {ds.wasCompletedWithDelay
+                              ? `Completed with ${ds.delayDays} day${ds.delayDays === 1 ? '' : 's'} delay`
+                              : `${ds.delayDays} day${ds.delayDays === 1 ? '' : 's'} overdue`}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-muted text-xs">
+                    <CheckCircle2 size={28} className="mx-auto mb-2 text-emerald-500 opacity-60" />
+                    No stages are currently delayed for this chapter.
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+        </Modal>
+      )}
 
       {/* Group Assign — pick chapters + assignee */}
       <Modal

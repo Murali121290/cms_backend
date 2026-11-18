@@ -36,5 +36,20 @@ export const xmlConversionApi = {
       responseType: 'blob',
     });
     return response.data;
+  },
+
+  getProgress: async (projectId: number) => {
+    const response = await api.get(`/post-prod/xml-conversion/projects/${projectId}/progress`);
+    return response.data;
+  },
+
+  s4cConvert: async (projectId: number) => {
+    const response = await api.post(`/post-prod/xml-conversion/projects/${projectId}/s4c-convert`);
+    return response.data;
+  },
+
+  targetConvert: async (projectId: number, format: string) => {
+    const response = await api.post(`/post-prod/xml-conversion/projects/${projectId}/target-convert?format=${format}`);
+    return response.data;
   }
 };

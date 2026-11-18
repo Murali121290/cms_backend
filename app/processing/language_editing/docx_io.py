@@ -123,6 +123,41 @@ _HEADING_TAG_RE = re.compile(r"^<\s*h(\d+)\b", re.IGNORECASE)
 _CAPTION_TEXT_RE = re.compile(r"^(table|figure|fig\.)\s+\d", re.IGNORECASE)
 _TITLE_TAG_RE = re.compile(r"^<\s*(title|ct|pt)\b", re.IGNORECASE)
 
+# Heading text that opens a References/Bibliography region per the
+# journal production user manual: "Only REF-N / REF-U paragraphs between
+# <ref-open> and <ref-close> (or under the References heading) count as
+# references." The region starts at the heading and continues until the
+# next chapter-boundary heading (or EOF) so entries typeset in Normal
+# paragraph style without any per-paragraph REF-* tag are still excluded
+# from Language Editing analysis.
+_REFERENCE_HEADING_TEXT_RE = re.compile(
+    r"^\s*(?:"
+    r"references?"
+    r"|bibliography"
+    r"|(?:selected\s+)?bibliography"
+    r"|works?\s+cited"
+    r"|literature\s+cited"
+    r"|further\s+reading"
+    r"|suggested\s+reading"
+    r"|references?\s+(?:and|&)\s+(?:further\s+reading|notes?|bibliography)"
+    r"|notes?\s+(?:and|&)\s+references?"
+    r")"
+    r"[\s\.\:\—\-–]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_reference_heading_text(text: str) -> bool:
+    """True when a heading's visible text names a References /
+    Bibliography section. Strips any leading inline tag (``<h1>`` style
+    markup authors sometimes bake into the paragraph text) before
+    matching so ``<H1>References`` is recognised the same as a plain
+    ``References`` heading."""
+    cleaned = re.sub(r"<[^>]+>", "", text or "").strip()
+    if not cleaned:
+        return False
+    return bool(_REFERENCE_HEADING_TEXT_RE.match(cleaned))
+
 # Characters that terminate a sentence. A paragraph whose last non-
 # whitespace character is one of these is sentence-terminated; one that
 # isn't may be an informal title (see ``_is_informal_title`` below).
@@ -177,12 +212,33 @@ def classify_paragraphs(doc) -> dict[int, dict]:
                                 ``<ABS>`` / Abstract style
       * ``in_table``          — True inside ``<table>…</table>`` or Table-
                                 styled runs
+      * ``in_table_note``     — True when ``in_table`` AND role=="caption";
+                                marks the table's notes/caption line
+                                where it IS legitimate for authors to
+                                define an abbreviation (Phase 4).
       * ``in_figure``         — True inside ``<figure>`` / ``<fig>`` …
+      * ``in_figure_legend``  — True when ``in_figure`` AND role=="caption";
+                                the figure's legend text where
+                                abbreviation definitions are expected
+                                (Phase 4).
       * ``in_epigraph``       — True inside ``<epigraph>…</epigraph>`` or
                                 Epigraph-styled paragraphs
       * ``in_src``            — True inside ``<src>…</src>`` (code /
                                 source blocks) or Code/Source-styled
                                 paragraphs
+      * ``in_extract``        — True inside ``<extract>…</extract>`` or
+                                Extract/BlockQuote-styled paragraphs
+                                (long quoted passages; ref/epi/src/
+                                extract are the four boundary-tag
+                                regions required for Language Editing
+                                exclusion).
+      * ``in_references``     — True inside ``<references>…</references>``
+                                or ``<REF>…</REF>`` boundary tags.
+                                Reference entries typeset in Normal
+                                paragraph style (common bibliography
+                                pattern) cannot be detected without
+                                such a boundary tag — they'd pass as
+                                body text otherwise. See Issue 2.
 
     The role / in_* flags carry through adjacent paragraphs until the
     closing tag is seen. The paragraphs between those tags all share the
@@ -194,6 +250,16 @@ def classify_paragraphs(doc) -> dict[int, dict]:
     in_figure = False
     in_epigraph = False
     in_src = False
+    in_extract = False
+    in_references = False
+    # Tracks whether the current in_references region was opened by a
+    # ``References`` heading (as opposed to a ``<references>`` /
+    # ``<ref-open>`` boundary tag or a Reference paragraph style). A
+    # heading-opened region has no closing tag — it ends at the next
+    # chapter-boundary heading (or EOF). Boundary-tag regions are closed
+    # explicitly by their matching close tag and MUST NOT be affected by
+    # a subsequent chapter-boundary heading inside the section.
+    in_references_opened_by_heading = False
     for i, p in enumerate(doc.paragraphs):
         text = (p.text or "").strip()
         style = (p.style.name if p.style else "") or ""
@@ -216,6 +282,35 @@ def classify_paragraphs(doc) -> dict[int, dict]:
         # CodeBlock paragraph styles (common conventions across templates).
         if "<src>" in tl or style_lc_boundary in {"code", "source", "sourcecode", "codeblock", "src"}:
             in_src = True
+        # Extract: long quoted passage set off from body. Boundary tag
+        # OR Extract / BlockQuote / BlockQuotation / Quotation paragraph
+        # styles (common conventions).
+        if "<extract>" in tl or style_lc_boundary in {
+            "extract", "blockquote", "blockquotation", "quotation", "quote",
+        }:
+            in_extract = True
+        # References section. Many templates typeset references in
+        # Normal paragraphs with no distinguishing style — only a
+        # boundary tag can mark them reliably. ``<references>``,
+        # ``<REF>``, and the long-form ``<ref-open>`` all open the
+        # region; ``is_reference_style`` still catches explicit
+        # Reference / Bibliography / BibEntry styles at the per-paragraph
+        # level below. The ``<ref-open>`` / ``<ref-close>`` form is the
+        # convention documented in the journal production user manual
+        # (``Only REF-N / REF-U paragraphs between <ref-open> and
+        # <ref-close> … count as references``) and used across the
+        # existing reference-review and journal-styling tests. It must
+        # be recognised here too so entries typeset in Normal paragraph
+        # style between the boundary tags are tagged in_references and
+        # skipped by the Language Editing router gate — the
+        # ``read_paragraphs`` extraction filter is NOT a guarantee
+        # (some code paths classify without re-running extraction).
+        if "<references>" in tl or "<ref>" in tl or "<ref-open>" in tl or style_lc_boundary in {
+            "references", "bibliography", "bibliographyentry", "bibentry",
+            "referenceslist", "reflist",
+        }:
+            in_references = True
+            in_references_opened_by_heading = False
 
         role = "body"
         level: int | None = None
@@ -254,6 +349,41 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             # or passive_voice findings on titles).
             role = "heading"
 
+        # Heading-driven in_references opener / closer. A ``References``
+        # or ``Bibliography`` heading (any level) opens the region; it
+        # continues until the next chapter-boundary heading or EOF —
+        # the convention used by non-templated manuscripts that don't
+        # wrap entries with ``<ref-open>`` / ``<ref-close>`` or carry
+        # per-paragraph REF-U / REF-N style. Ordering matters:
+        #   * A chapter-level ``References`` heading is itself a
+        #     chapter_boundary; we must open the region at it rather
+        #     than closing a hypothetical previous one on the same
+        #     paragraph.
+        #   * Subsequent chapter-boundary headings that are NOT also
+        #     reference-section titles close the region.
+        # Boundary-tag regions (``<references>`` / ``<ref-open>`` /
+        # Bibliography style) are NOT closed here — their close tag
+        # does that job explicitly below. Tracked via
+        # ``in_references_opened_by_heading`` so a chapter heading
+        # inside a boundary-tagged references block doesn't
+        # prematurely clear the flag.
+        if role in ("heading", "title") and _is_reference_heading_text(text):
+            in_references = True
+            in_references_opened_by_heading = True
+        elif role in ("heading", "title") and chapter_boundary and in_references_opened_by_heading:
+            in_references = False
+            in_references_opened_by_heading = False
+
+        # Positive subroles for Phase-4 abbreviations rules.
+        # ``in_table_note`` and ``in_figure_legend`` combine the region
+        # flag with the paragraph's caption role so Abbreviations can
+        # treat a definition inside a table's notes line or a figure's
+        # legend as a legitimate local definition (AB15 should NOT flag
+        # the abbreviation as undefined when its expansion appears in
+        # the caption line attached to the same table / figure).
+        in_table_note = bool(in_table and role == "caption")
+        in_figure_legend = bool(in_figure and role == "caption")
+
         out[i] = {
             "style": style,
             "role": role,
@@ -261,9 +391,13 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             "chapter_boundary": chapter_boundary,
             "in_abstract": in_abstract,
             "in_table": in_table,
+            "in_table_note": in_table_note,
             "in_figure": in_figure,
+            "in_figure_legend": in_figure_legend,
             "in_epigraph": in_epigraph,
             "in_src": in_src,
+            "in_extract": in_extract,
+            "in_references": in_references,
             "text": p.text or "",
         }
 
@@ -278,6 +412,11 @@ def classify_paragraphs(doc) -> dict[int, dict]:
             in_epigraph = False
         if "</src>" in tl:
             in_src = False
+        if "</extract>" in tl:
+            in_extract = False
+        if "</references>" in tl or "</ref>" in tl or "<ref-close>" in tl:
+            in_references = False
+            in_references_opened_by_heading = False
     return out
 
 

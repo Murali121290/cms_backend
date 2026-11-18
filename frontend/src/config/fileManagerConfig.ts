@@ -165,7 +165,7 @@ export type ProcessingActionKey =
   | 'languageEdit' | 'technicalEdit' | 'unifiedReview'
   | 'manuscriptAnalysis' | 'manuscriptAnalysisQa'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml' | 'wordToIndesign'
-  | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'inddToProof' | 'styleValidation' | 'artValidation'
+  | 'xmlToIndesign' | 'indesignToXml' | 'indesignToXhtml' | 'xhtmlToIndesign' | 'viewProof' | 'inddToProof' | 'styleValidation' | 'artValidation'
 
 const PRODUCTION_STAGES = [
   'XML Conversion',
@@ -203,6 +203,8 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   wordToIndesign:       WORD_TO_INDESIGN_STAGES,
   xmlToIndesign:        WORD_TO_INDESIGN_STAGES,
   indesignToXml:        WORD_TO_INDESIGN_STAGES,
+  indesignToXhtml:      WORD_TO_INDESIGN_STAGES,
+  xhtmlToIndesign:      WORD_TO_INDESIGN_STAGES,
   viewProof:            WORD_TO_INDESIGN_STAGES,
   inddToProof:          '*'
 }

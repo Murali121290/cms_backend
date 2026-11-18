@@ -31,6 +31,10 @@ export interface AdvisoryCandidate {
   /** Set when the reviewer typed a custom replacement. Wins over
    *  ``suggestion`` when present (same precedence the diff view uses). */
   edited_text?: string | null
+  /** Engine category — needed to distinguish sentence advisories
+   *  (passive_voice / max_sentence_length / SL001 / SL005) from
+   *  term-matcher advisories (term-list highlights). */
+  category?: string
 }
 
 /** Return the active suggestion string (edited wins over original
@@ -45,4 +49,14 @@ function activeSuggestionTrimmed(f: AdvisoryCandidate): string {
 export function isAdvisoryIdentity(f: AdvisoryCandidate): boolean {
   if (!f.advisory) return false
   return (f.original_text ?? '').trim() === activeSuggestionTrimmed(f)
+}
+
+/** True when the finding is a sentence-category advisory
+ *  (``passive_voice`` / ``max_sentence_length`` / ``SL001`` / ``SL005``).
+ *  Sentence advisories highlight a passage for the reviewer's judgement
+ *  but carry no accept/highlight-worthy decision — the only meaningful
+ *  action is to dismiss. Term-matcher advisories (``category==='term'``)
+ *  still show Highlight + Ignore. */
+export function isSentenceAdvisory(f: AdvisoryCandidate): boolean {
+  return isAdvisoryIdentity(f) && f.category === 'sentence'
 }

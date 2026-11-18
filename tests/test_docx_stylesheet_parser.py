@@ -166,6 +166,26 @@ def test_parse_mock_apa_docx():
     assert ce["14"]["option"] == 1  # en-dash
 
 
+def test_parse_docx_matched_ce_rules_pydantic_schema_validation():
+    from app import schemas_v2
+
+    parser = DocxStylesheetParser()
+    raw_docx = create_mock_editorial_docx(
+        title="Virology Manual",
+        author="Dr. Test",
+        edition="1e",
+        manual="AMA, 11e",
+    )
+    res = parser.parse(raw_docx)
+    # Ensure all matched_ce_rules keys are strings (preventing 422 validation errors)
+    for k in res["matched_ce_rules"].keys():
+        assert isinstance(k, str), f"Key {k} is not a string!"
+
+    # Verify Pydantic V2 schema instantiates without validation error
+    parsed_model = schemas_v2.DocxStylesheetParseResponse(**res)
+    assert len(parsed_model.matched_ce_rules) > 0
+
+
 def test_empty_or_plain_docx():
     parser = DocxStylesheetParser()
     doc = docx.Document()
@@ -185,7 +205,7 @@ def test_api_v2_parse_docx_stylesheet_endpoint(client, user_factory, db_session)
     client.post("/api/v2/session/login", json={"username": "alice", "password": "Secret123!"})
 
     from app.domains.projects.models import Project
-    project = Project(name="Virology Book", code="VIR-01", description="Virology test project")
+    project = Project(project_title="Virology Book", project_code="VIR-01")
     db_session.add(project)
     db_session.commit()
 

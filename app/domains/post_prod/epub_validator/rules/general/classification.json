@@ -16,7 +16,13 @@
           "front",
           "cover",
           "title_page",
-          "about"
+          "about",
+          "the_authors",
+          "acknowledgments",
+          "introduction",
+          "table_of_contents",
+          "prologue",
+          "notes"
         ],
         "category": "Front Matter"
       },
@@ -46,7 +52,13 @@
           "table_of_cases",
           "table_of_authorities",
           "table_of_statutes",
-          "table_of_jurisdiction"
+          "table_of_jurisdiction",
+          "conclusion",
+          "epilogue",
+          "thanks",
+          "bibliographic ",
+          "reference",
+          "about_the_book"
         ],
         "category": "Back Matter"
       }
@@ -68,7 +80,13 @@
           "vorspann",
           "cover",
           "about",
-          "fm"
+          "fm",
+          "die_autoren",
+          "danksagungen",
+          "einleitung",
+          "inhaltsverzeichnis",
+          "prolog",
+          "anmerkungen"
         ],
         "category": "Front Matter"
       },
@@ -95,7 +113,15 @@
           "quellen",
           "nachwort",
           "kolophon",
-          "abspann"
+          "abspann",
+          "ausklang",
+          "epilog",
+          "danke",
+          "bibliografische",
+          "literaturverzeichnis",
+          "referenzen",
+          "quellenangaben",
+          "uber_das_buch"
         ],
         "category": "Back Matter"
       }

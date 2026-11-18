@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from jose import JWTError, jwt
@@ -149,7 +149,20 @@ def _require_cookie_user(user):
 
 
 def _has_admin_role(user: models.User):
-    return "Admin" in [role.name for role in user.roles]
+    if not user:
+        return False
+    if getattr(user, "access_level", None) == "Admin":
+        return True
+    if getattr(user, "role", None) and "admin" in str(user.role).lower():
+        return True
+    if getattr(user, "designation", None) and "admin" in str(user.designation).lower():
+        return True
+    if hasattr(user, "roles") and user.roles:
+        return any(
+            getattr(role, "name", "") == "Admin" or "admin" in str(getattr(role, "name", "")).lower()
+            for role in user.roles
+        )
+    return False
 
 
 def _has_admin_or_pm_role(user: models.User):
@@ -258,16 +271,21 @@ def _serialize_project_summary(project: Project):
     uat = project.updated_at.isoformat() if getattr(project, "updated_at", None) else None
 
     is_delayed = False
-    for ch in project.chapters:
-        if ch.status != "complete" and ch.due_date:
-            due_dt = ch.due_date
-            if due_dt.tzinfo is not None:
-                now = datetime.now(due_dt.tzinfo)
-            else:
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
-            if due_dt < now:
-                is_delayed = True
-                break
+    # Projects in 'Planning' status have not had their schedule approved/started, so they should not be marked delayed
+    if (getattr(project, "status", None) or "").lower() != "planning":
+        for ch in project.chapters:
+            # Exclude CE support from triggering delay
+            if ch.chapters == "CE support":
+                continue
+            if ch.status != "complete" and ch.due_date:
+                due_dt = ch.due_date
+                if due_dt.tzinfo is not None:
+                    now = datetime.now(due_dt.tzinfo)
+                else:
+                    now = datetime.now(timezone.utc).replace(tzinfo=None)
+                if due_dt < now:
+                    is_delayed = True
+                    break
 
     return schemas_v2.ProjectSummary(
         id=project.id,
@@ -824,16 +842,19 @@ def api_v2_dashboard(
     delayed_count = 0
     for p in projects_list:
         is_delayed = False
-        for ch in p.chapters:
-            if ch.status != "complete" and ch.due_date:
-                due_dt = ch.due_date
-                if due_dt.tzinfo is not None:
-                    now = _dt.now(due_dt.tzinfo)
-                else:
-                    now = _dt.now()
-                if due_dt < now:
-                    is_delayed = True
-                    break
+        if (getattr(p, "status", None) or "").lower() != "planning":
+            for ch in p.chapters:
+                if ch.chapters == "CE support":
+                    continue
+                if ch.status != "complete" and ch.due_date:
+                    due_dt = ch.due_date
+                    if due_dt.tzinfo is not None:
+                        now = _dt.now(due_dt.tzinfo)
+                    else:
+                        now = _dt.now()
+                    if due_dt < now:
+                        is_delayed = True
+                        break
         if is_delayed:
             delayed_count += 1
 
@@ -2740,6 +2761,19 @@ def api_v2_ce_rules(
     return schemas_v2.CERulesResponse(rules=[schemas_v2.CERule(**r) for r in load_catalog()])
 
 
+@router.get("/stylesheets/presets/springer")
+def api_v2_get_springer_preset(
+    book_type: str = "standard",
+    list_style: str = "narrative",
+    user=Depends(get_current_user_from_cookie),
+):
+    """Springer Publishing House Style Sheet (July 2026) preset for a book type
+    (standard | pa | demos | qa) and list style (narrative | outline)."""
+    from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
+    return get_springer_preset(book_type=book_type, list_style=list_style)
+
+
+
 @router.get(
     "/projects/{project_id}/stylesheets",
     response_model=schemas_v2.StylesheetsListResponse,
@@ -3013,7 +3047,7 @@ def api_v2_analyze_files_for_stylesheet(
                     triggered_rules_map[key]["example_surfaces"].append(surface)
 
     # Convert to list of TriggeredIARule, sorted by count DESC
-    from app.processing.manuscript_core.rules.ce_rules import IA_ROW_TO_CE
+    from app.processing.manuscript_core.rules.ce_rules import IA_ROW_TO_CE, sno_for_rule_id, by_sno, option_text
     triggered_rules = [
         schemas_v2.TriggeredIARule(
             element=key[0],
@@ -3028,9 +3062,68 @@ def api_v2_analyze_files_for_stylesheet(
     ]
     triggered_rules.sort(key=lambda x: x.count, reverse=True)
 
+    # Build triggered_ce_rules with dominant options, occurrence counts and conflict detection (Phase C4)
+    catalog = by_sno()
+    ce_rule_findings: dict[int, list[dict]] = {}
+    for f in all_findings:
+        sno = f.get("ce_rule_no") or sno_for_rule_id(f.get("rule_id", ""))
+        if sno:
+            ce_rule_findings.setdefault(sno, []).append(f)
+
+    triggered_ce_rules = []
+    for sno, findings_list in ce_rule_findings.items():
+        rule_meta = catalog.get(sno, {})
+        rule_name = rule_meta.get("name", f"Rule {sno}")
+        forms = rule_meta.get("forms") or []
+        num_options = max(3, len(forms), len(rule_meta.get("options") or []))
+
+        option_counts: dict[int, int] = {i: 0 for i in range(1, num_options + 1)}
+        option_examples: dict[int, list[str]] = {i: [] for i in range(1, num_options + 1)}
+
+        for f in findings_list:
+            surf = f.get("surface", "")
+            opt_repls = f.get("option_replacements") or {}
+            matched_option = None
+            for opt_idx in range(1, num_options + 1):
+                rep = opt_repls.get(str(opt_idx))
+                if rep is None or rep == surf:
+                    matched_option = opt_idx
+                    break
+            if matched_option is None:
+                matched_option = f.get("ce_option") or 1
+            if matched_option in option_counts:
+                option_counts[matched_option] += 1
+                if surf and surf not in option_examples[matched_option] and len(option_examples[matched_option]) < 5:
+                    option_examples[matched_option].append(surf)
+
+        dominant_opt = max(option_counts.items(), key=lambda t: t[1])[0]
+        active_options_count = sum(1 for c in option_counts.values() if c > 0)
+        has_conflict = active_options_count > 1
+
+        options_models = []
+        for opt_idx in range(1, num_options + 1):
+            lbl = option_text(sno, opt_idx) or f"Option {opt_idx}"
+            options_models.append(schemas_v2.TriggeredCERuleOption(
+                option=opt_idx,
+                label=lbl,
+                count=option_counts[opt_idx],
+                examples=option_examples[opt_idx],
+            ))
+
+        triggered_ce_rules.append(schemas_v2.TriggeredCERule(
+            sno=sno,
+            name=rule_name,
+            dominant_option=dominant_opt,
+            conflict=has_conflict,
+            options=options_models,
+        ))
+
+    triggered_ce_rules.sort(key=lambda r: sum(o.count for o in r.options), reverse=True)
+
     return schemas_v2.AnalyzeFilesForStylesheetResponse(
         analyzed_files=analyzed_files,
         triggered_rules=triggered_rules,
+        triggered_ce_rules=triggered_ce_rules,
         total_findings=len(all_findings),
     )
 
@@ -3053,7 +3146,8 @@ def _serve_docx_finalized(path: str, filename: str, media_type: str, inline: boo
 
     if not filename.lower().endswith(".docx"):
         disp = "inline" if (inline or filename.lower().endswith((".html", ".htm", ".pdf"))) else "attachment"
-        return FileResponse(path=path, filename=filename, media_type=media_type, content_disposition_type=disp)
+        fn = None if disp == "inline" else filename
+        return FileResponse(path=path, filename=fn, media_type=media_type, content_disposition_type=disp)
 
     from starlette.background import BackgroundTask
     from app.processing.citation_link_finalizer import finalize_docx_for_export
@@ -4882,6 +4976,12 @@ def api_v2_start_batch_jobs(
     elif payload.process_type == "indesign_to_xml":
         target_category = "InDesign"
         target_extensions = [".indd", ".zip"]
+    elif payload.process_type == "indesign_to_xhtml":
+        target_category = "InDesign"
+        target_extensions = [".indd"]
+    elif payload.process_type == "xhtml_to_indesign":
+        target_category = "XML"
+        target_extensions = [".xhtml", ".html"]
     elif payload.process_type == "style_validation":
         target_category = "Manuscript"
         target_extensions = [".docx"]
@@ -5309,13 +5409,19 @@ def api_v2_processing_status(
 
     supported_types = (
         "structuring",
+        "structuring_qa",
+        "preediting_qa",
         "reference_validation",
         "reference_structuring",
         "ppd",
+        "manuscript_analysis",
+        "manuscript_analysis_qa",
         "bias_scan",
         "credit_extractor_ai",
         "word_to_xml",
         "word_to_indesign",
+        "indesign_to_xhtml",
+        "xhtml_to_indesign",
         "indesign_to_xml",
         "xml_to_indesign",
         "style_validation",
@@ -5785,6 +5891,8 @@ def api_v2_update_job_priority(
 def api_v2_technical_scan(
     file_id: int,
     stylesheet_id: int | None = None,
+    rescan: bool = Query(False, description="Force re-scan chapter manuscript from DOCX"),
+    reload_rules: bool = Query(False, description="Force re-sync stylesheet from disk/DB"),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -5803,6 +5911,7 @@ def api_v2_technical_scan(
             file_id=file_id,
             logger=logger,
             technical_editor_cls=TechnicalEditor,
+            force_rescan=rescan,
         )
     except HTTPException as exc:
         code = "TECHNICAL_SCAN_FAILED"
@@ -5833,45 +5942,50 @@ def api_v2_technical_scan(
     except Exception as e:
         logger.warning(f"Failed to generate Collabora launch URL: {e}")
 
-    # Attach active stylesheet for this project
+    # Attach active stylesheet for this project (a Springer client without one gets the
+    # Springer house-style stylesheet created and activated).
     active_stylesheet = None
+    active_ss = None
     if file_record and file_record.project_id:
-        active_ss = stylesheet_service.get_active_stylesheet_for_project(
-            db, project_id=file_record.project_id
-        )
-        if active_ss:
-            active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss, db=db)
+        if reload_rules:
+            # Force re-sync stylesheet from disk (CE support/Style sheet template/stylesheet.json) or DB
+            stylesheet_service.sync_stylesheet_from_ce_support(db, project_id=file_record.project_id)
+        active_ss = stylesheet_service.ensure_publisher_stylesheet(db, project_id=file_record.project_id)
 
-    # Annotate findings with stylesheet matching if stylesheet_id provided
-    findings = raw_scan.get("findings", [])
-    if stylesheet_id and findings:
-        selected_stylesheet = db.query(ProjectStylesheet).filter(
+    # The chosen (or active) stylesheet decides every finding: the selected option is the
+    # house style, other forms are errors with the selected form as the fix.
+    findings = [dict(f) for f in raw_scan.get("findings", [])]
+    applied_ss = active_ss
+    if stylesheet_id and file_record:
+        applied_ss = db.query(ProjectStylesheet).filter(
             ProjectStylesheet.id == stylesheet_id,
             ProjectStylesheet.project_id == file_record.project_id,
-        ).first()
-
-        if selected_stylesheet:
-            import json
-            from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
-            try:
-                selected_rows = json.loads(selected_stylesheet.selected_ia_rows)
-            except (json.JSONDecodeError, TypeError):
-                selected_rows = []
-            # rule_id_to_ia is embedded in the cached scan result; the helper imports it otherwise.
-            annotate_with_stylesheet(
-                findings, selected_rows, raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
-                ce_rules=stylesheet_service.stylesheet_ce_rules(selected_stylesheet),
-            )
-    elif findings and file_record and file_record.project_id and active_stylesheet:
-        # No stylesheet chosen on the page: the project's active stylesheet decides the
-        # CE checklist options and annotates findings with in_stylesheet matching.
-        from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
-        annotate_with_stylesheet(
-            findings,
-            [row.model_dump() for row in active_stylesheet.selected_ia_rows],
-            raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
-            ce_rules={k: v.model_dump(exclude_none=True) for k, v in active_stylesheet.ce_rules.items()},
+        ).first() or active_ss
+    if applied_ss:
+        active_stylesheet = stylesheet_service._serialize_stylesheet(applied_ss, db=db)
+    if findings and applied_ss is not None:
+        doc_path = None
+        try:
+            from app.domains.review.service import resolve_processed_target
+            doc_path = os.path.abspath(resolve_processed_target(db, file_id=file_id)["processed_path"])
+        except Exception as exc:
+            logger.warning(f"Could not resolve document for style-profile rules: {exc}")
+        findings = stylesheet_service.apply_stylesheet_to_findings(
+            findings, applied_ss,
+            rule_id_to_ia=raw_scan.get("ia_report", {}).get("rule_id_to_ia"),
+            file_path=doc_path if doc_path and os.path.exists(doc_path) else None,
         )
+        # Forms already in house style (the selected option) and rules switched off are not
+        # errors: keep them out of the review list and the "Apply N changes" count.
+        hidden = [f for f in findings if f.get("ce_status") in ("compliant", "off")]
+        findings = [f for f in findings if f.get("ce_status") not in ("compliant", "off")]
+        raw_scan["findings"] = findings
+        from app.domains.processing.technical_editor_service import _map_findings_to_legacy_issues
+        raw_scan["issues"] = _map_findings_to_legacy_issues(findings)
+        stats = dict(raw_scan.get("stats") or {})
+        stats["compliant_hidden"] = sum(1 for f in hidden if f.get("ce_status") == "compliant")
+        stats["rule_off_hidden"] = sum(1 for f in hidden if f.get("ce_status") == "off")
+        raw_scan["stats"] = stats
 
     # Ensure inconsistencies is a dict (convert list to dict if needed)
     inconsistencies_data = raw_scan.get("inconsistencies", {})
@@ -5890,6 +6004,8 @@ def api_v2_technical_scan(
         ia_report=raw_scan.get("ia_report", {}),
         stats=raw_scan.get("stats", {}),
         active_stylesheet=active_stylesheet,
+        engine_version=raw_scan.get("engine_version"),
+        stylesheet_source=stylesheet_service.stylesheet_source(db, applied_ss) if applied_ss is not None else None,
     )
 
 
@@ -6132,6 +6248,8 @@ async def api_v2_parse_docx_stylesheet(
         from app.processing.manuscript_core.parsers.docx_stylesheet_parser import DocxStylesheetParser
         parser = DocxStylesheetParser()
         result = parser.parse(content_bytes)
+        if isinstance(result, dict) and "matched_ce_rules" in result and isinstance(result["matched_ce_rules"], dict):
+            result["matched_ce_rules"] = {str(k): v for k, v in result["matched_ce_rules"].items()}
         return schemas_v2.DocxStylesheetParseResponse(**result)
     except Exception as e:
         logger.error(f"Failed to parse docx stylesheet: {e}", exc_info=True)
@@ -8548,6 +8666,7 @@ def api_v2_create_chapter_with_art(
         )
 
     import re as _re
+    from sqlalchemy import or_ as _or
     existing_art_chapters = [
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
         if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
@@ -8848,13 +8967,26 @@ def api_v2_create_chapters_with_art_zip(
         )
 
     import re as _re
+    from sqlalchemy import or_ as _or
+
+    # Check if project has a book manuscript (e.g. 00 or title contains Book)
+    has_book_manuscript = db.query(ChapterInfo).filter(
+        ChapterInfo.project == project.project_code,
+        _or(ChapterInfo.chapters == "00", ChapterInfo.chapter_title.ilike("%Book%"))
+    ).first() is not None
+
     existing_art_chapters = [
         ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
-        if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+        if ci.chapters and (_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters) or ci.chapters == "Book 00 - Art")
     ]
-    existing_art_by_num: dict[int, ChapterInfo] = {
-        int(_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters).group(1)): ci for ci in existing_art_chapters
-    }
+    existing_art_by_key: dict[str, ChapterInfo] = {}
+    for ci in existing_art_chapters:
+        m = _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+        if m:
+            existing_art_by_key[f"ch_{int(m.group(1)):02d}"] = ci
+        elif ci.chapters == "Book 00 - Art":
+            existing_art_by_key["book_00"] = ci
+
     existing_art_workflow = next((ci.workflow for ci in existing_art_chapters if ci.workflow), None)
 
     created: list = []
@@ -8869,8 +9001,9 @@ def api_v2_create_chapters_with_art_zip(
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(temp_dir)
 
-        # Map to hold temporary files grouped by chapter number
-        ch_files: dict[int, list[tuple[str, str]]] = {}
+        # Map to hold temporary files grouped by chapter key ("book_00" or "ch_01", etc.)
+        # and display info: (chapter_number, chapter_title, files_list)
+        ch_files: dict[str, dict] = {}
 
         for root, _dirs, filenames in os.walk(temp_dir):
             for fname in filenames:
@@ -8879,29 +9012,82 @@ def api_v2_create_chapters_with_art_zip(
 
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, temp_dir)
-                
-                # Determine chapter number
-                number_padded = None
+                rel_lower = rel_path.replace("\\", "/").lower()
                 path_parts = rel_path.replace("\\", "/").split("/")
-                for part in reversed(path_parts[:-1]):
-                    number_padded = file_service.extract_chapter_number_from_filename(part)
-                    if number_padded:
-                        break
-                if not number_padded:
-                    number_padded = file_service.extract_chapter_number_from_filename(fname)
 
-                if not number_padded:
-                    skipped.append({"filename": fname, "reason": "Could not determine a chapter number from the file name or path."})
+        # Determine whole-book vs chapter based ONLY on folder names or zip filename (not individual file names)
+        zip_stem = os.path.splitext(file.filename)[0].strip().lower()
+
+        for root, _dirs, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
                     continue
 
-                new_num = int(number_padded)
-                if new_num not in ch_files:
-                    ch_files[new_num] = []
-                ch_files[new_num].append((fname, full_path))
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, temp_dir)
+                path_parts = rel_path.replace("\\", "/").split("/")
+                dir_parts = path_parts[:-1]  # parent folders only
 
-        for new_num, files_list in sorted(ch_files.items()):
-            art_chapter_name = f"Ch {new_num:02d} - Art"
-            existing_ch = existing_art_by_num.get(new_num)
+                matched_chapter = None
+                matched_book = False
+
+                # 1. Check parent folder names first (from closest folder upwards)
+                for part in reversed(dir_parts):
+                    p_clean = part.strip().lower()
+                    if p_clean in ("art files", "art_files", "artfiles", "art file", "art-files", "book", "book art", "book_art", "common art", "common_art") or "art files" in p_clean:
+                        matched_book = True
+                        break
+                    m = _re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', p_clean)
+                    if m:
+                        matched_chapter = int(m.group(1))
+                        break
+                    m = _re.match(r'^(\d{1,3})$', p_clean)
+                    if m:
+                        matched_chapter = int(m.group(1))
+                        break
+
+                # 2. If not determined by folder name, check zip filename
+                if not matched_book and matched_chapter is None:
+                    if zip_stem in ("art files", "art_files", "artfiles", "art file", "art-files", "book", "book art", "book_art") or "art files" in zip_stem:
+                        matched_book = True
+                    else:
+                        m = _re.search(r'(?:chapter|chap|ch)[_\s-]*(\d{1,3})\b', zip_stem)
+                        if m:
+                            matched_chapter = int(m.group(1))
+                        else:
+                            m = _re.match(r'^(\d{1,3})$', zip_stem)
+                            if m:
+                                matched_chapter = int(m.group(1))
+
+                # 3. Assign chapter vs book
+                if matched_chapter is not None and matched_chapter > 0:
+                    key = f"ch_{matched_chapter:02d}"
+                    ch_number = f"Ch {matched_chapter:02d} - Art"
+                    ch_title = f"Chapter {matched_chapter:02d} Art"
+                elif matched_book or has_book_manuscript or not dir_parts:
+                    # e.g. "Art Files.zip" or folder named "Art Files" -> Book 00 - Art
+                    key = "book_00"
+                    ch_number = "Book 00 - Art"
+                    ch_title = "Book 00 Art"
+                else:
+                    key = "book_00"
+                    ch_number = "Book 00 - Art"
+                    ch_title = "Book 00 Art"
+
+                if key not in ch_files:
+                    ch_files[key] = {
+                        "ch_number": ch_number,
+                        "ch_title": ch_title,
+                        "files": []
+                    }
+                ch_files[key]["files"].append((fname, full_path))
+
+        for key, info in sorted(ch_files.items()):
+            art_chapter_name = info["ch_number"]
+            art_chapter_title = info["ch_title"]
+            files_list = info["files"]
+
+            existing_ch = existing_art_by_key.get(key)
             if existing_ch and not allow_revision:
                 for fname, _ in files_list:
                     skipped.append({"filename": fname, "reason": f"Art chapter {art_chapter_name} already exists."})
@@ -8913,7 +9099,7 @@ def api_v2_create_chapters_with_art_zip(
                     project_id=project_id,
                     chapter_id=existing_ch.id,
                     upload_dir=file_service.UPLOAD_DIR,
-                    title=f"Chapter {new_num:02d} Art",
+                    title=art_chapter_title,
                     workflow_name=workflow_name,
                 )
             else:
@@ -8921,7 +9107,7 @@ def api_v2_create_chapters_with_art_zip(
                     db,
                     project_id=project_id,
                     number=art_chapter_name,
-                    title=f"Chapter {new_num:02d} Art",
+                    title=art_chapter_title,
                     upload_dir=file_service.UPLOAD_DIR,
                     status="Received",
                     workflow_name=workflow_name,
@@ -8956,7 +9142,7 @@ def api_v2_create_chapters_with_art_zip(
                     uploaded_by_id=viewer.id,
                 ))
 
-            existing_art_by_num[new_num] = new_chapter
+            existing_art_by_key[key] = new_chapter
             db.commit()
             db.refresh(new_chapter)
             created.append(new_chapter)
@@ -9241,6 +9427,10 @@ class TransitionEmailRequest(BaseModel):
     subject: str
     body: str
     shipment_notes: Optional[str] = None
+
+class StageRevertRequest(BaseModel):
+    target_stage: Optional[str] = None
+    remarks: Optional[str] = None
 
 def _get_stage_notification_config(client_name: str, stage_name: str, db=None) -> Optional[dict]:
     import json
@@ -10211,6 +10401,181 @@ def api_v2_chapter_transition_email(
     }}
 
 
+@router.post("/chapters/{chapter_id}/revert-stage")
+def api_v2_chapter_revert_stage(
+    chapter_id: int,
+    payload: StageRevertRequest = StageRevertRequest(),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    if not _has_admin_role(user):
+        raise HTTPException(status_code=403, detail="Only administrators can revert workflow stages.")
+
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.domains.workflow.models import ChapterInfo, WorkflowMaster, StageDetail
+    from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
+    from app.domains.workflow.api_v1 import resolve_stage_owner_by_designation
+
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    project = db.execute(select(Project).where(Project.project_code == chapter.project)).scalars().first()
+    project_code = project.code if project else chapter.project
+    if not project_code:
+        raise HTTPException(status_code=400, detail="Project code not found")
+
+    client = None
+    if project and project.client_id:
+        client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
+    client_ident = client.division if (client and client.division) else (project.client_name if project else chapter.client)
+
+    # Resolve workflow and stages
+    chapter_workflow = (chapter.workflow or "").strip() or (project.workflow_name if project else "")
+    wf_stages = []
+    if chapter_workflow:
+        try:
+            wf_stages = db.execute(
+                select(WorkflowMaster)
+                .where(WorkflowMaster.workflow_name == chapter_workflow)
+            ).scalars().all()
+        except Exception:
+            pass
+
+    # Order stages topologically using previous_stage / next_stage
+    ordered_stage_names = []
+    if wf_stages:
+        by_name = {s.stage_name: s for s in wf_stages}
+        first_stage = next((s for s in wf_stages if not s.previous_stage), wf_stages[0] if wf_stages else None)
+        curr = first_stage
+        visited = set()
+        while curr and curr.stage_name not in visited:
+            ordered_stage_names.append(curr.stage_name)
+            visited.add(curr.stage_name)
+            curr = by_name.get(curr.next_stage) if curr.next_stage else None
+        for s in wf_stages:
+            if s.stage_name not in visited:
+                ordered_stage_names.append(s.stage_name)
+                visited.add(s.stage_name)
+
+    current_stage = (chapter.stage_name or "").strip()
+    target_stage = (payload.target_stage or "").strip()
+
+    if not target_stage:
+        if current_stage in ordered_stage_names:
+            curr_idx = ordered_stage_names.index(current_stage)
+            if curr_idx <= 0:
+                raise HTTPException(status_code=400, detail="Already at the first stage; cannot revert.")
+            target_stage = ordered_stage_names[curr_idx - 1]
+        else:
+            raise HTTPException(status_code=400, detail="Target stage not specified and cannot be determined from workflow.")
+
+    if target_stage == current_stage:
+        raise HTTPException(status_code=400, detail="Target stage is the same as current stage.")
+
+    # Find stage details
+    stage_details = db.execute(
+        select(StageDetail).where(
+            StageDetail.project == project_code,
+            StageDetail.chapters == chapter.chapters
+        )
+    ).scalars().all()
+
+    target_idx = ordered_stage_names.index(target_stage) if target_stage in ordered_stage_names else -1
+
+    for sd in stage_details:
+        sd_idx = ordered_stage_names.index(sd.stage_name) if sd.stage_name in ordered_stage_names else -1
+        if sd.stage_name == target_stage:
+            sd.stage_status = "In-progress"
+            sd.actual_end_date = None
+            sd.total_time_taken = None
+            if not sd.actual_start_date:
+                sd.actual_start_date = datetime.now(timezone.utc)
+        elif sd.stage_name == current_stage or (target_idx >= 0 and sd_idx > target_idx):
+            # Reset current and any subsequent stages
+            sd.stage_status = "Pending"
+            sd.actual_end_date = None
+            sd.actual_start_date = None
+            sd.total_time_taken = None
+            sd.delayed = False
+            sd.delay_days = 0
+
+    target_sd = next((sd for sd in stage_details if sd.stage_name == target_stage), None)
+
+    # Build structured JSON revert entry
+    revert_time_iso = datetime.now(timezone.utc).isoformat()
+    revert_user = getattr(user, "username", "admin")
+    revert_entry = {
+        "action": "revert",
+        "from_stage": current_stage,
+        "to_stage": target_stage,
+        "reverted_by": revert_user,
+        "timestamp": revert_time_iso,
+        "reason": (payload.remarks or "").strip()
+    }
+
+    # Update StageDetail history and remarks
+    if target_sd:
+        sd_history = list(target_sd.history) if target_sd.history and isinstance(target_sd.history, list) else []
+        sd_history.append(revert_entry)
+        target_sd.history = sd_history
+        existing_rem = target_sd.remarks or ""
+        revert_human_note = f"[Reverted from {current_stage} by {revert_user} at {revert_time_iso[:19]}]: {payload.remarks or 'No reason provided'}"
+        target_sd.remarks = f"{existing_rem}\n{revert_human_note}".strip() if existing_rem else revert_human_note
+
+    # Update ChapterInfo and append to JSON remarks history
+    chapter.stage_name = target_stage
+    chapter.status = "In-progress"
+
+    remarks_history = []
+    if chapter.remarks:
+        try:
+            parsed = json.loads(chapter.remarks)
+            if isinstance(parsed, list):
+                remarks_history = parsed
+            elif isinstance(parsed, dict):
+                remarks_history = [parsed]
+            else:
+                remarks_history = [{"note": str(chapter.remarks)}]
+        except Exception:
+            remarks_history = [{"note": chapter.remarks}]
+
+    remarks_history.append(revert_entry)
+    import json as _json
+    chapter.remarks = _json.dumps(remarks_history, indent=2)
+
+    owner_user = resolve_stage_owner_by_designation(
+        db, target_stage, project_code=project_code, client_identifier=client_ident
+    )
+    if owner_user:
+        chapter.current_assignee_name = owner_user.username
+    elif target_sd and target_sd.assignee_name:
+        chapter.current_assignee_name = target_sd.assignee_name
+    else:
+        chapter.current_assignee_name = None
+
+    if target_sd and target_sd.planned_end_date:
+        chapter.due_date = target_sd.planned_end_date
+
+    db.commit()
+    db.refresh(chapter)
+
+    return {
+        "message": f"Successfully reverted to {target_stage}",
+        "chapter": {
+            "id": chapter.id,
+            "stage_name": chapter.stage_name,
+            "status": chapter.status,
+            "current_assignee_name": chapter.current_assignee_name,
+            "remarks": chapter.remarks
+        },
+        "revert_entry": revert_entry
+    }
+
+
 @router.post("/chapters/bulk-transition-config", response_model=schemas_v2.BulkTransitionConfigResponse)
 def api_v2_bulk_transition_config(
     payload: schemas_v2.BulkTransitionConfigRequest,
@@ -11176,6 +11541,89 @@ def api_v2_chapter_bulk_download(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{safe_filename}_bulk.zip"'}
     )
+
+
+# ── Project Book Map ─────────────────────────────────────────────────────────
+
+@router.get("/projects/{project_id}/bookmap")
+def api_v2_get_project_bookmap(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    bookmap_data = getattr(project, "bookmap_details", None)
+    if not bookmap_data and project.file_details and isinstance(project.file_details, dict):
+        bookmap_data = project.file_details.get("bookmap")
+    return {"project_id": project.id, "project_code": project.project_code, "bookmap": bookmap_data}
+
+
+@router.put("/projects/{project_id}/bookmap")
+def api_v2_update_project_bookmap(
+    project_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    # Access control: Managers and Admins only
+    user_role_str = ""
+    if hasattr(viewer, "roles") and viewer.roles:
+        user_role_str += " " + " ".join(getattr(r, "name", str(r)) for r in viewer.roles)
+    if hasattr(viewer, "role") and viewer.role:
+        user_role_str += " " + str(viewer.role)
+    if hasattr(viewer, "designation") and viewer.designation:
+        user_role_str += " " + str(viewer.designation)
+    if hasattr(viewer, "access_level") and viewer.access_level:
+        user_role_str += " " + str(viewer.access_level)
+
+    user_role_str = user_role_str.lower()
+    is_manager_or_admin = any(k in user_role_str for k in ["admin", "manager", "lead", "gm"])
+    if not is_manager_or_admin:
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            message="Only managers and administrators can edit project book map."
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    from sqlalchemy.orm.attributes import flag_modified
+    bookmap_payload = payload.get("bookmap")
+
+    # Store in dedicated bookmap_details column
+    project.bookmap_details = bookmap_payload
+    flag_modified(project, "bookmap_details")
+
+    # Keep file_details['bookmap'] in sync as well
+    if project.file_details is None:
+        project.file_details = {}
+    elif not isinstance(project.file_details, dict):
+        project.file_details = dict(project.file_details)
+    project.file_details["bookmap"] = bookmap_payload
+    flag_modified(project, "file_details")
+
+    db.commit()
+    db.refresh(project)
+
+    return {
+        "message": "Book map saved successfully.",
+        "project_id": project.id,
+        "bookmap": project.bookmap_details
+    }
+
 
 
 

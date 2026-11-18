@@ -49,16 +49,16 @@ export interface ResolvedRule {
   custom_template?: string;
 }
 
-/** Catalog default, then IA-row option, then the stylesheet's explicit setting. */
+/** Catalog default, then IA-row option (if any), then the stylesheet's explicit setting. */
 export function resolveRule(
   rule: CERule,
-  derived: Record<number, DerivedOption>,
-  settings: CERuleSettings,
+  derived?: Record<number, DerivedOption>,
+  settings?: CERuleSettings,
 ): ResolvedRule {
-  const explicit = settings[String(rule.sno)] ?? {};
-  const fromRow = derived[rule.sno];
+  const explicit = settings?.[String(rule.sno)] ?? {};
+  const fromRow = derived?.[rule.sno];
   return {
-    enabled: explicit.enabled ?? true,
+    enabled: explicit.enabled ?? rule.default_enabled ?? true,
     option: explicit.option ?? fromRow?.option ?? 1,
     severity: explicit.severity ?? rule.severity,
     fromIaRow: explicit.option === undefined && fromRow ? fromRow.from : null,
@@ -70,13 +70,13 @@ export function resolveRule(
 export function updateSetting(
   settings: CERuleSettings,
   rule: CERule,
-  derived: Record<number, DerivedOption>,
+  derived: Record<number, DerivedOption> | undefined,
   field: keyof CERuleSetting,
   value: boolean | number | string,
 ): CERuleSettings {
   const inherited: Record<string, unknown> = {
-    enabled: true,
-    option: derived[rule.sno]?.option ?? 1,
+    enabled: rule.default_enabled ?? true,
+    option: derived?.[rule.sno]?.option ?? 1,
     severity: rule.severity,
   };
   const key = String(rule.sno);
@@ -85,6 +85,10 @@ export function updateSetting(
     delete (next as Record<string, unknown>)[field];
   } else {
     (next as Record<string, unknown>)[field] = value;
+  }
+  // Choosing an option on a house-style rule that is off by default switches it on.
+  if (field === "option" && rule.default_enabled === false && next.enabled === undefined) {
+    next.enabled = true;
   }
   const out = { ...settings };
   if (Object.keys(next).length === 0) delete out[key];
@@ -101,6 +105,28 @@ export interface HouseStylePreset {
 }
 
 export const HOUSE_STYLE_PRESETS: HouseStylePreset[] = [
+  {
+    id: "springer",
+    name: "Springer July 2026",
+    badge: "Springer Publishing Company",
+    description: "Closed %, closed °C, nonpossessive eponyms (R124), editorial red flags (R125), person-first (R96), generic terms (R46)",
+    rules: {
+      6: { option: 1, enabled: true }, // 25% closed
+      5: { option: 2, enabled: true }, // 25°C closed
+      14: { option: 1, enabled: true }, // 10–15 closed en-dash
+      13: { option: 3, enabled: true }, // numerals throughout
+      17: { option: 2, enabled: true }, // October 10, 2026
+      19: { option: 1, enabled: true }, // 3:30 p.m.
+      35: { option: 1, enabled: true }, // e.g., & vs.
+      46: { option: 2, enabled: true }, // generic terms over brands
+      96: { option: 1, enabled: true }, // person-first / words to avoid
+      112: { option: 1, enabled: true }, // future to present tense
+      124: { option: 1, enabled: true }, // nonpossessive medical eponyms
+      125: { option: 1, enabled: true }, // editorial red flags & permissions
+      128: { option: 1, enabled: true }, // 21st century
+      133: { option: 1, enabled: true }, // 6 mg/hr
+    },
+  },
   {
     id: "chicago",
     name: "Chicago (CMOS)",

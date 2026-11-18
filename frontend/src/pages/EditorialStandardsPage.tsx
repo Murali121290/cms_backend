@@ -38,7 +38,7 @@ export function EditorialStandardsPage() {
   const projectQuery = useProjectDetailQuery(normalizedProjectId);
   const stylesheetsQuery = useStylesheetsQuery(normalizedProjectId);
 
-  const project = projectQuery.data;
+  const project = projectQuery.data?.project;
   const stylesheets = stylesheetsQuery.data?.stylesheets || [];
   const activeStylesheet = stylesheetsQuery.data?.active_stylesheet;
 
@@ -48,15 +48,15 @@ export function EditorialStandardsPage() {
       : activeTab === "terms"
         ? "Term Lists"
         : "Stylesheets"
-    } — Editorial Standards Hub — S4 Carlisle CMS`
+    } — Editorial Hub`
   );
 
   const handleTabChange = (tab: EditorialTab) => {
     setSearchParams({ tab });
   };
 
-  const projectCode = project?.project_code || project?.code || `Project #${projectId}`;
-  const projectName = project?.title || project?.name || "Editorial Standards";
+  const actualProjectCode = project?.code || project?.project_code || "";
+  const projectTitle = project?.project_title || project?.title || "";
 
   return (
     <div className="min-h-screen bg-slate-50/50 flex flex-col">
@@ -76,33 +76,39 @@ export function EditorialStandardsPage() {
               </button>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 truncate">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">
-                    Editorial Hub
-                  </span>
-                  <span className="text-slate-300">·</span>
                   <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate">
-                    {projectName}
+                    Editorial Hub
                   </h1>
+                  {projectTitle && (
+                    <>
+                      <span className="text-slate-300">·</span>
+                      <span className="text-xs sm:text-sm font-medium text-slate-600 truncate" title={projectTitle}>
+                        {projectTitle}
+                      </span>
+                    </>
+                  )}
                   {project?.status && (
-                    <span className="hidden sm:inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 shrink-0">
+                    <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 shrink-0">
                       {project.status}
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5 truncate">
-                  <span>Code: <strong>{projectCode}</strong></span>
-                  {project?.workflow_name && (
-                    <>
-                      <span className="text-slate-300">•</span>
-                      <span className="truncate">Workflow: <strong>{project.workflow_name}</strong></span>
-                    </>
-                  )}
-                  {project?.project_manager && (
-                    <>
-                      <span className="text-slate-300">•</span>
-                      <span>PM: <strong>{project.project_manager}</strong></span>
-                    </>
-                  )}
+                <div className="flex items-center gap-2.5 sm:gap-3 text-xs text-slate-500 mt-0.5 truncate">
+                  {actualProjectCode ? (
+                    <span>Code: <strong className="font-mono text-slate-800">{actualProjectCode}</strong></span>
+                  ) : null}
+                  {actualProjectCode && project?.workflow_name ? (
+                    <span className="text-slate-300">•</span>
+                  ) : null}
+                  {project?.workflow_name ? (
+                    <span className="truncate">Workflow: <strong>{project.workflow_name}</strong></span>
+                  ) : null}
+                  {(actualProjectCode || project?.workflow_name) && project?.project_manager ? (
+                    <span className="text-slate-300">•</span>
+                  ) : null}
+                  {project?.project_manager ? (
+                    <span>PM: <strong>{project.project_manager}</strong></span>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -139,16 +145,16 @@ export function EditorialStandardsPage() {
               type="button"
               onClick={() => handleTabChange("stylesheets")}
               className={`inline-flex items-center gap-2 px-4 py-3 border-b-2 text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${activeTab === "stylesheets"
-                  ? "border-sky-600 text-sky-800 bg-sky-50/50"
-                  : "border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300"
+                ? "border-sky-600 text-sky-800 bg-sky-50/50"
+                : "border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300"
                 }`}
             >
               <BookOpen className={`w-4 h-4 ${activeTab === "stylesheets" ? "text-sky-600" : "text-slate-400"}`} />
               <span>Stylesheets &amp; CE Profiles</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${activeTab === "stylesheets"
-                    ? "bg-sky-200 text-sky-900"
-                    : "bg-slate-100 text-slate-600"
+                  ? "bg-sky-200 text-sky-900"
+                  : "bg-slate-100 text-slate-600"
                   }`}
               >
                 {stylesheets.length}
@@ -160,16 +166,16 @@ export function EditorialStandardsPage() {
               type="button"
               onClick={() => handleTabChange("rules")}
               className={`inline-flex items-center gap-2 px-4 py-3 border-b-2 text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${activeTab === "rules"
-                  ? "border-amber-600 text-amber-900 bg-amber-50/50"
-                  : "border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300"
+                ? "border-amber-600 text-amber-900 bg-amber-50/50"
+                : "border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300"
                 }`}
             >
               <Sparkles className={`w-4 h-4 ${activeTab === "rules" ? "text-amber-600" : "text-slate-400"}`} />
               <span>Language Editing Rules</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${activeTab === "rules"
-                    ? "bg-amber-200 text-amber-900"
-                    : "bg-slate-100 text-slate-600"
+                  ? "bg-amber-200 text-amber-900"
+                  : "bg-slate-100 text-slate-600"
                   }`}
               >
                 Catalog
@@ -181,16 +187,16 @@ export function EditorialStandardsPage() {
               type="button"
               onClick={() => handleTabChange("terms")}
               className={`inline-flex items-center gap-2 px-4 py-3 border-b-2 text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${activeTab === "terms"
-                  ? "border-emerald-600 text-emerald-900 bg-emerald-50/50"
-                  : "border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300"
+                ? "border-emerald-600 text-emerald-900 bg-emerald-50/50"
+                : "border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300"
                 }`}
             >
               <BookMarked className={`w-4 h-4 ${activeTab === "terms" ? "text-emerald-600" : "text-slate-400"}`} />
               <span>Term Lists &amp; Glossaries</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${activeTab === "terms"
-                    ? "bg-emerald-200 text-emerald-900"
-                    : "bg-slate-100 text-slate-600"
+                  ? "bg-emerald-200 text-emerald-900"
+                  : "bg-slate-100 text-slate-600"
                   }`}
               >
                 Assigned

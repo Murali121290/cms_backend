@@ -13,6 +13,7 @@ from . import abbreviations
 from . import medical_terms
 from . import uk_us_spelling
 from . import lww_ne
+from . import basic_grammar
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +253,8 @@ def _filter_protected(findings: list[Finding],
     """Drop findings whose span overlaps any protected span.
 
     Protected spans come from the hyphen/dash workbook's regex-pattern
-    layer (URL, DOI, ISBN, gene symbol, etc.). Any finding — hyphen,
+    layer (URL, DOI, ISBN, gene symbol, etc.), plus quoted-text spans
+    injected by :func:`build_quoted_text_spans`. Any finding — hyphen,
     spelling, compound, bias — that intersects one is dropped: the user
     marked the shape as off-limits.
     """
@@ -268,6 +270,69 @@ def _filter_protected(findings: list[Finding],
         if not hit:
             kept.append(f)
     return kept
+
+
+# Opening / closing double-quote characters tracked by the quoted-text
+# excluder. ASCII straight quote is self-closing (opener == closer). Curly
+# quotes come from Word's smart-quotes AutoFormat and from pasted text.
+_QUOTE_PAIRS: tuple[tuple[str, str], ...] = (
+    ('"', '"'),      # straight ASCII pair
+    ('“', '”'),  # U+201C LEFT DOUBLE / U+201D RIGHT DOUBLE
+    ('‟', '”'),  # U+201F DOUBLE HIGH-REVERSED-9 → right double
+    ('«', '»'),  # U+00AB «, U+00BB »  (guillemets)
+)
+
+
+def build_quoted_text_spans(text: str) -> list[tuple[int, int]]:
+    """Return ``(start, end)`` spans covering every ``"..."`` /
+    ``"..."`` / ``«...»`` pair in ``text``, inclusive of the quote
+    marks themselves. Used by the router to drop any Language Editing
+    finding whose span overlaps a quoted passage — the user's spec
+    "exclude text inside double quotation marks".
+
+    Unclosed openers are treated as the open-until-end-of-paragraph
+    case (common when a long quotation wraps to the next paragraph in
+    the source document; per-paragraph analysis makes that the only
+    conservative choice). The returned list is sorted and merged so
+    the caller can intersect once without worrying about overlaps.
+    """
+    if not text:
+        return []
+    raw: list[tuple[int, int]] = []
+
+    # Straight ASCII quote: toggle open/close on each occurrence.
+    straight = [i for i, ch in enumerate(text) if ch == '"']
+    i = 0
+    while i < len(straight) - 1:
+        raw.append((straight[i], straight[i + 1] + 1))
+        i += 2
+    # Trailing unclosed straight quote → cover to end of paragraph.
+    if len(straight) % 2 == 1:
+        raw.append((straight[-1], len(text)))
+
+    # Directional pairs (curly, high-reversed-9, guillemets): scan in a
+    # single pass so an unclosed opener is still counted.
+    for opener, closer in _QUOTE_PAIRS[1:]:
+        start = None
+        for i, ch in enumerate(text):
+            if ch == opener and start is None:
+                start = i
+            elif ch == closer and start is not None:
+                raw.append((start, i + 1))
+                start = None
+        if start is not None:
+            raw.append((start, len(text)))
+
+    if not raw:
+        return []
+    raw.sort()
+    merged: list[tuple[int, int]] = []
+    for s, e in raw:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+    return merged
 
 
 def analyze(
@@ -301,6 +366,13 @@ def analyze(
     # continue to work unchanged.
     project_profile_keys: Optional[list[str]] = None,
     is_lww_ne_project: bool = False,
+    # Basic Grammar workbook (420 rules). ``basic_grammar_state`` is the
+    # pre-computed document-scope counter dict from
+    # ``basic_grammar.build_document_state``; required by GK-001 / GK-002
+    # / GK-003 and ignored by every other rule. When None the document-
+    # scope detectors silently emit no findings — regex + para-scope
+    # rule-based rules still run normally.
+    basic_grammar_state: Optional[dict[str, Any]] = None,
 ) -> list[Finding]:
     """Runs all enabled rules over paragraph text and returns de-conflicted findings.
 
@@ -425,6 +497,21 @@ def analyze(
     except Exception:
         logger.exception("lww_ne.analyze_lww_ne failed; skipping this workbook for this paragraph")
 
+    # Basic Grammar workbook — 343 executable rules (337 regex +
+    # 6 rule-based) producing findings under the Grammar and
+    # Punctuation and Capitalization chips. Style-dependent rules
+    # gate on ``document_variant`` inside the analyser. Scope-C
+    # overrides apply per workbook rule_id.
+    try:
+        findings.extend(basic_grammar.analyze_basic_grammar(
+            text,
+            document_state=basic_grammar_state,
+            document_variant=document_variant,
+            rule_overrides=overrides,
+        ))
+    except Exception:
+        logger.exception("basic_grammar.analyze_basic_grammar failed; skipping this workbook for this paragraph")
+
     # Filter against protected spans BEFORE overlap resolution so a
     # protected span never wins a tie-break and causes a legitimate
     # finding on an adjacent token to drop.
@@ -446,7 +533,7 @@ def analyze(
 # ``app/processing/language_editing/`` in a way that changes finding
 # output. Not bumping means stale results linger until the file bytes
 # or user-visible configuration happens to change.
-CACHE_VERSION: str = "v3"  # bumped for informal-title heading classification
+CACHE_VERSION: str = "v7"  # bumped for Abbreviations Phase 4 (URL/email/code exclusion, table_note/figure_legend subroles, section scope_reset scaffolding)
 
 
 # Rule IDs that emit findings with ``original == suggestion`` on

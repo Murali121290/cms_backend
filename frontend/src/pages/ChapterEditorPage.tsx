@@ -1255,7 +1255,7 @@ export function ChapterEditorPage() {
           <iframe
             src={fileUrl}
             title={decodedFilename}
-            sandbox="allow-scripts"
+            sandbox="allow-scripts allow-same-origin"
             className="w-full h-full border-0 bg-white"
           />
         ) : (ext === 'docx' || ext === 'doc') ? (

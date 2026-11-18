@@ -4,16 +4,17 @@ import io
 import shutil
 import re
 from pathlib import Path
+from typing import Any
 from app.core.config import get_settings
 from app.integrations.pph.client import PPHClient
 from app.processing.manuscript_core.analyzer import analyze_manuscript
 from app.processing.manuscript_core.fixer import apply_fixes_targeted, apply_te_highlights_to_docx
 
 class TechnicalEngine:
-    def process_document(self, file_path: str) -> list[str]:
+    def process_document(self, file_path: str, project_id: int | None = None, db: Any = None) -> list[str]:
         """
-        Runs Technical Editing (Highlighting) on the document.
-        Generates a new file with technical highlights.
+        Runs Technical Editing (Highlighting and Auto-fixes) on the document.
+        Generates a new file with technical highlights and stylesheet-guided fixes.
         Offloads to PPH Server if PPH_ENABLED is configured.
         """
         if not os.path.exists(file_path):
@@ -57,20 +58,45 @@ class TechnicalEngine:
 
         # Local fallback using modern manuscript_core engine
         try:
+            # Resolve real client, project, and active stylesheet
+            active_ss = None
+            client_name = "DefaultClient"
+            project_name = "DefaultProject"
+            if project_id and db:
+                from app import models
+                from app.services import stylesheet_service
+                proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+                if proj:
+                    project_name = proj.title or "DefaultProject"
+                    client_name = stylesheet_service.project_client_name(proj) or "DefaultClient"
+                    # Active stylesheet; a Springer client without one gets the house-style preset activated.
+                    active_ss = stylesheet_service.ensure_publisher_stylesheet(db, project_id=project_id)
+
             chapters = [
                 {
                     "index": 1,
                     "filename": os.path.basename(file_path),
                     "path": file_path,
-                    "client_name": "DefaultClient",
-                    "project_name": "DefaultProject",
+                    "client_name": client_name,
+                    "project_name": project_name,
                     "role": "PM",
                     "ia_mapping_path": ""
                 }
             ]
             findings_dict = analyze_manuscript(chapters)
             findings = findings_dict.get("findings", [])
-            
+
+            # Apply the project's stylesheet: the selected option of each rule is the house style,
+            # every other form becomes a fix (or a highlight for suggest-only rules).
+            from app.services import stylesheet_service as _ss_service
+            findings = _ss_service.apply_stylesheet_to_findings(
+                findings, active_ss,
+                rule_id_to_ia=findings_dict.get("ia_report", {}).get("rule_id_to_ia"),
+                file_path=file_path,
+            )
+            # Compliant findings are already in house style: nothing to fix or highlight.
+            findings = [f for f in findings if f.get("ce_status") not in ("compliant", "off")]
+
             selected_findings = []
             highlight_findings = []
             

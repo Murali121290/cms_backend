@@ -10,6 +10,7 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
+  BookMarked,
 } from "lucide-react";
 
 import type {
@@ -20,10 +21,12 @@ import type {
   StylesheetCreateRequest,
   DocxStylesheetParseResponse,
   CESeverity,
+  StyleProfile,
 } from "@/types/api";
 import { CERulesEditor } from "./CERulesEditor";
 import { useCeRulesQuery, useIATemplateQuery } from "./useStylesheetsQuery";
-import { parseDocxStylesheet } from "@/api/stylesheets";
+import { parseDocxStylesheet, getSpringerPreset } from "@/api/stylesheets";
+import { StyleProfilePanel } from "./StyleProfilePanel";
 
 interface StylesheetFormDrawerProps {
   isOpen: boolean;
@@ -34,12 +37,7 @@ interface StylesheetFormDrawerProps {
     create: { mutate: (payload: StylesheetCreateRequest) => void; isPending: boolean };
     update: { mutate: (params: { id: number; payload: StylesheetUpdateRequest }) => void; isPending: boolean };
   };
-  iaTemplate: IATemplateRow[];
-}
-
-interface ElementGroup {
-  element: string;
-  rows: IATemplateRow[];
+  iaTemplate?: IATemplateRow[];
 }
 
 export function StylesheetFormDrawer({
@@ -53,107 +51,45 @@ export function StylesheetFormDrawer({
   const [isFullPage, setIsFullPage] = useState(true);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedRows, setSelectedRows] = useState<IATemplateRow[]>([]);
-  const [expandedElements, setExpandedElements] = useState<Set<string>>(new Set());
   const [ceRules, setCeRules] = useState<CERuleSettings>({});
-  const [section, setSection] = useState<"ia" | "ce">("ce");
-  const ceRulesQuery = useCeRulesQuery();
-  const fallbackIaQuery = useIATemplateQuery();
-  const effectiveIaTemplate = iaTemplate.length > 0 ? iaTemplate : (fallbackIaQuery.data?.rows || []);
-
-  // DOCX Import states
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [section, setSection] = useState<"ce" | "profile">("ce");
+  const [styleProfile, setStyleProfile] = useState<StyleProfile>({});
   const [isUploadingDocx, setIsUploadingDocx] = useState(false);
+  const [isLoadingSpringer, setIsLoadingSpringer] = useState(false);
   const [docxImportData, setDocxImportData] = useState<DocxStylesheetParseResponse | null>(null);
   const [showDocxDetails, setShowDocxDetails] = useState(false);
+  const [isApplyingBookType, setIsApplyingBookType] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const ceRulesQuery = useCeRulesQuery();
+
+  // Total style profile items count for badge
+  const totalProfileItems = useMemo(() => {
+    const redFlagsCount = (styleProfile.red_flags as Array<any>)?.length ?? 0;
+    const avoidWordsCount = Object.keys(styleProfile.avoid_words ?? {}).length;
+    const replacementsCount = styleProfile.word_replacements?.length ?? 0;
+    const wordsCount = styleProfile.word_list?.length ?? 0;
+    return redFlagsCount + avoidWordsCount + replacementsCount + wordsCount;
+  }, [styleProfile]);
 
   useEffect(() => {
     if (editingStylesheet) {
       setName(editingStylesheet.name);
       setDescription(editingStylesheet.description || "");
-      setSelectedRows(
-        editingStylesheet.selected_ia_rows.map((row) => ({
-          ...row,
-          example: null,
-        }))
-      );
-      setExpandedElements(
-        new Set(editingStylesheet.selected_ia_rows.map((row) => row.element))
-      );
       setCeRules(editingStylesheet.ce_rules ?? {});
-      if (editingStylesheet.ce_rules && Object.keys(editingStylesheet.ce_rules).length > 0) {
-        setSection("ce");
-      } else if (editingStylesheet.selected_ia_rows?.length > 0) {
-        setSection("ia");
-      } else {
-        setSection("ce");
-      }
+      setStyleProfile((editingStylesheet.style_profile as StyleProfile) ?? {});
+      setSection("ce");
     } else {
       setName("");
       setDescription("");
-      setSelectedRows([]);
-      setExpandedElements(new Set());
       setCeRules({});
+      setStyleProfile({});
       setSection("ce");
     }
     setIsFullPage(true);
     setDocxImportData(null);
     setShowDocxDetails(false);
   }, [editingStylesheet, isOpen]);
-
-  const linkedSelectedRows = useMemo(() => {
-    const link = new Map(effectiveIaTemplate.map((r) => [`${r.element}|${r.subtype}|${r.pattern}`, r]));
-    return selectedRows.map((r) => ({ ...r, ...link.get(`${r.element}|${r.subtype}|${r.pattern}`) }));
-  }, [effectiveIaTemplate, selectedRows]);
-
-  const groupedRows = groupByElement(effectiveIaTemplate);
-
-  const toggleElement = (element: string) => {
-    const newExpanded = new Set(expandedElements);
-    if (newExpanded.has(element)) {
-      newExpanded.delete(element);
-    } else {
-      newExpanded.add(element);
-    }
-    setExpandedElements(newExpanded);
-  };
-
-  const normalizePattern = (p: string) => p.replace(/[\u2013\u2014–—]/g, "-").trim().toLowerCase();
-
-  const toggleRowSelection = (row: IATemplateRow) => {
-    setSelectedRows((prev) => {
-      const exists = prev.some(
-        (r) =>
-          r.element.toLowerCase() === row.element.toLowerCase() &&
-          (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
-            normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
-          (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
-      );
-      if (exists) {
-        return prev.filter(
-          (r) =>
-            !(
-              r.element.toLowerCase() === row.element.toLowerCase() &&
-              (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
-                normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
-              (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
-            )
-        );
-      } else {
-        return [...prev, row];
-      }
-    });
-  };
-
-  const isRowSelected = (row: IATemplateRow) => {
-    return selectedRows.some(
-      (r) =>
-        r.element.toLowerCase() === row.element.toLowerCase() &&
-        (r.pattern.toLowerCase() === row.pattern.toLowerCase() ||
-          normalizePattern(r.pattern) === normalizePattern(row.pattern)) &&
-        (!row.subtype || !r.subtype || r.subtype.toLowerCase() === row.subtype.toLowerCase())
-    );
-  };
 
   const handleDocxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -178,56 +114,9 @@ export function StylesheetFormDrawer({
         };
       }
       setCeRules(newCeRules);
+      setStyleProfile(res.style_profile ?? {});
 
-      // Auto-match IA rows from template
-      const newSelectedRows: IATemplateRow[] = [];
-      const newExpanded = new Set<string>(expandedElements);
-      for (const matchedIa of res.matched_ia_rows) {
-        const found =
-          effectiveIaTemplate.find(
-            (t) =>
-              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
-              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
-                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern)) &&
-              (!matchedIa.subtype || t.subtype.toLowerCase() === matchedIa.subtype.toLowerCase())
-          ) ||
-          effectiveIaTemplate.find(
-            (t) =>
-              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
-              (t.pattern.toLowerCase() === matchedIa.pattern.toLowerCase() ||
-                normalizePattern(t.pattern) === normalizePattern(matchedIa.pattern))
-          ) ||
-          effectiveIaTemplate.find(
-            (t) =>
-              t.element.toLowerCase() === matchedIa.element.toLowerCase() &&
-              (normalizePattern(t.pattern).includes(normalizePattern(matchedIa.pattern)) ||
-                normalizePattern(matchedIa.pattern).includes(normalizePattern(t.pattern)))
-          );
-
-        const matchedRow: IATemplateRow = found || {
-          element: matchedIa.element,
-          subtype: matchedIa.subtype || "General",
-          pattern: matchedIa.pattern,
-          example: matchedIa.source_value || null,
-        };
-
-        if (
-          !newSelectedRows.some(
-            (r) =>
-              r.element.toLowerCase() === matchedRow.element.toLowerCase() &&
-              (r.pattern.toLowerCase() === matchedRow.pattern.toLowerCase() ||
-                normalizePattern(r.pattern) === normalizePattern(matchedRow.pattern)) &&
-              (!matchedRow.subtype || !r.subtype || r.subtype.toLowerCase() === matchedRow.subtype.toLowerCase())
-          )
-        ) {
-          newSelectedRows.push(matchedRow);
-          newExpanded.add(matchedRow.element);
-        }
-      }
-      setSelectedRows(newSelectedRows);
-      setExpandedElements(newExpanded);
-
-      // Switch to CE tab so user immediately sees imported rules
+      // Switch to Editorial Rules tab so user immediately sees imported rules
       setSection("ce");
     } catch (err: any) {
       console.error("Failed to parse DOCX stylesheet:", err);
@@ -235,6 +124,97 @@ export function StylesheetFormDrawer({
     } finally {
       setIsUploadingDocx(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  // Book type / list style: re-apply only the Springer overlay rules and lists
+  const handleBookTypeChange = async (bookType: string, listStyle: string) => {
+    try {
+      setIsApplyingBookType(true);
+      const res = await getSpringerPreset(bookType, listStyle);
+      const overlay = ["8", "118", "121"];
+      setCeRules((prev) => {
+        const next = { ...prev };
+        for (const sno of overlay) {
+          const item = res.ce_rules?.[sno];
+          if (item) next[sno] = { enabled: item.enabled, option: item.option, severity: item.severity as CESeverity };
+        }
+        return next;
+      });
+      const overlayFinds = new Set(["ECG", "mmHg", "mm Hg"]);
+      setStyleProfile((prev) => ({
+        ...prev,
+        book_type: bookType,
+        list_style: listStyle,
+        unit_style: { ...(prev.unit_style ?? {}), ...(res.style_profile?.unit_style ?? {}) },
+        word_replacements: [
+          ...(prev.word_replacements ?? []).filter((w) => !overlayFinds.has(w.find)),
+          ...((res.style_profile?.word_replacements ?? []) as { find: string; replace: string; note?: string }[]).filter(
+            (w) => overlayFinds.has(w.find),
+          ),
+        ],
+      }));
+    } catch (err) {
+      console.error("Failed to apply Springer book type:", err);
+    } finally {
+      setIsApplyingBookType(false);
+    }
+  };
+
+  const handleLoadSpringerPreset = async () => {
+    try {
+      setIsLoadingSpringer(true);
+      const res = await getSpringerPreset(styleProfile.book_type ?? "standard", styleProfile.list_style ?? "narrative");
+      setName(res.name);
+      setDescription(res.description);
+
+      const newCeRules: CERuleSettings = {};
+      for (const [sno, r] of Object.entries(res.ce_rules || {})) {
+        const item = r as any;
+        newCeRules[sno] = {
+          enabled: item.enabled,
+          option: item.option,
+          severity: item.severity as CESeverity,
+        };
+      }
+      setCeRules(newCeRules);
+      setStyleProfile(res.style_profile ?? {});
+
+      const matchedMap: Record<string, any> = {};
+      for (const [sno, r] of Object.entries(res.ce_rules || {})) {
+        const item = r as any;
+        matchedMap[sno] = {
+          sno: Number(sno),
+          rule_name: `Rule ${sno}`,
+          option: item.option,
+          enabled: item.enabled,
+          severity: item.severity,
+          source_label: "Springer Preset",
+          source_value: "Springer Style Sheet (July 2026)",
+          explanation: `Default Springer specification (Option ${item.option})`,
+          notes: `Default Springer specification (Option ${item.option})`,
+        };
+      }
+      setDocxImportData({
+        metadata: { "Customer": "Springer Publishing Company", "Edition": "July 2026 Update" },
+        suggested_name: res.name,
+        suggested_description: res.description,
+        detected_preset_id: "springer",
+        matched_ce_rules: matchedMap,
+        matched_ia_rows: res.selected_ia_rows || [],
+        word_list: res.word_list || [],
+        total_specs_scanned: Object.keys(res.ce_rules || {}).length,
+        matched_rules_count: Object.keys(res.ce_rules || {}).length,
+        style_profile: res.style_profile,
+        unresolved_specs: [],
+      });
+
+      setSection("ce");
+    } catch (err: any) {
+      console.error("Failed to load Springer preset:", err);
+      alert("Failed to load Springer Publishing House Style preset.");
+    } finally {
+      setIsLoadingSpringer(false);
     }
   };
 
@@ -246,8 +226,8 @@ export function StylesheetFormDrawer({
     const payload = {
       name: name.trim(),
       description: description.trim() || null,
-      selected_ia_rows: selectedRows,
       ce_rules: ceRules,
+      style_profile: styleProfile,
     };
 
     if (editingStylesheet) {
@@ -256,8 +236,8 @@ export function StylesheetFormDrawer({
         payload: {
           name: payload.name,
           description: payload.description,
-          selected_ia_rows: payload.selected_ia_rows,
           ce_rules: payload.ce_rules,
+          style_profile: payload.style_profile,
         },
       });
     } else {
@@ -330,7 +310,7 @@ export function StylesheetFormDrawer({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploadingDocx}
+              disabled={isUploadingDocx || isLoadingSpringer}
               title="Upload existing Word style sheet (.docx) to automatically choose rules and options"
               className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs disabled:opacity-50"
             >
@@ -343,6 +323,25 @@ export function StylesheetFormDrawer({
                 <>
                   <FileText className="w-3.5 h-3.5 text-blue-600" />
                   <span>Word Style Sheet</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleLoadSpringerPreset}
+              disabled={isLoadingSpringer || isUploadingDocx}
+              title="Load official Springer Publishing House Style Sheet (July 2026 update)"
+              className="px-2.5 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-md transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs disabled:opacity-50"
+            >
+              {isLoadingSpringer ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                  <span>Loading...</span>
+                </>
+              ) : (
+                <>
+                  <BookMarked className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Springer Preset</span>
                 </>
               )}
             </button>
@@ -361,19 +360,24 @@ export function StylesheetFormDrawer({
                     : "text-slate-600 hover:text-slate-900"
                   }`}
               >
-                CE Rules ({ceRulesQuery.data?.rules.length ?? 72})
+                Editorial Rules ({ceRulesQuery.data?.rules.length ?? 118})
               </button>
               <button
                 type="button"
                 role="tab"
-                aria-selected={section === "ia"}
-                onClick={() => setSection("ia")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${section === "ia"
+                aria-selected={section === "profile"}
+                onClick={() => setSection("profile")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${section === "profile"
                     ? "bg-white text-slate-900 shadow-xs font-semibold"
                     : "text-slate-600 hover:text-slate-900"
                   }`}
               >
-                IA Rows ({selectedRows.length})
+                <span>Style Profile &amp; Red Flags</span>
+                {totalProfileItems > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                    {totalProfileItems}
+                  </span>
+                )}
               </button>
             </div>
 
@@ -468,6 +472,11 @@ export function StylesheetFormDrawer({
                         <div key={sno} className="bg-white p-1.5 rounded border border-emerald-200 text-slate-800">
                           <span className="font-mono font-bold text-emerald-800">R{sno}</span> ({r.rule_name}):{" "}
                           <span className="font-semibold">Option {r.option}</span>
+                          {r.source_label.startsWith("Springer default") ? (
+                            <span className="ml-1 text-[9px] font-bold uppercase text-sky-700 bg-sky-50 border border-sky-200 px-1 rounded">default</span>
+                          ) : (
+                            <span className="ml-1 text-[9px] font-bold uppercase text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 rounded">from sheet</span>
+                          )}
                           <span className="block text-[10px] text-slate-500 truncate" title={r.source_value}>
                             From: "{r.source_label}" → {r.source_value}
                           </span>
@@ -495,77 +504,28 @@ export function StylesheetFormDrawer({
             </div>
           )}
 
-          {section === "ce" ? (
+          {section === "profile" ? (
+            <StyleProfilePanel
+              profile={styleProfile}
+              unresolved={docxImportData?.unresolved_specs ?? []}
+              onChange={setStyleProfile}
+              onBookTypeChange={handleBookTypeChange}
+              isApplyingBookType={isApplyingBookType}
+            />
+          ) : (
             <div>
               {ceRulesQuery.isPending ? (
-                <div className="p-12 text-center text-sm text-muted">Loading checklist rules…</div>
+                <div className="p-12 text-center text-sm text-muted">Loading editorial rules catalog…</div>
               ) : ceRulesQuery.isError ? (
-                <div className="p-12 text-center text-sm text-red-600">The checklist rules could not be loaded. Close and reopen to try again.</div>
+                <div className="p-12 text-center text-sm text-red-600">The editorial rules catalog could not be loaded. Close and reopen to try again.</div>
               ) : (
                 <CERulesEditor
                   rules={ceRulesQuery.data.rules}
-                  selectedRows={linkedSelectedRows}
                   settings={ceRules}
                   onChange={setCeRules}
                   isFullPage={true}
                 />
               )}
-            </div>
-          ) : (
-            <div className="max-w-5xl mx-auto space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-text">Legacy Style Rules from IA Analysis</h3>
-                  <p className="text-xs text-muted">Select specific patterns to enforce from previous publication analyses.</p>
-                </div>
-                <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
-                  {selectedRows.length} rules selected
-                </span>
-              </div>
-              <div className="border border-border rounded-lg bg-white overflow-hidden shadow-xs divide-y divide-border">
-                {groupedRows.map((group) => (
-                  <div key={group.element} className="divide-y divide-border">
-                    <button
-                      type="button"
-                      onClick={() => toggleElement(group.element)}
-                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors text-left"
-                    >
-                      <span className="text-xs font-bold text-text uppercase tracking-wider">{group.element}</span>
-                      <div className="flex items-center gap-2 text-xs text-muted">
-                        <span>{group.rows.length} patterns</span>
-                        {expandedElements.has(group.element) ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </div>
-                    </button>
-                    {expandedElements.has(group.element) && (
-                      <div className="px-4 py-3 bg-slate-50/50 grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {group.rows.map((row, i) => (
-                          <label key={i} className="flex items-start gap-2 p-2 bg-white rounded border border-slate-200 text-xs cursor-pointer hover:border-amber-400 transition-colors">
-                            <input
-                              type="checkbox"
-                              checked={isRowSelected(row)}
-                              onChange={() => toggleRowSelection(row)}
-                              className="mt-0.5 rounded border-border"
-                            />
-                            <div className="min-w-0 flex-1">
-                              <span className="font-mono text-text block truncate">{row.pattern}</span>
-                              {row.subtype && <span className="text-[10px] text-muted block">{row.subtype}</span>}
-                            </div>
-                            {row.ce_rule_no && (
-                              <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
-                                R{row.ce_rule_no} · Opt {row.ce_option}
-                              </span>
-                            )}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>
@@ -667,7 +627,7 @@ export function StylesheetFormDrawer({
               />
             </div>
 
-            <div className="flex gap-1.5" role="tablist">
+            <div className="flex flex-wrap gap-1.5" role="tablist">
               <button
                 type="button"
                 role="tab"
@@ -676,83 +636,47 @@ export function StylesheetFormDrawer({
                 className={`px-3 py-1 rounded-full text-xs font-medium border ${section === "ce" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
                   }`}
               >
-                CE rules ({ceRulesQuery.data?.rules.length ?? 72})
+                Editorial Rules ({ceRulesQuery.data?.rules.length ?? 118})
               </button>
               <button
                 type="button"
                 role="tab"
-                aria-selected={section === "ia"}
-                onClick={() => setSection("ia")}
-                className={`px-3 py-1 rounded-full text-xs font-medium border ${section === "ia" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
+                aria-selected={section === "profile"}
+                onClick={() => setSection("profile")}
+                className={`px-3 py-1 rounded-full text-xs font-medium border flex items-center gap-1 ${section === "profile" ? "bg-primary text-white border-primary" : "bg-white text-text border-border"
                   }`}
               >
-                IA rows ({selectedRows.length})
+                <span>Style profile</span>
+                {totalProfileItems > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
+                    {totalProfileItems}
+                  </span>
+                )}
               </button>
             </div>
 
-            {section === "ce" ? (
+            {section === "profile" ? (
+              <StyleProfilePanel
+                profile={styleProfile}
+                unresolved={docxImportData?.unresolved_specs ?? []}
+                onChange={setStyleProfile}
+                onBookTypeChange={handleBookTypeChange}
+                isApplyingBookType={isApplyingBookType}
+              />
+            ) : (
               <div className="space-y-2">
-                <p className="text-[11px] text-muted">
-                  Options tagged &ldquo;From IA row&rdquo; follow the ticked IA rows. Choosing a different option here overrides that.
-                  &ldquo;Query author&rdquo; options and rules 12, 26 and 28 are never applied automatically.
-                </p>
                 {ceRulesQuery.isPending ? (
-                  <p className="text-xs text-muted">Loading checklist rules…</p>
+                  <p className="text-xs text-muted">Loading editorial rules…</p>
                 ) : ceRulesQuery.isError ? (
-                  <p className="text-xs text-red-600">The checklist rules could not be loaded. Close and reopen the stylesheet to try again.</p>
+                  <p className="text-xs text-red-600">The editorial rules could not be loaded. Close and reopen the stylesheet to try again.</p>
                 ) : (
                   <CERulesEditor
                     rules={ceRulesQuery.data.rules}
-                    selectedRows={linkedSelectedRows}
                     settings={ceRules}
                     onChange={setCeRules}
                     isFullPage={false}
                   />
                 )}
-              </div>
-            ) : (
-              <div>
-                <label className="block text-xs font-semibold text-text mb-2 uppercase tracking-wide">
-                  Style Rules ({selectedRows.length} selected)
-                </label>
-                <div className="border border-border rounded-md bg-sidebar/3 overflow-hidden">
-                  {groupedRows.map((group) => (
-                    <div key={group.element} className="border-b border-border last:border-b-0">
-                      <button
-                        type="button"
-                        onClick={() => toggleElement(group.element)}
-                        className="w-full flex items-center justify-between px-3 py-2 hover:bg-sidebar/5 transition-colors text-left"
-                      >
-                        <span className="text-xs font-semibold text-text">{group.element}</span>
-                        {expandedElements.has(group.element) ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
-                      {expandedElements.has(group.element) && (
-                        <div className="px-3 pb-2 bg-white space-y-1.5 border-t border-border">
-                          {group.rows.map((row, i) => (
-                            <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={isRowSelected(row)}
-                                onChange={() => toggleRowSelection(row)}
-                                className="mt-0.5 rounded border-border"
-                              />
-                              <span className="flex-1 font-mono text-text">{row.pattern}</span>
-                              {row.ce_rule_no && (
-                                <span className="text-[10px] text-muted shrink-0">
-                                  R{row.ce_rule_no} · Opt {row.ce_option}
-                                </span>
-                              )}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
           </div>
@@ -779,17 +703,4 @@ export function StylesheetFormDrawer({
       </div>
     </div>
   );
-}
-
-function groupByElement(rows: IATemplateRow[]): ElementGroup[] {
-  const grouped = new Map<string, IATemplateRow[]>();
-  for (const row of rows) {
-    if (!grouped.has(row.element)) {
-      grouped.set(row.element, []);
-    }
-    grouped.get(row.element)!.push(row);
-  }
-  return Array.from(grouped.entries())
-    .map(([element, items]) => ({ element, rows: items }))
-    .sort((a, b) => a.element.localeCompare(b.element));
 }

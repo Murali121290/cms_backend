@@ -673,6 +673,17 @@ export interface CERule {
   notes: string;
   source_point: number | null;
   detectable: "auto" | "flag" | "manual";
+  /** One entry per option, in the engine's option order (Option N = forms[N-1]). */
+  forms?: CERuleForm[];
+  /** House-style rules 92+ are off until a stylesheet enables them. */
+  default_enabled?: boolean;
+  /** Projected IA patterns detected by this rule */
+  ia_patterns?: { element: string; subtype: string; pattern: string; option: number | null }[];
+}
+
+export interface CERuleForm {
+  label: string;
+  preview: string;
 }
 
 export interface CERulesResponse {
@@ -719,7 +730,7 @@ export interface StylesheetsListResponse {
 export interface StylesheetCreateRequest {
   name: string;
   description?: string | null;
-  selected_ia_rows: IARow[];
+  selected_ia_rows?: IARow[];
   analyzed_file_ids?: number[];
   ce_rules?: CERuleSettings;
   style_profile?: Record<string, unknown>;
@@ -768,9 +779,25 @@ export interface TriggeredIARule {
   ce_option?: number | null;
 }
 
+export interface TriggeredCERuleOption {
+  option: number;
+  label: string;
+  count: number;
+  examples: string[];
+}
+
+export interface TriggeredCERule {
+  sno: number;
+  name: string;
+  dominant_option: number;
+  conflict: boolean;
+  options: TriggeredCERuleOption[];
+}
+
 export interface AnalyzeFilesForStylesheetResponse {
   analyzed_files: { id: number; filename: string }[];
   triggered_rules: TriggeredIARule[];
+  triggered_ce_rules?: TriggeredCERule[];
   total_findings: number;
 }
 
@@ -805,6 +832,38 @@ export interface DocxStylesheetParseResponse {
   word_list: string[];
   total_specs_scanned: number;
   matched_rules_count: number;
+  layout?: "springer_sectioned" | "lww_3table" | string;
+  style_profile?: StyleProfile;
+  unresolved_specs?: UnresolvedSpec[];
+}
+
+export interface WordReplacement {
+  find: string;
+  replace: string;
+  note?: string;
+}
+
+/** Stylesheet lists used by the list-driven rules (word list, acronyms, registered terms, ...). */
+export interface StyleProfile {
+  publisher?: string;
+  book_type?: string;
+  list_style?: string;
+  word_list?: string[];
+  word_replacements?: WordReplacement[];
+  org_names?: WordReplacement[];
+  registered_terms?: string[];
+  acronyms_no_spellout?: string[];
+  avoid_words?: Record<string, string>;
+  ic_preferred?: Record<string, string>;
+  unit_style?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface UnresolvedSpec {
+  row: number;
+  section: string;
+  label: string;
+  value: string;
 }
 
 export interface XhtmlSaveResponse {

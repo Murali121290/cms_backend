@@ -76,6 +76,37 @@ export interface LanguageRule {
   rule_runs_raw?: string[]
   rule_runs_display?: string
   is_generic?: boolean
+  // Basic Grammar workbook metadata (surfaced by workbook_rules_surface
+  // .list_basic_grammar_rules). ``subcategory`` is the human-readable
+  // source-sheet label used for the sub-section grouping on the Rules
+  // Picker and for the finding-card header in the Language Editor.
+  // ``runtime_status`` / ``runtime_status_reason`` / ``reused_by`` let
+  // the Rules Picker show which workbook rules are actually executable
+  // vs reused by an existing engine detector vs disabled for missing
+  // capability. All fields are optional; non-basic_grammar rules omit
+  // them entirely.
+  subcategory?: string
+  rule_name?: string
+  rule_description?: string
+  explanation?: string
+  incorrect_example?: string
+  corrected_example?: string
+  detection_method?: string
+  detection_pattern?: string
+  trigger_condition?: string
+  exception_conditions?: string
+  suggested_correction?: string
+  confidence_level?: string
+  style_dependency?: string
+  validation_status?: string
+  recommended_action?: string
+  false_positive_risks?: string
+  implementation_status?: string
+  detector_id?: string
+  worksheet?: string
+  runtime_status?: 'enabled' | 'reused' | 'disabled' | 'manual_review'
+  runtime_status_reason?: string
+  reused_by?: string | null
   // Pass-through for any extra engine fields we don't care about in the UI.
   [k: string]: unknown
 }

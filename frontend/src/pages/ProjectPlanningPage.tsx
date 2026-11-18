@@ -154,35 +154,41 @@ function buildTrackSchedules(
   const result = new Map<number, StageSchedule[]>()
   if (trackChapters.length === 0 || orderedStages.length === 0) return result
 
-  // Track the due date of the first stage across chapters so due dates stagger progressively
-  // Track the due date of the first stage across planned chapters so due dates stagger progressively
-  let prevFirstStageDue: Date | null = null
-  // Separate stagger tracker for unplanned/new/revised chapters added after project creation
-  let prevUnplannedFirstStageDue: Date | null = null
   const sorted = [...trackChapters].sort(sortChapters)
 
-  for (const ch of sorted) {
-    const isUnplanned = alreadyApproved && plannedChapterNumbers && !plannedChapterNumbers.has(ch.chapters)
-    // Any chapter pending planning (unapproved / revised) starts fresh on the day planning is being reviewed/approved (today)
-    const anchor = isUnplanned
-      ? new Date().toISOString()
-      : (alreadyApproved && !isAdjusting ? (projectCreatedAt || effectiveAnchor) : effectiveAnchor)
+  // Track the operator work finish date per stage across chapters
+  const plannedStagePrevDue = new Map<string, Date>()
+  const unplannedStagePrevDue = new Map<string, Date>()
 
-    const cursor = validDate(anchor)
-    const chOverrides = cellSlas[ch.id] ?? {}
-    const chPages = ch.manuscript_pages != null
-      ? ch.manuscript_pages
-      : (ch.word_count ? Math.ceil(ch.word_count / 250) : null)
+  // Running cumulative pages allocated per stage
+  const plannedCumulativePages = new Map<string, number>()
+  const unplannedCumulativePages = new Map<string, number>()
 
-    const chSched: StageSchedule[] = []
+  // Also maintain chapter's previous stage due date: chapterId -> due date of previous stage
+  const chapterPrevStageDue = new Map<number, Date>()
 
-    for (let stageIdx = 0; stageIdx < orderedStages.length; stageIdx++) {
-      const ws = orderedStages[stageIdx]
+  for (let stageIdx = 0; stageIdx < orderedStages.length; stageIdx++) {
+    const ws = orderedStages[stageIdx]
+    const pageNorm = pageNormMap ? pageNormMap.get(ws.stage_name) : null
+
+    for (const ch of sorted) {
+      const isUnplanned = alreadyApproved && plannedChapterNumbers && !plannedChapterNumbers.has(ch.chapters)
+      const stageTracker = isUnplanned ? unplannedStagePrevDue : plannedStagePrevDue
+      const cumPagesTracker = isUnplanned ? unplannedCumulativePages : plannedCumulativePages
+
+      const anchor = isUnplanned
+        ? new Date().toISOString()
+        : (alreadyApproved && !isAdjusting ? (projectCreatedAt || effectiveAnchor) : effectiveAnchor)
+
       const isCompleted = checkCompleted ? checkCompleted(ch, ws.stage_name) : false
       const dbKey = `${ch.chapters}||${ws.stage_name}`
-      const pageNorm = pageNormMap ? pageNormMap.get(ws.stage_name) : null
 
-      // Individual chapter SLA based on page norm or master SLA
+      const chOverrides = cellSlas[ch.id] ?? {}
+      const chPages = ch.manuscript_pages != null
+        ? ch.manuscript_pages
+        : (ch.word_count ? Math.ceil(ch.word_count / 250) : null)
+
+      // Chapter-level standalone page SLA
       const pageBasedSla = (pageNorm && chPages != null && chPages > 0)
         ? Math.max(1, Math.ceil(chPages / pageNorm))
         : null
@@ -198,40 +204,65 @@ function buildTrackSchedules(
         start = new Date(dbDates[dbKey].start)
         due = new Date(dbDates[dbKey].due)
       } else {
+        // Determine start date:
+        // For Stage 0, starts on the project anchor date.
+        // For Stage > 0, starts the day after this chapter's preceding stage is due.
         if (stageIdx === 0) {
-          // Stage 1 (Job Initiation):
-          // ALL chapters start on Day 1 (anchor date)
-          start = new Date(cursor)
-          const prevStagger = isUnplanned ? prevUnplannedFirstStageDue : prevFirstStageDue
-          if (pageNorm != null && pageNorm > 0 && prevStagger) {
-            // Due date staggers progressively after the previous chapter finishes
-            due = new Date(prevStagger)
-            if (slaDays) due.setDate(due.getDate() + slaDays)
-          } else {
-            due = new Date(start)
-            if (slaDays) due.setDate(due.getDate() + slaDays)
-          }
-          if (isUnplanned) {
-            prevUnplannedFirstStageDue = new Date(due)
-          } else {
-            prevFirstStageDue = new Date(due)
-          }
+          start = validDate(anchor)
         } else {
-          // Subsequent stages:
-          // Starts immediately the day after THIS chapter's preceding stage is due
-          start = new Date(cursor)
+          const prevDue = chapterPrevStageDue.get(ch.id) ?? validDate(anchor)
+          start = new Date(prevDue)
+          start.setDate(start.getDate() + 1)
+        }
+
+        if (ws.stage_name in chOverrides) {
+          // Manual override explicitly set by user for this cell
           due = new Date(start)
-          if (slaDays) due.setDate(due.getDate() + slaDays)
+          if (slaDays != null) due.setDate(due.getDate() + slaDays)
+          stageTracker.set(ws.stage_name, new Date(due))
+        } else if (pageNorm != null && pageNorm > 0 && chPages != null && chPages > 0) {
+          // Continuous cumulative page pooling:
+          const totalPrevPages = cumPagesTracker.get(ws.stage_name) ?? 0
+          const newTotalPages = totalPrevPages + chPages
+          cumPagesTracker.set(ws.stage_name, newTotalPages)
+
+          // Calculate cumulative days needed from the baseline start
+          const totalDaysNeeded = Math.max(1, Math.ceil(newTotalPages / pageNorm))
+          
+          // Stage 0 calculates directly from the anchor start
+          // Subsequent stages also ensure due date is >= start date + chapter's minimal days
+          const baseAnchor = stageIdx === 0 ? validDate(anchor) : start
+          const calculatedDue = new Date(baseAnchor)
+          calculatedDue.setDate(calculatedDue.getDate() + totalDaysNeeded)
+
+          const prevDue = stageTracker.get(ws.stage_name)
+          if (prevDue && calculatedDue < prevDue) {
+            // Due date must never go backwards
+            due = new Date(prevDue)
+          } else {
+            due = calculatedDue
+          }
+
+          stageTracker.set(ws.stage_name, new Date(due))
+        } else {
+          // Standard SLA calculation (no pageNorm or no page count, e.g. Job Initiation with default 1d SLA)
+          // Every chapter simply starts at 'start' and finishes after slaDays (start + slaDays)
+          due = new Date(start)
+          if (slaDays != null) due.setDate(due.getDate() + slaDays)
+          stageTracker.set(ws.stage_name, new Date(due))
         }
       }
 
-      chSched.push({ stageName: ws.stage_name, start, due, slaDays, pageNorm })
-      // Next stage for THIS chapter starts the day after this stage is due
-      cursor.setTime(due.getTime())
-      cursor.setDate(cursor.getDate() + 1)
-    }
+      // Record this chapter's due date for the stage
+      chapterPrevStageDue.set(ch.id, new Date(due))
 
-    result.set(ch.id, chSched)
+      let chSched = result.get(ch.id)
+      if (!chSched) {
+        chSched = []
+        result.set(ch.id, chSched)
+      }
+      chSched.push({ stageName: ws.stage_name, start, due, slaDays, pageNorm })
+    }
   }
 
   return result
@@ -353,7 +384,7 @@ export function ProjectPlanningPage() {
   const [isAdjusting, setIsAdjusting] = useState(false)
   const [previewComposition, setPreviewComposition] = useState<string | null>(null)
   const [cellSlas, setCellSlas] = useState<Record<number, Record<string, number | null>>>({})
-  const [delayMap, setDelayMap] = useState<Map<string, number>>(new Map())
+  const [delayMap, setDelayMap] = useState<Map<string, { days: number; isOverdue: boolean }>>(new Map())
   const [actualFinalDue, setActualFinalDue] = useState<Date | null>(null)
   const [dbDates, setDbDates] = useState<Record<string, { start: Date; due: Date }>>({})
   const [completedStages, setCompletedStages] = useState<Set<string>>(new Set())
@@ -423,7 +454,7 @@ export function ProjectPlanningPage() {
       setWfStagesMap(wfMapObj)
 
       let loaded: Record<number, Record<string, number | null>> = {}
-      let dMap = new Map<string, number>()
+      let dMap = new Map<string, { days: number; isOverdue: boolean }>()
       let datesMap: Record<string, { start: Date; due: Date }> = {}
       let compStages = new Set<string>()
       let histMap = new Map<string, StageHistoryEntry[]>()
@@ -459,15 +490,55 @@ export function ProjectPlanningPage() {
               }
             }
           }
-          if (d.delayed && d.delay_days != null && d.delay_days > 0) {
-            const existing = dMap.get(key) ?? 0
-            if (d.delay_days > existing) dMap.set(key, d.delay_days)
-          }
           if (d.planned_end_date) {
             const due = new Date(d.planned_end_date)
             if (!maxDue || due > maxDue) maxDue = due
           }
         }
+
+        // Calculate delays & overdue days per chapter stage matching workflow logic
+        const todayStr = new Date().toISOString().split('T')[0]
+        const byChMap = new Map<string, any[]>()
+        stageDetails.forEach((d: any) => {
+          if (!byChMap.has(d.chapters)) byChMap.set(d.chapters, [])
+          byChMap.get(d.chapters)!.push(d)
+        })
+
+        byChMap.forEach((chDetails, chName) => {
+          const chSorted = [...chDetails].sort((a: any, b: any) => (a.id || 0) - (b.id || 0))
+          const chObj = chsRaw.find(c => c.chapters === chName)
+          let activeIdx = -1
+          if (chObj?.stage_name) {
+            activeIdx = chSorted.findIndex(s => s.stage_name?.trim().toLowerCase() === chObj.stage_name?.trim().toLowerCase())
+          }
+          if (activeIdx === -1) {
+            activeIdx = chSorted.findIndex(s => {
+              const st = (s.stage_status || '').toLowerCase()
+              return st !== 'completed' && st !== 'complete' && !s.actual_end_date
+            })
+          }
+          if (activeIdx === -1) {
+            activeIdx = chSorted.length - 1
+          }
+
+          chSorted.forEach((s, idx) => {
+            if (idx > activeIdx) return
+            const sEnd = s.planned_end_date ? s.planned_end_date.split('T')[0] : ''
+            const aEnd = s.actual_end_date ? s.actual_end_date.split('T')[0] : ''
+            const isCompleted = Boolean(aEnd || (s.stage_status || '').toLowerCase() === 'completed')
+            const cellKey = `${chName}||${s.stage_name}`
+
+            if (isCompleted && sEnd && aEnd && aEnd > sEnd) {
+              const diff = Math.floor((new Date(aEnd).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+              dMap.set(cellKey, { days: Math.max(1, diff), isOverdue: false })
+            } else if (!isCompleted && idx === activeIdx && sEnd && sEnd < todayStr) {
+              const diff = Math.floor((new Date(todayStr).getTime() - new Date(sEnd).getTime()) / (1000 * 60 * 60 * 24))
+              dMap.set(cellKey, { days: Math.max(1, diff), isOverdue: true })
+            } else if (s.delayed && s.delay_days != null && s.delay_days > 0) {
+              dMap.set(cellKey, { days: s.delay_days, isOverdue: false })
+            }
+          })
+        })
       }
       setCompletedStages(compStages)
       setStageHistoryMap(histMap)
@@ -983,8 +1054,9 @@ export function ProjectPlanningPage() {
         )}
         {chSched.map(s => {
           const isCellEdited = s.slaDays !== (baseSlaMap.get(s.stageName) ?? null)
-          const delayDays = delayMap.get(`${ch.chapters}||${s.stageName}`)
-            ?? (ch.delayed_stages?.[s.stageName] ?? 0)
+          const delayInfo = delayMap.get(`${ch.chapters}||${s.stageName}`)
+          const delayDays = delayInfo ? delayInfo.days : (ch.delayed_stages?.[s.stageName] ?? 0)
+          const isOverdue = delayInfo ? delayInfo.isOverdue : false
           const dbKey = `${ch.chapters}||${s.stageName}`
           const isCompleted = isStageCompleted(ch, s.stageName)
           const isCellEditable = editable && !isCompleted
@@ -1008,19 +1080,37 @@ export function ProjectPlanningPage() {
                 <div className="flex items-center gap-2 text-xs">
                   <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Due</span>
                   {isCompleted ? (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-text font-medium">{fmt(displayDue)}</span>
                       <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50">
                         <CheckCircle2 size={10} className="text-emerald-600 flex-shrink-0" />
                       </span>
+                      {delayDays > 0 && (
+                        <span
+                          className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-red-50 text-red-700 border border-red-200"
+                          title={`Completed with ${delayDays} day${delayDays > 1 ? 's' : ''} delay`}
+                        >
+                          +{delayDays}d delayed
+                        </span>
+                      )}
                     </div>
                   ) : !isCellEditable ? (
-                    <span className={`font-medium ${cellExceedsDue ? 'text-red-600 font-bold' : isCellEdited ? 'text-primary font-bold' : 'text-text'}`}>
-                      {fmt(displayDue)}
-                      {cellExceedsDue && (
-                        <span className="text-[10px] ml-1 text-red-500 font-bold" title={`Exceeds project due date (${projectDueDateStr})`}>⚠️</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`font-medium ${cellExceedsDue ? 'text-red-600 font-bold' : isCellEdited ? 'text-primary font-bold' : 'text-text'}`}>
+                        {fmt(displayDue)}
+                        {cellExceedsDue && (
+                          <span className="text-[10px] ml-1 text-red-500 font-bold" title={`Exceeds project due date (${projectDueDateStr})`}>⚠️</span>
+                        )}
+                      </span>
+                      {delayDays > 0 && (
+                        <span
+                          className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-red-50 text-red-700 border border-red-200"
+                          title={isOverdue ? `${delayDays} day${delayDays > 1 ? 's' : ''} overdue` : `Delayed by ${delayDays} day${delayDays > 1 ? 's' : ''}`}
+                        >
+                          {isOverdue ? `${delayDays}d overdue` : `+${delayDays}d delayed`}
+                        </span>
                       )}
-                    </span>
+                    </div>
                   ) : (
                     <div className="flex items-center gap-1">
                       <input
@@ -1056,11 +1146,6 @@ export function ProjectPlanningPage() {
                           title={`${chEffectivePages} pages ÷ ${s.pageNorm} pgs/day norm = ${Math.ceil(chEffectivePages / s.pageNorm)}d`}
                         >
                           ({chEffectivePages}p ÷ {s.pageNorm})
-                        </span>
-                      )}
-                      {delayDays > 0 && (
-                        <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 ml-1">
-                          +{delayDays}d
                         </span>
                       )}
                     </>

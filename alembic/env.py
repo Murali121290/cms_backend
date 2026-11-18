@@ -82,7 +82,7 @@ def run_migrations_online() -> None:
             connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
             connection.commit()
         except Exception:
-            pass
+            connection.rollback()
 
         context.configure(
             connection=connection, target_metadata=target_metadata

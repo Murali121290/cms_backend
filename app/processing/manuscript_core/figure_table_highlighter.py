@@ -7,7 +7,10 @@ from typing import Dict, List, Tuple, Any, Optional
 from docx import Document
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from word_analyzer_docx import CitationAnalyzer
+try:
+    from word_analyzer_docx import CitationAnalyzer
+except ImportError:
+    from app.processing.legacy.word_analyzer_docx import CitationAnalyzer
 
 
 class FigureTableHighlighter:
