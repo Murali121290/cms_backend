@@ -100,6 +100,58 @@ def build_rules_union(
 DEFAULT_DASH_PROFILE = "all"
 VALID_DASH_PROFILES = ("all", "mw_dictionary", "chicago_ama_apa")
 
+# ─── Style-profile → dash-profile derivation ──────────────────────────────────
+# The Rules UI only saves ``profile_keys`` (editorial styles like apa / ama /
+# chicago / uk / us / canadian). The workbook-driven dash axis has its own
+# namespace (``mw_dictionary`` | ``chicago_ama_apa``) and there is no UI
+# control to pick it directly. This helper closes the gap by mapping an
+# editorial-style selection onto the correct dash profile so the hyphenation
+# engine picks up the right rules without requiring a separate user action.
+#
+# Precedence when the project lists styles from BOTH groups:
+#   * Chicago-group wins over MW-group.
+#
+# Rationale (documented inline so the next reader sees the "why"):
+#   1. ``chicago_ama_apa`` is a strict superset of ``mw_dictionary`` for
+#      hyphenation findings — it adds relationship-pair and joint-eponym
+#      en-dash rules without suppressing anything MW emits. Surfacing more
+#      findings is always safer at review time.
+#   2. Matches README §4: "MW dictionary (default)" is neutral; "Chicago-
+#      AMA-APA: Adds the en dash for relationship pairs and joint eponyms".
+#      Chicago is purposely additive — an editor working under both
+#      styles expects Chicago-only rules (risk-benefit, dose-response)
+#      to still surface.
+#   3. The joint eponyms mostly follow MW ("Kaplan-Meier", "Mann-Whitney")
+#      so a Chicago-dominant project still sees them flagged under the
+#      "both forms accepted" advisory branch from a Chicago lens, and
+#      under the explicit-profile branch when the author used the hyphen
+#      form — exactly the user-facing behaviour the Rules page promises.
+_CHICAGO_GROUP = frozenset({"apa", "ama", "chicago"})
+_MW_GROUP = frozenset({"uk", "us", "canadian"})
+
+
+def derive_dash_profile_from_profile_keys(
+    profile_keys: Optional[list[str]],
+) -> Optional[str]:
+    """Return the dash profile implied by a project's ``profile_keys``
+    selection, or ``None`` when no recognised editorial style is present.
+
+    Callers combine this with the existing ``DEFAULT_DASH_PROFILE`` and the
+    ``VALID_DASH_PROFILES`` validation to decide when derivation applies.
+    Keeping the fallback decision out of this helper lets the save path and
+    the read path share the same mapping while making their own policy
+    choices (persist vs. apply-on-read)."""
+    if not profile_keys:
+        return None
+    norm = {str(k).strip().lower() for k in profile_keys if k}
+    if not norm:
+        return None
+    if norm & _CHICAGO_GROUP:
+        return "chicago_ama_apa"
+    if norm & _MW_GROUP:
+        return "mw_dictionary"
+    return None
+
 # Phase B abbreviations settings persisted in the project sidecar JSON.
 # No DB column — the service treats these as opaque fields on the config
 # dict (Phase E will decide if a column is warranted). Validation is
@@ -570,7 +622,16 @@ def save_project_language_rules(
     )
 
     if dash_profile is None:
-        dash_profile = DEFAULT_DASH_PROFILE
+        # Caller omitted the field — derive from ``profile_keys`` so the
+        # hyphenation engine runs under the style the project actually
+        # picked. ``None`` from the helper means no recognised editorial
+        # style is present (e.g. workbook-only JSONs); fall back to the
+        # backward-compatible default. Callers that explicitly want the
+        # legacy ``"all"`` behaviour pass ``dash_profile="all"``.
+        dash_profile = (
+            derive_dash_profile_from_profile_keys(pkeys)
+            or DEFAULT_DASH_PROFILE
+        )
     elif dash_profile not in VALID_DASH_PROFILES:
         raise ValueError(
             f"Invalid dash_profile {dash_profile!r}; expected one of {VALID_DASH_PROFILES}"
@@ -742,6 +803,23 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
                 # trust the key is present and valid.
                 if data.get("dash_profile") not in VALID_DASH_PROFILES:
                     data["dash_profile"] = DEFAULT_DASH_PROFILE
+                # Upgrade legacy sidecars whose persisted dash profile is the
+                # backward-compat default ``"all"`` to the profile derived
+                # from their editorial-style selection. Projects persisted
+                # before the Rules UI started round-tripping ``dash_profile``
+                # all have ``"all"`` on disk; applying the derivation on
+                # read lets Kaplan-Meier (and the other joint eponyms +
+                # relationship pairs) flag correctly on the next analyze
+                # without forcing every project manager to resave their
+                # rules. Explicit non-default values (``mw_dictionary`` /
+                # ``chicago_ama_apa``) set by an admin via API are left
+                # untouched.
+                if data["dash_profile"] == DEFAULT_DASH_PROFILE:
+                    derived = derive_dash_profile_from_profile_keys(
+                        data.get("profile_keys"),
+                    )
+                    if derived is not None:
+                        data["dash_profile"] = derived
                 # Scope C: older sidecars predate rule_overrides. Normalise
                 # to {} so engine / router consumers never have to None-check.
                 data["rule_overrides"] = _validate_rule_overrides(
@@ -809,7 +887,17 @@ def get_project_language_rules(db: Session, *, project_id: int) -> dict[str, Any
         default_data["project_code"] = project.project_code
     default_data["profile_key"] = "uk"
     default_data["profile_keys"] = ["uk"]
-    default_data["dash_profile"] = DEFAULT_DASH_PROFILE
+    # Mirror the same derivation applied on sidecar read: a brand-new
+    # project with the ``uk`` default lands under ``mw_dictionary`` (its
+    # editorial style group) rather than the neutral ``"all"`` — the same
+    # dash profile the engine would pick once the project manager
+    # explicitly saves the default. Keeps first-analyze behaviour aligned
+    # with resaved-same-settings behaviour so there's no "surprise shift"
+    # once the user touches Save.
+    default_data["dash_profile"] = (
+        derive_dash_profile_from_profile_keys(default_data["profile_keys"])
+        or DEFAULT_DASH_PROFILE
+    )
     default_data["rule_overrides"] = {}
     default_data["audience"] = DEFAULT_AUDIENCE
     default_data["min_uses"] = DEFAULT_MIN_USES
