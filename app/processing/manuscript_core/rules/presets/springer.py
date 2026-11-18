@@ -40,7 +40,7 @@ SPRINGER_CE_RULES: Dict[int, Dict[str, Any]] = {
     8: _on(2),          # spell out Greek letters (beta-blockers)
     9: _on(2),          # mcg, not μg
     10: _on(1),         # vitamin B12 subscript
-    11: _on(1),         # 1,234; leading zero only when the statistic can exceed 1
+    11: _on(1),         # 1,234 (leading zero: R138)
     13: _on(1),         # spell out numbers below 10
     14: _on(2),         # 10 to 20 in text; 10–20 in parentheses and illustrations
     15: _on(1, "Minor"),
@@ -54,6 +54,7 @@ SPRINGER_CE_RULES: Dict[int, Dict[str, Any]] = {
     34: _on(1),
     35: _on(3),         # that is / for example / and so forth in text; e.g., i.e., etc. in parentheses; versus
     36: _on(4),         # Staphylococcus aureus, then S aureus
+    39: _on(1),         # drug names: generic lower case (Trade Name), generic first
     40: _on(1),         # -ic preferred (dermatologic)
     43: _on(1),         # omit ® ™ © except registered terms at first mention (style_profile.registered_terms)
     44: _on(1),
@@ -106,6 +107,8 @@ SPRINGER_CE_RULES: Dict[int, Dict[str, Any]] = {
     119: _on(1),        # headings: no ?, :, parentheticals; 3+ H1s
     120: _on(1),        # bullets: max two levels, capital after stub colon
     121: _off(),        # MCQ rules: Q&A overlay
+    122: _on(1),        # index: lowercase entries, italic See cross-references, no alpha dividers
+    123: _on(1),        # italics for emphasis and defined terms; bold only for key terms
     124: _on(1),        # Seventh Edition
     125: _on(1),        # Editorial Red Flags (DSM quotes, Campinha-Bacote, Wikipedia)
     126: _off(),        # Other Element References
@@ -120,6 +123,10 @@ SPRINGER_CE_RULES: Dict[int, Dict[str, Any]] = {
     135: _off(),        # Spelling Variety
     136: _off(),        # Wrong Usage and Typos
     137: _off(),        # Clinical Jargon and Euphemisms
+    # Points of the July 2026 sheet covered by rules 138+
+    138: _on(2),        # 0.95, but p = .05 / r = .28: zero only when the statistic can exceed 1
+    139: _on(1),        # 10%–20% (repeat %), 10–20 mg
+    141: _on(1),        # era without periods; BCE/CE preferred (red flag on BC/AD)
 }
 
 # ── 2. IA rows (kept for the IA report and the Stylesheet card) ────────────────
@@ -172,6 +179,9 @@ SPRINGER_WORD_LIST: List[str] = [
     "TERCAP®", "time-consuming", "time frame", "timeline", "timetable", "trade-off", "Transition to Practice®",
     "type 2 diabetes", "United States", "U.S.", "vitamin B12", "voice mail", "warm-up", "webpage", "website",
     "well-being", "whistle-blower", "workday", "workup", "workforce", "worldview", "worldwide", "x-ray",
+    # July 2026 sheet: adjective forms and terms listed with notes
+    "day-care", "life-span", "critical-thinking questions", "critical-thinking exercises", "web",
+    "World Wide Web", "past",
 ]
 
 # find -> replace (the "not X" / "change X to Y" entries of the word list)
@@ -188,6 +198,7 @@ SPRINGER_WORD_REPLACEMENTS: List[Dict[str, str]] = [
     {"find": "ob-gyn", "replace": "OB/GYN", "note": "not ob-gyn"},
     {"find": "radiotherapy", "replace": "radiation therapy", "note": "not radiotherapy"},
     {"find": "Silver Springs, MD", "replace": "Silver Spring, MD", "note": "not Springs"},
+    {"find": "Silver Springs MD", "replace": "Silver Spring, MD", "note": "not Springs"},
     {"find": "Elizabeth Kubler-Ross", "replace": "Elisabeth Kübler-Ross", "note": "Word list"},
     {"find": "Elizabeth Kübler-Ross", "replace": "Elisabeth Kübler-Ross", "note": "Word list"},
     {"find": "Mini-Mental Status Examination", "replace": "Mini-Mental State Examination", "note": "not Status"},
@@ -210,6 +221,7 @@ SPRINGER_WORD_REPLACEMENTS: List[Dict[str, str]] = [
     {"find": "caesarean", "replace": "cesarean", "note": "AMA 11.1"},
     {"find": "practica", "replace": "practicums", "note": "plural of practicum"},
     {"find": "postmaster's", "replace": "post-master's", "note": "not postmaster's"},
+    {"find": "postmaster’s", "replace": "post-master’s", "note": "not postmaster’s"},
     {"find": "Pap-smear", "replace": "Pap smear", "note": "Word list"},
     {"find": "cognitive-behavioral therapy", "replace": "cognitive behavioral therapy", "note": "no hyphen"},
     {"find": "cognitive behavior therapy", "replace": "cognitive behavioral therapy", "note": "behavioral, not behavior"},
@@ -398,6 +410,8 @@ SPRINGER_UNIT_STYLE: Dict[str, Any] = {
 }
 
 SPRINGER_RED_FLAGS: List[Dict[str, str]] = [
+    {"pattern": r"\b\d{1,4}\s?B\.?C\.?(?!E)\b|\bA\.?D\.?\s?\d{1,4}\b|\b\d{1,4}\s?A\.?D\.?(?=[\s,.;)]|$)",
+     "message": "Era: use BCE and CE, not BC and AD (e.g., 300 BCE, 1500 CE)."},
     {"pattern": r"\bDSM-(?:IV|IV-TR|III)\b", "message": "DSM-IV: query author to update criteria to DSM-5."},
     {"pattern": r"\bDiagnostic and Statistical Manual(?: of Mental Disorders)?\b",
      "message": "DSM: flag all direct quotations from any edition of the DSM for permissions/accuracy."},

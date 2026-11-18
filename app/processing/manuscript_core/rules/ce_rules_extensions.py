@@ -30,7 +30,8 @@ FORMS: dict[int, list[tuple[str, str]]] = {
     6: [("Closed symbol", "25%"), ("Spaced symbol", "25 %"), ("US spelled", "25 percent"),
         ("UK spelled", "25 per cent"), ("Delta/Margin", "25 percentage points")],
     7: [("Correct operators; spaced + − =", "≥ 5; 5 + 3"), ("Author's dominant form", "as supplied"),
-        ("Query author", "AQ"), ("Clinical: symbols closed up", ">5; ≤10")],
+        ("Query author", "AQ"), ("Clinical: symbols closed up", ">5; ≤10"),
+        ("Words in text, symbols in parentheses and tables (AMA/APA)", "greater than 5; (>5)")],
     8: [("Unicode Greek letter", "β-blockers"), ("Spell out", "beta-blockers"), ("Query author", "AQ")],
     9: [("Micro sign", "10 μg"), ("mcg for dosages", "10 mcg"), ("Spell out", "10 micrograms")],
     10: [("Super/subscript", "CO₂; m²; B₁₂"), ("Replace ^ and _ notation", "10⁻³"), ("Query author", "AQ")],
@@ -51,7 +52,8 @@ FORMS: dict[int, list[tuple[str, str]]] = {
     30: [("Degree sign", "45°"), ("Spelled", "45 degrees"), ("Coordinates", "40° 26′ 46″")],
     35: [("Abbreviated, comma (vs.)", "e.g., / vs."), ("Abbreviated, no comma (vs)", "e.g. / vs"),
          ("English in text, abbreviated in parentheses", "for example, / versus"), ("UK eg. / v.", "eg. / v."),
-         ("No points", "eg / vs")],
+         ("No points", "eg / vs"),
+         ("English in text; eg, ie, vs (no points) in parentheses (AMA)", "for example, / (eg, vs)")],
     36: [("Italic binomial, full", "Staphylococcus aureus"), ("Abbreviate genus after first use", "S. aureus"),
          ("Query author", "AQ"), ("Abbreviate after first use, no period (AMA)", "S aureus")],
     40: [("-ic form", "pathologic"), ("-ical form", "pathological"), ("Query author", "AQ")],
@@ -89,6 +91,13 @@ EXTRA_TE_RULE_IDS: dict[int, list[str]] = {
     46: ["product_name"],
     47: ["wordlist_variant", "org_name_variant"],
     70: ["heading_case_check"],
+}
+
+# Detector rule_ids moved from a workbook rule to a dedicated rule (the workbook rule's
+# options describe something else, so its option keys could not express these forms).
+REMOVED_TE_RULE_IDS: dict[int, list[str]] = {
+    11: ["leading_zero_*"],  # -> R138 Leading Zero
+    17: ["era_*"],           # -> R141 Era Designations
 }
 
 _GROUP_TEXT = "House style: text and punctuation"
@@ -263,6 +272,30 @@ NEW_RULES: list[dict] = [
           "Prefer plain-language terms over clinical jargon or euphemisms.",
           [("Plain-language preferred term", "died; participants"), ("Keep author usage", "as supplied"), ("Query author", "AQ")],
           ["clinical_jargon", "death_euphemism", "subject_terms"], behaviour="Flag and suggest"),
+    # Points stated in LWW AMA / APA editorial style sheets
+    _rule(138, "Leading Zero", _GROUP_NUM,
+          "Zero before a decimal point (0.5). APA: none when the value cannot exceed 1 (p, r, α).",
+          [("Leading zero", "0.5"), ("None where the value cannot exceed 1 (APA)", "r = .45; 0.5 mg"),
+           ("Query author", "AQ")],
+          ["leading_zero_*"]),
+    _rule(139, "Units in Ranges", _GROUP_NUM,
+          "Repeat %, ° and °C with each number of a range (25%–30%); give other units once (10–20 mg).",
+          [("Repeat %, °; other units once", "25%–30%; 10–20 mg"), ("Repeat every unit", "10 mg–20 mg"),
+           ("Query author", "AQ")],
+          ["unitrep_*"]),
+    _rule(140, "Circa", _GROUP_NUM, "Abbreviation for circa before a year.",
+          [("ca (no period)", "ca 1850"), ("c.", "c. 1850"), ("circa", "circa 1850")],
+          ["circa_style"]),
+    _rule(141, "Era Designations", _GROUP_NUM,
+          "AD/BC/CE/BCE without periods (set in small capitals) or with periods.",
+          [("No periods (small caps)", "AD 1500; 300 BC"), ("Periods", "A.D. 1500; 300 B.C."), ("Query author", "AQ")],
+          ["era_*"]),
 ]
+
+# Rules that take over detectors which were on for every project: they stay on by default
+# with option 1 (the form those detectors produced) so existing output does not change.
+for _r in NEW_RULES:
+    if _r["sno"] in (138, 141):
+        _r["default_enabled"] = True
 
 NEW_RULE_NOS = {r["sno"] for r in NEW_RULES}

@@ -168,6 +168,30 @@ def test_without_captions_or_snapshot_headers_still_work(exported):
     assert [c["id"] for c in result["changes"]] == ["rule:6"]
 
 
+def test_reference_style_round_trip_from_lww_sheet():
+    """An LWW sheet's reference style and instructions are exported; reference edits are read back."""
+    from app.processing.manuscript_core.parsers.docx_stylesheet_parser import DocxStylesheetParser
+    fixture = os.path.join(os.path.dirname(__file__), "fixtures", "lww_ama_style_sheet.docx")
+    parsed = DocxStylesheetParser().parse(open(fixture, "rb").read())
+    ce = {k: {"enabled": v["enabled"], "option": v["option"]} for k, v in parsed["matched_ce_rules"].items()}
+    data = {"id": 9, "name": "AMA", "content_hash": "h", "ce_rules": ce, "style_profile": parsed["style_profile"]}
+    content = exp.build_style_sheet_docx(data, {})
+    assert imp.preview_docx_changes(content, data)["changes"] == []
+
+    d = docx.Document(io.BytesIO(content))
+    headings = [p.text.split("  ", 1)[1] for p in d.paragraphs if p.text[:2].strip().isdigit() and "  " in p.text]
+    assert "References" in headings and "Instructions from the style sheet" in headings
+    refs = _tables(d, exp.CAP_REFS)[0]
+    row = next(r for r in refs.rows if r.cells[0].text.startswith("Authors listed"))
+    assert row.cells[1].text == "6"
+    row.cells[1].paragraphs[0].runs[0].text = "10"
+    result = imp.preview_docx_changes(_save(d), data)
+    assert [(c["id"], c["after"]) for c in result["changes"]] == [("reference:list_all_authors_up_to", "10")]
+    _, profile, _ = imp.apply_docx_changes(data, result["changes"], ["reference:list_all_authors_up_to"])
+    assert profile["reference_style"]["list_all_authors_up_to"] == 10
+    assert profile["reference_style"]["citation"] == "superscript numbered"
+
+
 def test_customer_docx_uses_existing_parser():
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "springer_style_sheet_july2026.docx")
     with open(fixture, "rb") as f:

@@ -115,7 +115,8 @@ export function StylesheetFormDrawer({
         };
       }
       setCeRules(newCeRules);
-      setStyleProfile(res.style_profile ?? {});
+      // Merge: the sheet's word list, units and reference style are added to what is already set
+      setStyleProfile((prev) => ({ ...prev, ...(res.style_profile ?? {}) }));
 
       // Switch to Editorial Rules tab so user immediately sees imported rules
       setSection("ce");
@@ -472,6 +473,14 @@ export function StylesheetFormDrawer({
                 <span>
                   <strong>{docxImportData.word_list.length}</strong> publisher word list terms extracted
                 </span>
+                {(docxImportData.unresolved_specs?.length ?? 0) > 0 && (
+                  <>
+                    <span>•</span>
+                    <span className="text-amber-800" title="Stated in the sheet but not covered by a checklist rule — see Style Profile › Unresolved Specs">
+                      <strong>{docxImportData.unresolved_specs.length}</strong> points not mapped to a rule
+                    </span>
+                  </>
+                )}
               </div>
 
               {showDocxDetails && (
@@ -487,6 +496,8 @@ export function StylesheetFormDrawer({
                           <span className="font-semibold">Option {r.option}</span>
                           {r.source_label.startsWith("Springer default") ? (
                             <span className="ml-1 text-[9px] font-bold uppercase text-sky-700 bg-sky-50 border border-sky-200 px-1 rounded">default</span>
+                          ) : r.source_label.endsWith("(book specific)") ? (
+                            <span className="ml-1 text-[9px] font-bold uppercase text-violet-700 bg-violet-50 border border-violet-200 px-1 rounded">book specific</span>
                           ) : (
                             <span className="ml-1 text-[9px] font-bold uppercase text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 rounded">from sheet</span>
                           )}

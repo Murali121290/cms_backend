@@ -58,7 +58,11 @@ _HEADERS = {
     ("USE", "NOT"): exp.CAP_ORGS,
     ("AVOID", "USE"): exp.CAP_AVOID,
     ("SETTING", "HOUSE STYLE"): exp.CAP_UNITS,
+    ("REFERENCE POINT", "HOUSE STYLE"): exp.CAP_REFS,
 }
+_REF_KEYS = {_norm_label: key for _norm_label, key in
+             ((re.sub(r"\s+", " ", label).strip().lower(), key) for label, key in exp.REFERENCE_ROWS)}
+_REF_INT_KEYS = {"list_all_authors_up_to", "et_al_after_first"}
 _UNIT_SETTINGS = {"book type": "book_type", "list style": "list_style"}
 
 
@@ -96,6 +100,7 @@ class ParsedSheet:
     lists: dict[str, dict] = field(default_factory=lambda: {k: {} for k in LIST_KEYS})
     settings: dict[str, str | None] = field(default_factory=dict)  # book_type / list_style
     units: dict[str, str] = field(default_factory=dict)            # other unit rows (info only)
+    references: dict[str, Any] = field(default_factory=dict)       # style_profile.reference_style
     found: set[str] = field(default_factory=set)                   # table keys present in the .docx
     warnings: list[str] = field(default_factory=list)
 
@@ -249,6 +254,23 @@ def parse_style_sheet_docx(content: bytes) -> ParsedSheet:
                     out.lists["avoid_words"][_norm(a)] = {"avoid": a, "use": u}
                 elif a or u:
                     out.warnings.append(f"Words to avoid: the row \"{a or u}\" needs both Avoid and Use; ignored.")
+        elif key == exp.CAP_REFS:
+            for row in body:
+                cells = row.cells
+                if len(cells) < 2:
+                    continue
+                ref_key = _REF_KEYS.get(_norm(cells[0].text))
+                value = cells[1].text.strip()
+                if not ref_key or not value:
+                    continue
+                if ref_key in _REF_INT_KEYS:
+                    m = re.search(r"\d+", value)
+                    if not m:
+                        out.warnings.append(f"References: “{cells[0].text.strip()}” needs a number; ignored.")
+                        continue
+                    out.references[ref_key] = int(m.group(0))
+                else:
+                    out.references[ref_key] = value
         elif key == exp.CAP_UNITS:
             for row in body:
                 cells = row.cells
@@ -496,6 +518,22 @@ def _diff_s4c(doc: ParsedSheet, current: dict, warnings: list[str]) -> list[dict
                                (cur or "—").replace("_", " ").title(), (new or "—").replace("_", " ").title(),
                                "Changed in both places since the export." if conflict else "",
                                selected=not conflict, setting=key, value=new))
+    # Reference style (citation style, author list, order)
+    if exp.CAP_REFS in doc.found:
+        cur_ref = profile.get("reference_style") or {}
+        base_ref = base_profile.get("reference_style") or {}
+        for label, key in exp.REFERENCE_ROWS:
+            new, old, cur = doc.references.get(key), base.references.get(key), cur_ref.get(key)
+            if new is None and old is None:
+                continue
+            if _norm(new) == _norm(old) or _norm(new) == _norm(cur):
+                continue
+            conflict = _norm(cur) != _norm(base_ref.get(key))
+            changes.append(_change(f"reference:{key}", "settings", "conflict" if conflict else
+                                   ("removed" if new is None else "changed"), f"reference_style.{key}", label,
+                                   None if cur is None else str(cur), None if new is None else str(new),
+                                   "Changed in both places since the export." if conflict else "",
+                                   selected=not conflict and new is not None, reference=key, value=new))
     for name, value in doc.units.items():
         if _norm(value) != _norm(base.units.get(name, value)):
             warnings.append(f"Units and conventions: “{name}” was edited. This row is information only; the edit was ignored.")
@@ -587,6 +625,13 @@ def apply_docx_changes(current: dict, changes: list[dict], accepted: list[str],
                         raise DocxImportError(f"Option {opt} is not an option of R{sno}.")
                 entry = {**entry, "enabled": True, "option": opt}
             ce_rules[sno] = entry
+        elif ch["section"] == "settings" and ch.get("reference"):
+            ref = dict(profile.get("reference_style") or {})
+            if ch["value"] is None:
+                ref.pop(ch["reference"], None)
+            else:
+                ref[ch["reference"]] = ch["value"]
+            profile["reference_style"] = ref
         elif ch["section"] == "settings":
             profile[ch["setting"]] = ch["value"]
         else:

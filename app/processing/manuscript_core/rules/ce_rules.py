@@ -52,7 +52,12 @@ IA_ROW_TO_CE: dict[tuple[str, str], tuple[int, int]] = {
     ("Degree symbol", "° (bare degree)"): (30, 1),
     ("Thousand separator (use/non-use)", "1,000 (comma)"): (11, 1),
     ("Thousand separator (use/non-use)", "1000 (none)"): (11, 3),
-    ("Leading zero", "0.^#"): (11, 1),
+    ("Leading zero", "0.^#"): (138, 1),
+    ("Leading zero (NO)", ".^#"): (138, 2),
+    ("Era", "AD"): (141, 1),
+    ("Era", "BC"): (141, 1),
+    ("Era", "A.D."): (141, 2),
+    ("Era", "B.C."): (141, 2),
     ("Ordinals - numerals", "^#th"): (13, 1),
     ("Ordinals - spelled out", "first, second, … hundredth, thousandth"): (13, 1),
     ("Fractions", "½ [symbol]"): (16, 1),
@@ -142,7 +147,8 @@ def load_catalog() -> list[dict]:
             r["options"] = [label for label, _ in forms]
         else:
             r["forms"] = [{"label": o, "preview": o} for o in r["options"]]
-        r["te_rule_ids"] = list(r["te_rule_ids"]) + ext.EXTRA_TE_RULE_IDS.get(r["sno"], [])
+        removed = set(ext.REMOVED_TE_RULE_IDS.get(r["sno"], []))
+        r["te_rule_ids"] = [i for i in r["te_rule_ids"] if i not in removed] + ext.EXTRA_TE_RULE_IDS.get(r["sno"], [])
         r.setdefault("default_enabled", True)
     known = {r["sno"] for r in rules}
     for nr in ext.NEW_RULES:

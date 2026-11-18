@@ -12,7 +12,7 @@ from app.processing.manuscript_core.fixer import apply_fixes_targeted, apply_te_
 # Cache directory inside the app workspace
 RESULTS_DIR = Path(__file__).parent.parent.parent / "processing" / "results"
 # Bump when detectors change so cached scans made by older rule code are re-run.
-SCAN_ENGINE_VERSION = "2026.11-house-style-7"
+SCAN_ENGINE_VERSION = "2026.11-house-style-8"  # R138-R141, R7 opt 5, R35 opt 6
 
 def _map_findings_to_legacy_issues(findings: list[dict]) -> list[dict]:
     """Maps rich occurrences back to legacy issues schema for backward compatibility."""

@@ -473,7 +473,7 @@ export function StyleProfilePanel({
             </div>
           ))}
           <p className="px-3 py-2 text-[10px] text-slate-400 italic bg-slate-50">
-            These layout specifications (running heads, trim sizes, permissions) are cataloged for reference.
+            Points stated in the style sheet that no checklist rule covers. They are kept for reference; apply them manually.
           </p>
         </div>
       )}

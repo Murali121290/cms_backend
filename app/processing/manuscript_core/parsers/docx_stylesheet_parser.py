@@ -84,12 +84,20 @@ class DocxStylesheetParser:
         if is_sectioned_layout(doc):
             return self._parse_sectioned(doc)
 
+        from app.processing.manuscript_core.parsers.lww_sheet import match_spec_rows, read_spec_rows, read_word_list
+
         metadata = self._extract_metadata(doc)
         specs = self._extract_specifications(doc)
-        word_list = self._extract_word_list(doc)
+        spec_rows, editor_notes = read_spec_rows(doc)
+        word_list = read_word_list(doc)
 
         preset_id = self._detect_preset(metadata, specs, doc)
-        matched_ce_rules = self._match_ce_rules(specs, preset_id)
+        # Row -> rule matchers (lww_sheet): every stated point selects its rule and option,
+        # the Book Specific column overrides the manual's column, unmatched points are reported.
+        lww_rules, unresolved_specs, sheet_profile = match_spec_rows(spec_rows, preset_id)
+        matched_ce_rules = {str(sno): self._rule_entry(sno, {**cfg, "enabled": True}) for sno, cfg in lww_rules.items()}
+        for sno, cfg in lww_rules.items():
+            matched_ce_rules[str(sno)]["book_specific"] = cfg.get("book_specific", False)
         matched_ia_rows = self._match_ia_rows(specs, preset_id)
 
         # Single source in storage: feed matched IA rows into ia_row_to_rule to enrich matched_ce_rules
@@ -118,12 +126,23 @@ class DocxStylesheetParser:
         # Ensure all rule keys are strictly strings for Pydantic schema validation
         matched_ce_rules = {str(k): v for k, v in matched_ce_rules.items()}
 
-        style_profile: Dict[str, Any] = {}
+        # Style profile from the sheet: word list (Table 2 + "Miscellaneous" terms), unit
+        # abbreviations and preferences, gas abbreviations, reference style, editor notes.
+        style_profile: Dict[str, Any] = dict(sheet_profile)
+        for w in style_profile.pop("word_list", []):
+            if w not in word_list:
+                word_list.append(w)
+        if word_list:
+            style_profile["word_list"] = list(word_list)
+        if editor_notes:
+            style_profile["editor_notes"] = editor_notes
+        style_profile["source_doc"] = {"title": metadata.get("Book Title") or metadata.get("Project") or "",
+                                       "layout": "lww_3table", "manual": preset_id}
         if preset_id == "springer":
             from app.processing.manuscript_core.rules.presets.springer import get_springer_preset
             preset = get_springer_preset()
             self._fill_from_preset(matched_ce_rules, matched_ia_rows, preset)
-            style_profile = preset["style_profile"]
+            style_profile = {**preset["style_profile"], **{k: v for k, v in style_profile.items() if k != "word_list"}}
             seen_words = set(word_list)
             for w in style_profile["word_list"]:
                 if w not in seen_words:
@@ -172,7 +191,7 @@ class DocxStylesheetParser:
             "matched_rules_count": len(matched_ce_rules),
             "layout": "lww_3table",
             "style_profile": style_profile,
-            "unresolved_specs": [],
+            "unresolved_specs": unresolved_specs,
         }
 
     # ------------------------------------------------------------------

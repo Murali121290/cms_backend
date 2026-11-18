@@ -41,6 +41,14 @@ CAP_ACRONYMS = "s4c:acronyms"
 CAP_REGISTERED = "s4c:registered"
 CAP_AVOID = "s4c:avoid_words"
 CAP_UNITS = "s4c:units"
+CAP_REFS = "s4c:reference_style"
+# Reference-style rows: (label, style_profile.reference_style key)
+REFERENCE_ROWS = (
+    ("Citation style", "citation"),
+    ("Authors listed in full (up to)", "list_all_authors_up_to"),
+    ("Then first authors + et al", "et_al_after_first"),
+    ("Reference list order", "order"),
+)
 TERM_SEPARATOR = "; "  # approved terms may contain commas ("Silver Spring, MD")
 LOGO_PATH = Path(__file__).resolve().parents[1] / "static" / "logo.png"
 
@@ -515,6 +523,9 @@ def build_style_sheet_docx(data: dict, project: Any) -> bytes:
         ("Book type", str(profile.get("book_type") or "—").replace("_", " ").title()),
         ("List style", str(profile.get("list_style") or "—").title()),
     ]
+    preferred = units.get("preferred") or {}
+    if preferred:
+        rows.insert(3, ("Preferred unit symbols", "; ".join(f"{k}: {v}" for k, v in preferred.items())))
     w.heading("Units and conventions")
     wu = [Cm(6.5), Cm(10.6)]
     t = w.table(["Setting", "House style"], wu, CAP_UNITS)
@@ -522,6 +533,36 @@ def build_style_sheet_docx(data: dict, project: Any) -> bytes:
         c = w.row(t, wu, band=bool(k % 2))
         _write(c[0], a, bold=True, size=9)
         _write(c[1], b, size=9)
+
+    # References (citation style, author list): editable, read back on import
+    ref = profile.get("reference_style") or {}
+    if any(ref.get(key) not in (None, "") for _, key in REFERENCE_ROWS):
+        w.heading("References", "Citation and reference-list style. The reference module applies these points.")
+        wr = [Cm(6.5), Cm(10.6)]
+        t = w.table(["Reference point", "House style"], wr, CAP_REFS)
+        k = 0
+        for label, key in REFERENCE_ROWS:
+            if ref.get(key) in (None, ""):
+                continue
+            c = w.row(t, wr, band=bool(k % 2))
+            _write(c[0], label, bold=True, size=9)
+            _write(c[1], str(ref[key]), size=9)
+            k += 1
+
+    # Instructions carried over from the customer's style sheet (information only)
+    notes = [n for n in (profile.get("editor_notes") or []) if isinstance(n, dict) and n.get("text")]
+    if notes:
+        w.heading("Instructions from the style sheet")
+        for n in notes:
+            lines = [ln.strip() for ln in str(n["text"]).split("\n") if ln.strip()]
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(4)
+            p.paragraph_format.keep_with_next = True
+            _run(p, lines[0] if lines else str(n.get("label", "")), bold=True, size=9.5)
+            for ln in lines[1:]:
+                q = doc.add_paragraph(style="List Bullet")
+                q.paragraph_format.space_after = Pt(0)
+                _run(q, ln, size=9)
 
     # Notes and sign-off
     w.heading("Notes and sign-off")
