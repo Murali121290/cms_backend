@@ -6,6 +6,12 @@ export interface TermList {
   description: string | null
   scope: 'client' | 'generic'
   client_id: number | null
+  /** Display name of the associated Client (``Client.company`` on the
+   *  backend). Populated for scope='client' rows; ``null`` for generic
+   *  rows or when the client row was removed via ``ON DELETE SET NULL``.
+   *  The Term Library card falls back to the plain ``Client`` badge
+   *  label when this is absent. */
+  client_name?: string | null
   source_file: string | null
   term_count: number
   is_active: boolean
