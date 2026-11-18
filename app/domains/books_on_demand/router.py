@@ -96,6 +96,8 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "dispatched_at": job.dispatched_at,
             "is_fastrack": bool(job.is_fastrack),
             "fastrack_requested_date": job.fastrack_requested_date,
+            "version": job.version,
+            "reopen_history": job.reopen_history or [],
             "file_history": job.file_history or [],
             "hold_support_history": job.hold_support_history or [],
             "epubcheck_report_filepath": job.epubcheck_report_filepath,
@@ -153,6 +155,8 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "dispatched_at": job.dispatched_at,
         "is_fastrack": bool(job.is_fastrack),
         "fastrack_requested_date": job.fastrack_requested_date,
+        "version": job.version,
+        "reopen_history": job.reopen_history or [],
         "file_history": job.file_history or [],
         "hold_support_history": job.hold_support_history or [],
         "epubcheck_report_filepath": job.epubcheck_report_filepath,
@@ -442,6 +446,8 @@ def get_customer_report(
             "customer_due_date": customer_due,
             "is_fastrack": bool(job.is_fastrack),
             "fastrack_requested_date": job.fastrack_requested_date,
+            "version": job.version,
+            "reopen_history": job.reopen_history or [],
             "due_date_history": job.due_date_history
         })
     return {"jobs": report}
@@ -753,6 +759,250 @@ def update_job_hold_support(
         "hold_support_history": job.hold_support_history,
         "due_date_history": job.due_date_history
     }
+
+
+class BodReopenRequest(BaseModel):
+    reason: str
+
+
+@router.post("/jobs/{job_id}/reopen")
+def reopen_job(
+    job_id: int,
+    reason: str = Form(...),
+    files: List[UploadFile] = File(default=[]),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """
+    Reopens an already completed job for corrections.
+    Accepts correction reason and optional attachments (image, pdf, excel, docx).
+    Moves the job to QC stage (YTS unassigned) and updates version (R1, R2, ...).
+    """
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    reason_str = (reason or "").strip()
+    if not reason_str:
+        raise HTTPException(status_code=400, detail="Correction Reason is required to reopen the job")
+
+    if job.status != "Completed" and job.current_stage_name != "Archive":
+        raise HTTPException(status_code=400, detail="Only completed jobs can be reopened")
+
+    fn = (getattr(current_user, "first_name", None) or "").strip() if current_user else ""
+    ln = (getattr(current_user, "last_name", None) or "").strip() if current_user else ""
+    if fn and ln:
+        full_name = fn if (fn.endswith(f" {ln}") or fn.endswith(ln)) else f"{fn} {ln}"
+    else:
+        full_name = fn or ln or getattr(current_user, "username", getattr(current_user, "user_name", "Unknown")) if current_user else "Unknown"
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Calculate next version: R1, R2, R3...
+    existing_reopens = list(job.reopen_history) if job.reopen_history else []
+    next_ver_num = len(existing_reopens) + 1
+    new_version = f"R{next_ver_num}"
+
+    # Previous stage/status
+    prev_stage = job.current_stage_name
+    prev_status = job.status
+
+    # Save uploaded files into project directory
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    project_name = job.project_name or str(job.id)
+    reopen_files_dir = os.path.join(upload_dir, "bod", "BOD", project_name, "reopen_attachments", new_version)
+    os.makedirs(reopen_files_dir, exist_ok=True)
+
+    saved_attachments = []
+    allowed_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".xlsx", ".xls", ".csv", ".doc", ".docx"}
+
+    for upload_file in files:
+        if not upload_file or not upload_file.filename:
+            continue
+        orig_name = os.path.basename(upload_file.filename)
+        _, ext = os.path.splitext(orig_name)
+        if ext.lower() not in allowed_extensions:
+            continue
+
+        safe_filename = f"{new_version}_{orig_name}"
+        dest_path = os.path.join(reopen_files_dir, safe_filename)
+        with open(dest_path, "wb") as buffer:
+            shutil.copyfileobj(upload_file.file, buffer)
+
+        file_size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+        saved_attachments.append({
+            "filename": orig_name,
+            "saved_filename": safe_filename,
+            "filepath": dest_path,
+            "size": file_size,
+            "uploaded_at": now_iso
+        })
+
+    # Record in reopen_history
+    reopen_entry = {
+        "version": new_version,
+        "reason": reason_str,
+        "reopened_by": full_name,
+        "reopened_at": now_iso,
+        "previous_stage": prev_stage,
+        "previous_status": prev_status,
+        "attachments": saved_attachments
+    }
+    existing_reopens.append(reopen_entry)
+    job.reopen_history = existing_reopens
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(job, "reopen_history")
+
+    job.version = new_version
+
+    # Move job to stage: QC, status: Active, current_assignee: None (YTS)
+    settings = get_settings()
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
+    stages = [s.strip() for s in stages_str.split(",")]
+    qc_index = stages.index("QC") if "QC" in stages else 3
+
+    job.current_stage_name = "QC"
+    job.current_stage_index = qc_index
+    job.current_assignee = None
+    job.status = "Active"
+
+    # Preserve previous completed QC stage runs under stage_history without overwriting
+    history = dict(job.stage_history) if job.stage_history else {}
+    qc_data = dict(history.get("QC", {})) if history.get("QC") else {}
+
+    # Extract existing runs list or initialize with the initial run (R0)
+    prev_runs = list(qc_data.get("runs", []))
+    if not prev_runs and qc_data.get("start_time"):
+        # Save original R0 run before resetting
+        prev_runs.append({
+            "version": "R0",
+            "start_time": qc_data.get("start_time"),
+            "end_time": qc_data.get("end_time"),
+            "assignee": qc_data.get("assignee")
+        })
+
+    # Add the current active cycle entry
+    current_run = {
+        "version": new_version,
+        "start_time": now_iso,
+        "end_time": None,
+        "assignee": None
+    }
+    prev_runs.append(current_run)
+
+    # Set QC data with current cycle info and all previous runs preserved
+    qc_data["start_time"] = now_iso
+    qc_data["end_time"] = None
+    qc_data["assignee"] = None
+    qc_data["version"] = new_version
+    qc_data["runs"] = prev_runs
+    history["QC"] = qc_data
+    job.stage_history = history
+    flag_modified(job, "stage_history")
+
+    # Add assignment history entry
+    hist_list = list(job.assigned_users) if job.assigned_users else []
+    hist_list.append({
+        "user_id": None,
+        "stage": "QC",
+        "time": now_iso,
+        "assigned_by": full_name,
+        "action": f"Reopened to QC ({new_version}): {reason}"
+    })
+    job.assigned_users = hist_list
+    flag_modified(job, "assigned_users")
+
+    # Add audit entry in due_date_history
+    audit_entry = {
+        "field": "Reopen",
+        "version": new_version,
+        "old_status": prev_status,
+        "new_status": "Active",
+        "reason": reason_str,
+        "action": f"Reopened ({new_version})",
+        "changed_by": full_name,
+        "timestamp": now_iso,
+        "attachments_count": len(saved_attachments),
+        "changes": [
+            {
+                "field": "Stage",
+                "old": prev_stage,
+                "new": "QC"
+            },
+            {
+                "field": "Status",
+                "old": prev_status,
+                "new": "Active"
+            },
+            {
+                "field": "Version",
+                "old": job.version,
+                "new": new_version
+            }
+        ]
+    }
+    due_history = list(job.due_date_history) if job.due_date_history else []
+    due_history.append(audit_entry)
+    job.due_date_history = due_history
+    flag_modified(job, "due_date_history")
+
+    db.commit()
+    db.refresh(job)
+
+    return {
+        "status": "success",
+        "message": f"Job reopened successfully as version {new_version}",
+        "version": job.version,
+        "reopen_history": job.reopen_history,
+        "job": {
+            "id": job.id,
+            "version": job.version,
+            "status": job.status,
+            "current_stage_name": job.current_stage_name,
+            "current_assignee": job.current_assignee,
+            "reopen_history": job.reopen_history,
+            "stage_history": job.stage_history
+        }
+    }
+
+
+@router.get("/jobs/{job_id}/reopen-attachments/{version}/{filename}")
+def download_reopen_attachment(
+    job_id: int,
+    version: str,
+    filename: str,
+    db: Session = Depends(get_db)
+):
+    """Download an attachment uploaded during a job reopen cycle."""
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    project_name = job.project_name or str(job.id)
+    reopen_files_dir = os.path.join(upload_dir, "bod", "BOD", project_name, "reopen_attachments", version)
+
+    # Sanitize filename
+    safe_target = os.path.basename(filename)
+    dest_path = os.path.join(reopen_files_dir, safe_target)
+
+    # Also search by matching filename without the prefix if needed
+    if not os.path.exists(dest_path):
+        prefixed = f"{version}_{safe_target}"
+        dest_path_prefixed = os.path.join(reopen_files_dir, prefixed)
+        if os.path.exists(dest_path_prefixed):
+            dest_path = dest_path_prefixed
+
+    if not os.path.exists(dest_path) or not os.path.isfile(dest_path):
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    display_name = safe_target
+    if display_name.startswith(f"{version}_"):
+        display_name = display_name[len(version) + 1:]
+
+    return FileResponse(path=dest_path, filename=display_name)
 
 
 @router.put("/jobs/{job_id}/due-date")
@@ -1085,6 +1335,12 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     current_stage = job.current_stage_name
     stage_data = history.get(current_stage, {})
     stage_data["end_time"] = now_iso
+    if current_stage == "QC" and "runs" in stage_data:
+        runs = list(stage_data.get("runs", []))
+        if runs:
+            runs[-1]["end_time"] = now_iso
+            runs[-1]["assignee"] = job.current_assignee
+            stage_data["runs"] = runs
     history[current_stage] = stage_data
     
     # If currently at Ready to Dispatch, advancing requires FTP upload success

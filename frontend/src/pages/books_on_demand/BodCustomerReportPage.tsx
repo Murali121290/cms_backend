@@ -783,7 +783,7 @@ export function BodCustomerReportPage() {
               onClick={() => navigate('/bod/internal')}
               className="flex items-center gap-2 px-4 py-2.5 bg-card border border-border hover:bg-muted/30 text-text font-medium rounded-lg transition-colors shadow-sm text-sm"
             >
-              <Layers size={16} className="text-primary" /> BOD Job Pages
+              <Layers size={16} className="text-primary" /> Productions
             </button>
             <button onClick={downloadReport} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg font-medium text-sm transition-colors shadow-sm">
               <Download size={16} /> Export Report
@@ -1436,15 +1436,14 @@ export function BodCustomerReportPage() {
                                     handleFastrackClick(e, job)
                                   }}
                                   disabled={completed || togglingFastrackId === job.id}
-                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-all shadow-xs select-none ${
-                                    completed
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-all shadow-xs select-none ${completed
                                       ? job.is_fastrack
                                         ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
                                         : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
                                       : job.is_fastrack
                                         ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
                                         : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
-                                  }`}
+                                    }`}
                                   title={
                                     completed
                                       ? "Job completed — Fastrack status is locked"
@@ -1548,11 +1547,10 @@ export function BodCustomerReportPage() {
               <div className="bg-muted/30 border border-border/60 rounded-lg p-2.5 text-xs text-muted flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-text">Current Status:</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    fastrackModalJob.is_fastrack 
-                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40' 
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${fastrackModalJob.is_fastrack
+                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40'
                       : 'bg-muted text-muted-foreground'
-                  }`}>
+                    }`}>
                     {fastrackModalJob.is_fastrack ? 'Fastrack Active' : 'Normal Priority'}
                   </span>
                 </div>

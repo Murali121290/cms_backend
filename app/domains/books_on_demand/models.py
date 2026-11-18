@@ -37,6 +37,8 @@ class BodJob(Base):
     fastrack_requested_date = Column(DateTime(timezone=True), nullable=True)
     file_history = Column(JSON, nullable=False, default=list) # [{"filename": "...", "backup_filename": "...", "backup_filepath": "...", "uploaded_by": "...", "timestamp": "...", "stage": "..."}]
     hold_support_history = Column(JSON, nullable=False, default=list) # [{"id": "...", "type": "Hold"|"Support", "status": "Open"|"Resolved", "query_reason": "...", "created_by": "...", "created_at": "...", "resolution_notes": "...", "resolved_by": "...", "resolved_at": "..."}]
+    version = Column(String(50), nullable=True) # e.g. "R1", "R2", etc.
+    reopen_history = Column(JSON, nullable=False, default=list) # [{"version": "R1", "reason": "...", "reopened_by": "...", "reopened_at": "...", "previous_stage": "..."}]
 
 
 class BodCsvEntry(Base):

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X, Image as ImageIcon, PauseCircle, HelpCircle, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X, Image as ImageIcon, PauseCircle, HelpCircle, AlertTriangle, RotateCcw, Paperclip, File } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -43,11 +43,17 @@ export function BodInternalJobPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [isUploadingCover, setIsUploadingCover] = useState(false)
   const [isOpeningValidator, setIsOpeningValidator] = useState(false)
-  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files' | 'status'>('stage')
+  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files' | 'status' | 'reopen'>('stage')
   const [holdSupportFilter, setHoldSupportFilter] = useState<'all' | 'Hold' | 'Support'>('all')
   const [aceFile, setAceFile] = useState<File | null>(null)
   const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
   const [isUploadingReports, setIsUploadingReports] = useState(false)
+
+  // Reopen Modal State
+  const [showReopenModal, setShowReopenModal] = useState(false)
+  const [reopenReason, setReopenReason] = useState('')
+  const [reopenFiles, setReopenFiles] = useState<File[]>([])
+  const [isSubmittingReopen, setIsSubmittingReopen] = useState(false)
 
   // Hold / Support Modal State
   const [showHoldSupportModal, setShowHoldSupportModal] = useState(false)
@@ -61,6 +67,135 @@ export function BodInternalJobPage() {
     epubCheck: false,
     manualQC: false
   })
+
+  // Build chronological sequence of stage events (without artificial grouping, preserving full cycle progression)
+  const getChronologicalStageTimeline = (jobObj: any) => {
+    if (!jobObj) return []
+    const assigned: any[] = Array.isArray(jobObj.assigned_users) ? jobObj.assigned_users : []
+    const stageHist = jobObj.stage_history || {}
+    const reopens: any[] = Array.isArray(jobObj.reopen_history) ? jobObj.reopen_history : []
+    const isJobDone = jobObj.status === 'Completed' || jobObj.current_stage_name === 'Archive'
+
+    // If job has never been reopened, return simple linear stage history
+    if (reopens.length === 0) {
+      const standardOrder = ['Add job', 'Job Analysis', 'Production', 'QC', 'Ready to Dispatch', 'Archive']
+      const items: any[] = []
+      for (const s of standardOrder) {
+        const d = stageHist[s]
+        if (!d && s !== jobObj.current_stage_name) continue
+        items.push({
+          stageName: s,
+          cycleVersion: null,
+          startTime: d?.start_time || null,
+          endTime: d?.end_time || null,
+          assignee: d?.assignee || null,
+          dispatchedBy: d?.dispatched_by || null,
+          isCurrent: s === jobObj.current_stage_name && !isJobDone
+        })
+      }
+      return items
+    }
+
+    // Reopen cycles present: reconstruct exact chronological flow
+    const events: any[] = []
+
+    // 1. Add job
+    const addJobData = stageHist['Add job'] || {}
+    events.append = undefined // safety
+    events.push({
+      stageName: 'Add job',
+      cycleVersion: null,
+      startTime: addJobData.start_time || null,
+      endTime: addJobData.end_time || null,
+      assignee: addJobData.assignee || null,
+      dispatchedBy: null,
+      isCurrent: false
+    })
+
+    let currEvent: any = null
+    let currCycleVersion: string | null = null
+
+    for (const entry of assigned) {
+      const st = entry.stage
+      const action = entry.action || ''
+      const user = entry.user_id
+      const t = entry.time
+
+      // Check if entry is a reopen trigger
+      if (action.includes('Reopened to QC')) {
+        const m = action.match(/\((R\d+)\)/)
+        currCycleVersion = m ? m[1] : 'Reopen'
+      }
+
+      if (!currEvent || currEvent.stageName !== st) {
+        if (currEvent) {
+          if (!currEvent.endTime) {
+            currEvent.endTime = t
+          }
+          events.push(currEvent)
+        }
+
+        let startT = t
+        if (currCycleVersion === null) {
+          if (st === 'Production' && stageHist['Production']?.start_time) {
+            startT = stageHist['Production'].start_time
+          } else if (st === 'Job Analysis' && stageHist['Job Analysis']?.start_time) {
+            startT = stageHist['Job Analysis'].start_time
+          } else if (st === 'QC' && stageHist['Production']?.end_time) {
+            startT = stageHist['Production'].end_time
+          }
+        }
+
+        currEvent = {
+          stageName: st,
+          cycleVersion: currCycleVersion,
+          startTime: startT,
+          endTime: null,
+          assignee: user,
+          dispatchedBy: null,
+          isCurrent: false
+        }
+      } else {
+        if (user) {
+          currEvent.assignee = user
+        }
+      }
+
+      if (action.includes('Dispatched to FTP by')) {
+        const dispUser = user || entry.assigned_by
+        currEvent.dispatchedBy = dispUser
+        currEvent.endTime = t
+        events.push(currEvent)
+
+        // Following FTP dispatch, Archive completes
+        events.push({
+          stageName: 'Archive',
+          cycleVersion: currCycleVersion,
+          startTime: t,
+          endTime: t,
+          assignee: dispUser,
+          dispatchedBy: dispUser,
+          isCurrent: false
+        })
+        currEvent = null
+      }
+    }
+
+    if (currEvent) {
+      events.push(currEvent)
+    }
+
+    // Set current active stage
+    for (let idx = 0; idx < events.length; idx++) {
+      const isCur = idx === events.length - 1 && !isJobDone
+      events[idx].isCurrent = isCur
+      if (isCur) {
+        events[idx].endTime = null
+      }
+    }
+
+    return events
+  }
 
   const formatDateTime = (dateStr: string | null) => {
     return fmtUtcDateTime(dateStr)
@@ -462,6 +597,37 @@ export function BodInternalJobPage() {
     }
   }
 
+  const handleReopenSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!reopenReason.trim()) {
+      toast.error('Please enter a reason/correction for reopening.')
+      return
+    }
+
+    try {
+      setIsSubmittingReopen(true)
+      const formData = new FormData()
+      formData.append('reason', reopenReason.trim())
+      for (const file of reopenFiles) {
+        formData.append('files', file)
+      }
+
+      const res = await api.post(`/bod/jobs/${job.id}/reopen`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      toast.success(res.data?.message || 'Job reopened successfully')
+      setShowReopenModal(false)
+      setReopenReason('')
+      setReopenFiles([])
+      navigate('/bod/internal')
+    } catch (err: any) {
+      console.error('Failed to reopen job:', err)
+      toast.error(err.response?.data?.detail || 'Failed to reopen job')
+    } finally {
+      setIsSubmittingReopen(false)
+    }
+  }
+
   const openHoldSupportModal = () => {
     if (job.status === 'Hold' || job.status === 'Support') {
       setHoldSupportType('Active')
@@ -515,6 +681,11 @@ export function BodInternalJobPage() {
         <div>
           <h1 className="text-2xl font-bold font-serif text-text m-0 flex items-center gap-3">
             {job.pdf_filename}
+            {job.version && (
+              <span className="font-bold font-mono px-2 py-0.5 rounded-md text-[10px] bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider">
+                {job.version}
+              </span>
+            )}
             <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider ${job.status === 'Completed'
               ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
               : job.status === 'Hold'
@@ -549,6 +720,20 @@ export function BodInternalJobPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {isCompleted && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setReopenReason('')
+                setShowReopenModal(true)
+              }}
+              className="border-rose-500/50 text-rose-600 hover:bg-rose-500/10 dark:text-rose-400 font-semibold"
+              leftIcon={<RotateCcw size={14} className="text-rose-500" />}
+            >
+              Reopen Job
+            </Button>
+          )}
+
           {!isCompleted && (
             <Button
               variant="outline"
@@ -1155,66 +1340,90 @@ export function BodInternalJobPage() {
                   )}
                 </button>
               )}
+            {((job.reopen_history && job.reopen_history.length > 0) || (job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
+              h.field === 'Reopen' || (h.changes && h.changes.some((c: any) => c.field === 'Reopen'))
+            ))) && (
+                <button
+                  onClick={() => setActiveTab('reopen')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 flex items-center gap-1.5 ${activeTab === 'reopen' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Reopen History
+                  {job.reopen_history && job.reopen_history.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 font-mono font-bold">
+                      {job.reopen_history.length}
+                    </span>
+                  )}
+                </button>
+              )}
           </div>
 
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
             {activeTab === 'stage' && (
               <div className="space-y-4">
-                {Object.keys(job.stage_history || {})
-                  .filter(stageName => {
-                    const data = job.stage_history[stageName]
-                    return stageName === job.current_stage_name || Boolean(data?.start_time || data?.end_time)
-                  })
-                  .map((stageName, idx, arr) => {
-                    const data = job.stage_history[stageName]
-                    const isCurrent = stageName === job.current_stage_name && !isCompleted
+                {getChronologicalStageTimeline(job).map((event: any, idx: number, arr: any[]) => {
+                  const isCurrent = event.isCurrent
 
-                    return (
-                      <div key={idx} className="flex gap-3">
-                        <div className="flex flex-col items-center">
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${data.end_time ? 'bg-emerald-500/20 text-emerald-600' :
-                            isCurrent ? 'bg-primary/20 text-primary border-2 border-primary/30' :
-                              'bg-accent text-muted'
-                            }`}>
-                            {data.end_time ? <CheckCircle2 size={12} /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
-                          </div>
-                          {idx !== arr.length - 1 && (
-                            <div className="w-px h-full bg-border my-1" />
+                  return (
+                    <div key={idx} className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${event.endTime ? 'bg-emerald-500/20 text-emerald-600' :
+                          isCurrent ? 'bg-primary/20 text-primary border-2 border-primary/30' :
+                            'bg-accent text-muted'
+                          }`}>
+                          {event.endTime ? <CheckCircle2 size={12} /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
+                        </div>
+                        {idx !== arr.length - 1 && (
+                          <div className="w-px h-full bg-border my-1" />
+                        )}
+                      </div>
+
+                      <div className="pb-4 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className={`text-sm font-bold m-0 ${isCurrent ? 'text-text' : 'text-text/70'}`}>
+                            {event.stageName}
+                          </h4>
+                          {event.cycleVersion && (
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400">
+                              {event.cycleVersion}
+                            </span>
+                          )}
+                          {isCurrent && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary animate-pulse">
+                              In Progress
+                            </span>
                           )}
                         </div>
 
-                        <div className="pb-4 flex-1">
-                          <h4 className={`text-sm font-bold ${isCurrent ? 'text-text' : 'text-text/70'}`}>{stageName}</h4>
+                        <div className="mt-1.5 space-y-1">
+                          {event.dispatchedBy && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <Send size={12} className="text-emerald-600 dark:text-emerald-400" /> Dispatched by: <strong className="text-text">{getUserDisplayName(event.dispatchedBy)}</strong>
+                            </div>
+                          )}
 
-                          <div className="mt-1.5 space-y-1">
-                            {data.dispatched_by && (
-                              <div className="flex items-center gap-1.5 text-xs text-muted">
-                                <Send size={12} className="text-emerald-600 dark:text-emerald-400" /> Dispatched by: <strong className="text-text">{getUserDisplayName(data.dispatched_by)}</strong>
-                              </div>
-                            )}
+                          {event.assignee && !event.dispatchedBy && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <User size={12} /> Assigned to: <strong className="text-text">{getUserDisplayName(event.assignee)}</strong>
+                            </div>
+                          )}
 
-                            {data.assignee && !data.dispatched_by && (
-                              <div className="flex items-center gap-1.5 text-xs text-muted">
-                                <User size={12} /> Assigned to: <strong className="text-text">{getUserDisplayName(data.assignee)}</strong>
-                              </div>
-                            )}
+                          {event.startTime && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <Clock size={12} /> Started: {formatDateTime(event.startTime)}
+                            </div>
+                          )}
 
-                            {data.start_time && (
-                              <div className="flex items-center gap-1.5 text-xs text-muted">
-                                <Clock size={12} /> Started: {formatDateTime(data.start_time)}
-                              </div>
-                            )}
-
-                            {data.end_time && (
-                              <div className="flex items-center gap-1.5 text-xs text-muted">
-                                <CheckCircle2 size={12} /> Completed: {formatDateTime(data.end_time)}
-                              </div>
-                            )}
-                          </div>
+                          {event.endTime && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <CheckCircle2 size={12} /> Completed: {formatDateTime(event.endTime)}
+                            </div>
+                          )}
                         </div>
                       </div>
-                    )
-                  })}
+                    </div>
+                  )
+                })}
               </div>
             )}
 
@@ -1562,6 +1771,109 @@ export function BodInternalJobPage() {
                 )}
               </div>
             )}
+
+            {activeTab === 'reopen' && (
+              <div className="space-y-4">
+                {/* Reopen Cycle History */}
+                {job.reopen_history && Array.isArray(job.reopen_history) && job.reopen_history.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2 mb-2 pb-1 border-b border-border/40">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
+                        <RotateCcw size={12} className="text-rose-500" />
+                        Reopen ({job.reopen_history.length})
+                      </span>
+                      <span className="text-[10px] text-muted font-medium">
+                        Current: <strong className="text-rose-600 dark:text-rose-400 font-mono">{job.version || 'R0'}</strong>
+                      </span>
+                    </div>
+
+                    {[...job.reopen_history].reverse().map((record: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="bg-background border border-rose-500/30 rounded-lg p-3.5 space-y-3 ring-1 ring-rose-500/10 shadow-xs"
+                      >
+                        {/* Header */}
+                        <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400">
+                              {record.version}
+                            </span>
+                            <span className="text-[10px] font-semibold text-muted">
+                              Moved back to: <strong className="text-text">QC (Yet to Start)</strong>
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-muted">
+                            {formatDateTime(record.reopened_at)}
+                          </span>
+                        </div>
+
+                        {/* Correction / Reason */}
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Correction / Reason</p>
+                          <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
+                            {record.reason}
+                          </p>
+                          <p className="text-[10px] text-muted m-0 pt-0.5">
+                            Reopened by <strong className="text-text/90">{record.reopened_by || 'Unknown'}</strong>
+                            {record.previous_stage ? ` from stage "${record.previous_stage}"` : ''}
+                          </p>
+                        </div>
+
+                        {/* Attached Files (if any) */}
+                        {record.attachments && Array.isArray(record.attachments) && record.attachments.length > 0 && (
+                          <div className="space-y-1.5 pt-1 border-t border-border/40">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0 flex items-center gap-1">
+                              <Paperclip size={11} className="text-rose-500" />
+                              Attached Files ({record.attachments.length})
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {record.attachments.map((att: any, aIdx: number) => {
+                                const downloadUrl = `/api/v2/bod/jobs/${job.id}/reopen-attachments/${record.version}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
+
+                                return (
+                                  <a
+                                    key={aIdx}
+                                    href={downloadUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    download={att.filename}
+                                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-rose-500/40 hover:bg-rose-500/5 transition-all group/att"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <div className="p-1.5 rounded bg-muted/20 text-muted group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 group-hover/att:bg-rose-500/10 shrink-0">
+                                        {isImg ? <ImageIcon size={14} /> : isSheet ? <FileSpreadsheet size={14} /> : <FileText size={14} />}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-medium text-text group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 truncate m-0">
+                                          {att.filename}
+                                        </p>
+                                        {att.size ? (
+                                          <p className="text-[10px] text-muted m-0">
+                                            {(att.size / 1024).toFixed(1)} KB
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    <Download size={14} className="text-muted group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 shrink-0 mr-1" />
+                                  </a>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted text-xs">
+                    No reopen history recorded yet for this job.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1857,6 +2169,130 @@ export function BodInternalJobPage() {
                     <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Submitting...</span>
                   ) : (
                     <span>{holdSupportType === 'Active' ? 'Resolve & Resume' : 'Submit'}</span>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reopen Job Modal */}
+      {showReopenModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowReopenModal(false)} />
+          <div className="relative bg-card rounded-xl shadow-2xl w-full max-w-lg flex flex-col border border-border animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-rose-500/5 rounded-t-xl">
+              <h2 className="text-lg font-bold flex items-center gap-2 text-rose-600 dark:text-rose-400 m-0">
+                <RotateCcw size={20} />
+                Reopen Completed Job
+              </h2>
+              <button
+                onClick={() => setShowReopenModal(false)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleReopenSubmit}>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Correction Reason <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    placeholder="Specify the correction reason required for reopening this job (Mandatory)..."
+                    value={reopenReason}
+                    onChange={(e) => setReopenReason(e.target.value)}
+                    className="w-full p-3 bg-background border border-border rounded-lg text-sm text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 resize-y"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted">
+                      Attach Files (Images, PDF, Excel, DOCX)
+                    </label>
+                    <span className="text-[11px] text-muted">Optional</span>
+                  </div>
+
+                  <div className="border border-dashed border-border rounded-lg p-3 bg-accent/20 hover:bg-accent/40 transition-colors text-center">
+                    <input
+                      type="file"
+                      id="reopen-file-input"
+                      multiple
+                      accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx"
+                      onChange={(e) => {
+                        if (e.target.files) {
+                          const newFiles = Array.from(e.target.files)
+                          setReopenFiles(prev => [...prev, ...newFiles])
+                          e.target.value = ''
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="reopen-file-input"
+                      className="cursor-pointer flex flex-col items-center justify-center gap-1.5 text-xs text-muted hover:text-text"
+                    >
+                      <Paperclip size={20} className="text-rose-500" />
+                      <span>
+                        <span className="font-semibold text-rose-600 dark:text-rose-400">Click to browse</span> or drag and drop files
+                      </span>
+                      <span className="text-[10px] text-muted">
+                        Supports images, PDF, Excel (.xlsx, .xls, .csv), Word (.doc, .docx)
+                      </span>
+                    </label>
+                  </div>
+
+                  {reopenFiles.length > 0 && (
+                    <div className="mt-2.5 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {reopenFiles.map((file, fIdx) => (
+                        <div
+                          key={fIdx}
+                          className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <File size={14} className="text-rose-500 shrink-0" />
+                            <span className="font-medium text-text truncate max-w-[260px]">{file.name}</span>
+                            <span className="text-[10px] text-muted shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReopenFiles(prev => prev.filter((_, i) => i !== fIdx))}
+                            className="text-muted hover:text-rose-600 p-1 rounded transition-colors"
+                            title="Remove file"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-border flex justify-end gap-3 bg-muted/5 rounded-b-xl">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowReopenModal(false)}
+                  disabled={isSubmittingReopen}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmittingReopen || !reopenReason.trim()}
+                  className="bg-rose-600 hover:bg-rose-700 text-white min-w-[130px]"
+                >
+                  {isSubmittingReopen ? (
+                    <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Reopening...</span>
+                  ) : (
+                    <span className="flex items-center gap-1.5"><RotateCcw size={14} /> Reopen to QC</span>
                   )}
                 </Button>
               </div>
