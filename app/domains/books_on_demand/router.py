@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Form
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Dict, Any, Optional
 import os
 import re
@@ -643,22 +644,24 @@ class BodHoldSupportRequest(BaseModel):
 @router.put("/jobs/{job_id}/hold-support")
 def update_job_hold_support(
     job_id: int,
-    payload: BodHoldSupportRequest,
+    status: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    files: List[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user_from_cookie)
 ):
-    """Update job status to Hold, Support, or resolve back to Active with reason and resolution history."""
+    """Update job status to Hold, Support, or resolve back to Active with reason, screenshot/file attachments, and history."""
     job = db.query(BodJob).filter(BodJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    target_status = payload.status.strip()
+    target_status = (status or "").strip()
     valid_statuses = ["Hold", "Support", "Active"]
     if target_status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
 
-    description = payload.description.strip() if payload.description else ""
-    if not description:
+    desc = (description or "").strip()
+    if not desc:
         raise HTTPException(status_code=400, detail="Description / query reason or resolution is required.")
 
     fn = (getattr(current_user, "first_name", None) or "").strip()
@@ -674,6 +677,39 @@ def update_job_hold_support(
 
     # 1. Update hold_support_history
     hold_history = list(job.hold_support_history) if job.hold_support_history else []
+    record_id = f"HS-{job.id}-{len(hold_history) + 1}"
+
+    # Handle attachments (screenshots, images, PDFs, sheets, docs)
+    saved_attachments = []
+    if files:
+        settings = get_settings()
+        upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+        project_name = job.project_name or str(job.id)
+        hold_files_dir = os.path.join(upload_dir, "bod", "BOD", project_name, "hold_attachments", record_id)
+        os.makedirs(hold_files_dir, exist_ok=True)
+
+        allowed_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".xlsx", ".xls", ".csv", ".doc", ".docx"}
+        for upload_file in files:
+            if not upload_file or not upload_file.filename:
+                continue
+            orig_name = os.path.basename(upload_file.filename)
+            _, ext = os.path.splitext(orig_name)
+            if ext.lower() not in allowed_extensions:
+                continue
+
+            safe_filename = f"{record_id}_{orig_name}"
+            dest_path = os.path.join(hold_files_dir, safe_filename)
+            with open(dest_path, "wb") as buffer:
+                shutil.copyfileobj(upload_file.file, buffer)
+
+            file_size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+            saved_attachments.append({
+                "filename": orig_name,
+                "saved_filename": safe_filename,
+                "filepath": dest_path,
+                "size": file_size,
+                "uploaded_at": now_iso
+            })
 
     if target_status in ["Hold", "Support"]:
         # If there was an open item of another type or same type, we resolve it first
@@ -682,23 +718,47 @@ def update_job_hold_support(
                 item["status"] = "Resolved"
                 item["resolved_at"] = now_iso
                 item["resolved_by"] = full_name
-                item["resolution_notes"] = f"Superceded by {target_status}: {description}"
+                item["resolution_notes"] = f"Superceded by {target_status}: {desc}"
 
         # Create new Hold / Support ticket/record
-        record_id = f"HS-{job.id}-{len(hold_history) + 1}"
         new_record = {
             "id": record_id,
             "type": target_status,
             "status": "Open",
-            "query_reason": description,
+            "query_reason": desc,
             "created_by": full_name,
             "created_at": now_iso,
             "stage_at_hold": job.current_stage_name,
             "resolution_notes": None,
             "resolved_by": None,
             "resolved_at": None,
+            "attachments": saved_attachments,
         }
         hold_history.append(new_record)
+
+        # Unassign the job when placed on Hold or Support
+        job.current_assignee = None
+        history_list = job.assigned_users if isinstance(job.assigned_users, list) else []
+        new_assign_history = list(history_list)
+        new_assign_history.append({
+            "user_id": None,
+            "stage": job.current_stage_name,
+            "time": now_iso,
+            "assigned_by": full_name,
+            "action": f"Unassigned on {target_status}: {desc}"
+        })
+        job.assigned_users = new_assign_history
+        flag_modified(job, "assigned_users")
+
+        # Also clear assignee in current stage_history
+        if job.stage_history:
+            st_history = dict(job.stage_history)
+            if job.current_stage_name in st_history:
+                st_data = dict(st_history[job.current_stage_name])
+                st_data["assignee"] = None
+                st_history[job.current_stage_name] = st_data
+                job.stage_history = st_history
+                flag_modified(job, "stage_history")
     elif target_status == "Active":
         # Resolve any currently Open Hold or Support records
         resolved_any = False
@@ -707,12 +767,14 @@ def update_job_hold_support(
                 item["status"] = "Resolved"
                 item["resolved_at"] = now_iso
                 item["resolved_by"] = full_name
-                item["resolution_notes"] = description
+                item["resolution_notes"] = desc
+                if saved_attachments:
+                    existing_att = item.get("resolution_attachments") or []
+                    item["resolution_attachments"] = existing_att + saved_attachments
                 resolved_any = True
 
         if not resolved_any:
             # If no open record was found (e.g. legacy), record a resolution entry
-            record_id = f"HS-{job.id}-{len(hold_history) + 1}"
             hold_history.append({
                 "id": record_id,
                 "type": old_status if old_status in ["Hold", "Support"] else "Status Change",
@@ -721,13 +783,36 @@ def update_job_hold_support(
                 "created_by": full_name,
                 "created_at": now_iso,
                 "stage_at_hold": job.current_stage_name,
-                "resolution_notes": description,
+                "resolution_notes": desc,
                 "resolved_by": full_name,
                 "resolved_at": now_iso,
+                "resolution_attachments": saved_attachments,
             })
 
+        # Unassign the job when resolved back to Active (Yet to Start)
+        job.current_assignee = None
+        history_list = job.assigned_users if isinstance(job.assigned_users, list) else []
+        new_assign_history = list(history_list)
+        new_assign_history.append({
+            "user_id": None,
+            "stage": job.current_stage_name,
+            "time": now_iso,
+            "assigned_by": full_name,
+            "action": f"Unassigned on Resolve: {desc}"
+        })
+        job.assigned_users = new_assign_history
+        flag_modified(job, "assigned_users")
+
+        if job.stage_history:
+            st_history = dict(job.stage_history)
+            if job.current_stage_name in st_history:
+                st_data = dict(st_history[job.current_stage_name])
+                st_data["assignee"] = None
+                st_history[job.current_stage_name] = st_data
+                job.stage_history = st_history
+                flag_modified(job, "stage_history")
+
     job.hold_support_history = hold_history
-    from sqlalchemy.orm.attributes import flag_modified
     flag_modified(job, "hold_support_history")
 
     # 2. Also keep timeline entry in due_date_history for unified auditing
@@ -735,7 +820,7 @@ def update_job_hold_support(
         "field": "Status",
         "old_status": old_status,
         "new_status": target_status,
-        "reason": description,
+        "reason": desc,
         "action": "Resolve" if target_status == "Active" else f"Report {target_status}",
         "changed_by": full_name,
         "timestamp": now_iso,
@@ -762,6 +847,42 @@ def update_job_hold_support(
         "hold_support_history": job.hold_support_history,
         "due_date_history": job.due_date_history
     }
+
+
+@router.get("/jobs/{job_id}/hold-attachments/{record_id}/{filename}")
+def download_hold_attachment(
+    job_id: int,
+    record_id: str,
+    filename: str,
+    db: Session = Depends(get_db)
+):
+    """Download an attachment uploaded during a Hold / Support ticket."""
+    job = db.query(BodJob).filter(BodJob.id == job_id, BodJob.is_deleted == False).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    project_name = job.project_name or str(job.id)
+    hold_files_dir = os.path.join(upload_dir, "bod", "BOD", project_name, "hold_attachments", record_id)
+
+    safe_target = os.path.basename(filename)
+    dest_path = os.path.join(hold_files_dir, safe_target)
+
+    if not os.path.exists(dest_path):
+        prefixed = f"{record_id}_{safe_target}"
+        dest_path_prefixed = os.path.join(hold_files_dir, prefixed)
+        if os.path.exists(dest_path_prefixed):
+            dest_path = dest_path_prefixed
+
+    if not os.path.exists(dest_path) or not os.path.isfile(dest_path):
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    display_name = safe_target
+    if display_name.startswith(f"{record_id}_"):
+        display_name = display_name[len(record_id) + 1:]
+
+    return FileResponse(path=dest_path, filename=display_name)
 
 
 class BodReopenRequest(BaseModel):

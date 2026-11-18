@@ -3823,6 +3823,50 @@ export function BodInternalPage() {
                                 </p>
                               </div>
 
+                              {/* Attachments for query */}
+                              {record.attachments && Array.isArray(record.attachments) && record.attachments.length > 0 && (
+                                <div className="space-y-1.5 pt-1 border-t border-border/40">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0 flex items-center gap-1">
+                                    <Paperclip size={11} className="text-amber-500" />
+                                    Attached Screenshots / Files ({record.attachments.length})
+                                  </p>
+                                  <div className="space-y-1.5">
+                                    {record.attachments.map((att: any, aIdx: number) => {
+                                      const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                      const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                      const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                      const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
+
+                                      return (
+                                        <a
+                                          key={aIdx}
+                                          href={downloadUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          download={att.filename}
+                                          className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group/att"
+                                        >
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <div className="p-1 rounded bg-muted/20 text-muted group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 group-hover/att:bg-amber-500/10 shrink-0">
+                                              {isImg ? <ImageIcon size={13} /> : isSheet ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                                            </div>
+                                            <div className="min-w-0">
+                                              <p className="text-xs font-medium text-text group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 truncate m-0">
+                                                {att.filename}
+                                              </p>
+                                              <p className="text-[10px] text-muted m-0">
+                                                {((att.size || 0) / 1024).toFixed(1)} KB
+                                              </p>
+                                            </div>
+                                          </div>
+                                          <Download size={13} className="text-muted group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 shrink-0" />
+                                        </a>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
                               {/* Resolution Details */}
                               {record.status === 'Resolved' && (
                                 <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
@@ -3835,6 +3879,31 @@ export function BodInternalPage() {
                                   <p className="text-[10px] text-muted m-0 pt-0.5">
                                     Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
                                   </p>
+                                  {record.resolution_attachments && Array.isArray(record.resolution_attachments) && record.resolution_attachments.length > 0 && (
+                                    <div className="space-y-1 pt-1.5 border-t border-emerald-500/20">
+                                      <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                        <Paperclip size={11} /> Resolution Attachments ({record.resolution_attachments.length})
+                                      </p>
+                                      <div className="space-y-1">
+                                        {record.resolution_attachments.map((att: any, aIdx: number) => {
+                                          const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                          return (
+                                            <a
+                                              key={aIdx}
+                                              href={downloadUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              download={att.filename}
+                                              className="flex items-center justify-between gap-2 p-1.5 rounded bg-background border border-emerald-500/20 hover:border-emerald-500/40 text-xs transition-all"
+                                            >
+                                              <span className="truncate text-[11px] font-medium text-text">{att.filename}</span>
+                                              <Download size={12} className="text-muted shrink-0" />
+                                            </a>
+                                          )
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

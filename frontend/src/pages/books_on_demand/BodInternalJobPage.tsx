@@ -59,6 +59,7 @@ export function BodInternalJobPage() {
   const [showHoldSupportModal, setShowHoldSupportModal] = useState(false)
   const [holdSupportType, setHoldSupportType] = useState<'Hold' | 'Support' | 'Active'>('Hold')
   const [holdSupportDescription, setHoldSupportDescription] = useState('')
+  const [holdSupportFiles, setHoldSupportFiles] = useState<File[]>([])
   const [isSubmittingHoldSupport, setIsSubmittingHoldSupport] = useState(false)
 
   const [showQCModal, setShowQCModal] = useState(false)
@@ -572,23 +573,21 @@ export function BodInternalJobPage() {
 
     try {
       setIsSubmittingHoldSupport(true)
-      const res = await api.put(`/bod/jobs/${job.id}/hold-support`, {
-        status: holdSupportType,
-        description: holdSupportDescription.trim()
+      const formData = new FormData()
+      formData.append('status', holdSupportType)
+      formData.append('description', holdSupportDescription.trim())
+      for (const file of holdSupportFiles) {
+        formData.append('files', file)
+      }
+
+      const res = await api.put(`/bod/jobs/${job.id}/hold-support`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       })
-      toast.success(`Job status updated to ${holdSupportType}`)
+      toast.success(holdSupportType === 'Active' ? 'Query resolved & job resumed (Unassigned)' : `Job status updated to ${holdSupportType}`)
       setShowHoldSupportModal(false)
       setHoldSupportDescription('')
-      if (res.data) {
-        setJob((prev: any) => ({
-          ...prev,
-          status: holdSupportType,
-          hold_support_history: res.data.hold_support_history || prev.hold_support_history,
-          due_date_history: res.data.due_date_history || prev.due_date_history
-        }))
-      } else {
-        await fetchJob()
-      }
+      setHoldSupportFiles([])
+      navigate('/bod/internal')
     } catch (err: any) {
       console.error('Failed to update job status:', err)
       toast.error(err.response?.data?.detail || 'Failed to update job status')
@@ -635,6 +634,7 @@ export function BodInternalJobPage() {
       setHoldSupportType('Hold')
     }
     setHoldSupportDescription('')
+    setHoldSupportFiles([])
     setShowHoldSupportModal(true)
   }
 
@@ -1688,6 +1688,50 @@ export function BodInternalJobPage() {
                               </p>
                             </div>
 
+                            {/* Attachments for query */}
+                            {record.attachments && Array.isArray(record.attachments) && record.attachments.length > 0 && (
+                              <div className="space-y-1.5 pt-1 border-t border-border/40">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0 flex items-center gap-1">
+                                  <Paperclip size={11} className="text-amber-500" />
+                                  Attached Screenshots / Files ({record.attachments.length})
+                                </p>
+                                <div className="space-y-1.5">
+                                  {record.attachments.map((att: any, aIdx: number) => {
+                                    const downloadUrl = `/api/v2/bod/jobs/${job.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                    const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                    const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                    const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
+
+                                    return (
+                                      <a
+                                        key={aIdx}
+                                        href={downloadUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        download={att.filename}
+                                        className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group/att"
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <div className="p-1 rounded bg-muted/20 text-muted group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 group-hover/att:bg-amber-500/10 shrink-0">
+                                            {isImg ? <ImageIcon size={13} /> : isSheet ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <p className="text-xs font-medium text-text group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 truncate m-0">
+                                              {att.filename}
+                                            </p>
+                                            <p className="text-[10px] text-muted m-0">
+                                              {((att.size || 0) / 1024).toFixed(1)} KB
+                                            </p>
+                                          </div>
+                                        </div>
+                                        <Download size={13} className="text-muted group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 shrink-0" />
+                                      </a>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
                             {/* Resolution Details */}
                             {record.status === 'Resolved' && (
                               <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
@@ -1700,6 +1744,31 @@ export function BodInternalJobPage() {
                                 <p className="text-[10px] text-muted m-0 pt-0.5">
                                   Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
                                 </p>
+                                {record.resolution_attachments && Array.isArray(record.resolution_attachments) && record.resolution_attachments.length > 0 && (
+                                  <div className="space-y-1 pt-1.5 border-t border-emerald-500/20">
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                      <Paperclip size={11} /> Resolution Attachments ({record.resolution_attachments.length})
+                                    </p>
+                                    <div className="space-y-1">
+                                      {record.resolution_attachments.map((att: any, aIdx: number) => {
+                                        const downloadUrl = `/api/v2/bod/jobs/${job.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                        return (
+                                          <a
+                                            key={aIdx}
+                                            href={downloadUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            download={att.filename}
+                                            className="flex items-center justify-between gap-2 p-1.5 rounded bg-background border border-emerald-500/20 hover:border-emerald-500/40 text-xs transition-all"
+                                          >
+                                            <span className="truncate text-[11px] font-medium text-text">{att.filename}</span>
+                                            <Download size={12} className="text-muted shrink-0" />
+                                          </a>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2146,6 +2215,67 @@ export function BodInternalJobPage() {
                     onChange={(e) => setHoldSupportDescription(e.target.value)}
                     className="w-full p-3 bg-background border border-border rounded-lg text-sm text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-y"
                   />
+                </div>
+
+                {/* Screenshot & File Attachments */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1.5 flex items-center gap-1.5">
+                    <Paperclip size={13} className="text-amber-500" />
+                    Attach Screenshots / Reference Files <span className="text-[10px] text-muted font-normal lowercase">(optional)</span>
+                  </label>
+                  <div className="border border-dashed border-border hover:border-amber-500/50 rounded-lg p-3.5 text-center bg-muted/5 transition-colors">
+                    <input
+                      type="file"
+                      id="hold-support-file-input"
+                      multiple
+                      accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx"
+                      onChange={(e) => {
+                        if (e.target.files) {
+                          const newFiles = Array.from(e.target.files)
+                          setHoldSupportFiles(prev => [...prev, ...newFiles])
+                          e.target.value = ''
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="hold-support-file-input"
+                      className="cursor-pointer flex flex-col items-center justify-center gap-1.5 text-xs text-muted hover:text-text"
+                    >
+                      <Paperclip size={18} className="text-amber-500" />
+                      <span>
+                        <span className="font-semibold text-amber-600 dark:text-amber-400">Click to attach screenshot/file</span> or drag and drop
+                      </span>
+                      <span className="text-[10px] text-muted">
+                        Supports screenshot images (.png, .jpg, .jpeg), PDF, Excel, Word
+                      </span>
+                    </label>
+                  </div>
+
+                  {holdSupportFiles.length > 0 && (
+                    <div className="mt-2.5 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {holdSupportFiles.map((file, fIdx) => (
+                        <div
+                          key={fIdx}
+                          className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <File size={14} className="text-amber-500 shrink-0" />
+                            <span className="font-medium text-text truncate max-w-[260px]">{file.name}</span>
+                            <span className="text-[10px] text-muted shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setHoldSupportFiles(prev => prev.filter((_, i) => i !== fIdx))}
+                            className="text-muted hover:text-rose-600 p-1 rounded transition-colors"
+                            title="Remove file"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
