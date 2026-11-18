@@ -666,7 +666,7 @@ export function BodInternalJobPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto p-6 text-text animate-in fade-in">
+    <div className="space-y-6 w-full max-w-[1400px] mx-auto p-6 text-text animate-in fade-in">
       {/* Header / Breadcrumb */}
       <div className="flex items-center gap-3 text-muted">
         <button
@@ -677,19 +677,19 @@ export function BodInternalJobPage() {
         </button>
       </div>
 
-      <div className="flex items-center justify-between border-b border-border pb-4">
-        <div>
-          <h1 className="text-2xl font-bold font-serif text-text m-0 flex items-center gap-3">
-            {job.pdf_filename}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-bold font-serif text-text m-0 flex flex-wrap items-center gap-3">
+            <span className="truncate">{job.pdf_filename}</span>
             {job.revision && (
               <span
-                className="font-bold font-mono px-2 py-0.5 rounded-md text-[10px] bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider"
+                className="font-bold font-mono px-2 py-0.5 rounded-md text-[10px] bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider shrink-0"
                 title={`Revision: ${job.revision}`}
               >
                 {job.revision}
               </span>
             )}
-            <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider ${job.status === 'Completed'
+            <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider shrink-0 ${job.status === 'Completed'
               ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
               : job.status === 'Hold'
                 ? 'bg-fuchsia-500/15 border-fuchsia-500/40 text-fuchsia-600 dark:text-fuchsia-400'
@@ -701,7 +701,7 @@ export function BodInternalJobPage() {
             </span>
             {job.is_fastrack && (
               <span
-                className="inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-md text-[10px] bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-400 tracking-wider shadow-xs"
+                className="inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-md text-[10px] bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-400 tracking-wider shadow-xs shrink-0"
                 title={job.fastrack_requested_date ? `Fastrack expected by customer: ${formatDateTime(job.fastrack_requested_date)}` : 'Fastrack enabled'}
               >
                 <Zap size={11} className="fill-amber-500 text-amber-500" />
@@ -709,7 +709,7 @@ export function BodInternalJobPage() {
               </span>
             )}
           </h1>
-          <div className="flex items-center gap-4 mt-1.5">
+          <div className="flex items-center gap-4 mt-1.5 flex-wrap">
             <p className="text-sm text-muted m-0">{job.client_name} • Stage: <strong className="text-text">{job.current_stage_name}</strong></p>
 
             <div className="flex items-center gap-1.5 text-muted text-xs">
@@ -722,15 +722,16 @@ export function BodInternalJobPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           {isCompleted && (
             <Button
               variant="outline"
+              size="sm"
               onClick={() => {
                 setReopenReason('')
                 setShowReopenModal(true)
               }}
-              className="border-rose-500/50 text-rose-600 hover:bg-rose-500/10 dark:text-rose-400 font-semibold"
+              className="border-rose-500/50 text-rose-600 hover:bg-rose-500/10 dark:text-rose-400 font-semibold h-9 px-3.5"
               leftIcon={<RotateCcw size={14} className="text-rose-500" />}
             >
               Reopen Job
@@ -740,17 +741,17 @@ export function BodInternalJobPage() {
           {!isCompleted && (
             <Button
               variant="outline"
+              size="sm"
               onClick={openHoldSupportModal}
-              className={job.status === 'Hold'
-                ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400 font-semibold"
-                : job.status === 'Support'
-                  ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400 font-semibold"
+              className={`h-9 px-3.5 font-semibold ${
+                job.status === 'Hold' || job.status === 'Support'
+                  ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
                   : "border-border text-text hover:bg-accent"
-              }
+              }`}
               leftIcon={
                 job.status === 'Hold' || job.status === 'Support'
                   ? <CheckCircle size={14} className="text-emerald-500" />
-                  : <AlertTriangle size={14} />
+                  : <AlertTriangle size={14} className="text-amber-500" />
               }
             >
               {job.status === 'Hold' || job.status === 'Support' ? 'Resolve' : 'Report'}
@@ -760,8 +761,10 @@ export function BodInternalJobPage() {
           {!isCompleted && job.current_stage_name === 'Add job' && (
             <Button
               variant="primary"
+              size="sm"
               onClick={proceedToJobAnalysis}
               disabled={isAdvancing}
+              className="h-9 px-3.5 font-semibold"
               rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}
             >
               {isAdvancing ? 'Proceeding...' : 'Proceed to Job Analysis'}
@@ -771,8 +774,10 @@ export function BodInternalJobPage() {
           {!isCompleted && job.current_stage_name === 'Job Analysis' && (
             <Button
               variant="primary"
+              size="sm"
               onClick={proceedToProduction}
               disabled={isAdvancing}
+              className="h-9 px-3.5 font-semibold"
               rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}
             >
               {isAdvancing ? 'Proceeding...' : 'Proceed to Production'}
@@ -782,9 +787,10 @@ export function BodInternalJobPage() {
           {!isCompleted && job.epub_filename && (
             <Button
               variant="outline"
+              size="sm"
               onClick={openInEpubValidator}
               disabled={isOpeningValidator}
-              className="text-primary hover:text-primary-hover border-primary/30 hover:border-primary"
+              className="text-primary hover:text-primary-hover border-primary/30 hover:border-primary h-9 px-3.5 font-semibold"
               leftIcon={isOpeningValidator ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
             >
               {isOpeningValidator ? 'Opening Validator...' : 'Open in EPUB Validator'}
@@ -792,17 +798,25 @@ export function BodInternalJobPage() {
           )}
 
           {!isCompleted && job.current_stage_name === 'QC' && (
-            <Button variant="outline" onClick={() => setShowQCModal(true)} disabled={isAdvancing} rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}>
-              {isAdvancing ? 'Loading...' : 'Completed'}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowQCModal(true)}
+              disabled={isAdvancing}
+              className="h-9 px-3.5 font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+              rightIcon={!isAdvancing ? <CheckCircle size={14} /> : undefined}
+            >
+              {isAdvancing ? 'Loading...' : 'Mark Completed'}
             </Button>
           )}
 
           {!isCompleted && job.current_stage_name === 'Ready to Dispatch' && (
             <Button
               variant="primary"
+              size="sm"
               onClick={dispatchJob}
               disabled={isDispatching}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-9 px-3.5"
               leftIcon={isDispatching ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
             >
               {isDispatching ? 'Dispatching to FTP...' : 'Dispatch'}
@@ -810,7 +824,7 @@ export function BodInternalJobPage() {
           )}
 
           {canUploadEpub && (
-            <div className="relative">
+            <div className="relative inline-block">
               <input
                 type="file"
                 accept=".epub"
@@ -819,7 +833,13 @@ export function BodInternalJobPage() {
                 className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
                 title="Upload EPUB"
               />
-              <Button variant="primary" disabled={isUploading} leftIcon={!isUploading ? <Upload size={14} /> : undefined}>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={isUploading}
+                className="h-9 px-3.5 font-semibold"
+                leftIcon={!isUploading ? <Upload size={14} /> : undefined}
+              >
                 {isUploading ? 'Uploading...' : 'Upload EPUB'}
               </Button>
             </div>
