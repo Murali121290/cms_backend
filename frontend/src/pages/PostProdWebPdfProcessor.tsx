@@ -24,6 +24,10 @@ import {
   Type,
   AlignLeft,
   FileCheck2,
+  GripVertical,
+  ChevronRight,
+  Folder,
+  CornerDownRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -452,6 +456,8 @@ export function PostProdWebPdfProcessor() {
   const [editingBookmarksList, setEditingBookmarksList] = useState<BookmarkItem[]>([]);
   const [loadingBookmarks, setLoadingBookmarks] = useState(false);
   const [savingBookmarks, setSavingBookmarks] = useState(false);
+  const [draggedBookmarkIndex, setDraggedBookmarkIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Bookmarks
   const [generatingBookmarks, setGeneratingBookmarks] = useState(false);
@@ -508,6 +514,8 @@ export function PostProdWebPdfProcessor() {
   const [runningValidationDiff, setRunningValidationDiff] = useState(false);
 
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
+  const [previewPage, setPreviewPage] = useState<number | null>(null);
+  const [highlightSearch, setHighlightSearch] = useState<string | null>(null);
 
   const PDF_AVAILABLE_STATUSES = [
     'Merged',
@@ -651,6 +659,14 @@ export function PostProdWebPdfProcessor() {
       .catch(() => setExistingTocLinksInfo(null));
   }, [selectedProject?.id]);
 
+  // Reset step inputs and state when selected project changes
+  useEffect(() => {
+    setLinkType('one_way');
+    setPreserveExistingLinks(true);
+    setLinksStatus(null);
+    setLinksAnalysisStatus(null);
+  }, [selectedProject?.id]);
+
   // ── Lazy load analysis when step is opened ──────────────────────────────
   useEffect(() => {
     if (!selectedProject) return;
@@ -702,6 +718,17 @@ export function PostProdWebPdfProcessor() {
             // Add success flag for UI to display analysis
             const analysisData = { ...data, success: true };
             config.setter(analysisData);
+
+            // Sync linkType radio button with the loaded analysis if present
+            if (config.step === 'toc_links') {
+              if (data.link_type) {
+                setLinkType(data.link_type);
+              } else if (data.two_way_links && data.two_way_links > 0) {
+                setLinkType('two_way');
+              } else {
+                setLinkType('one_way');
+              }
+            }
           }
         } else {
           console.warn(`Failed to load ${config.step}: ${response.status}`);
@@ -965,6 +992,41 @@ export function PostProdWebPdfProcessor() {
     }
   };
 
+  const handleBookmarkDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedBookmarkIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+  };
+
+  const handleBookmarkDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleBookmarkDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (draggedBookmarkIndex === null || draggedBookmarkIndex === dropIndex) {
+      setDraggedBookmarkIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    const list = [...editingBookmarksList];
+    const [draggedItem] = list.splice(draggedBookmarkIndex, 1);
+    list.splice(dropIndex, 0, draggedItem);
+    setEditingBookmarksList(list);
+    setDraggedBookmarkIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleBookmarkDragEnd = () => {
+    setDraggedBookmarkIndex(null);
+    setDragOverIndex(null);
+  };
+
   const moveBookmark = (index: number, direction: 'up' | 'down') => {
     const list = [...editingBookmarksList];
     if (direction === 'up' && index > 0) {
@@ -977,11 +1039,29 @@ export function PostProdWebPdfProcessor() {
 
   const changeBookmarkLevel = (index: number, change: number) => {
     const list = [...editingBookmarksList];
-    const newLevel = list[index].level + change;
-    if (newLevel >= 1 && newLevel <= 6) {
-      list[index].level = newLevel;
-      setEditingBookmarksList(list);
+    const prevLevel = index > 0 ? list[index - 1].level : 0;
+    const maxAllowedLevel = prevLevel + 1; // Can never skip a parent level in PDF hierarchy
+
+    let newLevel = list[index].level + change;
+    if (change > 0 && newLevel > maxAllowedLevel) {
+      newLevel = maxAllowedLevel;
     }
+    if (newLevel < 1) {
+      newLevel = 1;
+    }
+
+    list[index] = { ...list[index], level: newLevel };
+
+    // Cascade sanitize subsequent items so no item skips a level
+    let currentMax = newLevel;
+    for (let i = index + 1; i < list.length; i++) {
+      if (list[i].level > currentMax + 1) {
+        list[i] = { ...list[i], level: currentMax + 1 };
+      }
+      currentMax = list[i].level;
+    }
+
+    setEditingBookmarksList(list);
   };
 
   const removeBookmark = (index: number) => {
@@ -1069,9 +1149,11 @@ export function PostProdWebPdfProcessor() {
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [selectedProject, showEditBookmarksModal, editingBookmarksList]);
 
-  const handleAnalyzeLinks = async (explicitLinkType?: 'one_way' | 'two_way' | 'none') => {
+  const handleAnalyzeLinks = async (explicitLinkType?: any) => {
     if (!selectedProject) return;
-    const targetType = explicitLinkType || linkType;
+    const targetType = (typeof explicitLinkType === 'string' && ['one_way', 'two_way', 'none'].includes(explicitLinkType))
+      ? explicitLinkType
+      : linkType;
     setAnalyzingLinks(true);
     setLinksAnalysisStatus(null);
     setLinksStatus(null);
@@ -1523,24 +1605,214 @@ export function PostProdWebPdfProcessor() {
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                     ✓ {selectedProject.status}
                   </span>
-                  <a
-                    href={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-auto text-xs text-primary hover:text-primary/80 font-semibold"
-                  >
-                    ↗ Open
-                  </a>
+                  <div className="ml-auto flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveStep(5);
+                        handleOpenEditBookmarks();
+                      }}
+                      className="text-xs text-primary hover:text-primary/80 font-semibold flex items-center gap-1 bg-primary/10 hover:bg-primary/20 px-2 py-0.5 rounded border border-primary/20 transition-colors"
+                      title="Open Drag & Drop Bookmark Level Manager"
+                    >
+                      <Bookmark size={12} />
+                      Edit Bookmarks
+                    </button>
+                    <a
+                      href={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:text-primary/80 font-semibold"
+                    >
+                      ↗ Open
+                    </a>
+                  </div>
                 </>
               )}
             </h2>
 
-            <div className="flex-1 rounded-xl overflow-hidden bg-card border border-border relative">
+            <div className="flex-1 rounded-xl overflow-hidden bg-card border border-border relative flex">
+              {/* SLIDE-OUT INTERACTIVE BOOKMARK SIDEBAR OVER THE PREVIEW */}
+              {showEditBookmarksModal && (
+                <div className="w-[300px] sm:w-[340px] shrink-0 border-r border-[#3a3b3c] bg-[#1e1f20] text-gray-200 flex flex-col z-20 shadow-2xl animate-in slide-in-from-left duration-200">
+                  <div className="p-3 border-b border-[#3a3b3c] flex items-center justify-between bg-[#2a2b2d]">
+                    <div className="flex items-center gap-2">
+                      <Bookmark size={15} className="text-primary" />
+                      <span className="text-xs font-bold text-white uppercase tracking-wider">Bookmarks</span>
+                      <span className="text-[10px] font-mono bg-[#1e1f20] px-1.5 py-0.5 rounded text-gray-400 border border-[#3a3b3c]">
+                        {editingBookmarksList.length}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        onClick={handleSaveBookmarks}
+                        disabled={savingBookmarks}
+                        className="text-[11px] h-6 px-2.5 font-semibold bg-emerald-600 hover:bg-emerald-500 text-white"
+                      >
+                        {savingBookmarks ? <RefreshCw size={11} className="animate-spin mr-1" /> : null}
+                        Save
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => setShowEditBookmarksModal(false)}
+                        className="p-1 hover:bg-[#3a3b3c] rounded text-gray-400 hover:text-white transition-colors"
+                        title="Close bookmark editor"
+                      >
+                        <XCircle size={15} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Subtitle helper */}
+                  <div className="px-3 py-1.5 bg-[#252627] border-b border-[#3a3b3c] flex items-center justify-between text-[10px] text-gray-400">
+                    <span>Drag ⋮⋮ to reorder • ◀ ▶ to change levels</span>
+                    <button
+                      type="button"
+                      onClick={() => addBookmark(editingBookmarksList.length - 1)}
+                      className="text-primary hover:text-primary/80 font-bold"
+                    >
+                      + Add
+                    </button>
+                  </div>
+
+                  {/* Scrollable draggable bookmarks tree */}
+                  <div className="flex-1 overflow-y-auto p-2 space-y-1 select-none">
+                    {loadingBookmarks ? (
+                      <div className="py-16 flex flex-col items-center justify-center gap-2 text-gray-400">
+                        <RefreshCw size={20} className="animate-spin text-primary" />
+                        <span className="text-xs">Loading bookmarks...</span>
+                      </div>
+                    ) : editingBookmarksList.length === 0 ? (
+                      <div className="p-6 text-center text-gray-400 text-xs">
+                        No bookmarks found. Generate or add one!
+                      </div>
+                    ) : (
+                      editingBookmarksList.map((bm, index) => {
+                        const isDragging = draggedBookmarkIndex === index;
+                        const isDragOver = dragOverIndex === index && draggedBookmarkIndex !== index;
+                        const levelColors = [
+                          'text-blue-400 border-blue-500/40 bg-blue-500/10',
+                          'text-purple-400 border-purple-500/40 bg-purple-500/10',
+                          'text-amber-400 border-amber-500/40 bg-amber-500/10',
+                          'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
+                          'text-rose-400 border-rose-500/40 bg-rose-500/10',
+                        ];
+                        const badgeClass = levelColors[(bm.level - 1) % levelColors.length];
+
+                        return (
+                          <div
+                            key={index}
+                            draggable
+                            onDragStart={(e) => handleBookmarkDragStart(e, index)}
+                            onDragOver={(e) => handleBookmarkDragOver(e, index)}
+                            onDrop={(e) => handleBookmarkDrop(e, index)}
+                            onDragEnd={handleBookmarkDragEnd}
+                            onClick={() => setPreviewPage(bm.page)}
+                            className={`group flex items-center gap-1.5 p-1 rounded border transition-all cursor-pointer ${
+                              isDragging ? 'opacity-30 border-dashed border-primary bg-primary/10' :
+                              isDragOver ? 'border-primary ring-2 ring-primary/40 bg-[#2f3133]' :
+                              'border-transparent hover:border-[#3a3b3c] hover:bg-[#2a2b2d] bg-[#242526]'
+                            }`}
+                            style={{ paddingLeft: `${Math.max(4, (bm.level - 1) * 14 + 4)}px` }}
+                          >
+                            {/* Drag Handle */}
+                            <div
+                              className="cursor-grab active:cursor-grabbing p-0.5 text-gray-500 group-hover:text-gray-300 shrink-0"
+                              title="Drag up or down to reorder"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <GripVertical size={13} />
+                            </div>
+
+                            {/* Level Badge + Indent / Outdent Controls */}
+                            <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <span className={`text-[9px] font-bold px-1 rounded border ${badgeClass} font-mono`}>
+                                L{bm.level}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => changeBookmarkLevel(index, -1)}
+                                disabled={bm.level <= 1}
+                                className="p-0.5 text-gray-400 hover:text-white hover:bg-[#3a3b3c] rounded disabled:opacity-20"
+                                title="Promote (Level Up / Outdent)"
+                              >
+                                <ArrowLeft size={10} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => changeBookmarkLevel(index, 1)}
+                                disabled={bm.level >= 6}
+                                className="p-0.5 text-gray-400 hover:text-white hover:bg-[#3a3b3c] rounded disabled:opacity-20 rotate-180"
+                                title="Demote (Indent / Child)"
+                              >
+                                <ArrowLeft size={10} />
+                              </button>
+                            </div>
+
+                            {/* Bookmark Title */}
+                            <input
+                              type="text"
+                              value={bm.title}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                const list = [...editingBookmarksList];
+                                list[index].title = e.target.value;
+                                setEditingBookmarksList(list);
+                              }}
+                              className="flex-1 min-w-0 text-xs px-1.5 py-0.5 bg-transparent hover:bg-[#1a1b1c] focus:bg-[#1a1b1c] border border-transparent hover:border-[#3a3b3c] focus:border-primary rounded outline-none text-gray-100 font-medium truncate"
+                            />
+
+                            {/* Page Number Editable Input */}
+                            <div
+                              className="flex items-center bg-[#1a1b1c] hover:bg-[#252627] px-1 py-0.5 rounded border border-[#3a3b3c] hover:border-gray-500 focus-within:border-primary shrink-0 transition-colors"
+                              onClick={(e) => e.stopPropagation()}
+                              title="Click to edit target page number"
+                            >
+                              <span className="text-[10px] font-mono text-gray-500 mr-0.5">p.</span>
+                              <input
+                                type="number"
+                                min="1"
+                                value={bm.page}
+                                onChange={(e) => {
+                                  const list = [...editingBookmarksList];
+                                  list[index].page = parseInt(e.target.value) || 1;
+                                  setEditingBookmarksList(list);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    setPreviewPage(bm.page);
+                                  }
+                                }}
+                                className="w-10 text-[10px] font-mono font-bold text-gray-200 bg-transparent outline-none text-center"
+                              />
+                            </div>
+
+                            {/* Delete button on hover */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeBookmark(index);
+                              }}
+                              className="p-1 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Delete bookmark"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
               {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) ? (
                 <iframe
-                  key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}`} // force reload if status or key changes
-                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf?t=${pdfRefreshKey}${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
-                  className="w-full h-full border-0"
+                  key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}-${previewPage ?? 'root'}-${highlightSearch ?? 'none'}`}
+                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf?t=${pdfRefreshKey}#page=${previewPage ?? 1}${highlightSearch ? `&search=${encodeURIComponent(highlightSearch)}` : ''}${(!previewPage && selectedProject.status === 'Bookmarked' && !showEditBookmarksModal) ? '&pagemode=bookmarks' : ''}`}
+                  className="w-full h-full border-0 flex-1"
                   title={`${selectedProject.status} PDF Preview`}
                 />
               ) : (
@@ -2188,7 +2460,7 @@ export function PostProdWebPdfProcessor() {
                               </div>
                             </div>
 
-                            <div className="flex-1 max-h-[50vh] overflow-y-auto border border-border rounded-lg bg-background p-2 space-y-1">
+                            <div className="flex-1 max-h-[60vh] overflow-y-auto border border-border rounded-xl bg-background p-2 space-y-1.5 shadow-inner">
                               {editingBookmarksList.length === 0 ? (
                                 <div className="p-8 flex flex-col items-center justify-center border border-dashed border-border rounded-lg bg-card text-center mt-2">
                                   <p className="text-xs text-muted mb-3">No bookmarks found.</p>
@@ -2197,64 +2469,123 @@ export function PostProdWebPdfProcessor() {
                                   </Button>
                                 </div>
                               ) : (
-                                editingBookmarksList.map((bm, index) => (
-                                  <div key={index} className="flex items-center gap-2 group hover:bg-muted/10 p-1.5 rounded" style={{ paddingLeft: `${(bm.level - 1) * 1.5 + 0.5}rem` }}>
-                                    <div className="flex flex-col gap-0.5 shrink-0 opacity-20 group-hover:opacity-100 transition-opacity">
-                                      <button onClick={() => moveBookmark(index, 'up')} disabled={index === 0} className="hover:text-primary disabled:opacity-30">
-                                        <ChevronUp size={12} />
-                                      </button>
-                                      <button onClick={() => moveBookmark(index, 'down')} disabled={index === editingBookmarksList.length - 1} className="hover:text-primary disabled:opacity-30">
-                                        <ChevronDown size={12} />
-                                      </button>
-                                    </div>
+                                editingBookmarksList.map((bm, index) => {
+                                  const isDragging = draggedBookmarkIndex === index;
+                                  const isDragOver = dragOverIndex === index && draggedBookmarkIndex !== index;
+                                  const levelColors = [
+                                    'bg-blue-500/10 text-blue-500 border-blue-500/30',
+                                    'bg-purple-500/10 text-purple-500 border-purple-500/30',
+                                    'bg-amber-500/10 text-amber-500 border-amber-500/30',
+                                    'bg-emerald-500/10 text-emerald-500 border-emerald-500/30',
+                                    'bg-rose-500/10 text-rose-500 border-rose-500/30',
+                                    'bg-cyan-500/10 text-cyan-500 border-cyan-500/30',
+                                  ];
+                                  const badgeClass = levelColors[(bm.level - 1) % levelColors.length];
 
-                                    <div className="flex gap-1 shrink-0 opacity-20 group-hover:opacity-100 transition-opacity mr-2">
-                                      <button onClick={() => changeBookmarkLevel(index, -1)} disabled={bm.level <= 1} className="p-1 hover:bg-muted/20 rounded disabled:opacity-30" title="Outdent (Level Up)">
-                                        <ArrowLeft size={12} />
-                                      </button>
-                                      <button onClick={() => changeBookmarkLevel(index, 1)} disabled={bm.level >= 6} className="p-1 hover:bg-muted/20 rounded disabled:opacity-30 rotate-180" title="Indent (Level Down)">
-                                        <ArrowLeft size={12} />
-                                      </button>
-                                    </div>
+                                  return (
+                                    <div
+                                      key={index}
+                                      draggable
+                                      onDragStart={(e) => handleBookmarkDragStart(e, index)}
+                                      onDragOver={(e) => handleBookmarkDragOver(e, index)}
+                                      onDrop={(e) => handleBookmarkDrop(e, index)}
+                                      onDragEnd={handleBookmarkDragEnd}
+                                      className={`flex items-center gap-2 p-1.5 rounded-lg border transition-all ${
+                                        isDragging ? 'opacity-30 border-dashed border-primary bg-primary/5' :
+                                        isDragOver ? 'border-primary ring-2 ring-primary/30 bg-primary/10' :
+                                        'border-border/60 hover:border-border hover:bg-muted/10 bg-card/60'
+                                      }`}
+                                      style={{ marginLeft: `${(bm.level - 1) * 1.25}rem` }}
+                                    >
+                                      {/* Drag Handle */}
+                                      <div
+                                        className="cursor-grab active:cursor-grabbing p-1 text-muted/50 hover:text-text rounded hover:bg-muted/20 shrink-0"
+                                        title="Drag up or down to reorder"
+                                      >
+                                        <GripVertical size={14} />
+                                      </div>
 
-                                    <div className="flex-1 flex items-center gap-2">
-                                      <input
-                                        type="text"
-                                        value={bm.title}
-                                        onChange={(e) => {
-                                          const list = [...editingBookmarksList];
-                                          list[index].title = e.target.value;
-                                          setEditingBookmarksList(list);
-                                        }}
-                                        className="flex-1 text-xs px-2 py-1 bg-transparent hover:bg-background border border-transparent hover:border-border rounded focus:border-primary focus:bg-background outline-none transition-colors"
-                                      />
-                                    </div>
+                                      {/* Level Badge + Indent / Outdent */}
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${badgeClass} font-mono`} title={`Hierarchy Level ${bm.level}`}>
+                                          L{bm.level}
+                                        </span>
+                                        <div className="flex items-center bg-muted/20 rounded p-0.5 border border-border/40">
+                                          <button
+                                            onClick={() => changeBookmarkLevel(index, -1)}
+                                            disabled={bm.level <= 1}
+                                            className="p-1 hover:bg-background hover:text-primary rounded disabled:opacity-20 transition-colors"
+                                            title="Promote (Level Up / Outdent)"
+                                          >
+                                            <ArrowLeft size={11} />
+                                          </button>
+                                          <button
+                                            onClick={() => changeBookmarkLevel(index, 1)}
+                                            disabled={bm.level >= 6}
+                                            className="p-1 hover:bg-background hover:text-primary rounded disabled:opacity-20 rotate-180 transition-colors"
+                                            title="Demote (Indent / Child of above)"
+                                          >
+                                            <ArrowLeft size={11} />
+                                          </button>
+                                        </div>
+                                      </div>
 
-                                    <div className="shrink-0 flex items-center gap-2">
-                                      <div className="flex items-center bg-muted/10 rounded px-1 border border-transparent focus-within:border-primary focus-within:bg-background transition-colors">
-                                        <span className="text-[10px] text-muted pr-1 pl-1 font-mono">p.</span>
+                                      {/* Bookmark Title */}
+                                      <div className="flex-1 min-w-0">
                                         <input
-                                          type="number"
-                                          min="1"
-                                          data-bookmark-page
-                                          value={bm.page}
+                                          type="text"
+                                          value={bm.title}
                                           onChange={(e) => {
                                             const list = [...editingBookmarksList];
-                                            list[index].page = parseInt(e.target.value) || 1;
+                                            list[index].title = e.target.value;
                                             setEditingBookmarksList(list);
                                           }}
-                                          className="w-10 text-[10px] font-mono text-muted bg-transparent py-0.5 outline-none"
+                                          className="w-full text-xs px-2 py-1 bg-transparent hover:bg-background border border-transparent hover:border-border rounded focus:border-primary focus:bg-background outline-none transition-colors font-medium text-text"
+                                          placeholder="Bookmark title..."
                                         />
                                       </div>
-                                      <button onClick={() => addBookmark(index)} className="p-1.5 text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Insert below">
-                                        <Plus size={14} />
-                                      </button>
-                                      <button onClick={() => removeBookmark(index)} className="p-1.5 text-muted hover:text-red-500 hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Remove">
-                                        <Trash2 size={14} />
-                                      </button>
+
+                                      {/* Page Number & Actions */}
+                                      <div className="shrink-0 flex items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => setPreviewPage(bm.page)}
+                                          className="flex items-center bg-muted/20 hover:bg-muted/40 rounded px-1.5 py-0.5 border border-border/60 transition-colors"
+                                          title={`Jump PDF preview to page ${bm.page}`}
+                                        >
+                                          <span className="text-[10px] text-muted font-mono mr-1">p.</span>
+                                          <input
+                                            type="number"
+                                            min="1"
+                                            data-bookmark-page
+                                            value={bm.page}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={(e) => {
+                                              const list = [...editingBookmarksList];
+                                              list[index].page = parseInt(e.target.value) || 1;
+                                              setEditingBookmarksList(list);
+                                            }}
+                                            className="w-9 text-[10px] font-mono font-bold text-text bg-transparent outline-none"
+                                          />
+                                        </button>
+                                        <button
+                                          onClick={() => addBookmark(index)}
+                                          className="p-1 text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded transition-colors"
+                                          title="Insert bookmark below"
+                                        >
+                                          <Plus size={13} />
+                                        </button>
+                                        <button
+                                          onClick={() => removeBookmark(index)}
+                                          className="p-1 text-muted hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
+                                          title="Delete bookmark"
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      </div>
                                     </div>
-                                  </div>
-                                ))
+                                  );
+                                })
                               )}
                             </div>
 
@@ -2425,7 +2756,7 @@ export function PostProdWebPdfProcessor() {
 
                     <div className="flex gap-3 mt-4">
                       <Button
-                        onClick={handleAnalyzeLinks}
+                        onClick={() => handleAnalyzeLinks()}
                         disabled={analyzingLinks || generatingLinks || linkType === 'none'}
                         variant={linksAnalysisStatus ? 'outline' : 'primary'}
                         leftIcon={analyzingLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
@@ -2509,34 +2840,45 @@ export function PostProdWebPdfProcessor() {
                             </tr>
                           </thead>
                           <tbody>
-                            {urlLinksAnalysis.details.map((item: UrlLinkDetail, i: number) => (
-                              <tr key={i} className="border-b border-blue-100 last:border-0 hover:bg-blue-50/30">
-                                <td className="p-2 max-w-[160px]">
-                                  <span className="truncate block text-blue-700" title={item.url}>{item.display_text}</span>
-                                </td>
-                                <td className="p-2 text-center text-muted">{item.page}</td>
-                                <td className="p-2 text-center">
-                                  {item.is_linked ? (
-                                    <span className="text-emerald-600 font-bold" title="Hyperlinked in PDF">✓ Linked</span>
-                                  ) : (
-                                    <span className="text-red-500 font-bold" title="Not hyperlinked in PDF">✗ Not linked</span>
-                                  )}
-                                </td>
-                                <td className="p-2 text-center">
-                                  {item.http_ok ? (
-                                    <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                                      {item.http_status} {item.http_description}
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 text-red-500 font-semibold" title={item.http_description}>
-                                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
-                                      {item.http_status ? `${item.http_status} ${item.http_description}` : item.http_description}
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
+                            {urlLinksAnalysis.details.map((item: UrlLinkDetail, i: number) => {
+                              const isSelected = previewPage === item.page && highlightSearch === item.display_text;
+                              return (
+                                <tr
+                                  key={i}
+                                  onClick={() => {
+                                    setPreviewPage(item.page);
+                                    setHighlightSearch(item.display_text || item.url);
+                                  }}
+                                  className={`border-b border-blue-100 last:border-0 cursor-pointer transition-colors ${isSelected ? 'bg-blue-100/70 font-medium' : 'hover:bg-blue-50/50'}`}
+                                  title="Click to view and highlight on PDF page"
+                                >
+                                  <td className="p-2 max-w-[160px]">
+                                    <span className="truncate block text-blue-700 underline decoration-blue-300 underline-offset-2" title={item.url}>{item.display_text}</span>
+                                  </td>
+                                  <td className="p-2 text-center font-semibold text-blue-800">{item.page}</td>
+                                  <td className="p-2 text-center">
+                                    {item.is_linked ? (
+                                      <span className="text-emerald-600 font-bold" title="Hyperlinked in PDF">✓ Linked</span>
+                                    ) : (
+                                      <span className="text-red-500 font-bold" title="Not hyperlinked in PDF">✗ Not linked</span>
+                                    )}
+                                  </td>
+                                  <td className="p-2 text-center">
+                                    {item.http_ok ? (
+                                      <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                                        {item.http_status} {item.http_description}
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-red-500 font-semibold" title={item.http_description}>
+                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
+                                        {item.http_status ? `${item.http_status} ${item.http_description}` : item.http_description}
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

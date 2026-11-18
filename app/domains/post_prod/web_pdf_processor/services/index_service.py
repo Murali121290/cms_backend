@@ -111,23 +111,27 @@ def find_index_links_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
         
         for i, w in enumerate(words):
             raw_token = w[4].rstrip('.,;:!?')
+
+            # Check if this word ends with a trailing hyphen indicating a broken page range across lines (e.g. "373-" + "374,")
+            word_rect = fitz.Rect(w[:4])
+            if raw_token.endswith(('-', '–')) and i + 1 < len(words):
+                next_raw = words[i + 1][4].rstrip('.,;:!?')
+                if next_raw.isdigit():
+                    raw_token = raw_token.rstrip('-–') + '-' + next_raw
+                    word_rect = word_rect | fitz.Rect(words[i + 1][:4])
+
             m = PAGE_REF_PAT.match(raw_token)
             if not m:
                 continue
 
             first_p_str = m.group(1)
             p_val = int(first_p_str)
-            
-            # Filter out years or numbers outside document range
             if p_val <= 0 or p_val >= len(doc):
                 continue
 
-            # Look up physical page index
             target_p_idx = page_map.get(p_val)
             if target_p_idx is None:
                 continue
-
-            word_rect = fitz.Rect(w[:4])
             
             # Determine term context (words preceding this page number on the entry line)
             term_words = []
@@ -178,7 +182,7 @@ def find_index_links_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
 
     if not analyze_only and (not_linked_count > 0 or details):
         temp_path = pdf_path.replace('.pdf', '_temp.pdf')
-        doc.save(temp_path, incremental=False, garbage=3, deflate=True)
+        doc.save(temp_path, incremental=False, garbage=0, deflate=True)
         doc.close()
         os.replace(temp_path, pdf_path)
     else:

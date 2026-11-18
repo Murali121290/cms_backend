@@ -87,9 +87,15 @@ def find_glossary_pages(doc) -> tuple[int, int]:
     return None, None
 
 
+def _clean_invisible(text: str) -> str:
+    """Strip zero-width spaces, soft hyphens, and non-breaking spaces commonly inserted in PDF glossary terms."""
+    return re.sub(r'[\u200b\u200c\u200d\ufeff\xad]', '', text).replace('\xa0', ' ')
+
+
 def extract_glossary_definitions(doc, start_p: int, end_p: int) -> dict:
     """
     Extract headwords defined in the Glossary section.
+    Handles single-line and multi-line headwords.
     Returns: dict mapping lowercase term to {
         'term': str (original casing),
         'page_idx': int,
@@ -107,19 +113,66 @@ def extract_glossary_definitions(doc, start_p: int, end_p: int) -> dict:
         content_blocks = [b for b in blocks if not (b['bbox'][1] < 45 or b['bbox'][1] > 740)]
 
         for b in content_blocks:
-            for l in b.get('lines', []):
-                for s in l.get('spans', []):
-                    txt = s.get('text', '').strip()
+            lines = b.get('lines', [])
+            for l_idx, l in enumerate(lines):
+                spans = l.get('spans', [])
+                for s_idx, s in enumerate(spans):
                     font = s.get('font', '').lower()
                     is_bold = 'bold' in font or 'heavy' in font or 'black' in font or (s.get('flags', 0) & 16)
+                    if not is_bold:
+                        continue
 
-                    # Look for bold headwords ending in dash or colon
-                    if is_bold and any(txt.endswith(d) for d in ['—', '–', '-', ':']):
-                        clean_term = txt.rstrip('—–-:').strip()
-                        if clean_term and 2 <= len(clean_term) < 70 and not clean_term.isdigit():
+                    txt = _clean_invisible(s.get('text', '')).strip()
+                    # Check if bold headword ends with dash or colon on this span
+                    matched_spans = [s]
+                    accum_txt = txt
+
+                    # If bold span doesn't end with dash/colon, check if next span or next line continues the bold headword
+                    if not any(accum_txt.endswith(d) for d in ['—', '–', '-', ':']):
+                        # Check subsequent bold spans on same line
+                        for k in range(s_idx + 1, len(spans)):
+                            ns = spans[k]
+                            n_font = ns.get('font', '').lower()
+                            n_bold = 'bold' in n_font or 'heavy' in n_font or 'black' in n_font or (ns.get('flags', 0) & 16)
+                            if not n_bold:
+                                break
+                            n_txt = _clean_invisible(ns.get('text', '')).strip()
+                            accum_txt += ' ' + n_txt
+                            matched_spans.append(ns)
+                            if any(accum_txt.endswith(d) for d in ['—', '–', '-', ':']):
+                                break
+
+                        # If still not ending with dash/colon and at line end, check start of next line
+                        if not any(accum_txt.endswith(d) for d in ['—', '–', '-', ':']) and s_idx == len(spans) - 1 and l_idx + 1 < len(lines):
+                            next_l = lines[l_idx + 1]
+                            next_spans = next_l.get('spans', [])
+                            if next_spans:
+                                ns = next_spans[0]
+                                n_font = ns.get('font', '').lower()
+                                n_bold = 'bold' in n_font or 'heavy' in n_font or 'black' in n_font or (ns.get('flags', 0) & 16)
+                                if n_bold:
+                                    n_txt = _clean_invisible(ns.get('text', '')).strip()
+                                    if accum_txt.endswith('-'):
+                                        accum_txt = accum_txt[:-1] + n_txt
+                                    else:
+                                        accum_txt += ' ' + n_txt
+                                    matched_spans.append(ns)
+
+                    # Accept headword if:
+                    # 1. Ends with dash or colon (e.g. "Term — Definition" or "Term: Definition")
+                    # 2. Or is a bold start-of-line entry followed by non-bold definition (e.g. "Advocacy  Campaigning...")
+                    has_punct = any(accum_txt.endswith(d) for d in ['—', '–', '-', ':'])
+                    is_start_of_entry = (s_idx == 0 or (s_idx == 1 and not lines[l_idx]['spans'][0].get('text', '').strip()))
+                    
+                    if has_punct or (is_start_of_entry and len(matched_spans) < len(spans)):
+                        clean_term = accum_txt.rstrip('—–-:\u2002\u2003\t ').strip()
+                        # Exclude single letter alphabet headings like 'A', 'B', 'C'
+                        if clean_term and 2 <= len(clean_term) < 90 and not clean_term.isdigit() and not re.match(r'^[A-Z]$', clean_term):
                             norm_key = clean_term.lower()
                             if norm_key not in definitions:
-                                r = fitz.Rect(s['bbox'])
+                                r = fitz.Rect(matched_spans[0]['bbox'])
+                                for ms in matched_spans[1:]:
+                                    r |= fitz.Rect(ms['bbox'])
                                 definitions[norm_key] = {
                                     'term': clean_term,
                                     'page_idx': page_idx,
@@ -134,7 +187,8 @@ def extract_glossary_definitions(doc, start_p: int, end_p: int) -> dict:
 def find_glossary_terms_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     """
     Scans the PDF for Glossary definitions and finds all bold/key term occurrences
-    in the chapter body text. Creates links from body terms to their glossary definitions.
+    in the chapter body text (including multi-line wrapped bold terms).
+    Creates links from body terms to their glossary definitions.
     """
     doc = fitz.open(pdf_path)
     start_p, end_p = find_glossary_pages(doc)
@@ -157,7 +211,6 @@ def find_glossary_terms_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict
     not_linked_count = 0
 
     # Scan body pages (from chapter start up to glossary start)
-    # Typically chapters start after front-matter (e.g. page index 5+)
     for page_idx in range(start_p):
         page = doc[page_idx]
         existing_links = page.get_links()
@@ -166,59 +219,83 @@ def find_glossary_terms_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict
         content_blocks = [b for b in blocks if not (b['bbox'][1] < 45 or b['bbox'][1] > 740)]
 
         for b in content_blocks:
-            for l in b.get('lines', []):
-                for s in l.get('spans', []):
+            lines = b.get('lines', [])
+            for l_idx, l in enumerate(lines):
+                spans = l.get('spans', [])
+                for s_idx, s in enumerate(spans):
                     font = s.get('font', '').lower()
                     is_bold = 'bold' in font or 'heavy' in font or 'black' in font or (s.get('flags', 0) & 16)
                     if not is_bold:
                         continue
 
                     # Clean candidate text
-                    candidate = s.get('text', '').strip().rstrip('.,;:!?')
-                    if not candidate or len(candidate) < 2 or candidate.isdigit():
+                    cand_raw = _clean_invisible(s.get('text', '')).strip().rstrip('.,;:!?')
+                    if not cand_raw or len(cand_raw) < 2 or cand_raw.isdigit():
                         continue
 
-                    norm_key = candidate.lower()
-                    if norm_key in definitions:
-                        defn = definitions[norm_key]
-                        term_rect = fitz.Rect(s['bbox'])
+                    candidates_to_try = [
+                        (cand_raw, [fitz.Rect(s['bbox'])])
+                    ]
 
-                        # Expand clickable rect slightly (+1.5pt)
-                        r_click = fitz.Rect(term_rect.x0 - 1.5, term_rect.y0 - 1.5, term_rect.x1 + 1.5, term_rect.y1 + 1.5)
+                    # Multi-line wrapped bold term detection:
+                    # If this span is at line end and next line starts with bold span
+                    if s_idx == len(spans) - 1 and l_idx + 1 < len(lines):
+                        next_l = lines[l_idx + 1]
+                        next_spans = next_l.get('spans', [])
+                        if next_spans:
+                            ns = next_spans[0]
+                            n_font = ns.get('font', '').lower()
+                            n_bold = 'bold' in n_font or 'heavy' in n_font or 'black' in n_font or (ns.get('flags', 0) & 16)
+                            if n_bold:
+                                n_raw = _clean_invisible(ns.get('text', '')).strip().rstrip('.,;:!?')
+                                if cand_raw.endswith('-'):
+                                    stitched = cand_raw[:-1] + n_raw
+                                else:
+                                    stitched = cand_raw + ' ' + n_raw
+                                candidates_to_try.insert(0, (stitched, [fitz.Rect(s['bbox']), fitz.Rect(ns['bbox'])]))
 
-                        # Check if already linked to the glossary page
-                        already_linked = any(
-                            l.get('kind') == fitz.LINK_GOTO and
-                            l.get('page') == defn['page_idx'] and
-                            _rects_overlap(r_click, fitz.Rect(l.get('from')), threshold=0.5)
-                            for l in existing_links
-                        )
+                    for candidate, rect_list in candidates_to_try:
+                        norm_key = candidate.lower()
+                        if norm_key in definitions:
+                            defn = definitions[norm_key]
 
-                        if already_linked:
-                            linked_count += 1
-                        else:
-                            not_linked_count += 1
-                            if not analyze_only:
-                                page.insert_link({
-                                    "kind": fitz.LINK_GOTO,
-                                    "from": r_click,
-                                    "page": defn['page_idx'],
-                                    "to": defn['point']
-                                })
-                                already_linked = True
+                            # Check if already linked to the glossary page
+                            already_linked = any(
+                                l.get('kind') == fitz.LINK_GOTO and
+                                l.get('page') == defn['page_idx'] and
+                                any(_rects_overlap(r, fitz.Rect(l.get('from')), threshold=0.4) for r in rect_list)
+                                for l in existing_links
+                            )
 
-                        details.append({
-                            "term": defn['term'],
-                            "body_term": candidate,
-                            "body_page": page_idx + 1,
-                            "glossary_page": defn['page'],
-                            "is_linked": already_linked,
-                            "rect": [r_click.x0, r_click.y0, r_click.x1, r_click.y1]
-                        })
+                            if already_linked:
+                                linked_count += 1
+                            else:
+                                not_linked_count += 1
+                                if not analyze_only:
+                                    for r_click in rect_list:
+                                        r_expanded = fitz.Rect(r_click.x0 - 1.5, r_click.y0 - 1.5, r_click.x1 + 1.5, r_click.y1 + 1.5)
+                                        page.insert_link({
+                                            "kind": fitz.LINK_GOTO,
+                                            "from": r_expanded,
+                                            "page": defn['page_idx'],
+                                            "to": defn['point']
+                                        })
+                                    already_linked = True
+
+                            details.append({
+                                "term": defn['term'],
+                                "body_term": candidate,
+                                "body_page": page_idx + 1,
+                                "glossary_page": defn['page'],
+                                "is_linked": already_linked,
+                                "rect": [rect_list[0].x0, rect_list[0].y0, rect_list[0].x1, rect_list[0].y1],
+                                "all_rects": [[r.x0, r.y0, r.x1, r.y1] for r in rect_list]
+                            })
+                            break
 
     if not analyze_only and (not_linked_count > 0 or details):
         temp_path = pdf_path.replace('.pdf', '_temp.pdf')
-        doc.save(temp_path, incremental=False, garbage=3, deflate=True)
+        doc.save(temp_path, incremental=False, garbage=0, deflate=True)
         doc.close()
         os.replace(temp_path, pdf_path)
     else:

@@ -82,24 +82,33 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
             if block["type"] != 0:
                 continue
             for line in block.get("lines", []):
-                # (a) Check superscript spans
+                # (a) Check superscript spans (single digit or comma/hyphen separated like "1,2", "3-5")
                 for span in line.get("spans", []):
                     flags = span.get("flags", 0)
                     text = span.get("text", "").strip()
-                    is_superscript = bool(flags & 1)
+                    is_superscript = bool(flags & 1) or (span.get("size", 10.0) < 7.0 and re.match(r'^\d+(?:[,\-–]\d+)*$', text))
 
-                    if is_superscript and re.match(r'^\d{1,4}$', text):
-                        note_num = int(text)
-                        key = (chapter_num, note_num)
+                    if is_superscript and re.match(r'^\d+(?:[,\-–]\d+)*$', text):
+                        # Extract all numbers from range or list (e.g. "1,2" -> [1, 2], "3-5" -> [3, 4, 5])
+                        nums = []
+                        for part in re.split(r'[,;]', text):
+                            m_rng = re.match(r'^(\d+)[–\-](\d+)$', part.strip())
+                            if m_rng:
+                                s_n, e_n = int(m_rng.group(1)), int(m_rng.group(2))
+                                nums.extend(range(s_n, min(s_n + 10, e_n + 1)))
+                            elif part.strip().isdigit():
+                                nums.append(int(part.strip()))
+
                         r = fitz.Rect(span["bbox"])
-                        # Expand bbox slightly (+1.5 pt all around) so it is easy to hover and click
                         r_click = fitz.Rect(r.x0 - 1.5, r.y0 - 1.5, r.x1 + 1.5, r.y1 + 1.5)
-                        note_references[key].append({
-                            "page_idx": page_idx,
-                            "page": page_idx + 1,
-                            "rect": r_click,
-                            "chapter_num": chapter_num,
-                        })
+                        for note_num in nums:
+                            key = (chapter_num, note_num)
+                            note_references[key].append({
+                                "page_idx": page_idx,
+                                "page": page_idx + 1,
+                                "rect": r_click,
+                                "chapter_num": chapter_num,
+                            })
 
                 # (b) Check bracketed/parenthesized citations: (19), (12, 17), (1-3), [19]
                 line_text = "".join(s.get("text", "") for s in line.get("spans", []))
@@ -373,7 +382,7 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     # ------------------------------------------------------------------
     if not analyze_only and note_entries:
         temp_path = pdf_path.replace('.pdf', '_temp.pdf')
-        doc.save(temp_path, incremental=False, garbage=3, deflate=True)
+        doc.save(temp_path, incremental=False, garbage=0, deflate=True)
         doc.close()
         os.replace(temp_path, pdf_path)
         logger.debug("Endnote links created and PDF saved")
@@ -395,21 +404,79 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
 # Helper: clean existing endnote links before re-applying
 # ---------------------------------------------------------------------------
 
+def _identify_toc_pages(doc) -> set:
+    """Identify page indices that belong to the Table of Contents."""
+    toc_pages = set()
+    try:
+        # Check bookmarks first
+        for lvl, title, page_1based in doc.get_toc():
+            if re.match(r'^(?:Table of )?Contents$', title.strip(), re.IGNORECASE):
+                toc_pages.add(page_1based - 1)
+    except Exception:
+        pass
+
+    # Text search fallback in first 20 pages
+    if not toc_pages:
+        for p_idx in range(min(20, len(doc))):
+            page_text = doc[p_idx].get_text()
+            if re.search(r'\b(?:Table\s+of\s+Contents|^Contents\b)', page_text, re.IGNORECASE | re.MULTILINE):
+                toc_pages.add(p_idx)
+
+    # Expand to consecutive TOC pages if multi-page TOC
+    if toc_pages:
+        expanded = set(toc_pages)
+        for tp in toc_pages:
+            for next_p in range(tp + 1, min(tp + 6, len(doc))):
+                text = doc[next_p].get_text()
+                if re.search(r'\.{4,}|\b\d{1,4}\s*$', text, re.MULTILINE) and not re.search(r'^(?:CHAPTER|Chapter)\s+1\b', text, re.MULTILINE):
+                    expanded.add(next_p)
+                else:
+                    break
+        return expanded
+    return toc_pages
+
+
 def _clear_existing_endnote_links(doc, notes_section_start: int, notes_section_end: int):
-    """Safely remove existing GOTO links between body pages and notes pages."""
+    """
+    Safely remove existing GOTO links between body pages and notes pages.
+    PROTECTS:
+      1. All links on TOC pages (TOC -> Chapter / Bibliography / Index)
+      2. All links pointing to TOC pages (Two-Way Return Links from Chapter headings -> TOC)
+      3. Wide links (TOC entries and chapter title banners are broad; endnote links are tiny superscripts)
+    """
+    toc_pages = _identify_toc_pages(doc)
+    logger.debug(f"Endnote cleaner protecting TOC pages: {toc_pages}")
+
     for page_idx in range(len(doc)):
+        # Never remove any links on Table of Contents pages!
+        if page_idx in toc_pages:
+            continue
+
         page = doc[page_idx]
         links = page.get_links()
         for link in links:
             if link.get("kind") == fitz.LINK_GOTO:
                 target_page = link.get("page")
-                if target_page is not None:
-                    # Link from body to notes section
-                    if page_idx < notes_section_start and (notes_section_start <= target_page < notes_section_end):
-                        page.delete_link(link)
-                    # Link from notes section back to body
-                    elif (notes_section_start <= page_idx < notes_section_end) and target_page < notes_section_start:
-                        page.delete_link(link)
+                if target_page is None:
+                    continue
+
+                # Never delete backlinks that return to the Table of Contents!
+                if target_page in toc_pages:
+                    continue
+
+                # Check link bounding box: endnote superscripts and definition numbers are narrow (< 45 pt)
+                # Two-way chapter title banners or section links are much wider.
+                link_rect = fitz.Rect(link.get("from", [0, 0, 0, 0]))
+                if link_rect.width > 60:
+                    # Not an endnote link (probably a heading or banner link) -> protect it!
+                    continue
+
+                # Link from body to notes section
+                if page_idx < notes_section_start and (notes_section_start <= target_page < notes_section_end):
+                    page.delete_link(link)
+                # Link from notes section back to body
+                elif (notes_section_start <= page_idx < notes_section_end) and target_page < notes_section_start:
+                    page.delete_link(link)
 
 
 # ---------------------------------------------------------------------------

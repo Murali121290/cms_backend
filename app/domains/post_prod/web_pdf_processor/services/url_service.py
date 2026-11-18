@@ -54,6 +54,89 @@ def _status_description(code: int) -> str:
     return descriptions.get(code, f'HTTP {code}')
 
 
+def _clean_invisible(text: str) -> str:
+    """Strip zero-width spaces and soft hyphens commonly inserted in PDF URLs."""
+    return re.sub(r'[\u200b\u200c\u200d\ufeff\xad]', '', text)
+
+
+def _extract_page_urls_and_rects(page):
+    """
+    Extracts URLs from a page, properly detecting and stitching multi-line URLs
+    that wrap across line breaks, and returns (clean_url, [fitz.Rect, ...], [seg_text, ...]).
+    """
+    words = page.get_text('words')
+    found = []
+    used_word_indices = set()
+    domain_exts = (
+        '.html', '.htm', '.pdf', '.php', '.aspx', '.org', '.com', '.edu',
+        '.gov', '.io', '.net', '.au', '.uk', '.ca', '.de', '.fr', '.in'
+    )
+    
+    i = 0
+    while i < len(words):
+        if i in used_word_indices:
+            i += 1
+            continue
+            
+        w_raw = words[i][4]
+        w_clean = _clean_invisible(w_raw).lstrip('([<{\'\"“‘')
+        if re.match(r'^(?:https?://|www\.)', w_clean, re.I):
+            accum_clean = w_clean
+            matched_words = [words[i]]
+            matched_indices = [i]
+            
+            j = i + 1
+            while j < len(words):
+                w_prev = words[j - 1]
+                w_curr = words[j]
+                
+                # Check block/line continuity: w[5] = block_no, w[6] = line_no, w[7] = word_no
+                same_block = (w_curr[5] == w_prev[5])
+                consecutive_line = same_block and (w_curr[6] == w_prev[6] + 1) and (w_curr[7] == 0)
+                same_line = same_block and (w_curr[6] == w_prev[6])
+                
+                if not (same_line or (same_block and consecutive_line)):
+                    break
+                    
+                next_clean = _clean_invisible(w_curr[4])
+                
+                # Avoid breaking into list bullets or numbered items
+                if re.match(r'^(?:[•\*]|\d+[\.\t]|[A-Z][a-z]+ [A-Z])', next_clean):
+                    break
+                if next_clean.startswith('-') and not ('/' in next_clean or any(accum_clean.endswith(c) for c in ['/', '.'])):
+                    break
+                    
+                is_cont = False
+                if any(accum_clean.endswith(ch) for ch in ['/', '.', '-', '=', '?', '&', ':']):
+                    is_cont = True
+                elif any(next_clean.startswith(ch) for ch in ['/', '.', '-', '=', '?', '&']):
+                    is_cont = True
+                elif ('/' in accum_clean or accum_clean.count('.') >= 1) and not any(accum_clean.endswith(ext) for ext in domain_exts):
+                    if re.match(r'^[a-zA-Z0-9_\-\.\/\?\=\&\#\%]+$', next_clean):
+                        is_cont = True
+                        
+                if is_cont:
+                    accum_clean += next_clean
+                    matched_words.append(w_curr)
+                    matched_indices.append(j)
+                    j += 1
+                else:
+                    break
+                    
+            clean_url = accum_clean.rstrip('.,;:!?()[]{}')
+            clean_url = re.sub(r'(?<=[a-zA-Z0-9])\.\d+$', '', clean_url)
+            
+            rects = [fitz.Rect(mw[:4]) for mw in matched_words]
+            segs = [mw[4] for mw in matched_words]
+            used_word_indices.update(matched_indices)
+            found.append((clean_url, rects, segs))
+            i = j
+        else:
+            i += 1
+            
+    return found
+
+
 def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True, color_urls: bool = False) -> dict:
     """
     Scan PDF for plain-text URLs.
@@ -83,71 +166,14 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True, color_urls: bool 
                 if rect:
                     existing_link_rects.append((rect, uri))
 
-        # Extract all text at once (preserves line continuity info)
-        page_text = page.get_text()
-
-        # Smart normalization: only remove newlines that are likely within URLs
-        # This handles cases like "http://sports\n.yahoo.com" where a newline breaks a URL
-        import re as re_module
-        normalized_text = page_text
-
-        # Handle various line break scenarios within URLs:
-        # 1. "word\n.domain" → "word.domain" (most common)
-        normalized_text = re_module.sub(r'(\S)\s*\n\s*(?=\.)', r'\1', normalized_text)
-        # 2. "word\n/path" → "word/path" (word followed by newline then slash)
-        normalized_text = re_module.sub(r'(\S)\s*\n\s*(?=/)', r'\1', normalized_text)
-        # 3. "://\n" → "://" (protocol followed by newline)
-        normalized_text = re_module.sub(r'://\s*\n\s*', '://', normalized_text)
-        # 4. "www\n.example" → "www.example"
-        normalized_text = re_module.sub(r'(www)\s*\n\s*(?=\.)', r'\1', normalized_text)
-        # 5. Hyphenated path continuations: "word-\npath" or "path\n-subpath"
-        normalized_text = re_module.sub(r'([a-zA-Z0-9/])\s*\n\s*(?=-[a-zA-Z0-9])', r'\1', normalized_text)
-        normalized_text = re_module.sub(r'(-)\s*\n\s*(?=[a-zA-Z0-9])', r'\1', normalized_text)
-
-        # Clean up any remaining newlines with space
-        normalized_text = normalized_text.replace('\n', ' ').replace('\r', ' ')
-        # Clean up multiple spaces
-        normalized_text = ' '.join(normalized_text.split())
-
-        # Find all URLs in the normalized page text
-        found_urls = []
-
-        # First pass: collect all potential URLs (including incomplete ones)
-        all_matches = list(URL_PATTERN.finditer(normalized_text))
-
-        for i, m in enumerate(all_matches):
-            raw_url = m.group(0).rstrip('.,;:!?')
-
-            # Check if this is an incomplete URL (no domain after ://)
-            if raw_url.startswith('http://') or raw_url.startswith('https://'):
-                domain_part = raw_url.split('://', 1)[1]
-                if '.' not in domain_part:
-                    # Incomplete URL - try to find continuation in the next match
-                    if i + 1 < len(all_matches):
-                        next_match = all_matches[i + 1]
-                        next_url = next_match.group(0).rstrip('.,;:!?')
-
-                        # Check if next_url looks like a continuation (starts with . or /)
-                        if next_url.startswith('.') or next_url.startswith('/'):
-                            # Merge them: "http://sports" + ".yahoo.com/..." = "http://sports.yahoo.com/..."
-                            merged_url = raw_url + next_url
-                            if '.' in merged_url.split('://', 1)[1]:
-                                found_urls.append(merged_url)
-                                logger.debug(f"Merged incomplete URL on page {physical_page}: {raw_url} + {next_url} = {merged_url}")
-                                continue
-
-                    logger.debug(f"Skipping incomplete URL on page {physical_page}: {raw_url}")
-                    continue
-
-            found_urls.append(raw_url)
-            logger.debug(f"Found URL on page {physical_page}: {raw_url}")
-
-        # Second pass: process all found URLs (including merged ones)
+        # Extract structured word-based URLs including wrapped lines
+        page_urls_info = _extract_page_urls_and_rects(page)
         used_rects = []
-        for raw_url in found_urls:
+
+        for raw_url, matched_rects, segs in page_urls_info:
             href = raw_url if raw_url.startswith('http') else f'https://{raw_url}'
             norm = _normalise_url(href)
-            matched_rects, segs = _find_all_text_rects_and_segments(page, raw_url, used_rects=used_rects)
+
             if not matched_rects:
                 continue
 
@@ -171,29 +197,10 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True, color_urls: bool 
                 for link_rect, link_uri in existing_link_rects:
                     if any(_rects_overlap(r, link_rect, threshold=0.3) for r in matched_rects):
                         already_linked = True
-                        # Adopt existing link's true URI and exact bounded rectangle to avoid
-                        # capturing adjacent footnotes/citation numbers (e.g. "...acclimatization.33")
                         href = link_uri
-                        exact_clip_text = page.get_text('text', clip=fitz.Rect(link_rect)).strip()
-                        if exact_clip_text:
-                            raw_url = exact_clip_text
-                        matched_rects = [fitz.Rect(link_rect)]
-                        primary_rect = matched_rects[0]
-                        segs = [raw_url]
                         break
 
-            # If this URL is already linked by an existing link, ensure matched_rects strictly matches the link rect
-            if already_linked and matched_rects:
-                for link_rect, link_uri in existing_link_rects:
-                    if _normalise_url(link_uri) == _normalise_url(href) or any(_rects_overlap(r, link_rect, threshold=0.3) for r in matched_rects):
-                        href = link_uri
-                        exact_clip_text = page.get_text('text', clip=fitz.Rect(link_rect)).strip()
-                        if exact_clip_text:
-                            raw_url = exact_clip_text
-                        matched_rects = [fitz.Rect(link_rect)]
-                        primary_rect = matched_rects[0]
-                        segs = [raw_url]
-                        break
+            used_rects.extend(matched_rects)
 
             used_rects.extend(matched_rects)
 
