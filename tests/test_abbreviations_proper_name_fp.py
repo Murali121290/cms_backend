@@ -104,14 +104,31 @@ def test_who_organization_does_not_flag_embedded_phrases():
 
 def test_ama_organization_does_not_flag_embedded_phrases():
     """American Medical Association (AMA): embedded ``Medical
-    Association`` must not fire. AB07 (ambiguous meaning) is
-    allowed — it's a separate rule class, orthogonal to this fix."""
+    Association`` must not fire.
+
+    Tests focused on embedded-phrase false positives — ``AB01`` /
+    ``AB02`` / ``AB14`` are the rule classes that would flag the
+    embedded workbook expansion if the proper-name protection failed;
+    they must stay silent. ``AB07`` (ambiguity) is orthogonal to this
+    fix — it may or may not fire depending on whether the author
+    disambiguated inline. ``AB05`` (single-use spell-out) is also
+    orthogonal: once the engine resolves AMA via the in-document
+    definition it correctly observes that AMA is never used again and
+    recommends dropping the parentheses — that's AB05 doing its job,
+    not an embedded-phrase regression.
+    """
     text = "The American Medical Association (AMA) released guidelines."
     findings = _run(text)
-    # Ignore AB07 (ambiguity rule — fires because AMA has multiple
-    # meanings in the workbook).
-    non_ab07 = [f for f in findings if f[0] != "AB07"]
-    assert non_ab07 == [], f"expected no non-AB07 findings, got: {non_ab07}"
+    embedded_class = {"AB01", "AB02", "AB14"}
+    embedded_hits = [
+        f for f in findings
+        if f[0] in embedded_class
+        and "medical association" in (f[1] or "").lower()
+    ]
+    assert embedded_hits == [], (
+        f"embedded 'Medical Association' phrase must not surface AB01 / "
+        f"AB02 / AB14, got: {embedded_hits}"
+    )
 
 
 # ─── Preserve-cases: valid workflow must still work ────────────────

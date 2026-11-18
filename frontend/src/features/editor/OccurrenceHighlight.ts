@@ -15,6 +15,12 @@ interface OccurrencePluginState {
   decorations: DecorationSet;
   occurrences: Occurrence[];
   selectedIndex: number;
+  // Whitelist of occurrence categories whose decorations should be painted.
+  // ``null`` means "no filter" (every occurrence is decorated — the behaviour
+  // before category-aware filtering existed). An empty array hides every
+  // finding decoration (used by the Comments / Rules tabs which have no
+  // occurrence-backed highlights of their own).
+  allowedCategories: string[] | null;
 }
 
 interface BlockInfo {
@@ -34,6 +40,10 @@ export const OccurrenceHighlight = Extension.create({
       occurrences: [] as Occurrence[],
       selectedIndex: -1,
       onOccurrenceClick: null as ((index: number) => void) | null,
+      // Mirrors the plugin-state field; used by the apply() fallback path
+      // that re-seeds state from storage when an unrelated transaction
+      // triggers recompute without a meta payload.
+      allowedCategories: null as string[] | null,
     };
   },
 
@@ -49,12 +59,17 @@ export const OccurrenceHighlight = Extension.create({
               decorations: DecorationSet.empty,
               occurrences: [] as Occurrence[],
               selectedIndex: -1,
+              allowedCategories: null as string[] | null,
             };
           },
           apply(tr, pluginState, oldState, newState) {
             const meta = tr.getMeta(occurrenceHighlightKey) || tr.getMeta("occurrenceHighlight");
             let occurrences = pluginState?.occurrences || extension.storage.occurrences || [];
             let selectedIndex = pluginState?.selectedIndex ?? extension.storage.selectedIndex ?? -1;
+            let allowedCategories: string[] | null =
+              pluginState?.allowedCategories !== undefined
+                ? pluginState.allowedCategories
+                : (extension.storage.allowedCategories ?? null);
             let needsRecompute = false;
 
             if (meta) {
@@ -66,6 +81,17 @@ export const OccurrenceHighlight = Extension.create({
                 selectedIndex = meta.selectedIndex;
                 needsRecompute = true;
               }
+              // `null` is a valid payload ("show everything"), so key off
+              // property presence rather than truthiness. Reference compare
+              // is enough because the page wraps the array in useMemo keyed
+              // on the active category tab.
+              if (
+                Object.prototype.hasOwnProperty.call(meta, "allowedCategories") &&
+                meta.allowedCategories !== allowedCategories
+              ) {
+                allowedCategories = meta.allowedCategories ?? null;
+                needsRecompute = true;
+              }
             } else if (
               extension.storage.occurrences &&
               extension.storage.occurrences.length > 0 &&
@@ -73,6 +99,7 @@ export const OccurrenceHighlight = Extension.create({
             ) {
               occurrences = extension.storage.occurrences;
               selectedIndex = extension.storage.selectedIndex ?? -1;
+              allowedCategories = extension.storage.allowedCategories ?? null;
               needsRecompute = true;
             }
 
@@ -89,8 +116,15 @@ export const OccurrenceHighlight = Extension.create({
                 decorations: DecorationSet.empty,
                 occurrences: [],
                 selectedIndex: -1,
+                allowedCategories,
               };
             }
+
+            // Build a membership check once per recompute. `null` disables
+            // filtering entirely so the "All" tab keeps the pre-filter
+            // behaviour verbatim. An empty whitelist ⇒ no occurrence ever
+            // passes (used by Comments / Rules tabs).
+            const allowedSet = allowedCategories ? new Set(allowedCategories) : null;
 
             // 1. Collect all block nodes with both sequential index and data-para-idx
             const blocks: BlockInfo[] = [];
@@ -111,6 +145,16 @@ export const OccurrenceHighlight = Extension.create({
             // 2. Map each occurrence to the best matching block using content-based & paragraph scoring
             occurrences.forEach((occ: Occurrence, occIndex: number) => {
               if (!occ.surface) return;
+
+              // Category-aware filter. Applied before any match work so
+              // hidden-category occurrences cost nothing beyond the Set
+              // lookup. Occurrences without a category (e.g. stylesheet
+              // term highlights) are treated as uncategorised and hide
+              // when any specific whitelist is active — they resurface
+              // under the "All" tab (allowedSet === null).
+              if (allowedSet) {
+                if (!occ.category || !allowedSet.has(occ.category)) return;
+              }
 
               let bestBlock: BlockInfo | null = null;
               let bestScore = Infinity;
@@ -212,6 +256,7 @@ export const OccurrenceHighlight = Extension.create({
               decorations: DecorationSet.create(newState.doc, decorations),
               occurrences,
               selectedIndex,
+              allowedCategories,
             };
           },
         },

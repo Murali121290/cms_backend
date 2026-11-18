@@ -715,6 +715,27 @@ def _dash_rule_findings(
 # Detection — En_Dash_Terms
 # ---------------------------------------------------------------------------
 
+def _compile_token_regex(form: str) -> Optional[re.Pattern[str]]:
+    """Whole-word boundary regex for a workbook surface form.
+
+    Alphanumeric endpoints get ``\\b``; punctuation endpoints get the
+    non-letter/digit negative lookarounds. ``re.IGNORECASE`` + Python's
+    default Unicode-aware ``\\b`` is what lets a form like
+    ``Guillain–Barré`` match the identical sequence in the author's
+    text even with the accented é. Returns ``None`` when the form is
+    empty or the pattern can't be compiled.
+    """
+    if not form:
+        return None
+    esc = re.escape(form)
+    left = r"\b" if form[:1].isalnum() else r"(?<![A-Za-z0-9])"
+    right = r"\b" if form[-1:].isalnum() else r"(?![A-Za-z0-9])"
+    try:
+        return re.compile(f"{left}{esc}{right}", re.IGNORECASE)
+    except re.error:
+        return None
+
+
 def _en_dash_findings(
     text: str,
     *,
@@ -722,13 +743,75 @@ def _en_dash_findings(
     protected_spans: list[tuple[int, int]],
 ) -> list[Finding]:
     """For each En_Dash_Terms row, under the active profile, flag the
-    surface form that disagrees with the profile's expectation."""
+    surface form that disagrees with the profile's expectation.
+
+    When the two style axes AGREE (``expected`` is ``en_dash`` or
+    ``hyphen``) the row's ``wrong_form`` surfaces as an auto-fixable
+    finding whose suggestion is the expected form.
+
+    When the two style axes DISAGREE (``expected == 'both'``) — the
+    canonical case being "Joint eponym" entries like Kaplan–Meier /
+    Mann–Whitney / Guillain–Barré where Chicago/AMA/APA call for an en
+    dash and MW keeps the hyphen — the engine previously stayed silent
+    and the terms never appeared in the Hyphenation panel. The fix:
+    still surface a finding for EVERY in-text occurrence of either
+    form, flagged ``autofixable=False`` with the *other* form as the
+    alternative. The reviewer decides which style to apply; the editor
+    now shows a highlight and a Hyphenation card for each occurrence
+    so consistency can be audited at a glance.
+    """
     out: list[Finding] = []
     for i, row in enumerate(_compile_en_dash_terms()):
         if not _rule_in_profile(row.detect_list_profile, dash_profile):
             continue
         expected = _active_en_dash_expectation(row, dash_profile)
         if expected == "both":
+            # Joint-eponym / style-neutral entries. Surface both surface
+            # forms so reviewers can confirm the compound is written
+            # correctly. Autofix OFF — "both forms accepted" semantics.
+            if not row.form_en_dash and not row.form_hyphen:
+                continue
+            seen_this_row: list[tuple[int, int]] = []
+            for present_form, alt_form in (
+                (row.form_hyphen, row.form_en_dash),
+                (row.form_en_dash, row.form_hyphen),
+            ):
+                rx = _compile_token_regex(present_form or "")
+                if rx is None:
+                    continue
+                for m in rx.finditer(text):
+                    s, e = m.start(), m.end()
+                    if _span_overlaps(s, e, protected_spans):
+                        continue
+                    # Guard against a single surface matching under both
+                    # loop iterations (e.g. if the two forms were equal
+                    # in a malformed workbook row).
+                    if any(s == ss and e == ee for ss, ee in seen_this_row):
+                        continue
+                    seen_this_row.append((s, e))
+                    surface = m.group(0)
+                    alt = _preserve_case(surface, alt_form) if alt_form else surface
+                    out.append(Finding(
+                        rule_id=f"EN-{i:04d}",
+                        category="hyphenation",
+                        start=s,
+                        end=e,
+                        original=surface,
+                        # Keep the surface unchanged in ``suggestion`` so
+                        # the UI treats it as an advisory detection, not a
+                        # mechanical rewrite. The alternative form rides on
+                        # ``alt_suggestions`` for the reviewer to apply if
+                        # they choose.
+                        suggestion=surface,
+                        message=(
+                            f"{row.category}: both forms accepted — "
+                            f"Chicago/AMA/APA prefer en dash; "
+                            f"MW uses hyphen. Review for consistency."
+                        ),
+                        severity="suggestion",
+                        autofixable=False,
+                        alt_suggestions=[alt] if alt and alt != surface else [],
+                    ))
             continue
         # Determine which surface, if present, is wrong under the profile.
         wrong_form: Optional[str] = None
@@ -739,14 +822,8 @@ def _en_dash_findings(
             wrong_form, right_form = row.form_en_dash, row.form_hyphen
         if not wrong_form or not right_form:
             continue
-        # Build a strict regex: whole-word on either side when the token
-        # endpoints are alphanumeric, else a non-letter/digit boundary.
-        esc = re.escape(wrong_form)
-        left = r"\b" if wrong_form[:1].isalnum() else r"(?<![A-Za-z0-9])"
-        right = r"\b" if wrong_form[-1:].isalnum() else r"(?![A-Za-z0-9])"
-        try:
-            rx = re.compile(f"{left}{esc}{right}", re.IGNORECASE)
-        except re.error:
+        rx = _compile_token_regex(wrong_form)
+        if rx is None:
             continue
         for m in rx.finditer(text):
             s, e = m.start(), m.end()

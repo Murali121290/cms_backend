@@ -30,6 +30,8 @@ export interface GroupCardFinding extends GroupableFinding {
 
 export type DecideStatus = 'accepted' | 'edited' | 'rejected' | 'highlighted'
 
+export type IgnoreScope = 'once' | 'always'
+
 export interface AbbreviationGroupCardProps {
   group: AbbreviationGroup<GroupCardFinding>
   collapsed: boolean
@@ -38,7 +40,9 @@ export interface AbbreviationGroupCardProps {
   editingFindingId: number | null
   editedInputs: Record<number, string>
   onSelectFinding: (id: number) => void
-  onDecide: (id: number, status: DecideStatus) => void
+  /** Scope is optional; only passed through when ``status === 'rejected'``.
+   *  Existing callers that don't care about Once vs Always keep working. */
+  onDecide: (id: number, status: DecideStatus, scope?: IgnoreScope) => void
   onToggleEdit: (id: number) => void
   onEditInputChange: (id: number, value: string) => void
   /** Optional: callback refs for scroll-into-view. */

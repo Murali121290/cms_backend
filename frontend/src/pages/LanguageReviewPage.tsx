@@ -58,6 +58,8 @@ import { buildAbbreviationGroups, isDisplayableGroup, type AbbreviationGroup } f
 import { referenceHighlightKey } from '@/features/editor/ReferenceHighlight'
 import { AbbreviationGroupCard } from '@/features/language_edit/AbbreviationGroupCard'
 import { computeCategoryWorkflow, isInclusiveFinding, type UnlockCategory } from '@/features/language_edit/categoryWorkflow'
+import { IgnoredTermsPanel } from '@/features/language_edit/IgnoredTermsPanel'
+import { scanForChosenExpansion, extractParagraphsFromEditor } from '@/features/language_edit/ambiguousScan'
 
 interface Finding {
   id: number
@@ -150,6 +152,36 @@ interface Finding {
     end_offset: number
     text: string
   } | null
+  // Populated server-side only when ``status === 'rejected'``. 'once' =
+  // Ignore Once (this occurrence only). 'always' = Ignore Always (every
+  // sibling with the same rule_id + original_text was cascade-rejected
+  // by the backend). The Ignored Terms panel displays the scope badge
+  // and the restore handler uses it to decide whether a confirmation
+  // dialog is needed before the cascade restore.
+  ignore_scope?: 'once' | 'always' | null
+  // AB07 ambiguous-abbreviation manuscript scan. Populated server-side
+  // only when the reviewer has already picked a canonical meaning for
+  // this finding (``status === 'edited'`` with ``edited_text`` set).
+  // Each entry is a related occurrence the reviewer should know about:
+  // the first valid definition pattern, later definitions (repeated or
+  // inconsistent), standalone expansion phrases, and bare abbreviation
+  // tokens. ``null`` / omitted for every non-AB07 row and for AB07
+  // rows that have no chosen meaning yet. Pure presentation — the
+  // engine never emits ``Finding`` rows from this scan.
+  ambiguous_scan?: Array<{
+    kind:
+      | 'first_definition'
+      | 'repeated_definition'
+      | 'inconsistent_definition'
+      | 'expansion'
+      | 'abbreviation'
+    para_index: number
+    start_offset: number
+    end_offset: number
+    text: string
+    rule_id?: string | null
+    conflicting_expansion?: string | null
+  }> | null
 }
 
 // "Term from list: <name>" or "Term from list: <name> (also in: <names>)"
@@ -246,7 +278,31 @@ export function LanguageReviewPage() {
   // Punctuation and Capitalization tab. ``hyphenation`` is labelled
   // "Hyphenated Words" in the UI. Backend finding categories stay the
   // same — this change is presentation + grouping only.
-  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules'>('all')
+  const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules' | 'ignored'>('all')
+  // Remembers which tab the reviewer was on when they clicked the
+  // ``Ignored Items`` button, so the panel's Back affordance returns
+  // them exactly where they came from. Falls back to 'all' when the
+  // user opens the Ignored view some other way (e.g. a direct deep
+  // link, or a browser back-navigation that skipped the entry point).
+  const [preIgnoredTab, setPreIgnoredTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'bias' | 'typo' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'comments' | 'rules'>('all')
+  const openIgnoredPanel = useCallback(() => {
+    setActiveRightTab(prev => {
+      if (prev !== 'ignored') {
+        setPreIgnoredTab(prev as any)
+      }
+      return 'ignored'
+    })
+  }, [])
+  const closeIgnoredPanel = useCallback(() => {
+    setActiveRightTab(preIgnoredTab)
+  }, [preIgnoredTab])
+  // Ignored Terms panel local UI state. Kept at the page level (not inside
+  // the panel component) so the search/filter survive a tab switch and so
+  // the restore-confirmation modal can be rendered next to the editor
+  // modal stack instead of inside the scrollable sidebar.
+  const [ignoredSearchQuery, setIgnoredSearchQuery] = useState<string>('')
+  const [ignoredCategoryFilter, setIgnoredCategoryFilter] = useState<string>('all')
+  const [restoringFindingIds, setRestoringFindingIds] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
   // Three-phase loading message driven by the analyze endpoint's
   // behaviour: the POST both checks the cache and (on miss) runs the
@@ -615,7 +671,15 @@ export function LanguageReviewPage() {
   const clearSelection = useCallback(() => setSelectedFindingIds(new Set()), [])
 
   // Handle Finding Decision
-  const handleDecide = async (findingId: number, status: 'accepted' | 'edited' | 'rejected' | 'highlighted') => {
+  //
+  // ``Ignore`` is now a single action — the backend defaults scope to
+  // 'once' when none is provided and never cascades without an
+  // explicit 'always' payload (dormant path kept for restore + any
+  // pre-existing 'always' rows).
+  const handleDecide = async (
+    findingId: number,
+    status: 'accepted' | 'edited' | 'rejected' | 'highlighted',
+  ) => {
     // Duplicate-click guard: if a prior click's POST is still in
     // flight for this finding, drop the new click. Browser Network
     // tab shows one request, server receives one write, counters
@@ -695,7 +759,9 @@ export function LanguageReviewPage() {
     //    backend response may replace this later with a full
     //    re-analysed list (AB only).
     setFindings(prev =>
-      prev.map(f => (f.id === findingId ? { ...f, status, edited_text: editedText } : f))
+      prev.map(f => (f.id === findingId
+        ? { ...f, status, edited_text: editedText }
+        : f))
     )
 
     // 3) Optimistic job-counter delta so the header progress bar
@@ -754,7 +820,7 @@ export function LanguageReviewPage() {
         } : prev)
       }
 
-      toast.success(`Finding ${status}`)
+      toast.success(status === 'rejected' ? 'Ignored' : `Finding ${status}`)
     } catch (err) {
       // ── Rollback every optimistic mutation so the UI matches the
       //    unchanged server state and the reviewer can retry. ──
@@ -798,6 +864,82 @@ export function LanguageReviewPage() {
       })
     }
   }
+
+  // ── Restore (Ignored Terms → Pending) ───────────────────────────
+  // Reverses an earlier Ignore decision. On an Ignore Once row this is
+  // a single-finding flip; on an Ignore Always row the backend cascade-
+  // restores every sibling that shares (rule_id, original_text). The
+  // caller (the Ignored Terms panel's Restore button) decides whether
+  // to open a confirmation modal first — see ``requestRestore`` below.
+  const executeRestore = useCallback(async (finding: Finding) => {
+    if (restoringFindingIds.has(finding.id)) return
+    setRestoringFindingIds(prev => {
+      const next = new Set(prev)
+      next.add(finding.id)
+      return next
+    })
+    try {
+      const resp = await apiClient.post(`/language-edit/findings/${finding.id}/restore`)
+      const data = resp?.data as any
+      // Preferred shape when the cascade touched more than one row: the
+      // backend sends ``findings`` for atomic client-side replace.
+      if (Array.isArray(data?.findings)) {
+        setFindings(data.findings as Finding[])
+      } else if (data?.finding) {
+        setFindings(prev =>
+          prev.map(f => (f.id === data.finding.id ? (data.finding as Finding) : f)),
+        )
+      } else {
+        // Minimal fallback — just flip our local state. Covers the case
+        // where the backend returned an older shape (shouldn't happen
+        // but keeps the UI consistent).
+        setFindings(prev =>
+          prev.map(f => (f.id === finding.id
+            ? { ...f, status: 'pending', reviewer: undefined, decided_at: undefined, ignore_scope: null }
+            : f)),
+        )
+      }
+      if (data?.job) {
+        setJob(prev => prev ? {
+          ...prev,
+          total_findings: data.job.total_findings ?? prev.total_findings,
+          accepted_count: data.job.accepted_count ?? prev.accepted_count,
+          edited_count: data.job.edited_count ?? prev.edited_count,
+          rejected_count: data.job.rejected_count ?? prev.rejected_count,
+        } : prev)
+      }
+      const restoredCount = Array.isArray(data?.restored_ids) ? data.restored_ids.length : 1
+      toast.success(
+        restoredCount > 1
+          ? `Restored ${restoredCount} findings to pending`
+          : 'Finding restored to pending',
+      )
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to restore finding'))
+    } finally {
+      setRestoringFindingIds(prev => {
+        if (!prev.has(finding.id)) return prev
+        const next = new Set(prev)
+        next.delete(finding.id)
+        return next
+      })
+    }
+  }, [restoringFindingIds])
+
+  // Entry point used by the Ignored Items panel. Always a single-row
+  // restore now — the UI no longer surfaces Ignore Always, so there's
+  // no cascade to confirm. The backend still cascade-restores any
+  // pre-existing 'always'-scoped sibling rows if a legacy database
+  // carried them; the response's ``findings`` array is applied
+  // atomically either way.
+  const requestRestore = useCallback((finding: Finding) => {
+    executeRestore(finding)
+  }, [executeRestore])
+
+  const isRestoringFinding = useCallback(
+    (id: number) => restoringFindingIds.has(id),
+    [restoringFindingIds],
+  )
 
   // Category-level bulk decide. Calls the single-shot
   // ``POST /jobs/{job_id}/batch-decide`` endpoint which wraps every
@@ -1131,6 +1273,55 @@ export function LanguageReviewPage() {
     return findings.findIndex((f) => f.id === selectedFindingId)
   }, [findings, selectedFindingId])
 
+  // Which occurrence categories the editor should paint highlights for,
+  // driven by the sidebar category badge.
+  //   * ``null`` ⇒ no filter (All) — the OccurrenceHighlight plugin
+  //     reverts to its historical "decorate everything" behaviour.
+  //   * array ⇒ only occurrences whose ``category`` is in the list get
+  //     a decoration. Buckets mirror the sidebar's own category groups
+  //     (Hyphenated Words absorbs legacy ``compounds`` / ``compound``;
+  //     Inclusive folds in ``article`` and the term-matcher category
+  //     ``term`` so clicking Inclusive highlights match the
+  //     ``inclusiveFindings`` filter).
+  //   * ``[]`` ⇒ hide every finding highlight (Comments / Rules tabs
+  //     have no occurrence-backed highlights of their own; Comment
+  //     marks remain visible because they live in document content,
+  //     not in this decoration set).
+  //
+  // Filtering happens inside the ProseMirror plugin, so switching tabs
+  // only triggers a decoration recompute — the document is not
+  // reloaded, findings/statuses/counts are untouched, and Accept /
+  // Edit / Highlight / Ignore keep their existing wiring (clicks still
+  // land on ``findings[idx]`` via the decoration's ``data-occ-index``).
+  const allowedOccurrenceCategories = useMemo<string[] | null>(() => {
+    switch (activeRightTab) {
+      case 'all':
+        return null
+      case 'grammar':
+        return ['grammar']
+      case 'spelling':
+        return ['spelling']
+      case 'sentence':
+        return ['sentence']
+      case 'typo':
+        return ['typo']
+      case 'hyphenation':
+        return ['hyphenation', 'compounds', 'compound']
+      case 'abbreviations':
+        return ['abbreviations']
+      case 'medical_terms':
+        return ['medical_terms']
+      case 'bias':
+        return ['bias', 'article', 'term']
+      case 'comments':
+      case 'rules':
+      case 'ignored':
+        return []
+      default:
+        return null
+    }
+  }, [activeRightTab])
+
   // Direct scroll-to-span via the OccurrenceHighlight decoration's data-occ-index
   // attribute. This bypasses the WysiwygEditor useEffect roundtrip (which can
   // miss when selectedFindingId doesn't change value or when the found block
@@ -1455,6 +1646,41 @@ export function LanguageReviewPage() {
     [pendingFindings],
   )
 
+  // Ignored Terms list — every finding the reviewer has ignored
+  // (status === 'rejected'). Sourced from the full ``findings`` array,
+  // not ``pendingFindings`` (which excludes rejected rows by design), so
+  // the panel surfaces the complete ignored set regardless of scope.
+  // Preserves individual occurrences — abbreviation group rows each
+  // have their own Finding record and therefore appear as separate
+  // Ignored Terms entries.
+  const ignoredFindings = useMemo(
+    () => findings.filter(f => f.status === 'rejected'),
+    [findings],
+  )
+  const filteredIgnoredFindings = useMemo(() => {
+    const q = ignoredSearchQuery.trim().toLowerCase()
+    return ignoredFindings.filter(f => {
+      if (ignoredCategoryFilter !== 'all' && f.category !== ignoredCategoryFilter) return false
+      if (!q) return true
+      return (
+        (f.original_text || '').toLowerCase().includes(q) ||
+        (f.suggestion || '').toLowerCase().includes(q) ||
+        (f.rule_id || '').toLowerCase().includes(q) ||
+        (f.message || '').toLowerCase().includes(q)
+      )
+    })
+  }, [ignoredFindings, ignoredSearchQuery, ignoredCategoryFilter])
+  // Category options derived from the actual ignored set so the dropdown
+  // only lists categories that have at least one ignored finding — avoids
+  // a confusing filter with empty results.
+  const ignoredCategoryOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const f of ignoredFindings) {
+      if (f.category) set.add(f.category)
+    }
+    return Array.from(set).sort()
+  }, [ignoredFindings])
+
   const activeCategoryFindings = useMemo(() => {
     let list: Finding[] = []
     if (activeRightTab === 'all') list = pendingFindings
@@ -1565,7 +1791,7 @@ export function LanguageReviewPage() {
   // current always-visible policy this effect is a no-op.
   useEffect(() => {
     const t = activeRightTab
-    if (t === 'all' || t === 'rules') return
+    if (t === 'all' || t === 'rules' || t === 'ignored') return
     if (t === 'bias' || t === 'comments') {
       if (!categoryWorkflow.allActionableCategoriesComplete) {
         setActiveRightTab('all')
@@ -1680,6 +1906,50 @@ export function LanguageReviewPage() {
     const isAb07 = f.rule_id === 'AB07'
     const meanings = Array.isArray(f.meanings) ? f.meanings : []
     const hasAb07Meanings = isAb07 && meanings.length > 0
+
+    // AB07 ambiguous scan — related occurrences shown beneath the
+    // meaning picker once the reviewer has chosen a canonical meaning.
+    // Prefers the backend's serialized scan (``f.ambiguous_scan``) for
+    // already-edited rows; falls back to a live editor scan while the
+    // reviewer is still previewing their pick (``editedInputs[f.id]``
+    // set but Accept hasn't fired yet). ``f.abbreviation`` +
+    // ``f.meanings`` come from the backend AB07 payload so the scan
+    // stays generic — never hardcoding any specific term.
+    const chosenMeaningRaw = (editedInputs[f.id] ?? f.edited_text ?? '').trim()
+    const ab07Scan: Array<{
+      kind: 'first_definition' | 'repeated_definition' | 'inconsistent_definition' | 'expansion' | 'abbreviation'
+      para_index: number
+      start_offset: number
+      end_offset: number
+      text: string
+      rule_id?: string | null
+      conflicting_expansion?: string | null
+    }> | null = (() => {
+      if (!hasAb07Meanings) return null
+      // Prefer the authoritative server scan when the row has been
+      // persisted — it uses the real DOCX text + engine exclusions.
+      if (Array.isArray(f.ambiguous_scan) && f.ambiguous_scan.length > 0) {
+        return f.ambiguous_scan
+      }
+      if (!chosenMeaningRaw) return null
+      const abbr = (f.abbreviation || f.original_text || '').trim()
+      if (!abbr) return null
+      const otherExpansions = meanings
+        .map(m => m.meaning)
+        .filter(m => m && m.trim().toLowerCase() !== chosenMeaningRaw.toLowerCase())
+      const paragraphs = extractParagraphsFromEditor(editorRef.current?.editor)
+      if (paragraphs.length === 0) return null
+      try {
+        return scanForChosenExpansion({
+          paragraphs,
+          abbreviation: abbr,
+          chosenExpansion: chosenMeaningRaw,
+          otherExpansions,
+        })
+      } catch {
+        return null
+      }
+    })()
 
     if (isTerm) {
       const { listName, alsoIn } = parseTermMeta(f.message)
@@ -1962,6 +2232,85 @@ export function LanguageReviewPage() {
                 )
               })}
             </div>
+
+            {/* AB07 related-occurrence scan. Fires the moment the
+                reviewer picks a meaning; stays visible after Accept
+                via the backend-serialized ``ambiguous_scan`` payload.
+                Nothing is rendered when the chosen expansion + its
+                abbreviation never appear elsewhere in the manuscript
+                — ``no false findings`` per spec. */}
+            {chosenMeaningRaw && ab07Scan && ab07Scan.length > 0 && (
+              <div
+                className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 overflow-hidden"
+                data-testid="ab07-ambiguous-scan"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 bg-white border-b border-slate-200 flex items-center justify-between">
+                  <span>
+                    Occurrences of “{(f.abbreviation || f.original_text || '').trim()}” /{' '}
+                    “{chosenMeaningRaw}”
+                  </span>
+                  <span className="text-slate-400 font-normal">
+                    {ab07Scan.length} found
+                  </span>
+                </div>
+                <ul className="divide-y divide-slate-200">
+                  {ab07Scan.map((hit, hitIdx) => {
+                    const kindMeta: Record<typeof hit.kind, { label: string; cls: string }> = {
+                      first_definition: { label: 'First definition', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                      repeated_definition: { label: 'Repeated definition', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+                      inconsistent_definition: { label: 'Inconsistent definition', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+                      expansion: { label: 'Expansion', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
+                      abbreviation: { label: 'Abbreviation', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+                    }
+                    const meta = kindMeta[hit.kind]
+                    return (
+                      <li
+                        key={`${f.id}-scan-${hitIdx}`}
+                        data-testid="ab07-scan-row"
+                        data-finding-id={f.id}
+                        data-kind={hit.kind}
+                        className="px-3 py-2 hover:bg-white transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                            <span
+                              className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide ${meta.cls}`}
+                              data-testid="ab07-scan-kind"
+                            >
+                              {meta.label}
+                            </span>
+                            {hit.rule_id && (
+                              <span className="font-mono text-slate-400">{hit.rule_id}</span>
+                            )}
+                            <button
+                              type="button"
+                              data-testid="ab07-scan-goto"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                scrollEditorToParaIndex(hit.para_index, hit.start_offset, hit.end_offset)
+                              }}
+                              className="text-slate-500 hover:text-indigo-700 underline decoration-dotted"
+                              title="Jump to this occurrence in the editor"
+                            >
+                              Para {hit.para_index + 1}
+                            </button>
+                            {hit.conflicting_expansion && (
+                              <span className="italic text-rose-600">
+                                (defines “{hit.conflicting_expansion}”)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-1 text-[12.5px] text-slate-700 leading-snug" data-testid="ab07-scan-text">
+                          {hit.text}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
           </div>
         ) : isAdvisoryIdentity(f) ? (
           <div className="mt-3 flex items-center gap-2 text-sm font-medium flex-wrap">
@@ -2395,6 +2744,7 @@ export function LanguageReviewPage() {
                     occurrences={editorOccurrences}
                     selectedOccurrenceIndex={selectedOccurrenceIndex}
                     onOccurrenceClick={handleOccurrenceClick}
+                    allowedOccurrenceCategories={allowedOccurrenceCategories}
                     onSelectionChange={(text) => setSelectedEditorText(text)}
                     onCommentClick={(commentId) => {
                       setActiveRightTab('comments')
@@ -2426,6 +2776,7 @@ export function LanguageReviewPage() {
             />
           )}
 
+
           {/* ── RIGHT SIDE: SIDE PANEL (CLARITY DESIGN) ── */}
           <aside className="w-[420px] bg-white border-l border-slate-100 flex flex-col flex-shrink-0 overflow-hidden">
             
@@ -2435,7 +2786,7 @@ export function LanguageReviewPage() {
                 the same signal. */}
             <div className="p-5 border-b border-slate-100 flex-shrink-0">
               {/* Pill Search Input */}
-              {activeRightTab !== 'rules' && activeRightTab !== 'comments' && (
+              {activeRightTab !== 'rules' && activeRightTab !== 'comments' && activeRightTab !== 'ignored' && (
                 <div className="relative">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <input
@@ -2451,7 +2802,7 @@ export function LanguageReviewPage() {
               {/* Category Filter Chips */}
               <div
                 className={`flex items-center gap-1.5 flex-wrap ${
-                  activeRightTab !== 'rules' && activeRightTab !== 'comments' ? 'mt-3' : ''
+                  activeRightTab !== 'rules' && activeRightTab !== 'comments' && activeRightTab !== 'ignored' ? 'mt-3' : ''
                 }`}
               >
                 <button
@@ -2801,6 +3152,28 @@ export function LanguageReviewPage() {
                       ))
                   )}
                 </div>
+              ) : activeRightTab === 'ignored' ? (
+                <IgnoredTermsPanel
+                  findings={filteredIgnoredFindings}
+                  totalCount={ignoredFindings.length}
+                  categoryOptions={ignoredCategoryOptions}
+                  searchQuery={ignoredSearchQuery}
+                  onSearchChange={setIgnoredSearchQuery}
+                  categoryFilter={ignoredCategoryFilter}
+                  onCategoryFilterChange={setIgnoredCategoryFilter}
+                  onRestore={(ignored) => {
+                    // The panel's narrower ``IgnoredFinding`` shape is a
+                    // structural subset of ``Finding``; look up the full
+                    // record so ``requestRestore`` can inspect fields the
+                    // panel doesn't carry (e.g. the live ``ignore_scope``
+                    // + any sibling references used to decide whether to
+                    // confirm the cascade).
+                    const full = findings.find(f => f.id === ignored.id)
+                    if (full) requestRestore(full)
+                  }}
+                  isRestoring={isRestoringFinding}
+                  onBack={closeIgnoredPanel}
+                />
               ) : activeRightTab !== 'rules' ? (
                 activeCategoryFindings.length === 0 ? (
                   <div className="py-12 text-center text-slate-400 text-xs">
@@ -2902,6 +3275,27 @@ export function LanguageReviewPage() {
                                   data-testid="category-ignore-all"
                                 >
                                   Ignore All ({pendingIds.length})
+                                </button>
+                                {/* Ignored Items — the ignored queue lives
+                                    on this bar per the revised spec, not
+                                    the category-chip row. Count reflects
+                                    every ignored finding across the whole
+                                    document (not just this category) so
+                                    the reviewer sees the full backlog from
+                                    any actionable tab. Muted-indigo fill
+                                    distinguishes it from the emerald
+                                    Accept All and the outline-only Ignore
+                                    All without reusing the amber reserved
+                                    for Highlight actions. */}
+                                <button
+                                  type="button"
+                                  onClick={openIgnoredPanel}
+                                  className="px-2.5 py-1 rounded-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-[11px] font-semibold text-indigo-700 flex items-center gap-1 transition-colors"
+                                  data-testid="category-ignored-items"
+                                  title="Review and restore ignored findings"
+                                >
+                                  <XCircle size={11} />
+                                  Ignored Items ({ignoredFindings.length})
                                 </button>
                               </>
                             )}
