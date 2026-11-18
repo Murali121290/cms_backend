@@ -36,5 +36,27 @@ class BodJob(Base):
     is_fastrack = Column(Boolean, default=False, nullable=False)
     fastrack_requested_date = Column(DateTime(timezone=True), nullable=True)
     file_history = Column(JSON, nullable=False, default=list) # [{"filename": "...", "backup_filename": "...", "backup_filepath": "...", "uploaded_by": "...", "timestamp": "...", "stage": "..."}]
+    hold_support_history = Column(JSON, nullable=False, default=list) # [{"id": "...", "type": "Hold"|"Support", "status": "Open"|"Resolved", "query_reason": "...", "created_by": "...", "created_at": "...", "resolution_notes": "...", "resolved_by": "...", "resolved_at": "..."}]
+
+
+class BodCsvEntry(Base):
+    """
+    Stores CSV manifest metadata fetched from the FTP or uploaded.
+    Used for matching incoming PDFs to their expected ISBN and metadata.
+    """
+    __tablename__ = "bod_csv_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    isbn = Column(String(100), nullable=True, index=True)
+    raw_filename = Column(String(255), nullable=True) # File Name in CSV if present (e.g. Demo_Book_1.pdf)
+    source_csv_filename = Column(String(255), nullable=True)
+    pages = Column(Integer, nullable=True)
+    pdf_type = Column(String(50), nullable=True)
+    language = Column(String(50), nullable=True)
+    extra_data = Column(JSON, nullable=True) # Full row data as dict
+    matched_job_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
 
 
