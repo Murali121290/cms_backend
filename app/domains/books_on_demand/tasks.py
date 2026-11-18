@@ -668,7 +668,7 @@ def send_bod_daily_receipt_summary(target_date_str: str | None = None):
                 "language": job.pdf_language if job.pdf_language and job.pdf_language != "None" else "-",
                 "file_size_kb": file_size_display,
                 "alt_text": "No",
-                "remarks": "file received not in csv"
+                "remarks": "File received not in CSV"
             })
 
         logger.info(f"Sending BOD daily receipt summary to {manager_email} with {len(summary_rows)} rows...")

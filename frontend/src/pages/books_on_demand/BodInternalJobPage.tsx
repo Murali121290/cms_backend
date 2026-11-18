@@ -44,6 +44,7 @@ export function BodInternalJobPage() {
   const [isUploadingCover, setIsUploadingCover] = useState(false)
   const [isOpeningValidator, setIsOpeningValidator] = useState(false)
   const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files' | 'status'>('stage')
+  const [holdSupportFilter, setHoldSupportFilter] = useState<'all' | 'Hold' | 'Support'>('all')
   const [aceFile, setAceFile] = useState<File | null>(null)
   const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
   const [isUploadingReports, setIsUploadingReports] = useState(false)
@@ -531,33 +532,18 @@ export function BodInternalJobPage() {
               >
                 <Zap size={11} className="fill-amber-500 text-amber-500" />
                 Fastrack
-                {job.fastrack_requested_date && (
-                  <span className="font-mono text-[9px] opacity-90">
-                    ({formatDateTime(job.fastrack_requested_date).split(' ')[0]})
-                  </span>
-                )}
               </span>
             )}
           </h1>
           <div className="flex items-center gap-4 mt-1.5">
             <p className="text-sm text-muted m-0">{job.client_name} • Stage: <strong className="text-text">{job.current_stage_name}</strong></p>
 
-            {!isCompleted && (
-              <div className="flex items-center gap-1.5 text-muted text-xs">
-                <User size={13} className="text-muted/70" />
-                <div className="w-[180px]">
-                  <Dropdown
-                    variant="inline"
-                    searchable
-                    searchPlaceholder="Search assignees..."
-                    value={job.current_assignee || ''}
-                    onChange={(val) => assignUser(val)}
-                    className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[12px]"
-                    options={assigneeOptions}
-                  />
-                </div>
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 text-muted text-xs">
+              <User size={13} className="text-muted/70" />
+              <span className="font-semibold text-text">
+                {getUserDisplayName(job.current_assignee) || job.current_assignee || 'Unassigned'}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -579,7 +565,7 @@ export function BodInternalJobPage() {
                   : <AlertTriangle size={14} />
               }
             >
-              {job.status === 'Hold' || job.status === 'Support' ? 'Resolve' : 'Report / Status'}
+              {job.status === 'Hold' || job.status === 'Support' ? 'Resolve' : 'Report'}
             </Button>
           )}
 
@@ -1408,75 +1394,105 @@ export function BodInternalJobPage() {
                 {/* 1. Structured Hold & Support Resolution History */}
                 {job.hold_support_history && Array.isArray(job.hold_support_history) && job.hold_support_history.length > 0 ? (
                   <div className="space-y-3">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-2">
-                      Hold & Support Tickets ({job.hold_support_history.length})
-                    </span>
-                    {[...job.hold_support_history].reverse().map((record: any, idx: number) => {
-                      const isOpen = record.status === 'Open'
-                      const isHold = record.type === 'Hold'
-                      const isSupport = record.type === 'Support'
+                    <div className="flex items-center justify-between gap-2 mb-2 pb-1 border-b border-border/40">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                        Hold & Support Tickets ({job.hold_support_history.length})
+                      </span>
+                      {/* Filter Buttons: Hold and Support */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setHoldSupportFilter(holdSupportFilter === 'Hold' ? 'all' : 'Hold')}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${holdSupportFilter === 'Hold'
+                            ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-xs ring-1 ring-fuchsia-400'
+                            : 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400 hover:bg-fuchsia-500/20'
+                            }`}
+                          title={holdSupportFilter === 'Hold' ? 'Click to show both Hold and Support' : 'Click to filter Hold only'}
+                        >
+                          Hold {job.hold_support_history.filter((h: any) => h.type === 'Hold').length > 0 && `(${job.hold_support_history.filter((h: any) => h.type === 'Hold').length})`}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHoldSupportFilter(holdSupportFilter === 'Support' ? 'all' : 'Support')}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${holdSupportFilter === 'Support'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
+                            : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20'
+                            }`}
+                          title={holdSupportFilter === 'Support' ? 'Click to show both Hold and Support' : 'Click to filter Support only'}
+                        >
+                          Support {job.hold_support_history.filter((h: any) => h.type === 'Support').length > 0 && `(${job.hold_support_history.filter((h: any) => h.type === 'Support').length})`}
+                        </button>
+                      </div>
+                    </div>
+                    {[...job.hold_support_history]
+                      .filter((record: any) => holdSupportFilter === 'all' || record.type === holdSupportFilter)
+                      .reverse()
+                      .map((record: any, idx: number) => {
+                        const isOpen = record.status === 'Open'
+                        const isHold = record.type === 'Hold'
+                        const isSupport = record.type === 'Support'
 
-                      return (
-                        <div
-                          key={record.id || idx}
-                          className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
+                        return (
+                          <div
+                            key={record.id || idx}
+                            className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
                               ? isHold
-                                ? 'border-amber-500/50 ring-1 ring-amber-500/20'
+                                ? 'border-fuchsia-500/50 ring-1 ring-fuchsia-500/20'
                                 : 'border-indigo-500/50 ring-1 ring-indigo-500/20'
                               : 'border-border'
-                            }`}
-                        >
-                          {/* Header */}
-                          <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
-                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                              }`}
+                          >
+                            {/* Header */}
+                            <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
+                                  ? 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400'
                                   : isSupport
                                     ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400'
                                     : 'bg-accent border-border text-text'
-                                }`}>
-                                {record.type}
-                              </span>
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isOpen
+                                  }`}>
+                                  {record.type}
+                                </span>
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isOpen
                                   ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 animate-pulse'
                                   : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-                                }`}>
-                                {isOpen ? '● Pending / Open' : '✓ Resolved'}
+                                  }`}>
+                                  {isOpen ? '● Pending / Open' : '✓ Resolved'}
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-muted">
+                                {record.id}
                               </span>
                             </div>
-                            <span className="text-[11px] font-mono text-muted">
-                              {record.id}
-                            </span>
-                          </div>
 
-                          {/* Query Reason */}
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Query / Reason</p>
-                            <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
-                              {record.query_reason}
-                            </p>
-                            <p className="text-[10px] text-muted m-0 pt-0.5">
-                              Reported by <strong className="text-text/90">{record.created_by || 'Unknown'}</strong> at stage "{record.stage_at_hold || job.current_stage_name}" • {formatDateTime(record.created_at)}
-                            </p>
-                          </div>
-
-                          {/* Resolution Details */}
-                          {record.status === 'Resolved' && (
-                            <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
-                              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
-                                <CheckCircle size={12} /> Resolution Notes
-                              </p>
-                              <p className="text-xs text-text leading-relaxed m-0 break-words font-sans">
-                                {record.resolution_notes || <span className="text-muted italic">No resolution notes recorded</span>}
+                            {/* Query Reason */}
+                            <div className="space-y-1">
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Query / Reason</p>
+                              <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
+                                {record.query_reason}
                               </p>
                               <p className="text-[10px] text-muted m-0 pt-0.5">
-                                Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
+                                Reported by <strong className="text-text/90">{record.created_by || 'Unknown'}</strong> at stage "{record.stage_at_hold || job.current_stage_name}" • {formatDateTime(record.created_at)}
                               </p>
                             </div>
-                          )}
-                        </div>
-                      )
-                    })}
+
+                            {/* Resolution Details */}
+                            {record.status === 'Resolved' && (
+                              <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                  <CheckCircle size={12} /> Resolution Notes
+                                </p>
+                                <p className="text-xs text-text leading-relaxed m-0 break-words font-sans">
+                                  {record.resolution_notes || <span className="text-muted italic">No resolution notes recorded</span>}
+                                </p>
+                                <p className="text-[10px] text-muted m-0 pt-0.5">
+                                  Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                   </div>
                 ) : null}
 
@@ -1501,8 +1517,8 @@ export function BodInternalJobPage() {
                           <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-2.5 gap-3">
                             <div className="flex items-start gap-2.5 flex-1 min-w-0">
                               <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${isHold ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                                  : isSupport ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
-                                    : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                : isSupport ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                                  : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                                 }`}>
                                 {isHold ? <PauseCircle size={13} /> : isSupport ? <HelpCircle size={13} /> : <CheckCircle size={13} />}
                               </div>
@@ -1515,8 +1531,8 @@ export function BodInternalJobPage() {
                                     </>
                                   ) : null}
                                   <span className={`font-bold text-xs ${isHold ? 'text-amber-600 dark:text-amber-400'
-                                      : isSupport ? 'text-indigo-600 dark:text-indigo-400'
-                                        : 'text-emerald-600 dark:text-emerald-400'
+                                    : isSupport ? 'text-indigo-600 dark:text-indigo-400'
+                                      : 'text-emerald-600 dark:text-emerald-400'
                                     }`}>
                                     {newSt}
                                   </span>
