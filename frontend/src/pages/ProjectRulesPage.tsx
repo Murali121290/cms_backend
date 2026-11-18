@@ -40,7 +40,7 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { formatDateTime } from '@/utils/dateUtils'
 import { useUsersStore } from '@/stores/usersStore'
 
-type CategoryKey = 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'inclusive' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'custom' | 'other'
+type CategoryKey = 'grammar' | 'spelling' | 'sentence' | 'inclusive' | 'hyphenation' | 'abbreviations' | 'medical_terms' | 'custom' | 'other'
 
 interface CategoryMeta {
   label: string
@@ -83,15 +83,13 @@ const CATEGORY_META: Record<CategoryKey, CategoryMeta> = {
     softBg: 'bg-gradient-to-r from-violet-50/60 to-transparent',
     tileBg: 'from-violet-50 to-purple-50/40',
   },
-  compounds: {
-    label: 'Compounds', Icon: Link2,
-    grad: 'from-emerald-500 to-teal-500',
-    dot: 'bg-emerald-500', accent: 'border-l-emerald-500', ring: 'text-emerald-500',
-    chipActive: 'bg-emerald-500 text-white border-emerald-500',
-    chipInactive: 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100',
-    softBg: 'bg-gradient-to-r from-emerald-50/60 to-transparent',
-    tileBg: 'from-emerald-50 to-teal-50/40',
-  },
+  // ``compounds`` category removed from the Rules page sidebar — the
+  // Language Review workflow already folds the compounds bucket into
+  // Hyphenation (see categoryWorkflow.ts + findingLabel.ts), so showing a
+  // separate card here duplicated a single rule (MC_COMPOUNDS). ``catOf``
+  // below reroutes any rule tagged ``category='compounds'`` into the
+  // Hyphenation bucket so the rule still enables / disables / executes
+  // normally; only the sidebar entry is gone.
   inclusive: {
     label: 'Inclusive', Icon: Users,
     grad: 'from-rose-500 to-pink-500',
@@ -167,6 +165,9 @@ const SEVERITY_STYLE: Record<string, SeverityStyle> = {
 
 function catOf(rule: LanguageRule): CategoryKey {
   const c = (rule.category || '').toLowerCase()
+  // Fold legacy ``compounds`` / ``compound`` rules into Hyphenation.
+  // Same policy as the Language Review tab (see categoryWorkflow.ts).
+  if (c === 'compounds' || c === 'compound') return 'hyphenation'
   if (c in CATEGORY_META) return c as CategoryKey
   return 'other'
 }
@@ -529,7 +530,7 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
   const grouped = useMemo(() => {
     const q = search.trim().toLowerCase()
     const g: Record<CategoryKey, LanguageRule[]> = {
-      grammar: [], spelling: [], sentence: [], compounds: [], inclusive: [], hyphenation: [], abbreviations: [], medical_terms: [], custom: [], other: [],
+      grammar: [], spelling: [], sentence: [], inclusive: [], hyphenation: [], abbreviations: [], medical_terms: [], custom: [], other: [],
     }
     for (const r of allRules) {
       // Style filter: hide rules classified as 'hide' when a filter is
@@ -558,7 +559,7 @@ export function ProjectRulesPage({ embedded = false }: ProjectRulesPageProps = {
     const enabled = filtered.filter((r) => r.enabled !== false).length
     const byCat: Record<CategoryKey, { total: number; enabled: number }> = {
       grammar: { total: 0, enabled: 0 }, spelling: { total: 0, enabled: 0 },
-      sentence: { total: 0, enabled: 0 }, compounds: { total: 0, enabled: 0 },
+      sentence: { total: 0, enabled: 0 },
       inclusive: { total: 0, enabled: 0 }, hyphenation: { total: 0, enabled: 0 },
       abbreviations: { total: 0, enabled: 0 }, medical_terms: { total: 0, enabled: 0 },
       custom: { total: 0, enabled: 0 }, other: { total: 0, enabled: 0 },
