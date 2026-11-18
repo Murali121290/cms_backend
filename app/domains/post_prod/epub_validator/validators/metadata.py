@@ -218,10 +218,23 @@ def _is_title_case(value: str) -> bool:
 
 def _check_meta_values_com(soup, lines, prop, expected_values):
     issues = []
-    found_values = {
-        m.get_text(strip=True)
-        for m in soup.find_all("meta", attrs={"property": prop})
-    }
+    meta_tags = soup.find_all("meta", attrs={"property": prop})
+    found_values = set()
+
+    for m in meta_tags:
+        val = m.get_text(strip=True)
+        found_values.add(val)
+        if val not in expected_values:
+            actual_text = str(m)
+            line_num = getattr(m, "sourceline", None) or _find_line(lines, val) or _find_line(lines, prop)
+            issues.append({
+                "type": f"invalid_{prop.replace(':', '_')}",
+                "message": f"Unexpected or disallowed value for {prop}: '{val}'. Allowed values: {', '.join(sorted(expected_values))}",
+                "category": "Error",
+                "line_number": line_num,
+                "extract": val,
+            })
+
     missing = [val for val in expected_values if val not in found_values]
     for val in missing:
         issues.append({
@@ -383,7 +396,19 @@ def validate_accessibility_summary(book_details, rule_config=None):
     expected_norm = " ".join((target_expected or "").split()) if target_expected else ""
 
     issues = []
-    summary = soup.find("meta", attrs={"property": "schema:accessibilitySummary"})
+    summary_tags = soup.find_all("meta", attrs={"property": "schema:accessibilitySummary"})
+    if len(summary_tags) > 1:
+        for extra in summary_tags[1:]:
+            issues.append({
+                "type": "duplicate_accessibilitySummary",
+                "message": f"Multiple <meta property=\"schema:accessibilitySummary\"> tags found ({len(summary_tags)}). Only one tag is allowed.",
+                "category": "Error",
+                "line_number": getattr(extra, "sourceline", _find_line(lines, "schema:accessibilitySummary")),
+                "extract": extra.get_text(strip=True),
+                "actual_text": str(extra),
+            })
+
+    summary = summary_tags[0] if summary_tags else None
     if summary is None:
         if is_required:
             expected_tag = f'<meta property="schema:accessibilitySummary">{expected_norm}</meta>'
@@ -441,7 +466,19 @@ def validate_conforms_to(book_details, rule_config=None):
         return {"issues_count": 0, "issues": []}
 
     issues = []
-    tag = soup.find("meta", attrs={"property": "dcterms:conformsTo"})
+    conforms_tags = soup.find_all("meta", attrs={"property": "dcterms:conformsTo"})
+    if len(conforms_tags) > 1:
+        for extra in conforms_tags[1:]:
+            issues.append({
+                "type": "duplicate_conformsTo",
+                "message": f"Multiple <meta property=\"dcterms:conformsTo\"> tags found ({len(conforms_tags)}). Only one tag is allowed.",
+                "category": "Error",
+                "line_number": getattr(extra, "sourceline", _find_line(lines, "dcterms:conformsTo")),
+                "extract": extra.get_text(strip=True),
+                "actual_text": str(extra),
+            })
+
+    tag = conforms_tags[0] if conforms_tags else None
     if not tag:
         issues.append({
             "type": "missing_conformsTo",
@@ -484,7 +521,19 @@ def validate_certified_by(book_details, rule_config=None):
         return {"issues_count": 0, "issues": []}
 
     issues = []
-    tag = soup.find("meta", attrs={"property": "a11y:certifiedBy"})
+    certified_tags = soup.find_all("meta", attrs={"property": "a11y:certifiedBy"})
+    if len(certified_tags) > 1:
+        for extra in certified_tags[1:]:
+            issues.append({
+                "type": "duplicate_certifiedBy",
+                "message": f"Multiple <meta property=\"a11y:certifiedBy\"> tags found ({len(certified_tags)}). Only one tag is allowed.",
+                "category": "Error",
+                "line_number": getattr(extra, "sourceline", _find_line(lines, "a11y:certifiedBy")),
+                "extract": extra.get_text(strip=True),
+                "actual_text": str(extra),
+            })
+
+    tag = certified_tags[0] if certified_tags else None
     if not tag:
         issues.append({
             "type": "missing_certifiedBy",
