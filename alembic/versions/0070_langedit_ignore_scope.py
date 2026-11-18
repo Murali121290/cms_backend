@@ -19,8 +19,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0067_langedit_ignore_scope"
-down_revision: Union[str, Sequence[str], None] = "0066_add_eisbn_to_bod_jobs"
+revision: str = "0070_langedit_ignore_scope"
+down_revision: Union[str, Sequence[str], None] = "0069_add_bod_hold_support_history"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
