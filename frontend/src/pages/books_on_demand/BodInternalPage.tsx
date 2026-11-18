@@ -3914,7 +3914,7 @@ export function BodInternalPage() {
                           <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
                             <div className="flex items-center gap-2">
                               <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400">
-                                record.revision
+                                {record.revision}
                               </span>
                               <span className="text-[10px] font-semibold text-muted">
                                 Moved back to: <strong className="text-text">QC (Yet to Start)</strong>
