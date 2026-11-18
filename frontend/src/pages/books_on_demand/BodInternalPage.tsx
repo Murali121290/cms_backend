@@ -60,7 +60,7 @@ export function BodInternalPage() {
   // Table heading filters & sorting
   const [colFilters, setColFilters] = useState({
     name: '',
-    version: 'all',
+    revision: 'all',
     fastrack: 'all',
     pages: '',
     type: 'all',
@@ -615,7 +615,7 @@ export function BodInternalPage() {
 
   const hasColFilters = Boolean(
     colFilters.name ||
-    (colFilters.version && colFilters.version !== 'all') ||
+    (colFilters.revision && colFilters.revision !== 'all') ||
     (colFilters.fastrack && colFilters.fastrack !== 'all') ||
     colFilters.pages ||
     (colFilters.type && colFilters.type !== 'all') ||
@@ -631,7 +631,7 @@ export function BodInternalPage() {
   const clearColFilters = () => {
     setColFilters({
       name: '',
-      version: 'all',
+      revision: 'all',
       fastrack: 'all',
       pages: '',
       type: 'all',
@@ -710,8 +710,8 @@ export function BodInternalPage() {
   const holdJobsCount = jobs.filter(j => !isJobCompleted(j) && j.status === 'Hold').length
   const supportJobsCount = jobs.filter(j => !isJobCompleted(j) && j.status === 'Support').length
 
-  // Reopen count: active jobs that have been reopened (have version / reopen history)
-  const reopenJobsCount = jobs.filter(j => !isJobCompleted(j) && (Boolean(j.version) || (j.reopen_history && j.reopen_history.length > 0))).length
+  // Reopen count: active jobs that have been reopened (have revision / reopen history)
+  const reopenJobsCount = jobs.filter(j => !isJobCompleted(j) && (Boolean(j.revision) || (j.reopen_history && j.reopen_history.length > 0))).length
 
   // Metric card counts computed dynamically from baseJobs
   const totalJobs = baseJobs.length
@@ -1025,7 +1025,7 @@ export function BodInternalPage() {
     } else if (cardFilter === 'support') {
       matchesFilter = !jobCompleted && j.status === 'Support'
     } else if (cardFilter === 'reopen') {
-      matchesFilter = !jobCompleted && (Boolean(j.version) || (j.reopen_history && j.reopen_history.length > 0))
+      matchesFilter = !jobCompleted && (Boolean(j.revision) || (j.reopen_history && j.reopen_history.length > 0))
     } else if (cardFilter === 'total_intake') {
       matchesFilter = isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)
     } else if (cardFilter === 'total_backlog') {
@@ -1078,13 +1078,13 @@ export function BodInternalPage() {
       if (!matchName) return false
     }
 
-    if (colFilters.version && colFilters.version !== 'all') {
-      const v = (j.version || '').toLowerCase()
-      if (colFilters.version === 'reopened') {
-        if (!j.version && (!j.reopen_history || j.reopen_history.length === 0)) return false
-      } else if (colFilters.version === 'original') {
-        if (j.version || (j.reopen_history && j.reopen_history.length > 0)) return false
-      } else if (v !== colFilters.version.toLowerCase()) {
+    if (colFilters.revision && colFilters.revision !== 'all') {
+      const v = (j.revision || '').toLowerCase()
+      if (colFilters.revision === 'reopened') {
+        if (!j.revision && (!j.reopen_history || j.reopen_history.length === 0)) return false
+      } else if (colFilters.revision === 'original') {
+        if (j.revision || (j.reopen_history && j.reopen_history.length > 0)) return false
+      } else if (v !== colFilters.revision.toLowerCase()) {
         return false
       }
     }
@@ -1204,9 +1204,9 @@ export function BodInternalPage() {
       if (sortField === 'name') {
         valA = (a.pdf_filename || '').toLowerCase()
         valB = (b.pdf_filename || '').toLowerCase()
-      } else if (sortField === 'version') {
-        valA = (a.version || '').toLowerCase()
-        valB = (b.version || '').toLowerCase()
+      } else if (sortField === 'revision') {
+        valA = (a.revision || '').toLowerCase()
+        valB = (b.revision || '').toLowerCase()
       } else if (sortField === 'fastrack') {
         valA = a.is_fastrack ? 1 : 0
         valB = b.is_fastrack ? 1 : 0
@@ -2077,17 +2077,17 @@ export function BodInternalPage() {
                         {renderSortIcon('name')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('version')} className="px-1 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[5%] text-center overflow-hidden">
+                    <th onClick={() => handleSort('revision')} className="px-1 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[6%] text-center overflow-hidden">
                       <div className="flex items-center justify-center gap-0.5">
-                        <RotateCcw size={10} className="text-rose-500" />
-                        <span className="truncate">Ver</span>
-                        {renderSortIcon('version')}
+                        <RotateCcw size={11} className="text-rose-500" />
+                        <span className="truncate font-bold">Revision</span>
+                        {renderSortIcon('revision')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('fastrack')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[6%] text-center overflow-hidden">
+                    <th onClick={() => handleSort('fastrack')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[7.5%] text-center overflow-hidden">
                       <div className="flex items-center justify-center gap-0.5">
-                        <Zap size={10} className="text-amber-500 fill-amber-500" />
-                        <span className="truncate">Fastrack</span>
+                        <Zap size={11} className="text-amber-500 fill-amber-500" />
+                        <span className="truncate font-bold">Fastrack</span>
                         {renderSortIcon('fastrack')}
                       </div>
                     </th>
@@ -2127,13 +2127,13 @@ export function BodInternalPage() {
                         {renderSortIcon('dispatchedDate')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[12%] overflow-hidden">
+                    <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10.5%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Assignee</span>
                         {renderSortIcon('assignee')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[11%] overflow-hidden">
+                    <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Progress</span>
                         {renderSortIcon('progress')}
@@ -2174,7 +2174,7 @@ export function BodInternalPage() {
                       </div>
                     </th>
 
-                    {/* Version filter */}
+                    {/* Revision filter */}
                     <th className="px-1 py-1 font-normal overflow-visible">
                       <Dropdown
                         options={[
@@ -2182,8 +2182,8 @@ export function BodInternalPage() {
                           { value: 'reopened', label: 'Reopened' },
                           { value: 'original', label: 'Original' },
                         ]}
-                        value={colFilters.version}
-                        onChange={(val) => setColFilters(prev => ({ ...prev, version: val }))}
+                        value={colFilters.revision}
+                        onChange={(val) => setColFilters(prev => ({ ...prev, revision: val }))}
                         className="h-[26px] py-0 px-1 text-[11px] font-medium bg-background/90 hover:bg-background border-border/80 rounded-md shadow-xs truncate text-center"
                       />
                     </th>
@@ -2454,12 +2454,12 @@ export function BodInternalPage() {
                             )}
                           </td>
                           <td className="px-1 py-2 text-center overflow-hidden">
-                            {job.version ? (
+                            {(job.revision) ? (
                               <span
-                                className="inline-block font-mono font-bold px-1.5 py-0.5 rounded text-[10px] bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider"
-                                title={`Correction version: ${job.version}`}
+                                className="inline-block font-mono font-bold px-2 py-0.5 rounded text-xs bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider shadow-2xs"
+                                title={`Revision: ${job.revision}`}
                               >
-                                {job.version}
+                                {job.revision}
                               </span>
                             ) : (
                               <span className="text-[10px] text-muted/60">—</span>
@@ -2474,7 +2474,7 @@ export function BodInternalPage() {
                                   handleFastrackClick(e, job)
                                 }}
                                 disabled={completed || togglingFastrackId === job.id}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all select-none ${completed
+                                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-bold border transition-all select-none shadow-2xs ${completed
                                   ? job.is_fastrack
                                     ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
                                     : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
@@ -2491,9 +2491,9 @@ export function BodInternalPage() {
                                 }
                               >
                                 {togglingFastrackId === job.id ? (
-                                  <Loader2 size={10} className="animate-spin text-amber-500" />
+                                  <Loader2 size={12} className="animate-spin text-amber-500" />
                                 ) : (
-                                  <Zap size={10} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                                  <Zap size={12} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
                                 )}
                                 <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
                               </button>
@@ -2573,9 +2573,9 @@ export function BodInternalPage() {
                               )
                             })()}
                           </td>
-                          <td className="px-1.5 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-1 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center gap-1 text-muted min-w-0">
-                              <User size={12} className="text-muted/70 shrink-0" />
+                              <User size={11} className="text-muted/70 shrink-0" />
                               <div className="min-w-0 flex-1 truncate">
                                 <Dropdown
                                   variant="inline"
@@ -2583,18 +2583,18 @@ export function BodInternalPage() {
                                   searchPlaceholder="Search assignees..."
                                   value={currentAssignee || ''}
                                   onChange={(val) => assignUser(job.id, val)}
-                                  className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px] truncate"
+                                  className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[10.5px] truncate"
                                   options={assigneeOptions}
                                 />
                               </div>
                             </div>
                           </td>
-                          <td className="px-1.5 py-2 overflow-hidden">
-                            <div className="flex items-center justify-between text-[9px] text-muted font-bold mb-1">
+                          <td className="px-1 py-2 overflow-hidden">
+                            <div className="flex items-center justify-between text-[8.5px] text-muted font-bold mb-0.5">
                               <span className="truncate">{job.current_stage_name}</span>
-                              <span className="shrink-0 ml-1">{percent}%</span>
+                              <span className="shrink-0 ml-0.5">{percent}%</span>
                             </div>
-                            <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+                            <div className="h-1 w-full bg-border rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-primary transition-all duration-500 rounded-full"
                                 style={{ width: `${percent}%` }}
@@ -3902,7 +3902,7 @@ export function BodInternalPage() {
                           Reopen ({historyJob.reopen_history.length})
                         </span>
                         <span className="text-[10px] text-muted font-medium">
-                          Current: <strong className="text-rose-600 dark:text-rose-400 font-mono">{historyJob.version || 'R0'}</strong>
+                          Current Revision: <strong className="text-rose-600 dark:text-rose-400 font-mono">{historyJob.revision || 'R0'}</strong>
                         </span>
                       </div>
 
@@ -3914,7 +3914,7 @@ export function BodInternalPage() {
                           <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
                             <div className="flex items-center gap-2">
                               <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400">
-                                {record.version}
+                                record.revision
                               </span>
                               <span className="text-[10px] font-semibold text-muted">
                                 Moved back to: <strong className="text-text">QC (Yet to Start)</strong>
@@ -3945,7 +3945,8 @@ export function BodInternalPage() {
                               </p>
                               <div className="space-y-1.5">
                                 {record.attachments.map((att: any, aIdx: number) => {
-                                  const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/reopen-attachments/${record.version}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                  const rev = record.revision
+                                  const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/reopen-attachments/${rev}/${encodeURIComponent(att.saved_filename || att.filename)}`
                                   const ext = (att.filename || '').split('.').pop()?.toLowerCase()
                                   const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
                                   const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)

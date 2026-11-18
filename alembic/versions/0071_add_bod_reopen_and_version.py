@@ -1,4 +1,4 @@
-"""Add bod reopen and version columns
+"""Add bod reopen and revision columns
 
 Revision ID: 0071_add_bod_reopen_and_version
 Revises: 0070_langedit_ignore_scope
@@ -17,11 +17,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('bod_jobs', sa.Column('version', sa.String(length=50), nullable=True))
+    op.add_column('bod_jobs', sa.Column('revision', sa.String(length=50), nullable=True))
     op.add_column('bod_jobs', sa.Column('reopen_history', sa.JSON(), nullable=False, server_default='[]'))
 
 
 def downgrade() -> None:
     op.drop_column('bod_jobs', 'reopen_history')
-    op.drop_column('bod_jobs', 'version')
+    op.drop_column('bod_jobs', 'revision')
 

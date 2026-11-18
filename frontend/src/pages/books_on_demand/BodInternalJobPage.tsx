@@ -681,9 +681,12 @@ export function BodInternalJobPage() {
         <div>
           <h1 className="text-2xl font-bold font-serif text-text m-0 flex items-center gap-3">
             {job.pdf_filename}
-            {job.version && (
-              <span className="font-bold font-mono px-2 py-0.5 rounded-md text-[10px] bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider">
-                {job.version}
+            {job.revision && (
+              <span
+                className="font-bold font-mono px-2 py-0.5 rounded-md text-[10px] bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider"
+                title={`Revision: ${job.revision}`}
+              >
+                {job.revision}
               </span>
             )}
             <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider ${job.status === 'Completed'
@@ -1783,7 +1786,7 @@ export function BodInternalJobPage() {
                         Reopen ({job.reopen_history.length})
                       </span>
                       <span className="text-[10px] text-muted font-medium">
-                        Current: <strong className="text-rose-600 dark:text-rose-400 font-mono">{job.version || 'R0'}</strong>
+                        Current Revision: <strong className="text-rose-600 dark:text-rose-400 font-mono">{job.revision || 'R0'}</strong>
                       </span>
                     </div>
 
@@ -1796,7 +1799,7 @@ export function BodInternalJobPage() {
                         <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400">
-                              {record.version}
+                              {record.revision}
                             </span>
                             <span className="text-[10px] font-semibold text-muted">
                               Moved back to: <strong className="text-text">QC (Yet to Start)</strong>
@@ -1828,7 +1831,8 @@ export function BodInternalJobPage() {
                             </p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               {record.attachments.map((att: any, aIdx: number) => {
-                                const downloadUrl = `/api/v2/bod/jobs/${job.id}/reopen-attachments/${record.version}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                const rev = record.revision
+                                const downloadUrl = `/api/v2/bod/jobs/${job.id}/reopen-attachments/${rev}/${encodeURIComponent(att.saved_filename || att.filename)}`
                                 const ext = (att.filename || '').split('.').pop()?.toLowerCase()
                                 const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
                                 const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)

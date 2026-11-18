@@ -96,7 +96,8 @@ def list_jobs(status: str = None, db: Session = Depends(get_db)):
             "dispatched_at": job.dispatched_at,
             "is_fastrack": bool(job.is_fastrack),
             "fastrack_requested_date": job.fastrack_requested_date,
-            "version": job.version,
+            "revision": job.revision,
+            "version": job.revision,
             "reopen_history": job.reopen_history or [],
             "file_history": job.file_history or [],
             "hold_support_history": job.hold_support_history or [],
@@ -155,7 +156,8 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "dispatched_at": job.dispatched_at,
         "is_fastrack": bool(job.is_fastrack),
         "fastrack_requested_date": job.fastrack_requested_date,
-        "version": job.version,
+        "revision": job.revision,
+        "version": job.revision,
         "reopen_history": job.reopen_history or [],
         "file_history": job.file_history or [],
         "hold_support_history": job.hold_support_history or [],
@@ -446,7 +448,8 @@ def get_customer_report(
             "customer_due_date": customer_due,
             "is_fastrack": bool(job.is_fastrack),
             "fastrack_requested_date": job.fastrack_requested_date,
-            "version": job.version,
+            "revision": job.revision,
+            "version": job.revision,
             "reopen_history": job.reopen_history or [],
             "due_date_history": job.due_date_history
         })
@@ -841,6 +844,7 @@ def reopen_job(
 
     # Record in reopen_history
     reopen_entry = {
+        "revision": new_version,
         "version": new_version,
         "reason": reason_str,
         "reopened_by": full_name,
@@ -854,7 +858,7 @@ def reopen_job(
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(job, "reopen_history")
 
-    job.version = new_version
+    job.revision = new_version
 
     # Move job to stage: QC, status: Active, current_assignee: None (YTS)
     settings = get_settings()
@@ -936,8 +940,8 @@ def reopen_job(
                 "new": "Active"
             },
             {
-                "field": "Version",
-                "old": job.version,
+                "field": "Revision",
+                "old": job.revision,
                 "new": new_version
             }
         ]
@@ -952,12 +956,14 @@ def reopen_job(
 
     return {
         "status": "success",
-        "message": f"Job reopened successfully as version {new_version}",
-        "version": job.version,
+        "message": f"Job reopened successfully as revision {new_version}",
+        "revision": job.revision,
+        "version": job.revision,
         "reopen_history": job.reopen_history,
         "job": {
             "id": job.id,
-            "version": job.version,
+            "revision": job.revision,
+            "version": job.revision,
             "status": job.status,
             "current_stage_name": job.current_stage_name,
             "current_assignee": job.current_assignee,
