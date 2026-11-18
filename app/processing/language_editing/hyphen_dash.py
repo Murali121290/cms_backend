@@ -53,6 +53,37 @@ _PROTECTED_JSON = _CONFIG_DIR / "hyphen_dash_protected.json"
 # when detecting. (U+2013/U+2014 are DISTINCT and never collapsed.)
 _HYPHEN_CLASS = r"[-‐‑]"
 
+# Author-typed Unicode hyphen variants that the README (§5 Step 2) says
+# must be matched as ``-`` for Detect_List lookup. Keeps the surface
+# text intact — this map only drives the key used when normalising a
+# matched substring back to its workbook row.
+_HYPHEN_VARIANTS = ("‐", "‑")
+
+
+def _normalise_hyphen_variants(s: str) -> str:
+    """Collapse U+2010 / U+2011 to the keyboard hyphen for Detect_List
+    key lookup. U+2013 (en dash) is left untouched — the workbook keeps
+    it as its own semantic character (README §5 Step 2)."""
+    for ch in _HYPHEN_VARIANTS:
+        if ch in s:
+            s = s.replace(ch, "-")
+    return s
+
+
+def _source_to_pattern(source: str) -> str:
+    """Build the regex body for one Detect_List source term.
+
+    Literal hyphen-minus characters in the workbook term are broadened to
+    ``_HYPHEN_CLASS`` so author-typed U+2010 / U+2011 variants still
+    match — the README's "map U+2010 and U+2011 to a hyphen for matching"
+    requirement applied at pattern-build time instead of mutating the
+    document text (which would shift finding offsets).
+    """
+    if not source:
+        return ""
+    parts = source.split("-")
+    return _HYPHEN_CLASS.join(re.escape(p) for p in parts)
+
 
 # Profiles the workbook ships. ``all`` is the backward-compatible default
 # applied by the service layer; the other two are workbook-specific style
@@ -307,7 +338,10 @@ def _compile_phrase_lookup() -> list[_PhraseGroup]:
         # Pre-escape and anchor each phrase with word boundaries. Both
         # whole_word and phrase use \b…\b — the workbook distinguishes
         # them for cataloguing, but Python's \b works identically on either.
-        pat = "|".join(r"\b" + re.escape(r.source) + r"\b" for r in rows_in_bucket)
+        # Literal hyphens in the source term broaden to the hyphen
+        # character class so author-typed U+2010 / U+2011 still match
+        # (README §5 Step 2).
+        pat = "|".join(r"\b" + _source_to_pattern(r.source) + r"\b" for r in rows_in_bucket)
         if not pat:
             continue
         flags = 0 if mc else re.IGNORECASE
@@ -575,13 +609,18 @@ def _phrase_findings(
             continue
         for m in group.regex.finditer(text):
             surface = m.group(0)
-            key = surface if group.match_case else surface.lower()
+            # Normalise author-typed U+2010 / U+2011 to the keyboard hyphen
+            # before looking the row up — the Detect_List is keyed on the
+            # workbook spelling, which always uses U+002D. The ``surface``
+            # value kept on the Finding stays verbatim from the document.
+            key_source = _normalise_hyphen_variants(surface)
+            key = key_source if group.match_case else key_source.lower()
             row = group.lookup.get(key)
             if row is None:
                 # Can happen when match_case is False but the key already
                 # lower is from a case variant not in the map; try the
                 # mixed form.
-                row = group.lookup.get(surface.lower())
+                row = group.lookup.get(key_source.lower())
                 if row is None:
                     continue
 
@@ -883,24 +922,64 @@ def analyze_hyphen_dash(
         protected_spans = build_protected_spans(text, dash_profile=dash_profile)
     protected_literals = build_protected_literals(dash_profile=dash_profile)
 
-    findings: list[Finding] = []
-    findings.extend(_dash_rule_findings(
+    # README §5 pipeline order (Step 4 → Step 5 → Step 6). Each step is
+    # kept on its own list so the Step 7 overlap resolver below can honour
+    # "earlier step wins". A joint eponym like ``Guillain–Barré`` matched
+    # by En_Dash_Terms (step 4) must suppress any later Dash_Rules (step
+    # 6) span that overlaps the same characters — otherwise the Hyphenation
+    # panel shows two conflicting cards for the same text.
+    en_dash_findings = _en_dash_findings(
         text, dash_profile=dash_profile, protected_spans=protected_spans,
-        rule_overrides=rule_overrides,
-    ))
-    findings.extend(_phrase_findings(
+    )
+    phrase_findings = _phrase_findings(
         text,
         dash_profile=dash_profile,
         protected_literals=protected_literals,
         protected_spans=protected_spans,
         rule_overrides=rule_overrides,
-    ))
-    findings.extend(_en_dash_findings(
+    )
+    dash_rule_findings = _dash_rule_findings(
         text, dash_profile=dash_profile, protected_spans=protected_spans,
-    ))
+        rule_overrides=rule_overrides,
+    )
 
-    # Priority ordering: Dash_Rules carry explicit priority (lower = earlier);
-    # phrase + en-dash findings default to 100.
+    # Step 7 — overlap resolution. Earlier pipeline step wins; within a
+    # step, the longer span wins. "Never apply two changes to the same
+    # characters" (README §5 Step 7).
+    findings = _resolve_overlaps([
+        (0, en_dash_findings),
+        (1, phrase_findings),
+        (2, dash_rule_findings),
+    ])
+
+    # Display order: explicit Dash_Rules priority (lower = earlier);
+    # En_Dash_Terms and Detect_List default to 100.
     rule_priority = {r.id: getattr(r, "priority", 100) for r in _compile_dash_rules()}
     findings.sort(key=lambda f: (rule_priority.get(f.rule_id, 100), f.start))
     return findings
+
+
+def _resolve_overlaps(
+    steps: list[tuple[int, list[Finding]]],
+) -> list[Finding]:
+    """Implement README §5 Step 7.
+
+    ``steps`` is an ordered list of ``(step_rank, findings)`` tuples with
+    lower ``step_rank`` meaning "earlier pipeline step". Within each
+    step the inner list may be in any emission order; the resolver sorts
+    by longest span first so same-step matches resolve deterministically.
+
+    Each finding is accepted only when its ``[start, end)`` span does not
+    overlap any already-accepted finding. The result preserves document
+    order for downstream callers.
+    """
+    accepted: list[Finding] = []
+    taken: list[tuple[int, int]] = []
+    for _step, group in sorted(steps, key=lambda s: s[0]):
+        for f in sorted(group, key=lambda g: (-(g.end - g.start), g.start)):
+            if any(f.start < te and ts < f.end for ts, te in taken):
+                continue
+            accepted.append(f)
+            taken.append((f.start, f.end))
+    accepted.sort(key=lambda f: (f.start, f.end))
+    return accepted
