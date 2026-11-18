@@ -106,13 +106,17 @@ def contextualize(rule_id: str, opts: dict, seg: Segment, start: int, end: int) 
     # R8: spell out Greek in running text only; symbols stay in tables, figures, equations.
     if rule_id in ("greek_lowercase", "greek_uppercase") and is_table_or_caption(seg):
         opts["2"] = surface  # symbol kept: compliant
-    # R35: English forms in running text; abbreviations stay inside parentheses.
-    if parenthetical:
+    # R35: English forms in running text; abbreviations stay inside parentheses
+    # (option 3 with points, option 6 AMA without points: eg, ie, vs).
+    if parenthetical or is_table_or_caption(seg):
         if rule_id in _LATIN_ABBR:
             abbr = _LATIN_ABBR[rule_id]
             opts["3"] = None if surface == abbr else abbr
+            bare = abbr.replace(".", "")
+            opts["6"] = None if surface == bare else bare
         elif rule_id.startswith("versus_"):
             opts["3"] = None if surface == "vs." else "vs."
+            opts["6"] = None if surface == "vs" else "vs"
     return opts
 
 
@@ -152,19 +156,42 @@ _CMP_WORDS = re.compile(r"\b(greater|more|less|fewer)\s+than\s+(or\s+equal\s+to\
 _OP_TIGHT = re.compile(r"(?<=\d)(?: ?([+=]) ?)(?=\d)")
 
 
+_CMP_CLOSED = re.compile(r"(?<![<>=!\w])([<>≤≥~])(?=\d)")
+_CMP_WORD_FORM = {"<": "less than ", ">": "greater than ", "≤": "less than or equal to ",
+                  "≥": "greater than or equal to ", "~": "approximately "}
+_STAT_BEFORE = re.compile(r"\b[pPnNtFrR]\s*$")
+
+
+def _cmp_symbol_zone(seg: Segment, pos: int) -> bool:
+    """Option 5 (AMA/APA): symbols in parentheses, tables and figures; words in running text."""
+    return is_table_or_caption(seg) or in_parentheses(seg.text, pos)
+
+
 def detect_comparison_variants(seg: Segment) -> Iterable[Finding]:
     if seg.source != "table":
         for m in _matches(_CMP_SPACED, seg):
-            if re.search(r"\b[pPnNtFrR]\s*$", seg.text[:m.start()]):
+            if _STAT_BEFORE.search(seg.text[:m.start()]):
                 continue  # p < .05: statistical notation keeps its spaces (R25)
             sym = m.group(1)
+            opt5 = sym if _cmp_symbol_zone(seg, m.start()) else _CMP_WORD_FORM[sym]
             yield _emit(seg, m.start(), m.end(), "cmp_num_spaced", "Comparison symbol spacing",
-                        _o(None, None, QUERY, sym), "comparison_style")
+                        _o(None, None, QUERY, sym, opt5), "comparison_style")
+    # R7 option 5: a closed symbol (>5, ~10) in running text is written out
+    for m in _matches(_CMP_CLOSED, seg):
+        if _STAT_BEFORE.search(seg.text[:m.start()]):
+            continue
+        sym = m.group(1)
+        # In parentheses / tables the symbol is the house form (compliant); this finding also
+        # supersedes the broad cmp_gt_sym / cmp_tilde flags on the same character.
+        opt5 = sym if _cmp_symbol_zone(seg, m.start()) else _CMP_WORD_FORM[sym]
+        yield _emit(seg, m.start(), m.end(), "cmp_text_symbol", "Comparison symbol in running text",
+                    _o(None, None, QUERY, None, opt5), "comparison_style")
     for m in _matches(_CMP_WORDS, seg):
         word, eq = m.group(1).lower(), bool(m.group(2))
         sym = ("≥" if eq else ">") if word in ("greater", "more") else ("≤" if eq else "<")
+        opt5 = sym if _cmp_symbol_zone(seg, m.start()) else None
         yield _emit(seg, m.start(), m.end(), "cmp_words_num", "Comparison written out",
-                    _o(None, None, QUERY, sym), "comparison_style")
+                    _o(None, None, QUERY, sym, opt5), "comparison_style")
     for m in _matches(_OP_TIGHT, seg):
         if m.group(0) == f" {m.group(1)} ":
             continue
@@ -829,6 +856,42 @@ def document_pass(findings: list[Finding], segments: list[Segment]) -> list[Find
     return extra
 
 
+# ---------------------------------------------------------------------------
+# R139 units in ranges; R140 circa
+# ---------------------------------------------------------------------------
+_REPEAT_UNITS = ("%", "°C", "°F", "°")  # repeated with each number (25%–30%)
+_ONCE_UNITS = ("mm Hg", "mmol", "mEq", "mcg", "μg", "µg", "kDa", "mg", "kg", "mL", "dL", "μL", "µL", "cm", "mm",
+               "km", "min", "IU", "Hz", "g", "L", "m", "h", "s")
+_UNIT_ALT = "|".join(re.escape(u) for u in sorted(_REPEAT_UNITS + _ONCE_UNITS, key=len, reverse=True))
+_NUM = r"\d+(?:\.\d+)?"
+_RSEP = r"(\s?[–-]\s?|\s+to\s+)"
+_UNIT_ONCE_RE = re.compile(rf"(?<![\d.,\-–/])({_NUM}){_RSEP}({_NUM})(\s?)({_UNIT_ALT})(?![\w%°])")
+_UNIT_TWICE_RE = re.compile(rf"(?<![\d.,\-–/])({_NUM})(\s?)({_UNIT_ALT}){_RSEP}({_NUM})\s?\3(?![\w%°])")
+_CIRCA_RE = re.compile(r"(?<![\w.])(circa|ca\.?|c\.?)\s(?=\d{3,4}\b)")
+
+
+def detect_number_extras(seg: Segment) -> Iterable[Finding]:
+    for m in _matches(_UNIT_ONCE_RE, seg):
+        a, sep, b, sp, u = m.groups()
+        if u in _REPEAT_UNITS:
+            both = f"{a}{sp}{u}{sep}{b}{sp}{u}"
+            opts = _o(both, both, QUERY)
+        else:
+            space = sp or " "
+            opts = _o(None, f"{a}{space}{u}{sep}{b}{space}{u}", QUERY)
+        yield _emit(seg, m.start(), m.end(), "unitrep_single", "Unit in a range", opts, "unit_range_style")
+    for m in _matches(_UNIT_TWICE_RE, seg):
+        a, sp, u, sep, b = m.groups()
+        if u in _REPEAT_UNITS:
+            continue  # already repeated: right for every option
+        opts = _o(f"{a}{sep}{b}{sp or ' '}{u}", None, QUERY)
+        yield _emit(seg, m.start(), m.end(), "unitrep_repeated", "Unit repeated in a range", opts, "unit_range_style")
+    for m in _matches(_CIRCA_RE, seg):
+        s = m.group(0)
+        yield _emit(seg, m.start(), m.end(), "circa_style", "Circa",
+                    _same_none(_o("ca ", "c. ", "circa "), s), "circa_style")
+
+
 # Order matters only for overlap resolution; all run on unexcluded body/table segments.
 HOUSE_STYLE_DETECTORS = [
     detect_percent_variants,
@@ -841,4 +904,5 @@ HOUSE_STYLE_DETECTORS = [
     detect_heading_case,
     detect_text_house_style,
     detect_structure,
+    detect_number_extras,
 ]

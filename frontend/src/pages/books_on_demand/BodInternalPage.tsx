@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap, History, FileText, PauseCircle, HelpCircle } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, CheckCircle, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap, History, FileText, PauseCircle, HelpCircle, RotateCcw, Paperclip, FileSpreadsheet, Image as ImageIcon } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -35,7 +35,7 @@ export function BodInternalPage() {
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
-  type QuickFilter = 'all' | 'total_all' | 'fastrack' | 'hold' | 'support' | 'total_intake' | 'total_backlog' | 'add_job_all' | 'analysis_all' | 'analysis_today' | 'analysis_previous' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
+  type QuickFilter = 'all' | 'total_all' | 'fastrack' | 'hold' | 'support' | 'reopen' | 'total_intake' | 'total_backlog' | 'add_job_all' | 'analysis_all' | 'analysis_today' | 'analysis_previous' | 'fresh_all' | 'fresh_today' | 'fresh_previous' | 'prod_all' | 'prod_yts' | 'prod_in_progress' | 'qc_all' | 'qc_yts' | 'qc_in_progress' | 'ready_to_dispatch' | 'overdue' | 'today_due' | 'tomorrow_due' | 'completed' | 'completed_all' | 'completed_ahead' | 'completed_ontime' | 'completed_delay'
   const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
@@ -54,11 +54,13 @@ export function BodInternalPage() {
 
   // History Drawer state
   const [historyJob, setHistoryJob] = useState<any | null>(null)
-  const [historyActiveTab, setHistoryActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files'>('stage')
+  const [historyActiveTab, setHistoryActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files' | 'status' | 'reopen'>('stage')
+  const [drawerHoldSupportFilter, setDrawerHoldSupportFilter] = useState<'all' | 'Hold' | 'Support'>('all')
 
   // Table heading filters & sorting
   const [colFilters, setColFilters] = useState({
     name: '',
+    revision: 'all',
     fastrack: 'all',
     pages: '',
     type: 'all',
@@ -298,6 +300,134 @@ export function BodInternalPage() {
   // Calculate metrics
   const isJobCompleted = (job: any) => job.status === 'Completed' || job.current_stage_name === 'Archive'
 
+  // Build chronological sequence of stage events (without artificial grouping, preserving full cycle progression)
+  const getChronologicalStageTimeline = (jobObj: any) => {
+    if (!jobObj) return []
+    const assigned: any[] = Array.isArray(jobObj.assigned_users) ? jobObj.assigned_users : []
+    const stageHist = jobObj.stage_history || {}
+    const reopens: any[] = Array.isArray(jobObj.reopen_history) ? jobObj.reopen_history : []
+    const isJobDone = isJobCompleted(jobObj)
+
+    // If job has never been reopened, return simple linear stage history
+    if (reopens.length === 0) {
+      const standardOrder = ['Add job', 'Job Analysis', 'Production', 'QC', 'Ready to Dispatch', 'Archive']
+      const items: any[] = []
+      for (const s of standardOrder) {
+        const d = stageHist[s]
+        if (!d && s !== jobObj.current_stage_name) continue
+        items.push({
+          stageName: s,
+          cycleVersion: null,
+          startTime: d?.start_time || null,
+          endTime: d?.end_time || null,
+          assignee: d?.assignee || null,
+          dispatchedBy: d?.dispatched_by || null,
+          isCurrent: s === jobObj.current_stage_name && !isJobDone
+        })
+      }
+      return items
+    }
+
+    // Reopen cycles present: reconstruct exact chronological flow
+    const events: any[] = []
+
+    // 1. Add job
+    const addJobData = stageHist['Add job'] || {}
+    events.push({
+      stageName: 'Add job',
+      cycleVersion: null,
+      startTime: addJobData.start_time || null,
+      endTime: addJobData.end_time || null,
+      assignee: addJobData.assignee || null,
+      dispatchedBy: null,
+      isCurrent: false
+    })
+
+    let currEvent: any = null
+    let currCycleVersion: string | null = null
+
+    for (const entry of assigned) {
+      const st = entry.stage
+      const action = entry.action || ''
+      const user = entry.user_id
+      const t = entry.time
+
+      // Check if entry is a reopen trigger
+      if (action.includes('Reopened to QC')) {
+        const m = action.match(/\((R\d+)\)/)
+        currCycleVersion = m ? m[1] : 'Reopen'
+      }
+
+      if (!currEvent || currEvent.stageName !== st) {
+        if (currEvent) {
+          if (!currEvent.endTime) {
+            currEvent.endTime = t
+          }
+          events.push(currEvent)
+        }
+
+        let startT = t
+        if (currCycleVersion === null) {
+          if (st === 'Production' && stageHist['Production']?.start_time) {
+            startT = stageHist['Production'].start_time
+          } else if (st === 'Job Analysis' && stageHist['Job Analysis']?.start_time) {
+            startT = stageHist['Job Analysis'].start_time
+          } else if (st === 'QC' && stageHist['Production']?.end_time) {
+            startT = stageHist['Production'].end_time
+          }
+        }
+
+        currEvent = {
+          stageName: st,
+          cycleVersion: currCycleVersion,
+          startTime: startT,
+          endTime: null,
+          assignee: user,
+          dispatchedBy: null,
+          isCurrent: false
+        }
+      } else {
+        if (user) {
+          currEvent.assignee = user
+        }
+      }
+
+      if (action.includes('Dispatched to FTP by')) {
+        const dispUser = user || entry.assigned_by
+        currEvent.dispatchedBy = dispUser
+        currEvent.endTime = t
+        events.push(currEvent)
+
+        // Following FTP dispatch, Archive completes
+        events.push({
+          stageName: 'Archive',
+          cycleVersion: currCycleVersion,
+          startTime: t,
+          endTime: t,
+          assignee: dispUser,
+          dispatchedBy: dispUser,
+          isCurrent: false
+        })
+        currEvent = null
+      }
+    }
+
+    if (currEvent) {
+      events.push(currEvent)
+    }
+
+    // Set current active stage
+    for (let idx = 0; idx < events.length; idx++) {
+      const isCur = idx === events.length - 1 && !isJobDone
+      events[idx].isCurrent = isCur
+      if (isCur) {
+        events[idx].endTime = null
+      }
+    }
+
+    return events
+  }
+
   const getCompletedDate = (job: any): string | null => {
     const history = job.stage_history || {}
     if (history['Archive']?.end_time) return history['Archive'].end_time
@@ -485,6 +615,7 @@ export function BodInternalPage() {
 
   const hasColFilters = Boolean(
     colFilters.name ||
+    (colFilters.revision && colFilters.revision !== 'all') ||
     (colFilters.fastrack && colFilters.fastrack !== 'all') ||
     colFilters.pages ||
     (colFilters.type && colFilters.type !== 'all') ||
@@ -500,6 +631,7 @@ export function BodInternalPage() {
   const clearColFilters = () => {
     setColFilters({
       name: '',
+      revision: 'all',
       fastrack: 'all',
       pages: '',
       type: 'all',
@@ -553,7 +685,7 @@ export function BodInternalPage() {
     const matchesAssignee = effectiveAssigneeFilter === 'all'
       || (effectiveAssigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === effectiveAssigneeFilter)
 
-    const matchesDate = (cardFilter === 'fastrack' || cardFilter === 'hold' || cardFilter === 'support') ? true : matchesDateFilter(j)
+    const matchesDate = (cardFilter === 'fastrack' || cardFilter === 'hold' || cardFilter === 'support' || cardFilter === 'reopen') ? true : matchesDateFilter(j)
 
     return matchesSearch && matchesAssignee && matchesDate
   })
@@ -577,6 +709,9 @@ export function BodInternalPage() {
   // Hold & Support counts: active jobs on Hold or Support
   const holdJobsCount = jobs.filter(j => !isJobCompleted(j) && j.status === 'Hold').length
   const supportJobsCount = jobs.filter(j => !isJobCompleted(j) && j.status === 'Support').length
+
+  // Reopen count: active jobs that have been reopened (have revision / reopen history)
+  const reopenJobsCount = jobs.filter(j => !isJobCompleted(j) && (Boolean(j.revision) || (j.reopen_history && j.reopen_history.length > 0))).length
 
   // Metric card counts computed dynamically from baseJobs
   const totalJobs = baseJobs.length
@@ -715,7 +850,7 @@ export function BodInternalPage() {
           const text = await err.response.data.text()
           const json = JSON.parse(text)
           if (json.detail) errMsg = json.detail
-        } catch (_) {}
+        } catch (_) { }
       } else if (err.response?.data?.detail) {
         errMsg = err.response.data.detail
       }
@@ -889,6 +1024,8 @@ export function BodInternalPage() {
       matchesFilter = !jobCompleted && j.status === 'Hold'
     } else if (cardFilter === 'support') {
       matchesFilter = !jobCompleted && j.status === 'Support'
+    } else if (cardFilter === 'reopen') {
+      matchesFilter = !jobCompleted && (Boolean(j.revision) || (j.reopen_history && j.reopen_history.length > 0))
     } else if (cardFilter === 'total_intake') {
       matchesFilter = isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)
     } else if (cardFilter === 'total_backlog') {
@@ -939,6 +1076,17 @@ export function BodInternalPage() {
       const matchName = (j.pdf_filename && j.pdf_filename.toLowerCase().includes(q)) ||
         (j.epub_filename && j.epub_filename.toLowerCase().includes(q))
       if (!matchName) return false
+    }
+
+    if (colFilters.revision && colFilters.revision !== 'all') {
+      const v = (j.revision || '').toLowerCase()
+      if (colFilters.revision === 'reopened') {
+        if (!j.revision && (!j.reopen_history || j.reopen_history.length === 0)) return false
+      } else if (colFilters.revision === 'original') {
+        if (j.revision || (j.reopen_history && j.reopen_history.length > 0)) return false
+      } else if (v !== colFilters.revision.toLowerCase()) {
+        return false
+      }
     }
 
     if (colFilters.fastrack && colFilters.fastrack !== 'all') {
@@ -1056,6 +1204,9 @@ export function BodInternalPage() {
       if (sortField === 'name') {
         valA = (a.pdf_filename || '').toLowerCase()
         valB = (b.pdf_filename || '').toLowerCase()
+      } else if (sortField === 'revision') {
+        valA = (a.revision || '').toLowerCase()
+        valB = (b.revision || '').toLowerCase()
       } else if (sortField === 'fastrack') {
         valA = a.is_fastrack ? 1 : 0
         valB = b.is_fastrack ? 1 : 0
@@ -1759,7 +1910,7 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        {/* Row 3: Special Status & Priority (Fastrack, Hold, Support) */}
+        {/* Row 3: Special Status & Priority (Fastrack, Hold, Support, Reopen) */}
         <div>
           <div className="flex items-center justify-between mb-1 px-0.5">
             <span className="text-[10px] font-bold tracking-wider uppercase text-muted flex items-center gap-1.5">
@@ -1767,7 +1918,7 @@ export function BodInternalPage() {
               Special Attention & Status
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {/* 1. Fastrack */}
             <div
               onClick={() => setCardFilter(cardFilter === 'fastrack' ? 'all' : 'fastrack')}
@@ -1828,6 +1979,27 @@ export function BodInternalPage() {
               <div className="text-right">
                 <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400 leading-none">{supportJobsCount}</span>
                 <span className="text-[9px] text-indigo-600/80 dark:text-indigo-400/80 block mt-0.5">Internal</span>
+              </div>
+            </div>
+
+            {/* 4. Reopen (Rose theme - correction cycles R1, R2) */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'reopen' ? 'all' : 'reopen')}
+              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'reopen' ? 'border-rose-500/60 ring-2 ring-rose-500/20 bg-rose-500/[0.04]' : 'border-border/80 hover:border-rose-500/40'}`}
+              title="Click to view all reopened jobs undergoing correction"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg">
+                  <RotateCcw size={16} className="text-rose-500" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block">Reopen</span>
+                  <span className="text-[9px] text-muted">Reopen Cycle</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xl font-bold text-rose-600 dark:text-rose-400 leading-none">{reopenJobsCount}</span>
+                <span className="text-[9px] text-rose-600/80 dark:text-rose-400/80 block mt-0.5">Active</span>
               </div>
             </div>
           </div>
@@ -1899,16 +2071,23 @@ export function BodInternalPage() {
                         className="w-3.5 h-3.5 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                       />
                     </th>
-                    <th onClick={() => handleSort('name')} className="px-2 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[17%] overflow-hidden">
+                    <th onClick={() => handleSort('name')} className="px-2 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[15%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Job Name</span>
                         {renderSortIcon('name')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('fastrack')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[7%] text-center overflow-hidden">
+                    <th onClick={() => handleSort('revision')} className="px-1 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[6%] text-center overflow-hidden">
                       <div className="flex items-center justify-center gap-0.5">
-                        <Zap size={10} className="text-amber-500 fill-amber-500" />
-                        <span className="truncate">Fastrack</span>
+                        <RotateCcw size={11} className="text-rose-500" />
+                        <span className="truncate font-bold">Revision</span>
+                        {renderSortIcon('revision')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('fastrack')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[7.5%] text-center overflow-hidden">
+                      <div className="flex items-center justify-center gap-0.5">
+                        <Zap size={11} className="text-amber-500 fill-amber-500" />
+                        <span className="truncate font-bold">Fastrack</span>
                         {renderSortIcon('fastrack')}
                       </div>
                     </th>
@@ -1948,13 +2127,13 @@ export function BodInternalPage() {
                         {renderSortIcon('dispatchedDate')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[12%] overflow-hidden">
+                    <th onClick={() => handleSort('assignee')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10.5%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Assignee</span>
                         {renderSortIcon('assignee')}
                       </div>
                     </th>
-                    <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[11%] overflow-hidden">
+                    <th onClick={() => handleSort('progress')} className="px-1.5 py-2 cursor-pointer hover:bg-accent/80 transition-colors group w-[10%] overflow-hidden">
                       <div className="flex items-center gap-1">
                         <span className="truncate">Progress</span>
                         {renderSortIcon('progress')}
@@ -1993,6 +2172,20 @@ export function BodInternalPage() {
                           </button>
                         )}
                       </div>
+                    </th>
+
+                    {/* Revision filter */}
+                    <th className="px-1 py-1 font-normal overflow-visible">
+                      <Dropdown
+                        options={[
+                          { value: 'all', label: 'All' },
+                          { value: 'reopened', label: 'Reopened' },
+                          { value: 'original', label: 'Original' },
+                        ]}
+                        value={colFilters.revision}
+                        onChange={(val) => setColFilters(prev => ({ ...prev, revision: val }))}
+                        className="h-[26px] py-0 px-1 text-[11px] font-medium bg-background/90 hover:bg-background border-border/80 rounded-md shadow-xs truncate text-center"
+                      />
                     </th>
 
                     {/* Fastrack filter */}
@@ -2260,6 +2453,18 @@ export function BodInternalPage() {
                               </p>
                             )}
                           </td>
+                          <td className="px-1 py-2 text-center overflow-hidden">
+                            {(job.revision) ? (
+                              <span
+                                className="inline-block font-mono font-bold px-2 py-0.5 rounded text-xs bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider shadow-2xs"
+                                title={`Revision: ${job.revision}`}
+                              >
+                                {job.revision}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-muted/60">—</span>
+                            )}
+                          </td>
                           <td className="px-1.5 py-2 text-center overflow-hidden" onClick={(e) => e.stopPropagation()}>
                             <div className="flex flex-col items-center gap-0.5">
                               <button
@@ -2269,13 +2474,13 @@ export function BodInternalPage() {
                                   handleFastrackClick(e, job)
                                 }}
                                 disabled={completed || togglingFastrackId === job.id}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all select-none ${completed
-                                    ? job.is_fastrack
-                                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
-                                      : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
-                                    : job.is_fastrack
-                                      ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
-                                      : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-bold border transition-all select-none shadow-2xs ${completed
+                                  ? job.is_fastrack
+                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                    : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                                  : job.is_fastrack
+                                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                    : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
                                   }`}
                                 title={
                                   completed
@@ -2286,9 +2491,9 @@ export function BodInternalPage() {
                                 }
                               >
                                 {togglingFastrackId === job.id ? (
-                                  <Loader2 size={10} className="animate-spin text-amber-500" />
+                                  <Loader2 size={12} className="animate-spin text-amber-500" />
                                 ) : (
-                                  <Zap size={10} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                                  <Zap size={12} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
                                 )}
                                 <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
                               </button>
@@ -2368,9 +2573,9 @@ export function BodInternalPage() {
                               )
                             })()}
                           </td>
-                          <td className="px-1.5 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-1 py-2 overflow-visible" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center gap-1 text-muted min-w-0">
-                              <User size={12} className="text-muted/70 shrink-0" />
+                              <User size={11} className="text-muted/70 shrink-0" />
                               <div className="min-w-0 flex-1 truncate">
                                 <Dropdown
                                   variant="inline"
@@ -2378,18 +2583,18 @@ export function BodInternalPage() {
                                   searchPlaceholder="Search assignees..."
                                   value={currentAssignee || ''}
                                   onChange={(val) => assignUser(job.id, val)}
-                                  className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px] truncate"
+                                  className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[10.5px] truncate"
                                   options={assigneeOptions}
                                 />
                               </div>
                             </div>
                           </td>
-                          <td className="px-1.5 py-2 overflow-hidden">
-                            <div className="flex items-center justify-between text-[9px] text-muted font-bold mb-1">
+                          <td className="px-1 py-2 overflow-hidden">
+                            <div className="flex items-center justify-between text-[8.5px] text-muted font-bold mb-0.5">
                               <span className="truncate">{job.current_stage_name}</span>
-                              <span className="shrink-0 ml-1">{percent}%</span>
+                              <span className="shrink-0 ml-0.5">{percent}%</span>
                             </div>
-                            <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+                            <div className="h-1 w-full bg-border rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-primary transition-all duration-500 rounded-full"
                                 style={{ width: `${percent}%` }}
@@ -2584,12 +2789,12 @@ export function BodInternalPage() {
                             }}
                             disabled={isJobCompleted(job) || togglingFastrackId === job.id}
                             className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all select-none ${isJobCompleted(job)
-                                ? job.is_fastrack
-                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
-                                  : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
-                                : job.is_fastrack
-                                  ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
-                                  : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                              ? job.is_fastrack
+                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                              : job.is_fastrack
+                                ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
                               }`}
                             title={
                               isJobCompleted(job)
@@ -3072,11 +3277,10 @@ export function BodInternalPage() {
               <div className="bg-muted/30 border border-border/60 rounded-lg p-2.5 text-xs text-muted flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-text">Current Status:</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    fastrackModalJob.is_fastrack 
-                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40' 
-                      : 'bg-muted text-muted-foreground'
-                  }`}>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${fastrackModalJob.is_fastrack
+                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40'
+                    : 'bg-muted text-muted-foreground'
+                    }`}>
                     {fastrackModalJob.is_fastrack ? 'Fastrack Active' : 'Normal Priority'}
                   </span>
                 </div>
@@ -3234,25 +3438,25 @@ export function BodInternalPage() {
               {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
                 (!h.changes || h.changes.length === 0) || h.changes.some((c: any) => c.field === 'Due Date')
               ) && (
-                <button
-                  onClick={() => setHistoryActiveTab('duedate')}
-                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-                    }`}
-                >
-                  Due Date History
-                </button>
-              )}
+                  <button
+                    onClick={() => setHistoryActiveTab('duedate')}
+                    className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                      }`}
+                  >
+                    Due Date History
+                  </button>
+                )}
               {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
                 h.changes && h.changes.some((c: any) => c.field === 'Priority' || c.field === 'Fastrack Date')
               ) && (
-                <button
-                  onClick={() => setHistoryActiveTab('priority')}
-                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-                    }`}
-                >
-                  Priority History
-                </button>
-              )}
+                  <button
+                    onClick={() => setHistoryActiveTab('priority')}
+                    className={`pb-2.5 text-xs font-bold transition-colors border-b-2 ${historyActiveTab === 'priority' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                      }`}
+                  >
+                    Priority History
+                  </button>
+                )}
               {historyJob.file_history && Array.isArray(historyJob.file_history) && historyJob.file_history.length > 0 && (
                 <button
                   onClick={() => setHistoryActiveTab('files')}
@@ -3262,60 +3466,97 @@ export function BodInternalPage() {
                   File History
                 </button>
               )}
+              {((historyJob.hold_support_history && historyJob.hold_support_history.length > 0) || (historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
+                h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status'))
+              ))) && (
+                  <button
+                    onClick={() => setHistoryActiveTab('status')}
+                    className={`pb-2.5 text-xs font-bold transition-colors border-b-2 flex items-center gap-1.5 ${historyActiveTab === 'status' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                      }`}
+                  >
+                    Hold & Support History
+                    {historyJob.hold_support_history && historyJob.hold_support_history.length > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-accent border border-border text-text font-mono font-normal">
+                        {historyJob.hold_support_history.length}
+                      </span>
+                    )}
+                  </button>
+                )}
+              {((historyJob.reopen_history && historyJob.reopen_history.length > 0) || (historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
+                h.field === 'Reopen' || (h.changes && h.changes.some((c: any) => c.field === 'Reopen'))
+              ))) && (
+                  <button
+                    onClick={() => setHistoryActiveTab('reopen')}
+                    className={`pb-2.5 text-xs font-bold transition-colors border-b-2 flex items-center gap-1.5 ${historyActiveTab === 'reopen' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                      }`}
+                  >
+                    Reopen History
+                    {historyJob.reopen_history && historyJob.reopen_history.length > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 font-mono font-bold">
+                        {historyJob.reopen_history.length}
+                      </span>
+                    )}
+                  </button>
+                )}
             </div>
 
             {/* Tab Contents */}
             <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-3">
               {historyActiveTab === 'stage' && (
                 <div className="space-y-3">
-                  {Object.keys(historyJob.stage_history || {})
-                    .filter(stageName => {
-                      const data = historyJob.stage_history[stageName]
-                      return stageName === historyJob.current_stage_name || Boolean(data?.start_time || data?.end_time)
-                    })
-                    .map((stageName, idx) => {
-                      const data = historyJob.stage_history[stageName]
-                      const isCurrent = stageName === historyJob.current_stage_name && !isJobCompleted(historyJob)
-                      return (
-                        <div
-                          key={idx}
-                          className={`p-3.5 rounded-xl border transition-all ${isCurrent
-                            ? 'bg-primary/5 border-primary/30 shadow-xs ring-1 ring-primary/10'
-                            : 'bg-background/80 border-border'
-                            }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`w-2 h-2 rounded-full ${isCurrent ? 'bg-primary animate-pulse' : 'bg-emerald-500'
-                                  }`}
-                              />
-                              <span className="text-xs font-bold text-text">{stageName}</span>
-                            </div>
-                            {isCurrent && (
-                              <span className="text-[10px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded-full">
-                                In Progress
+                  {getChronologicalStageTimeline(historyJob).map((event: any, idx: number) => {
+                    const isCurrent = event.isCurrent
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-3.5 rounded-xl border transition-all ${isCurrent
+                          ? 'bg-primary/5 border-primary/30 shadow-xs ring-1 ring-primary/10'
+                          : 'bg-background/80 border-border'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`w-2 h-2 rounded-full ${isCurrent ? 'bg-primary animate-pulse' : 'bg-emerald-500'
+                                }`}
+                            />
+                            <span className="text-xs font-bold text-text">{event.stageName}</span>
+                            {event.cycleVersion && (
+                              <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400">
+                                {event.cycleVersion}
                               </span>
                             )}
                           </div>
-                          <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11px] text-muted border-t border-border/50 pt-2">
-                            <div>
-                              <span className="block text-[9px] uppercase tracking-wider text-muted-foreground">Started</span>
-                              <span className="font-medium text-text">{data?.start_time ? formatDateTime(data.start_time) : '-'}</span>
-                            </div>
-                            <div>
-                              <span className="block text-[9px] uppercase tracking-wider text-muted-foreground">Completed</span>
-                              <span className="font-medium text-text">{data?.end_time ? formatDateTime(data.end_time) : (isCurrent ? 'Ongoing' : '-')}</span>
-                            </div>
-                          </div>
-                          {data?.assignee && (
-                            <div className="mt-2 text-[11px] text-muted">
-                              Assignee: <span className="font-medium text-text">{getUserDisplayName(data.assignee)}</span>
-                            </div>
+                          {isCurrent && (
+                            <span className="text-[10px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded-full">
+                              In Progress
+                            </span>
                           )}
                         </div>
-                      )
-                    })}
+
+                        <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11px] text-muted border-t border-border/50 pt-2">
+                          <div>
+                            <span className="block text-[9px] uppercase tracking-wider text-muted-foreground">Started</span>
+                            <span className="font-medium text-text">{event.startTime ? formatDateTime(event.startTime) : '-'}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[9px] uppercase tracking-wider text-muted-foreground">Completed</span>
+                            <span className="font-medium text-text">{event.endTime ? formatDateTime(event.endTime) : (isCurrent ? 'Ongoing' : '-')}</span>
+                          </div>
+                        </div>
+
+                        {event.dispatchedBy ? (
+                          <div className="mt-2 text-[11px] text-muted flex items-center gap-1.5">
+                            <Send size={12} className="text-emerald-600 dark:text-emerald-400" /> Dispatched by: <span className="font-medium text-text">{getUserDisplayName(event.dispatchedBy)}</span>
+                          </div>
+                        ) : event.assignee ? (
+                          <div className="mt-2 text-[11px] text-muted">
+                            Assignee: <span className="font-medium text-text">{getUserDisplayName(event.assignee)}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
 
@@ -3492,6 +3733,332 @@ export function BodInternalPage() {
                       </p>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {historyActiveTab === 'status' && (
+                <div className="space-y-4">
+                  {/* 1. Structured Hold & Support Resolution History */}
+                  {historyJob.hold_support_history && Array.isArray(historyJob.hold_support_history) && historyJob.hold_support_history.length > 0 ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2 mb-2 pb-1 border-b border-border/40">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                          Hold & Support Tickets ({historyJob.hold_support_history.length})
+                        </span>
+                        {/* Filter Buttons: Hold and Support */}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDrawerHoldSupportFilter(drawerHoldSupportFilter === 'Hold' ? 'all' : 'Hold')}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${drawerHoldSupportFilter === 'Hold'
+                              ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-xs ring-1 ring-fuchsia-400'
+                              : 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400 hover:bg-fuchsia-500/20'
+                              }`}
+                            title={drawerHoldSupportFilter === 'Hold' ? 'Click to show both Hold and Support' : 'Click to filter Hold only'}
+                          >
+                            Hold {historyJob.hold_support_history.filter((h: any) => h.type === 'Hold').length > 0 && `(${historyJob.hold_support_history.filter((h: any) => h.type === 'Hold').length})`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDrawerHoldSupportFilter(drawerHoldSupportFilter === 'Support' ? 'all' : 'Support')}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${drawerHoldSupportFilter === 'Support'
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
+                              : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20'
+                              }`}
+                            title={drawerHoldSupportFilter === 'Support' ? 'Click to show both Hold and Support' : 'Click to filter Support only'}
+                          >
+                            Support {historyJob.hold_support_history.filter((h: any) => h.type === 'Support').length > 0 && `(${historyJob.hold_support_history.filter((h: any) => h.type === 'Support').length})`}
+                          </button>
+                        </div>
+                      </div>
+                      {[...historyJob.hold_support_history]
+                        .filter((record: any) => drawerHoldSupportFilter === 'all' || record.type === drawerHoldSupportFilter)
+                        .reverse()
+                        .map((record: any, idx: number) => {
+                          const isOpen = record.status === 'Open'
+                          const isHold = record.type === 'Hold'
+                          const isSupport = record.type === 'Support'
+
+                          return (
+                            <div
+                              key={record.id || idx}
+                              className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
+                                ? isHold
+                                  ? 'border-fuchsia-500/50 ring-1 ring-fuchsia-500/20'
+                                  : 'border-indigo-500/50 ring-1 ring-indigo-500/20'
+                                : 'border-border'
+                                }`}
+                            >
+                              {/* Header */}
+                              <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
+                                    ? 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400'
+                                    : isSupport
+                                      ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400'
+                                      : 'bg-accent border-border text-text'
+                                    }`}>
+                                    {record.type}
+                                  </span>
+                                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isOpen
+                                    ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 animate-pulse'
+                                    : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                                    }`}>
+                                    {isOpen ? '● Pending / Open' : '✓ Resolved'}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] font-mono text-muted">
+                                  {record.id}
+                                </span>
+                              </div>
+
+                              {/* Query Reason */}
+                              <div className="space-y-1">
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Query / Reason</p>
+                                <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
+                                  {record.query_reason}
+                                </p>
+                                <p className="text-[10px] text-muted m-0 pt-0.5">
+                                  Reported by <strong className="text-text/90">{record.created_by || 'Unknown'}</strong> at stage "{record.stage_at_hold || historyJob.current_stage_name}" • {formatDateTime(record.created_at)}
+                                </p>
+                              </div>
+
+                              {/* Attachments for query */}
+                              {record.attachments && Array.isArray(record.attachments) && record.attachments.length > 0 && (
+                                <div className="space-y-1.5 pt-1 border-t border-border/40">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0 flex items-center gap-1">
+                                    <Paperclip size={11} className="text-amber-500" />
+                                    Attached Screenshots / Files ({record.attachments.length})
+                                  </p>
+                                  <div className="space-y-1.5">
+                                    {record.attachments.map((att: any, aIdx: number) => {
+                                      const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                      const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                      const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                      const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
+
+                                      return (
+                                        <a
+                                          key={aIdx}
+                                          href={downloadUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          download={att.filename}
+                                          className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group/att"
+                                        >
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <div className="p-1 rounded bg-muted/20 text-muted group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 group-hover/att:bg-amber-500/10 shrink-0">
+                                              {isImg ? <ImageIcon size={13} /> : isSheet ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                                            </div>
+                                            <div className="min-w-0">
+                                              <p className="text-xs font-medium text-text group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 truncate m-0">
+                                                {att.filename}
+                                              </p>
+                                              <p className="text-[10px] text-muted m-0">
+                                                {((att.size || 0) / 1024).toFixed(1)} KB
+                                              </p>
+                                            </div>
+                                          </div>
+                                          <Download size={13} className="text-muted group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 shrink-0" />
+                                        </a>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Resolution Details */}
+                              {record.status === 'Resolved' && (
+                                <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
+                                  <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                    <CheckCircle size={12} /> Resolution Notes
+                                  </p>
+                                  <p className="text-xs text-text leading-relaxed m-0 break-words font-sans">
+                                    {record.resolution_notes || <span className="text-muted italic">No resolution notes recorded</span>}
+                                  </p>
+                                  <p className="text-[10px] text-muted m-0 pt-0.5">
+                                    Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
+                                  </p>
+                                  {record.resolution_attachments && Array.isArray(record.resolution_attachments) && record.resolution_attachments.length > 0 && (
+                                    <div className="space-y-1 pt-1.5 border-t border-emerald-500/20">
+                                      <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                        <Paperclip size={11} /> Resolution Attachments ({record.resolution_attachments.length})
+                                      </p>
+                                      <div className="space-y-1">
+                                        {record.resolution_attachments.map((att: any, aIdx: number) => {
+                                          const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                          return (
+                                            <a
+                                              key={aIdx}
+                                              href={downloadUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              download={att.filename}
+                                              className="flex items-center justify-between gap-2 p-1.5 rounded bg-background border border-emerald-500/20 hover:border-emerald-500/40 text-xs transition-all"
+                                            >
+                                              <span className="truncate text-[11px] font-medium text-text">{att.filename}</span>
+                                              <Download size={12} className="text-muted shrink-0" />
+                                            </a>
+                                          )
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                    </div>
+                  ) : null}
+
+                  {/* 2. Timeline fallback / Status transitions */}
+                  {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) => h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status'))) && (
+                    <div className="space-y-2 pt-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted block">
+                        Status Change Activity Log
+                      </span>
+                      {[...historyJob.due_date_history]
+                        .filter((h: any) => h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status')))
+                        .reverse()
+                        .map((historyItem: any, idx: number) => (
+                          <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-text">Status Change</span>
+                              <span className="text-[11px] text-muted font-medium">
+                                {formatDateTime(historyItem.timestamp)}
+                              </span>
+                            </div>
+                            <div className="space-y-1 pt-1 border-t border-border/50">
+                              {historyItem.changes ? (
+                                historyItem.changes.filter((c: any) => c.field === 'Status').map((change: any, cIdx: number) => (
+                                  <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                    <span className="text-muted line-through text-[11px]">{String(change.old)}</span>
+                                    <span className="text-muted text-[10px]">→</span>
+                                    <span className="font-semibold text-primary text-[11px]">{String(change.new)}</span>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                                  <span className="text-muted line-through text-[11px]">{String(historyItem.old_value)}</span>
+                                  <span className="text-muted text-[10px]">→</span>
+                                  <span className="font-semibold text-primary text-[11px]">{String(historyItem.new_value)}</span>
+                                </div>
+                              )}
+                            </div>
+                            {historyItem.reason && (
+                              <p className="text-xs text-text/80 m-0 break-words bg-muted/20 p-2 rounded-lg">
+                                <span className="text-muted font-medium">Reason / Note:</span> {historyItem.reason}
+                              </p>
+                            )}
+                            <p className="text-[10px] text-muted m-0">
+                              Changed By: <span className="font-medium text-text">{historyItem.changed_by || 'Unknown'}</span>
+                            </p>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {historyActiveTab === 'reopen' && (
+                <div className="space-y-3">
+                  {historyJob.reopen_history && Array.isArray(historyJob.reopen_history) && historyJob.reopen_history.length > 0 ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2 mb-2 pb-1 border-b border-border/40">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
+                          <RotateCcw size={12} className="text-rose-500" />
+                          Reopen ({historyJob.reopen_history.length})
+                        </span>
+                        <span className="text-[10px] text-muted font-medium">
+                          Current Revision: <strong className="text-rose-600 dark:text-rose-400 font-mono">{historyJob.revision || 'R0'}</strong>
+                        </span>
+                      </div>
+
+                      {[...historyJob.reopen_history].reverse().map((record: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className="bg-background border border-rose-500/30 rounded-xl p-3.5 space-y-3 ring-1 ring-rose-500/10 shadow-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400">
+                                {record.revision}
+                              </span>
+                              <span className="text-[10px] font-semibold text-muted">
+                                Moved back to: <strong className="text-text">QC (Yet to Start)</strong>
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-muted">
+                              {formatDateTime(record.reopened_at)}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Correction / Reason</p>
+                            <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
+                              {record.reason}
+                            </p>
+                            <p className="text-[10px] text-muted m-0 pt-0.5">
+                              Reopened by <strong className="text-text/90">{record.reopened_by || 'Unknown'}</strong>
+                              {record.previous_stage ? ` from stage "${record.previous_stage}"` : ''}
+                            </p>
+                          </div>
+
+                          {/* Attached Files */}
+                          {record.attachments && Array.isArray(record.attachments) && record.attachments.length > 0 && (
+                            <div className="space-y-1.5 pt-1 border-t border-border/40">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0 flex items-center gap-1">
+                                <Paperclip size={11} className="text-rose-500" />
+                                Attached Files ({record.attachments.length})
+                              </p>
+                              <div className="space-y-1.5">
+                                {record.attachments.map((att: any, aIdx: number) => {
+                                  const rev = record.revision
+                                  const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/reopen-attachments/${rev}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                  const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                  const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                  const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
+
+                                  return (
+                                    <a
+                                      key={aIdx}
+                                      href={downloadUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      download={att.filename}
+                                      className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-rose-500/40 hover:bg-rose-500/5 transition-all group/att"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <div className="p-1 rounded bg-muted/20 text-muted group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 group-hover/att:bg-rose-500/10 shrink-0">
+                                          {isImg ? <ImageIcon size={13} /> : isSheet ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                                        </div>
+                                        <div className="min-w-0">
+                                          <p className="text-xs font-medium text-text group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 truncate m-0">
+                                            {att.filename}
+                                          </p>
+                                          {att.size ? (
+                                            <p className="text-[10px] text-muted m-0">
+                                              {(att.size / 1024).toFixed(1)} KB
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                      <Download size={13} className="text-muted group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 shrink-0 mr-1" />
+                                    </a>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted text-xs">
+                      No reopen history recorded yet for this job.
+                    </div>
+                  )}
                 </div>
               )}
             </div>

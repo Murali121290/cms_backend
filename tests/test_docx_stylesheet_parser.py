@@ -121,7 +121,7 @@ def test_parse_mock_ama_docx():
     assert "6" in ce  # Percentage
     assert ce["6"]["option"] == 1  # 10% closed
     assert "5" in ce  # Temperature
-    assert ce["5"]["option"] == 5  # Dual °C and °F
+    assert ce["5"]["option"] == 1  # "5 °C (spaced out) 10 °F": spaced degree (°F is not given in parentheses)
     assert "13" in ce  # Numbers
     assert ce["13"]["option"] == 1  # 0 to 9 spelled
     assert "14" in ce  # Ranges

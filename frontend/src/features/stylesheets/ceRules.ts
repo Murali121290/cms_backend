@@ -136,7 +136,7 @@ export const HOUSE_STYLE_PRESETS: HouseStylePreset[] = [
       6: { option: 3 }, // 25 percent
       5: { option: 1 }, // 25 °C
       14: { option: 1 }, // 10–15 closed en-dash
-      13: { option: 2 }, // 0–99 spelled
+      13: { option: 1 }, // spell out small numbers (CMOS: zero to one hundred)
       17: { option: 2 }, // October 10, 2026
       19: { option: 1 }, // 3:30 p.m.
       35: { option: 1 }, // e.g., & vs.
@@ -151,7 +151,7 @@ export const HOUSE_STYLE_PRESETS: HouseStylePreset[] = [
       6: { option: 1 }, // 25% closed
       5: { option: 2 }, // 25°C closed
       14: { option: 2 }, // 10 to 15
-      13: { option: 3 }, // Numerals for all
+      13: { option: 2 }, // Numerals for all
       17: { option: 2 }, // October 10, 2026
       19: { option: 3 }, // 3:30 PM / 3:30 pm
       35: { option: 1 }, // e.g.,
@@ -168,7 +168,7 @@ export const HOUSE_STYLE_PRESETS: HouseStylePreset[] = [
       14: { option: 4 }, // 10 – 15 spaced
       13: { option: 1 }, // 0–9 spelled
       17: { option: 1 }, // 10 October 2026
-      19: { option: 2 }, // 3:30 pm
+      19: { option: 3 }, // 3:30 pm
       35: { option: 2 }, // e.g. & vs
     },
   },
@@ -196,9 +196,9 @@ export const HOUSE_STYLE_PRESETS: HouseStylePreset[] = [
       6: { option: 1 }, // 25%
       5: { option: 1 }, // 25 °C
       14: { option: 1 }, // 10–15
-      13: { option: 3 }, // numerals throughout
+      13: { option: 2 }, // numerals throughout
       17: { option: 1 }, // 10 October 2026
-      19: { option: 4 }, // 15:30 24h
+      19: { option: 2 }, // 15:30 24h
       35: { option: 1 }, // e.g.,
     },
   },

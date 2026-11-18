@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Sparkles,
   BookMarked,
+  Download,
 } from "lucide-react";
 
 import type {
@@ -114,7 +115,8 @@ export function StylesheetFormDrawer({
         };
       }
       setCeRules(newCeRules);
-      setStyleProfile(res.style_profile ?? {});
+      // Merge: the sheet's word list, units and reference style are added to what is already set
+      setStyleProfile((prev) => ({ ...prev, ...(res.style_profile ?? {}) }));
 
       // Switch to Editorial Rules tab so user immediately sees imported rules
       setSection("ce");
@@ -390,6 +392,18 @@ export function StylesheetFormDrawer({
               {isPending ? "Saving..." : editingStylesheet ? "Update" : "Create Stylesheet"}
             </button>
 
+            {editingStylesheet && (
+              <a
+                href={`/api/v2/projects/${projectId}/stylesheets/${editingStylesheet.id}/style-sheet.docx`}
+                download
+                title="Download the saved S4C Editorial Style Sheet (.docx) — save first to include current edits"
+                className="px-3 py-1.5 text-xs font-semibold text-[#1E5AA8] bg-white border border-[#1E5AA8]/40 rounded-md hover:bg-blue-50 transition-colors shadow-xs inline-flex items-center gap-1.5 no-underline"
+              >
+                <Download className="w-3.5 h-3.5" />
+                .docx
+              </a>
+            )}
+
             <div className="h-5 w-px bg-slate-200 mx-1" />
 
             {/* Toggle to Drawer Mode */}
@@ -459,6 +473,14 @@ export function StylesheetFormDrawer({
                 <span>
                   <strong>{docxImportData.word_list.length}</strong> publisher word list terms extracted
                 </span>
+                {(docxImportData.unresolved_specs?.length ?? 0) > 0 && (
+                  <>
+                    <span>•</span>
+                    <span className="text-amber-800" title="Stated in the sheet but not covered by a checklist rule — see Style Profile › Unresolved Specs">
+                      <strong>{docxImportData.unresolved_specs.length}</strong> points not mapped to a rule
+                    </span>
+                  </>
+                )}
               </div>
 
               {showDocxDetails && (
@@ -474,6 +496,8 @@ export function StylesheetFormDrawer({
                           <span className="font-semibold">Option {r.option}</span>
                           {r.source_label.startsWith("Springer default") ? (
                             <span className="ml-1 text-[9px] font-bold uppercase text-sky-700 bg-sky-50 border border-sky-200 px-1 rounded">default</span>
+                          ) : r.source_label.endsWith("(book specific)") ? (
+                            <span className="ml-1 text-[9px] font-bold uppercase text-violet-700 bg-violet-50 border border-violet-200 px-1 rounded">book specific</span>
                           ) : (
                             <span className="ml-1 text-[9px] font-bold uppercase text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 rounded">from sheet</span>
                           )}

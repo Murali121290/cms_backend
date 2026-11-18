@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X, Image as ImageIcon, PauseCircle, HelpCircle, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2, FileText, Edit3, Check, Send, ExternalLink, Zap, Eye, FileSpreadsheet, X, Image as ImageIcon, PauseCircle, HelpCircle, AlertTriangle, RotateCcw, Paperclip, File } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -43,15 +43,23 @@ export function BodInternalJobPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [isUploadingCover, setIsUploadingCover] = useState(false)
   const [isOpeningValidator, setIsOpeningValidator] = useState(false)
-  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files' | 'status'>('stage')
+  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files' | 'status' | 'reopen'>('stage')
+  const [holdSupportFilter, setHoldSupportFilter] = useState<'all' | 'Hold' | 'Support'>('all')
   const [aceFile, setAceFile] = useState<File | null>(null)
   const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
   const [isUploadingReports, setIsUploadingReports] = useState(false)
+
+  // Reopen Modal State
+  const [showReopenModal, setShowReopenModal] = useState(false)
+  const [reopenReason, setReopenReason] = useState('')
+  const [reopenFiles, setReopenFiles] = useState<File[]>([])
+  const [isSubmittingReopen, setIsSubmittingReopen] = useState(false)
 
   // Hold / Support Modal State
   const [showHoldSupportModal, setShowHoldSupportModal] = useState(false)
   const [holdSupportType, setHoldSupportType] = useState<'Hold' | 'Support' | 'Active'>('Hold')
   const [holdSupportDescription, setHoldSupportDescription] = useState('')
+  const [holdSupportFiles, setHoldSupportFiles] = useState<File[]>([])
   const [isSubmittingHoldSupport, setIsSubmittingHoldSupport] = useState(false)
 
   const [showQCModal, setShowQCModal] = useState(false)
@@ -60,6 +68,135 @@ export function BodInternalJobPage() {
     epubCheck: false,
     manualQC: false
   })
+
+  // Build chronological sequence of stage events (without artificial grouping, preserving full cycle progression)
+  const getChronologicalStageTimeline = (jobObj: any) => {
+    if (!jobObj) return []
+    const assigned: any[] = Array.isArray(jobObj.assigned_users) ? jobObj.assigned_users : []
+    const stageHist = jobObj.stage_history || {}
+    const reopens: any[] = Array.isArray(jobObj.reopen_history) ? jobObj.reopen_history : []
+    const isJobDone = jobObj.status === 'Completed' || jobObj.current_stage_name === 'Archive'
+
+    // If job has never been reopened, return simple linear stage history
+    if (reopens.length === 0) {
+      const standardOrder = ['Add job', 'Job Analysis', 'Production', 'QC', 'Ready to Dispatch', 'Archive']
+      const items: any[] = []
+      for (const s of standardOrder) {
+        const d = stageHist[s]
+        if (!d && s !== jobObj.current_stage_name) continue
+        items.push({
+          stageName: s,
+          cycleVersion: null,
+          startTime: d?.start_time || null,
+          endTime: d?.end_time || null,
+          assignee: d?.assignee || null,
+          dispatchedBy: d?.dispatched_by || null,
+          isCurrent: s === jobObj.current_stage_name && !isJobDone
+        })
+      }
+      return items
+    }
+
+    // Reopen cycles present: reconstruct exact chronological flow
+    const events: any[] = []
+
+    // 1. Add job
+    const addJobData = stageHist['Add job'] || {}
+    events.append = undefined // safety
+    events.push({
+      stageName: 'Add job',
+      cycleVersion: null,
+      startTime: addJobData.start_time || null,
+      endTime: addJobData.end_time || null,
+      assignee: addJobData.assignee || null,
+      dispatchedBy: null,
+      isCurrent: false
+    })
+
+    let currEvent: any = null
+    let currCycleVersion: string | null = null
+
+    for (const entry of assigned) {
+      const st = entry.stage
+      const action = entry.action || ''
+      const user = entry.user_id
+      const t = entry.time
+
+      // Check if entry is a reopen trigger
+      if (action.includes('Reopened to QC')) {
+        const m = action.match(/\((R\d+)\)/)
+        currCycleVersion = m ? m[1] : 'Reopen'
+      }
+
+      if (!currEvent || currEvent.stageName !== st) {
+        if (currEvent) {
+          if (!currEvent.endTime) {
+            currEvent.endTime = t
+          }
+          events.push(currEvent)
+        }
+
+        let startT = t
+        if (currCycleVersion === null) {
+          if (st === 'Production' && stageHist['Production']?.start_time) {
+            startT = stageHist['Production'].start_time
+          } else if (st === 'Job Analysis' && stageHist['Job Analysis']?.start_time) {
+            startT = stageHist['Job Analysis'].start_time
+          } else if (st === 'QC' && stageHist['Production']?.end_time) {
+            startT = stageHist['Production'].end_time
+          }
+        }
+
+        currEvent = {
+          stageName: st,
+          cycleVersion: currCycleVersion,
+          startTime: startT,
+          endTime: null,
+          assignee: user,
+          dispatchedBy: null,
+          isCurrent: false
+        }
+      } else {
+        if (user) {
+          currEvent.assignee = user
+        }
+      }
+
+      if (action.includes('Dispatched to FTP by')) {
+        const dispUser = user || entry.assigned_by
+        currEvent.dispatchedBy = dispUser
+        currEvent.endTime = t
+        events.push(currEvent)
+
+        // Following FTP dispatch, Archive completes
+        events.push({
+          stageName: 'Archive',
+          cycleVersion: currCycleVersion,
+          startTime: t,
+          endTime: t,
+          assignee: dispUser,
+          dispatchedBy: dispUser,
+          isCurrent: false
+        })
+        currEvent = null
+      }
+    }
+
+    if (currEvent) {
+      events.push(currEvent)
+    }
+
+    // Set current active stage
+    for (let idx = 0; idx < events.length; idx++) {
+      const isCur = idx === events.length - 1 && !isJobDone
+      events[idx].isCurrent = isCur
+      if (isCur) {
+        events[idx].endTime = null
+      }
+    }
+
+    return events
+  }
 
   const formatDateTime = (dateStr: string | null) => {
     return fmtUtcDateTime(dateStr)
@@ -436,28 +573,57 @@ export function BodInternalJobPage() {
 
     try {
       setIsSubmittingHoldSupport(true)
-      const res = await api.put(`/bod/jobs/${job.id}/hold-support`, {
-        status: holdSupportType,
-        description: holdSupportDescription.trim()
+      const formData = new FormData()
+      formData.append('status', holdSupportType)
+      formData.append('description', holdSupportDescription.trim())
+      for (const file of holdSupportFiles) {
+        formData.append('files', file)
+      }
+
+      const res = await api.put(`/bod/jobs/${job.id}/hold-support`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       })
-      toast.success(`Job status updated to ${holdSupportType}`)
+      toast.success(holdSupportType === 'Active' ? 'Query resolved & job resumed (Unassigned)' : `Job status updated to ${holdSupportType}`)
       setShowHoldSupportModal(false)
       setHoldSupportDescription('')
-      if (res.data) {
-        setJob((prev: any) => ({
-          ...prev,
-          status: holdSupportType,
-          hold_support_history: res.data.hold_support_history || prev.hold_support_history,
-          due_date_history: res.data.due_date_history || prev.due_date_history
-        }))
-      } else {
-        await fetchJob()
-      }
+      setHoldSupportFiles([])
+      navigate('/bod/internal')
     } catch (err: any) {
       console.error('Failed to update job status:', err)
       toast.error(err.response?.data?.detail || 'Failed to update job status')
     } finally {
       setIsSubmittingHoldSupport(false)
+    }
+  }
+
+  const handleReopenSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!reopenReason.trim()) {
+      toast.error('Please enter a reason/correction for reopening.')
+      return
+    }
+
+    try {
+      setIsSubmittingReopen(true)
+      const formData = new FormData()
+      formData.append('reason', reopenReason.trim())
+      for (const file of reopenFiles) {
+        formData.append('files', file)
+      }
+
+      const res = await api.post(`/bod/jobs/${job.id}/reopen`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      toast.success(res.data?.message || 'Job reopened successfully')
+      setShowReopenModal(false)
+      setReopenReason('')
+      setReopenFiles([])
+      navigate('/bod/internal')
+    } catch (err: any) {
+      console.error('Failed to reopen job:', err)
+      toast.error(err.response?.data?.detail || 'Failed to reopen job')
+    } finally {
+      setIsSubmittingReopen(false)
     }
   }
 
@@ -468,6 +634,7 @@ export function BodInternalJobPage() {
       setHoldSupportType('Hold')
     }
     setHoldSupportDescription('')
+    setHoldSupportFiles([])
     setShowHoldSupportModal(true)
   }
 
@@ -499,7 +666,7 @@ export function BodInternalJobPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto p-6 text-text animate-in fade-in">
+    <div className="space-y-6 w-full max-w-[1400px] mx-auto p-6 text-text animate-in fade-in">
       {/* Header / Breadcrumb */}
       <div className="flex items-center gap-3 text-muted">
         <button
@@ -510,11 +677,19 @@ export function BodInternalJobPage() {
         </button>
       </div>
 
-      <div className="flex items-center justify-between border-b border-border pb-4">
-        <div>
-          <h1 className="text-2xl font-bold font-serif text-text m-0 flex items-center gap-3">
-            {job.pdf_filename}
-            <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider ${job.status === 'Completed'
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-bold font-serif text-text m-0 flex flex-wrap items-center gap-3">
+            <span className="truncate">{job.pdf_filename}</span>
+            {job.revision && (
+              <span
+                className="font-bold font-mono px-2 py-0.5 rounded-md text-[10px] bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider shrink-0"
+                title={`Revision: ${job.revision}`}
+              >
+                {job.revision}
+              </span>
+            )}
+            <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider shrink-0 ${job.status === 'Completed'
               ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
               : job.status === 'Hold'
                 ? 'bg-fuchsia-500/15 border-fuchsia-500/40 text-fuchsia-600 dark:text-fuchsia-400'
@@ -526,68 +701,70 @@ export function BodInternalJobPage() {
             </span>
             {job.is_fastrack && (
               <span
-                className="inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-md text-[10px] bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-400 tracking-wider shadow-xs"
+                className="inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-md text-[10px] bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-400 tracking-wider shadow-xs shrink-0"
                 title={job.fastrack_requested_date ? `Fastrack expected by customer: ${formatDateTime(job.fastrack_requested_date)}` : 'Fastrack enabled'}
               >
                 <Zap size={11} className="fill-amber-500 text-amber-500" />
                 Fastrack
-                {job.fastrack_requested_date && (
-                  <span className="font-mono text-[9px] opacity-90">
-                    ({formatDateTime(job.fastrack_requested_date).split(' ')[0]})
-                  </span>
-                )}
               </span>
             )}
           </h1>
-          <div className="flex items-center gap-4 mt-1.5">
+          <div className="flex items-center gap-4 mt-1.5 flex-wrap">
             <p className="text-sm text-muted m-0">{job.client_name} • Stage: <strong className="text-text">{job.current_stage_name}</strong></p>
 
-            {!isCompleted && (
-              <div className="flex items-center gap-1.5 text-muted text-xs">
-                <User size={13} className="text-muted/70" />
-                <div className="w-[180px]">
-                  <Dropdown
-                    variant="inline"
-                    searchable
-                    searchPlaceholder="Search assignees..."
-                    value={job.current_assignee || ''}
-                    onChange={(val) => assignUser(val)}
-                    className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[12px]"
-                    options={assigneeOptions}
-                  />
-                </div>
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 text-muted text-xs">
+              <User size={13} className="text-muted/70" />
+              <span className="font-semibold text-text">
+                {getUserDisplayName(job.current_assignee) || job.current_assignee || 'Unassigned'}
+              </span>
+            </div>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {isCompleted && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setReopenReason('')
+                setShowReopenModal(true)
+              }}
+              className="border-rose-500/50 text-rose-600 hover:bg-rose-500/10 dark:text-rose-400 font-semibold h-9 px-3.5"
+              leftIcon={<RotateCcw size={14} className="text-rose-500" />}
+            >
+              Reopen Job
+            </Button>
+          )}
+
           {!isCompleted && (
             <Button
               variant="outline"
+              size="sm"
               onClick={openHoldSupportModal}
-              className={job.status === 'Hold'
-                ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400 font-semibold"
-                : job.status === 'Support'
-                  ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400 font-semibold"
+              className={`h-9 px-3.5 font-semibold ${
+                job.status === 'Hold' || job.status === 'Support'
+                  ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
                   : "border-border text-text hover:bg-accent"
-              }
+              }`}
               leftIcon={
                 job.status === 'Hold' || job.status === 'Support'
                   ? <CheckCircle size={14} className="text-emerald-500" />
-                  : <AlertTriangle size={14} />
+                  : <AlertTriangle size={14} className="text-amber-500" />
               }
             >
-              {job.status === 'Hold' || job.status === 'Support' ? 'Resolve' : 'Report / Status'}
+              {job.status === 'Hold' || job.status === 'Support' ? 'Resolve' : 'Report'}
             </Button>
           )}
 
           {!isCompleted && job.current_stage_name === 'Add job' && (
             <Button
               variant="primary"
+              size="sm"
               onClick={proceedToJobAnalysis}
               disabled={isAdvancing}
+              className="h-9 px-3.5 font-semibold"
               rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}
             >
               {isAdvancing ? 'Proceeding...' : 'Proceed to Job Analysis'}
@@ -597,8 +774,10 @@ export function BodInternalJobPage() {
           {!isCompleted && job.current_stage_name === 'Job Analysis' && (
             <Button
               variant="primary"
+              size="sm"
               onClick={proceedToProduction}
               disabled={isAdvancing}
+              className="h-9 px-3.5 font-semibold"
               rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}
             >
               {isAdvancing ? 'Proceeding...' : 'Proceed to Production'}
@@ -608,27 +787,23 @@ export function BodInternalJobPage() {
           {!isCompleted && job.epub_filename && (
             <Button
               variant="outline"
+              size="sm"
               onClick={openInEpubValidator}
               disabled={isOpeningValidator}
-              className="text-primary hover:text-primary-hover border-primary/30 hover:border-primary"
+              className="text-primary hover:text-primary-hover border-primary/30 hover:border-primary h-9 px-3.5 font-semibold"
               leftIcon={isOpeningValidator ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
             >
               {isOpeningValidator ? 'Opening Validator...' : 'Open in EPUB Validator'}
             </Button>
           )}
 
-          {!isCompleted && job.current_stage_name === 'QC' && (
-            <Button variant="outline" onClick={() => setShowQCModal(true)} disabled={isAdvancing} rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}>
-              {isAdvancing ? 'Loading...' : 'Completed'}
-            </Button>
-          )}
-
           {!isCompleted && job.current_stage_name === 'Ready to Dispatch' && (
             <Button
               variant="primary"
+              size="sm"
               onClick={dispatchJob}
               disabled={isDispatching}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-9 px-3.5"
               leftIcon={isDispatching ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
             >
               {isDispatching ? 'Dispatching to FTP...' : 'Dispatch'}
@@ -636,7 +811,7 @@ export function BodInternalJobPage() {
           )}
 
           {canUploadEpub && (
-            <div className="relative">
+            <div className="relative inline-block">
               <input
                 type="file"
                 accept=".epub"
@@ -645,7 +820,13 @@ export function BodInternalJobPage() {
                 className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
                 title="Upload EPUB"
               />
-              <Button variant="primary" disabled={isUploading} leftIcon={!isUploading ? <Upload size={14} /> : undefined}>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={isUploading}
+                className="h-9 px-3.5 font-semibold"
+                leftIcon={!isUploading ? <Upload size={14} /> : undefined}
+              >
                 {isUploading ? 'Uploading...' : 'Upload EPUB'}
               </Button>
             </div>
@@ -1169,66 +1350,90 @@ export function BodInternalJobPage() {
                   )}
                 </button>
               )}
+            {((job.reopen_history && job.reopen_history.length > 0) || (job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.some((h: any) =>
+              h.field === 'Reopen' || (h.changes && h.changes.some((c: any) => c.field === 'Reopen'))
+            ))) && (
+                <button
+                  onClick={() => setActiveTab('reopen')}
+                  className={`pb-2 text-sm font-bold transition-colors border-b-2 flex items-center gap-1.5 ${activeTab === 'reopen' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Reopen History
+                  {job.reopen_history && job.reopen_history.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 font-mono font-bold">
+                      {job.reopen_history.length}
+                    </span>
+                  )}
+                </button>
+              )}
           </div>
 
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
             {activeTab === 'stage' && (
               <div className="space-y-4">
-                {Object.keys(job.stage_history || {})
-                  .filter(stageName => {
-                    const data = job.stage_history[stageName]
-                    return stageName === job.current_stage_name || Boolean(data?.start_time || data?.end_time)
-                  })
-                  .map((stageName, idx, arr) => {
-                    const data = job.stage_history[stageName]
-                    const isCurrent = stageName === job.current_stage_name && !isCompleted
+                {getChronologicalStageTimeline(job).map((event: any, idx: number, arr: any[]) => {
+                  const isCurrent = event.isCurrent
 
-                    return (
-                      <div key={idx} className="flex gap-3">
-                        <div className="flex flex-col items-center">
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${data.end_time ? 'bg-emerald-500/20 text-emerald-600' :
-                            isCurrent ? 'bg-primary/20 text-primary border-2 border-primary/30' :
-                              'bg-accent text-muted'
-                            }`}>
-                            {data.end_time ? <CheckCircle2 size={12} /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
-                          </div>
-                          {idx !== arr.length - 1 && (
-                            <div className="w-px h-full bg-border my-1" />
+                  return (
+                    <div key={idx} className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${event.endTime ? 'bg-emerald-500/20 text-emerald-600' :
+                          isCurrent ? 'bg-primary/20 text-primary border-2 border-primary/30' :
+                            'bg-accent text-muted'
+                          }`}>
+                          {event.endTime ? <CheckCircle2 size={12} /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
+                        </div>
+                        {idx !== arr.length - 1 && (
+                          <div className="w-px h-full bg-border my-1" />
+                        )}
+                      </div>
+
+                      <div className="pb-4 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className={`text-sm font-bold m-0 ${isCurrent ? 'text-text' : 'text-text/70'}`}>
+                            {event.stageName}
+                          </h4>
+                          {event.cycleVersion && (
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400">
+                              {event.cycleVersion}
+                            </span>
+                          )}
+                          {isCurrent && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary animate-pulse">
+                              In Progress
+                            </span>
                           )}
                         </div>
 
-                        <div className="pb-4 flex-1">
-                          <h4 className={`text-sm font-bold ${isCurrent ? 'text-text' : 'text-text/70'}`}>{stageName}</h4>
+                        <div className="mt-1.5 space-y-1">
+                          {event.dispatchedBy && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <Send size={12} className="text-emerald-600 dark:text-emerald-400" /> Dispatched by: <strong className="text-text">{getUserDisplayName(event.dispatchedBy)}</strong>
+                            </div>
+                          )}
 
-                          <div className="mt-1.5 space-y-1">
-                            {data.dispatched_by && (
-                              <div className="flex items-center gap-1.5 text-xs text-muted">
-                                <Send size={12} className="text-emerald-600 dark:text-emerald-400" /> Dispatched by: <strong className="text-text">{getUserDisplayName(data.dispatched_by)}</strong>
-                              </div>
-                            )}
+                          {event.assignee && !event.dispatchedBy && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <User size={12} /> Assigned to: <strong className="text-text">{getUserDisplayName(event.assignee)}</strong>
+                            </div>
+                          )}
 
-                            {data.assignee && !data.dispatched_by && (
-                              <div className="flex items-center gap-1.5 text-xs text-muted">
-                                <User size={12} /> Assigned to: <strong className="text-text">{getUserDisplayName(data.assignee)}</strong>
-                              </div>
-                            )}
+                          {event.startTime && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <Clock size={12} /> Started: {formatDateTime(event.startTime)}
+                            </div>
+                          )}
 
-                            {data.start_time && (
-                              <div className="flex items-center gap-1.5 text-xs text-muted">
-                                <Clock size={12} /> Started: {formatDateTime(data.start_time)}
-                              </div>
-                            )}
-
-                            {data.end_time && (
-                              <div className="flex items-center gap-1.5 text-xs text-muted">
-                                <CheckCircle2 size={12} /> Completed: {formatDateTime(data.end_time)}
-                              </div>
-                            )}
-                          </div>
+                          {event.endTime && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <CheckCircle2 size={12} /> Completed: {formatDateTime(event.endTime)}
+                            </div>
+                          )}
                         </div>
                       </div>
-                    )
-                  })}
+                    </div>
+                  )
+                })}
               </div>
             )}
 
@@ -1408,75 +1613,174 @@ export function BodInternalJobPage() {
                 {/* 1. Structured Hold & Support Resolution History */}
                 {job.hold_support_history && Array.isArray(job.hold_support_history) && job.hold_support_history.length > 0 ? (
                   <div className="space-y-3">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-2">
-                      Hold & Support Tickets ({job.hold_support_history.length})
-                    </span>
-                    {[...job.hold_support_history].reverse().map((record: any, idx: number) => {
-                      const isOpen = record.status === 'Open'
-                      const isHold = record.type === 'Hold'
-                      const isSupport = record.type === 'Support'
+                    <div className="flex items-center justify-between gap-2 mb-2 pb-1 border-b border-border/40">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                        Hold & Support Tickets ({job.hold_support_history.length})
+                      </span>
+                      {/* Filter Buttons: Hold and Support */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setHoldSupportFilter(holdSupportFilter === 'Hold' ? 'all' : 'Hold')}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${holdSupportFilter === 'Hold'
+                            ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-xs ring-1 ring-fuchsia-400'
+                            : 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400 hover:bg-fuchsia-500/20'
+                            }`}
+                          title={holdSupportFilter === 'Hold' ? 'Click to show both Hold and Support' : 'Click to filter Hold only'}
+                        >
+                          Hold {job.hold_support_history.filter((h: any) => h.type === 'Hold').length > 0 && `(${job.hold_support_history.filter((h: any) => h.type === 'Hold').length})`}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHoldSupportFilter(holdSupportFilter === 'Support' ? 'all' : 'Support')}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${holdSupportFilter === 'Support'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
+                            : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20'
+                            }`}
+                          title={holdSupportFilter === 'Support' ? 'Click to show both Hold and Support' : 'Click to filter Support only'}
+                        >
+                          Support {job.hold_support_history.filter((h: any) => h.type === 'Support').length > 0 && `(${job.hold_support_history.filter((h: any) => h.type === 'Support').length})`}
+                        </button>
+                      </div>
+                    </div>
+                    {[...job.hold_support_history]
+                      .filter((record: any) => holdSupportFilter === 'all' || record.type === holdSupportFilter)
+                      .reverse()
+                      .map((record: any, idx: number) => {
+                        const isOpen = record.status === 'Open'
+                        const isHold = record.type === 'Hold'
+                        const isSupport = record.type === 'Support'
 
-                      return (
-                        <div
-                          key={record.id || idx}
-                          className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
+                        return (
+                          <div
+                            key={record.id || idx}
+                            className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
                               ? isHold
-                                ? 'border-amber-500/50 ring-1 ring-amber-500/20'
+                                ? 'border-fuchsia-500/50 ring-1 ring-fuchsia-500/20'
                                 : 'border-indigo-500/50 ring-1 ring-indigo-500/20'
                               : 'border-border'
-                            }`}
-                        >
-                          {/* Header */}
-                          <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
-                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                              }`}
+                          >
+                            {/* Header */}
+                            <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
+                                  ? 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400'
                                   : isSupport
                                     ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400'
                                     : 'bg-accent border-border text-text'
-                                }`}>
-                                {record.type}
-                              </span>
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isOpen
+                                  }`}>
+                                  {record.type}
+                                </span>
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isOpen
                                   ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 animate-pulse'
                                   : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-                                }`}>
-                                {isOpen ? '● Pending / Open' : '✓ Resolved'}
+                                  }`}>
+                                  {isOpen ? '● Pending / Open' : '✓ Resolved'}
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-muted">
+                                {record.id}
                               </span>
                             </div>
-                            <span className="text-[11px] font-mono text-muted">
-                              {record.id}
-                            </span>
-                          </div>
 
-                          {/* Query Reason */}
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Query / Reason</p>
-                            <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
-                              {record.query_reason}
-                            </p>
-                            <p className="text-[10px] text-muted m-0 pt-0.5">
-                              Reported by <strong className="text-text/90">{record.created_by || 'Unknown'}</strong> at stage "{record.stage_at_hold || job.current_stage_name}" • {formatDateTime(record.created_at)}
-                            </p>
-                          </div>
-
-                          {/* Resolution Details */}
-                          {record.status === 'Resolved' && (
-                            <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
-                              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
-                                <CheckCircle size={12} /> Resolution Notes
-                              </p>
-                              <p className="text-xs text-text leading-relaxed m-0 break-words font-sans">
-                                {record.resolution_notes || <span className="text-muted italic">No resolution notes recorded</span>}
+                            {/* Query Reason */}
+                            <div className="space-y-1">
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Query / Reason</p>
+                              <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
+                                {record.query_reason}
                               </p>
                               <p className="text-[10px] text-muted m-0 pt-0.5">
-                                Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
+                                Reported by <strong className="text-text/90">{record.created_by || 'Unknown'}</strong> at stage "{record.stage_at_hold || job.current_stage_name}" • {formatDateTime(record.created_at)}
                               </p>
                             </div>
-                          )}
-                        </div>
-                      )
-                    })}
+
+                            {/* Attachments for query */}
+                            {record.attachments && Array.isArray(record.attachments) && record.attachments.length > 0 && (
+                              <div className="space-y-1.5 pt-1 border-t border-border/40">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0 flex items-center gap-1">
+                                  <Paperclip size={11} className="text-amber-500" />
+                                  Attached Screenshots / Files ({record.attachments.length})
+                                </p>
+                                <div className="space-y-1.5">
+                                  {record.attachments.map((att: any, aIdx: number) => {
+                                    const downloadUrl = `/api/v2/bod/jobs/${job.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                    const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                    const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                    const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
+
+                                    return (
+                                      <a
+                                        key={aIdx}
+                                        href={downloadUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        download={att.filename}
+                                        className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group/att"
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <div className="p-1 rounded bg-muted/20 text-muted group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 group-hover/att:bg-amber-500/10 shrink-0">
+                                            {isImg ? <ImageIcon size={13} /> : isSheet ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <p className="text-xs font-medium text-text group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 truncate m-0">
+                                              {att.filename}
+                                            </p>
+                                            <p className="text-[10px] text-muted m-0">
+                                              {((att.size || 0) / 1024).toFixed(1)} KB
+                                            </p>
+                                          </div>
+                                        </div>
+                                        <Download size={13} className="text-muted group-hover/att:text-amber-600 dark:group-hover/att:text-amber-400 shrink-0" />
+                                      </a>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Resolution Details */}
+                            {record.status === 'Resolved' && (
+                              <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                  <CheckCircle size={12} /> Resolution Notes
+                                </p>
+                                <p className="text-xs text-text leading-relaxed m-0 break-words font-sans">
+                                  {record.resolution_notes || <span className="text-muted italic">No resolution notes recorded</span>}
+                                </p>
+                                <p className="text-[10px] text-muted m-0 pt-0.5">
+                                  Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
+                                </p>
+                                {record.resolution_attachments && Array.isArray(record.resolution_attachments) && record.resolution_attachments.length > 0 && (
+                                  <div className="space-y-1 pt-1.5 border-t border-emerald-500/20">
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                      <Paperclip size={11} /> Resolution Attachments ({record.resolution_attachments.length})
+                                    </p>
+                                    <div className="space-y-1">
+                                      {record.resolution_attachments.map((att: any, aIdx: number) => {
+                                        const downloadUrl = `/api/v2/bod/jobs/${job.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                        return (
+                                          <a
+                                            key={aIdx}
+                                            href={downloadUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            download={att.filename}
+                                            className="flex items-center justify-between gap-2 p-1.5 rounded bg-background border border-emerald-500/20 hover:border-emerald-500/40 text-xs transition-all"
+                                          >
+                                            <span className="truncate text-[11px] font-medium text-text">{att.filename}</span>
+                                            <Download size={12} className="text-muted shrink-0" />
+                                          </a>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                   </div>
                 ) : null}
 
@@ -1501,8 +1805,8 @@ export function BodInternalJobPage() {
                           <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-2.5 gap-3">
                             <div className="flex items-start gap-2.5 flex-1 min-w-0">
                               <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${isHold ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                                  : isSupport ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
-                                    : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                : isSupport ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                                  : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                                 }`}>
                                 {isHold ? <PauseCircle size={13} /> : isSupport ? <HelpCircle size={13} /> : <CheckCircle size={13} />}
                               </div>
@@ -1515,8 +1819,8 @@ export function BodInternalJobPage() {
                                     </>
                                   ) : null}
                                   <span className={`font-bold text-xs ${isHold ? 'text-amber-600 dark:text-amber-400'
-                                      : isSupport ? 'text-indigo-600 dark:text-indigo-400'
-                                        : 'text-emerald-600 dark:text-emerald-400'
+                                    : isSupport ? 'text-indigo-600 dark:text-indigo-400'
+                                      : 'text-emerald-600 dark:text-emerald-400'
                                     }`}>
                                     {newSt}
                                   </span>
@@ -1542,6 +1846,110 @@ export function BodInternalJobPage() {
                           </div>
                         )
                       })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'reopen' && (
+              <div className="space-y-4">
+                {/* Reopen Cycle History */}
+                {job.reopen_history && Array.isArray(job.reopen_history) && job.reopen_history.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2 mb-2 pb-1 border-b border-border/40">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
+                        <RotateCcw size={12} className="text-rose-500" />
+                        Reopen ({job.reopen_history.length})
+                      </span>
+                      <span className="text-[10px] text-muted font-medium">
+                        Current Revision: <strong className="text-rose-600 dark:text-rose-400 font-mono">{job.revision || 'R0'}</strong>
+                      </span>
+                    </div>
+
+                    {[...job.reopen_history].reverse().map((record: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="bg-background border border-rose-500/30 rounded-lg p-3.5 space-y-3 ring-1 ring-rose-500/10 shadow-xs"
+                      >
+                        {/* Header */}
+                        <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400">
+                              {record.revision}
+                            </span>
+                            <span className="text-[10px] font-semibold text-muted">
+                              Moved back to: <strong className="text-text">QC (Yet to Start)</strong>
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-muted">
+                            {formatDateTime(record.reopened_at)}
+                          </span>
+                        </div>
+
+                        {/* Correction / Reason */}
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Correction / Reason</p>
+                          <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
+                            {record.reason}
+                          </p>
+                          <p className="text-[10px] text-muted m-0 pt-0.5">
+                            Reopened by <strong className="text-text/90">{record.reopened_by || 'Unknown'}</strong>
+                            {record.previous_stage ? ` from stage "${record.previous_stage}"` : ''}
+                          </p>
+                        </div>
+
+                        {/* Attached Files (if any) */}
+                        {record.attachments && Array.isArray(record.attachments) && record.attachments.length > 0 && (
+                          <div className="space-y-1.5 pt-1 border-t border-border/40">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0 flex items-center gap-1">
+                              <Paperclip size={11} className="text-rose-500" />
+                              Attached Files ({record.attachments.length})
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {record.attachments.map((att: any, aIdx: number) => {
+                                const rev = record.revision
+                                const downloadUrl = `/api/v2/bod/jobs/${job.id}/reopen-attachments/${rev}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
+
+                                return (
+                                  <a
+                                    key={aIdx}
+                                    href={downloadUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    download={att.filename}
+                                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-rose-500/40 hover:bg-rose-500/5 transition-all group/att"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <div className="p-1.5 rounded bg-muted/20 text-muted group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 group-hover/att:bg-rose-500/10 shrink-0">
+                                        {isImg ? <ImageIcon size={14} /> : isSheet ? <FileSpreadsheet size={14} /> : <FileText size={14} />}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-medium text-text group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 truncate m-0">
+                                          {att.filename}
+                                        </p>
+                                        {att.size ? (
+                                          <p className="text-[10px] text-muted m-0">
+                                            {(att.size / 1024).toFixed(1)} KB
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    <Download size={14} className="text-muted group-hover/att:text-rose-600 dark:group-hover/att:text-rose-400 shrink-0 mr-1" />
+                                  </a>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted text-xs">
+                    No reopen history recorded yet for this job.
                   </div>
                 )}
               </div>
@@ -1815,6 +2223,67 @@ export function BodInternalJobPage() {
                     className="w-full p-3 bg-background border border-border rounded-lg text-sm text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-y"
                   />
                 </div>
+
+                {/* Screenshot & File Attachments */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1.5 flex items-center gap-1.5">
+                    <Paperclip size={13} className="text-amber-500" />
+                    Attach Screenshots / Reference Files <span className="text-[10px] text-muted font-normal lowercase">(optional)</span>
+                  </label>
+                  <div className="border border-dashed border-border hover:border-amber-500/50 rounded-lg p-3.5 text-center bg-muted/5 transition-colors">
+                    <input
+                      type="file"
+                      id="hold-support-file-input"
+                      multiple
+                      accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx"
+                      onChange={(e) => {
+                        if (e.target.files) {
+                          const newFiles = Array.from(e.target.files)
+                          setHoldSupportFiles(prev => [...prev, ...newFiles])
+                          e.target.value = ''
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="hold-support-file-input"
+                      className="cursor-pointer flex flex-col items-center justify-center gap-1.5 text-xs text-muted hover:text-text"
+                    >
+                      <Paperclip size={18} className="text-amber-500" />
+                      <span>
+                        <span className="font-semibold text-amber-600 dark:text-amber-400">Click to attach screenshot/file</span> or drag and drop
+                      </span>
+                      <span className="text-[10px] text-muted">
+                        Supports screenshot images (.png, .jpg, .jpeg), PDF, Excel, Word
+                      </span>
+                    </label>
+                  </div>
+
+                  {holdSupportFiles.length > 0 && (
+                    <div className="mt-2.5 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {holdSupportFiles.map((file, fIdx) => (
+                        <div
+                          key={fIdx}
+                          className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <File size={14} className="text-amber-500 shrink-0" />
+                            <span className="font-medium text-text truncate max-w-[260px]">{file.name}</span>
+                            <span className="text-[10px] text-muted shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setHoldSupportFiles(prev => prev.filter((_, i) => i !== fIdx))}
+                            className="text-muted hover:text-rose-600 p-1 rounded transition-colors"
+                            title="Remove file"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="px-6 py-4 border-t border-border flex justify-end gap-3 bg-muted/5 rounded-b-xl">
@@ -1841,6 +2310,130 @@ export function BodInternalJobPage() {
                     <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Submitting...</span>
                   ) : (
                     <span>{holdSupportType === 'Active' ? 'Resolve & Resume' : 'Submit'}</span>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reopen Job Modal */}
+      {showReopenModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowReopenModal(false)} />
+          <div className="relative bg-card rounded-xl shadow-2xl w-full max-w-lg flex flex-col border border-border animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-rose-500/5 rounded-t-xl">
+              <h2 className="text-lg font-bold flex items-center gap-2 text-rose-600 dark:text-rose-400 m-0">
+                <RotateCcw size={20} />
+                Reopen Completed Job
+              </h2>
+              <button
+                onClick={() => setShowReopenModal(false)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleReopenSubmit}>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Correction Reason <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    placeholder="Specify the correction reason required for reopening this job (Mandatory)..."
+                    value={reopenReason}
+                    onChange={(e) => setReopenReason(e.target.value)}
+                    className="w-full p-3 bg-background border border-border rounded-lg text-sm text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 resize-y"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted">
+                      Attach Files (Images, PDF, Excel, DOCX)
+                    </label>
+                    <span className="text-[11px] text-muted">Optional</span>
+                  </div>
+
+                  <div className="border border-dashed border-border rounded-lg p-3 bg-accent/20 hover:bg-accent/40 transition-colors text-center">
+                    <input
+                      type="file"
+                      id="reopen-file-input"
+                      multiple
+                      accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx"
+                      onChange={(e) => {
+                        if (e.target.files) {
+                          const newFiles = Array.from(e.target.files)
+                          setReopenFiles(prev => [...prev, ...newFiles])
+                          e.target.value = ''
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="reopen-file-input"
+                      className="cursor-pointer flex flex-col items-center justify-center gap-1.5 text-xs text-muted hover:text-text"
+                    >
+                      <Paperclip size={20} className="text-rose-500" />
+                      <span>
+                        <span className="font-semibold text-rose-600 dark:text-rose-400">Click to browse</span> or drag and drop files
+                      </span>
+                      <span className="text-[10px] text-muted">
+                        Supports images, PDF, Excel (.xlsx, .xls, .csv), Word (.doc, .docx)
+                      </span>
+                    </label>
+                  </div>
+
+                  {reopenFiles.length > 0 && (
+                    <div className="mt-2.5 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {reopenFiles.map((file, fIdx) => (
+                        <div
+                          key={fIdx}
+                          className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <File size={14} className="text-rose-500 shrink-0" />
+                            <span className="font-medium text-text truncate max-w-[260px]">{file.name}</span>
+                            <span className="text-[10px] text-muted shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReopenFiles(prev => prev.filter((_, i) => i !== fIdx))}
+                            className="text-muted hover:text-rose-600 p-1 rounded transition-colors"
+                            title="Remove file"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-border flex justify-end gap-3 bg-muted/5 rounded-b-xl">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowReopenModal(false)}
+                  disabled={isSubmittingReopen}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmittingReopen || !reopenReason.trim()}
+                  className="bg-rose-600 hover:bg-rose-700 text-white min-w-[130px]"
+                >
+                  {isSubmittingReopen ? (
+                    <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Reopening...</span>
+                  ) : (
+                    <span className="flex items-center gap-1.5"><RotateCcw size={14} /> Reopen to QC</span>
                   )}
                 </Button>
               </div>

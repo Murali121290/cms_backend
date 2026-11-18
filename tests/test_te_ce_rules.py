@@ -33,8 +33,9 @@ def test_catalog_has_all_72_rules():
     workbook = [r for r in rules if r["sno"] < 92]
     house_style = [r for r in rules if r["sno"] >= 92]
     assert len(workbook) == 72
-    assert len(house_style) == 46  # ce_rules_extensions.NEW_RULES (92-137), off by default
-    assert all(not r["default_enabled"] for r in house_style)
+    assert len(house_style) == 50  # ce_rules_extensions.NEW_RULES (92-141), off by default
+    # except R138 Leading Zero and R141 Era, which took over detectors that were always on
+    assert all(not r["default_enabled"] for r in house_style if r["sno"] not in (138, 141))
     assert all(len(r["options"]) >= 3 for r in rules)
     assert all(len(r["forms"]) == len(r["options"]) for r in rules)
     assert {r["detectable"] for r in rules} <= {"auto", "flag", "manual"}
@@ -256,7 +257,10 @@ def test_leading_zero_and_fractions_options():
     
     f_zero = f_map[".5"]
     assert f_zero["option_replacements"]["1"] == "0.5"
-    assert f_zero["option_replacements"]["2"] is None
+    # R138 option 2 (APA) drops the zero only for values that cannot exceed 1; a dose keeps it
+    assert f_zero["option_replacements"]["2"] == "0.5"
+    r_zero = _findings("The correlation was r = 0.45 overall.")["0.45"]
+    assert r_zero["option_replacements"]["2"] == ".45"
 
     f_fract = f_map["½"]
     assert f_fract["option_replacements"]["1"] == "1/2"

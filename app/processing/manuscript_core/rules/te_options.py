@@ -51,6 +51,10 @@ def _opts(o1=None, o2=None, o3=None, o4=None, o5=None, o6=None, **kwargs) -> dic
     return d
 
 
+# Statistics that cannot exceed 1: p, r, R², α, β (APA drops their leading zero)
+_BOUNDED_STAT_RE = re.compile(r"(?:\b[pPrR]|R2|R²|[αβ]|\balpha|\bbeta)\s*[=<>≤≥]\s*$")
+
+
 def _unless_same(opts: dict, surface: str) -> dict:
     return {k: (v if v != surface else None) for k, v in opts.items()}
 
@@ -351,10 +355,11 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
         return _opts(fix, None, QUERY) if fix else _opts(None, None, QUERY)
 
     # R35 Latin abbreviations: roman with comma / roman without comma / English / UK forms
+    # Option 6 (AMA): English in running text; "eg," / "ie," / "vs" in parentheses (house_style.contextualize)
     if rule_id in ("latin_eg_nodots", "latin_eg_dots"):
-        return _unless_same(_opts("e.g.,", "e.g.", "for example,", "eg.", "eg"), s)
+        return _unless_same(_opts("e.g.,", "e.g.", "for example,", "eg.", "eg", "for example,"), s)
     if rule_id in ("latin_ie_nodots", "latin_ie_dots"):
-        return _unless_same(_opts("i.e.,", "i.e.", "that is,", "ie.", "ie"), s)
+        return _unless_same(_opts("i.e.,", "i.e.", "that is,", "ie.", "ie", "that is,"), s)
     if rule_id == "latin_etc_nodot":
         return _opts("etc.", None, "and so forth")
     if rule_id == "latin_etc_dot":
@@ -362,7 +367,7 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
     if rule_id == "latin_etal_nodot":
         return _opts("et al.", "et al.", "et al.")
     if rule_id.startswith("versus_"):
-        return _unless_same(_opts("vs.", "vs", "versus", "v."), s)
+        return _unless_same(_opts("vs.", "vs", "versus", "v.", "vs", "versus"), s)
 
     # R31 First-Use Abbreviation Definition / R34 Heading / R81 Table
     if rule_id in ("abbrev_body", "abbrev_heading", "abbrev_table", "abbrev_caption"):
@@ -552,12 +557,14 @@ def get_te_replacements_by_option(rule_id: str, m: re.Match) -> dict:
             slash, spelled = fm
             return _unless_same(_opts(slash, spelled, QUERY), s)
 
-    # R11 Leading zero: 0.5 vs .5
+    # R138 Leading zero: 0.5 vs .5. Option 2 (APA) drops the zero only for values that
+    # cannot exceed 1 (correlations, alpha, proportions written as r = / α = ...).
     if rule_id in ("leading_zero_missing", "leading_zero_present"):
         dm = re.search(r"0?(\.\d+)", s)
         if dm:
             dec = dm.group(1)
-            return _unless_same(_opts(f"0{dec}", dec, QUERY), s)
+            bounded = bool(_BOUNDED_STAT_RE.search(_before(m, 16)))
+            return _unless_same(_opts(f"0{dec}", dec if bounded else f"0{dec}", QUERY), s)
 
     # R13 Ordinals spelled out: first-ninth are correct when one to nine are spelled out
     if rule_id == "ordinal_spelled":

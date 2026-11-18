@@ -38,11 +38,16 @@ _GENERIC_SUB_RULES = {
     "range_to", "range_endash", "range_hyphen",
     # Broad detectors that the CE checklist detectors refine (p<0.05, 2 x 10^5,
     # 25KGS, TBD): suppressed where they overlap a more specific finding.
-    "cmp_gt_sym", "cmp_lt_sym", "abbrev_body", "leading_zero_present",
+    "cmp_gt_sym", "cmp_lt_sym", "cmp_tilde", "abbrev_body", "leading_zero_present",
     "unit_mg_abbr", "unit_kg_abbr", "unit_ml_abbr", "unit_mcg_abbr", "unit_mm_abbr",
     "unit_cm_abbr", "unit_km_abbr", "unit_hour_h", "unit_hour_hr", "unit_min_abbr",
     "unit_sec_s", "unit_sec_abbr", "thousands_nosep",
 }
+
+
+# Findings that check a different aspect of the same text (R139 unit repetition in
+# "10-15 mg"): they never suppress the range / number findings they overlap.
+_NON_SUPPRESSING_RULES = {"unitrep_single", "unitrep_repeated"}
 
 
 def resolve_finding_overlaps(findings: list[Finding]) -> list[Finding]:
@@ -73,7 +78,7 @@ def resolve_finding_overlaps(findings: list[Finding]) -> list[Finding]:
         compound_spans = [
             (f.match_start, f.match_end, f.rule_id)
             for f in group
-            if f.rule_id not in _GENERIC_SUB_RULES
+            if f.rule_id not in _GENERIC_SUB_RULES and f.rule_id not in _NON_SUPPRESSING_RULES
         ]
 
         kept: list[Finding] = []
