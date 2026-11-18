@@ -911,6 +911,78 @@ class StylesheetUpdateResponse(BaseModel):
     stylesheet: StylesheetSummary
 
 
+# --- Import edits from the S4C Editorial Style Sheet (.docx) ---
+class DocxImportCandidate(BaseModel):
+    option: int
+    label: str = ""
+    preview: str = ""
+    score: float | None = None
+
+
+class DocxImportChange(BaseModel):
+    id: str
+    section: str                      # rules | words | orgs | abbr | settings
+    kind: str                         # changed | enabled | disabled | unresolved | conflict | added | removed | edited
+    target: str
+    title: str
+    before: str | None = None
+    after: str | None = None
+    detail: str = ""
+    default_selected: bool = True
+    sno: int | None = None
+    option: int | str | None = None
+    current: str | None = None
+    docx_text: str | None = None
+    candidates: list[DocxImportCandidate] = Field(default_factory=list)
+    best_option: int | None = None
+
+
+class DocxImportPreviewResponse(BaseModel):
+    source: Literal["upload", "ce_support"]
+    upload_token: str | None = None
+    filename: str
+    format: Literal["s4c", "customer"]
+    stylesheet_id: int
+    exported_from_id: int | None = None
+    base_hash: str | None = None
+    current_hash: str | None = None
+    stale: bool = False
+    snapshot: bool = False
+    changes: list[DocxImportChange] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DocxImportApplyRequest(BaseModel):
+    source: Literal["upload", "ce_support"]
+    upload_token: str | None = None
+    filename: str | None = None
+    accepted: list[str] = Field(default_factory=list)
+    resolutions: dict[str, int | str] = Field(default_factory=dict)
+
+
+class DocxImportApplyResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    stylesheet: StylesheetSummary
+    applied: list[str] = Field(default_factory=list)
+
+
+class DocxImportPendingItem(BaseModel):
+    stylesheet_id: int
+    stylesheet_name: str
+    filename: str
+    modified: str
+    change_count: int
+    sha256: str
+
+
+class DocxImportPendingResponse(BaseModel):
+    items: list[DocxImportPendingItem] = Field(default_factory=list)
+
+
+class DocxImportDismissRequest(BaseModel):
+    filename: str
+
+
 class StylesheetDeleteResponse(BaseModel):
     status: Literal["ok"] = "ok"
     deleted_id: int
@@ -985,6 +1057,7 @@ class TriggeredCERuleOption(BaseModel):
 class TriggeredCERule(BaseModel):
     sno: int
     name: str
+    group: str = ""
     dominant_option: int
     conflict: bool = False
     options: list[TriggeredCERuleOption] = Field(default_factory=list)

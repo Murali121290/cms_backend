@@ -2,6 +2,10 @@ import { apiClient } from "@/api/client";
 import type {
   AnalyzeFilesForStylesheetResponse,
   DocxStylesheetParseResponse,
+  DocxImportApplyRequest,
+  DocxImportApplyResponse,
+  DocxImportPendingItem,
+  DocxImportPreviewResponse,
   CERulesResponse,
   IATemplateResponse,
   StylesheetActivateResponse,
@@ -97,6 +101,50 @@ export async function parseDocxStylesheet(
     },
   );
   return response.data;
+}
+
+// --- Import edits from the Editorial Style Sheet (.docx) ---
+export async function previewDocxImportUpload(projectId: number, stylesheetId: number, file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("source", "upload");
+  const response = await apiClient.post<DocxImportPreviewResponse>(
+    `/projects/${projectId}/stylesheets/${stylesheetId}/docx-import/preview`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return response.data;
+}
+
+export async function previewDocxImportCeSupport(projectId: number, stylesheetId: number, filename: string) {
+  const formData = new FormData();
+  formData.append("source", "ce_support");
+  formData.append("filename", filename);
+  const response = await apiClient.post<DocxImportPreviewResponse>(
+    `/projects/${projectId}/stylesheets/${stylesheetId}/docx-import/preview`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return response.data;
+}
+
+export async function applyDocxImport(projectId: number, stylesheetId: number, payload: DocxImportApplyRequest) {
+  const response = await apiClient.post<DocxImportApplyResponse>(
+    `/projects/${projectId}/stylesheets/${stylesheetId}/docx-import/apply`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function dismissDocxImport(projectId: number, stylesheetId: number, filename: string) {
+  await apiClient.post(`/projects/${projectId}/stylesheets/${stylesheetId}/docx-import/dismiss`, { filename });
+}
+
+export async function getDocxImportPending(projectId: number) {
+  const response = await apiClient.get<{ items: DocxImportPendingItem[] }>(
+    `/projects/${projectId}/stylesheets/docx-import/pending`,
+  );
+  return response.data.items;
 }
 
 export async function getSpringerPreset(

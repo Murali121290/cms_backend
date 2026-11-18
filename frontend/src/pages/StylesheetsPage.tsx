@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useQueries } from "@tanstack/react-query";
-import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronUp, GripVertical, Loader, FileSpreadsheet, Table2, Globe, Download, AlertCircle } from "lucide-react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronUp, GripVertical, Loader, FileSpreadsheet, Table2, Globe, Download, AlertCircle, Upload, AlertTriangle } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
@@ -14,7 +14,9 @@ import { useStylesheetsQuery, useIATemplateQuery, useStylesheetMutations, useAna
 import { useProjectChaptersQuery } from "@/features/projects/useProjectChaptersQuery";
 import { getChapterFiles } from "@/api/projects";
 import { StylesheetFormDrawer } from "@/features/stylesheets/StylesheetFormDrawer";
-import type { StylesheetSummary, TriggeredIARule, FileRecord, IATemplateRow, AnalyzeFilesForStylesheetResponse, TriggeredCERule } from "@/types/api";
+import { DocxImportReviewDrawer } from "@/features/stylesheets/DocxImportReviewDrawer";
+import { getDocxImportPending, previewDocxImportCeSupport, previewDocxImportUpload } from "@/api/stylesheets";
+import type { DocxImportPreviewResponse, StylesheetSummary, TriggeredIARule, FileRecord, IATemplateRow, AnalyzeFilesForStylesheetResponse, TriggeredCERule } from "@/types/api";
 import { deriveFromRows, resolveRule } from "@/features/stylesheets/ceRules";
 import { formatDateTime as formatUtcDateTime } from "@/utils/dateUtils";
 
@@ -54,6 +56,21 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
   const mutations = useStylesheetMutations(normalizedProjectId || 0);
   const analyzeFilesMutation = useAnalyzeFilesMutation(normalizedProjectId || 0);
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Import edits made to the Editorial Style Sheet (.docx): uploaded, or found edited in CE support
+  const [importState, setImportState] = useState<{
+    open: boolean;
+    loading: boolean;
+    stylesheetName: string;
+    preview: DocxImportPreviewResponse | null;
+  }>({ open: false, loading: false, stylesheetName: "", preview: null });
+  const pendingQuery = useQuery({
+    queryKey: ["stylesheet-docx-pending", normalizedProjectId],
+    queryFn: () => getDocxImportPending(normalizedProjectId as number),
+    enabled: normalizedProjectId !== null,
+    staleTime: 30_000,
+  });
 
   useDocumentTitle("Stylesheets — S4 Carlisle CMS");
 
@@ -130,6 +147,35 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
 
   const handleActivateStylesheet = (stylesheetId: number) => {
     mutations.activate.mutate(stylesheetId);
+  };
+
+  const importError = (err: any) => {
+    const detail = err?.response?.data?.detail;
+    addToast({
+      title: typeof detail === "string" ? detail : "The style sheet could not be read.",
+      variant: "error",
+    });
+    setImportState((s) => ({ ...s, open: false, loading: false }));
+  };
+
+  const handleImportUpload = (stylesheet: StylesheetSummary, file: File) => {
+    setImportState({ open: true, loading: true, stylesheetName: stylesheet.name, preview: null });
+    previewDocxImportUpload(normalizedProjectId, stylesheet.id, file)
+      .then((preview) => setImportState((s) => ({ ...s, loading: false, preview })))
+      .catch(importError);
+  };
+
+  const handleReviewPending = (stylesheetId: number, stylesheetName: string, filename: string) => {
+    setImportState({ open: true, loading: true, stylesheetName, preview: null });
+    previewDocxImportCeSupport(normalizedProjectId, stylesheetId, filename)
+      .then((preview) => setImportState((s) => ({ ...s, loading: false, preview })))
+      .catch(importError);
+  };
+
+  const closeImport = () => setImportState({ open: false, loading: false, stylesheetName: "", preview: null });
+  const refreshAfterImport = () => {
+    queryClient.invalidateQueries({ queryKey: ["project-stylesheets", normalizedProjectId] });
+    queryClient.invalidateQueries({ queryKey: ["stylesheet-docx-pending", normalizedProjectId] });
   };
 
   const toggleFileSelection = (fileId: number) => {
@@ -219,7 +265,7 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
           setActiveTab("manage");
           setJustCreatedId(res.stylesheet.id);
           addToast({
-            title: "Stylesheet created successfully.",
+            title: "Stylesheet created — Editorial Style Sheet (.docx) saved to CE support.",
             variant: "success",
           });
         },
@@ -285,6 +331,26 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
       {/* Manage Tab */}
       {activeTab === "manage" && (
         <div>
+          {(pendingQuery.data ?? []).map((item) => (
+            <div
+              key={item.filename}
+              className="flex flex-wrap items-center gap-3 mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm"
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <div className="flex-1 min-w-0 text-navy-800">
+                <b className="text-amber-800">The style sheet .docx in CE support was edited</b> —{" "}
+                {item.change_count} change{item.change_count === 1 ? "" : "s"} found in{" "}
+                <span className="font-mono text-xs">{item.filename}</span> ({item.stylesheet_name}).
+              </div>
+              <button
+                type="button"
+                onClick={() => handleReviewPending(item.stylesheet_id, item.stylesheet_name, item.filename)}
+                className="h-8 px-3 text-xs font-semibold rounded-md bg-amber-600 text-white hover:bg-amber-700"
+              >
+                Review changes
+              </button>
+            </div>
+          ))}
           <div className="flex items-center justify-end gap-2 mb-6">
             <button
               type="button"
@@ -308,6 +374,7 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
                   onEdit={() => handleEditStylesheet(stylesheet)}
                   onDelete={() => handleDeleteStylesheet(stylesheet.id)}
                   onActivate={() => handleActivateStylesheet(stylesheet.id)}
+                  onImportDocx={(file) => handleImportUpload(stylesheet, file)}
                   isActivating={mutations.activate.isPending}
                   isDeleting={mutations.remove.isPending}
                   isJustCreated={stylesheet.id === justCreatedId}
@@ -418,6 +485,28 @@ export function StylesheetsPage({ embedded = false }: StylesheetsPageProps = {})
         iaTemplate={iaTemplateQuery.data?.rows || []}
       />
 
+      <DocxImportReviewDrawer
+        isOpen={importState.open}
+        projectId={normalizedProjectId}
+        stylesheetName={importState.stylesheetName}
+        preview={importState.preview}
+        isLoading={importState.loading}
+        onClose={closeImport}
+        onApplied={(_ss, applied) => {
+          closeImport();
+          refreshAfterImport();
+          addToast({
+            title: `Stylesheet updated — ${applied} change${applied === 1 ? "" : "s"} applied; stylesheet.json and the .docx were regenerated.`,
+            variant: "success",
+          });
+        }}
+        onDismissed={() => {
+          closeImport();
+          refreshAfterImport();
+          addToast({ title: ".docx changes dismissed — the stylesheet was not changed.", variant: "success" });
+        }}
+      />
+
       <ConfirmDialog
         isOpen={deleteConfirmId !== null}
         title="Delete stylesheet?"
@@ -437,6 +526,7 @@ interface StylesheetCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onActivate: () => void;
+  onImportDocx: (file: File) => void;
   isActivating: boolean;
   isDeleting: boolean;
   isJustCreated?: boolean;
@@ -448,6 +538,7 @@ function StylesheetCard({
   onEdit,
   onDelete,
   onActivate,
+  onImportDocx,
   isActivating,
   isDeleting,
   isJustCreated = false,
@@ -498,6 +589,7 @@ function StylesheetCard({
   };
 
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (isJustCreated && cardRef.current) {
       cardRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -654,6 +746,43 @@ function StylesheetCard({
               )}
             </div>
           )}
+
+          {/* S4C Editorial Style Sheet (.docx) — always available; built from the saved stylesheet.json */}
+          <div className="mt-3 pt-3 border-t border-navy-100 flex flex-wrap items-center gap-2">
+            <a
+              href={`/api/v2/projects/${stylesheet.project_id}/stylesheets/${stylesheet.id}/style-sheet.docx`}
+              className="no-underline"
+              download
+            >
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 h-8 px-3 text-[11.5px] font-semibold rounded bg-[#1E5AA8] text-white hover:bg-[#184a8c] shadow-sm transition-all"
+                title="Download the S4C Editorial Style Sheet (Word) for this stylesheet"
+              >
+                <Download className="w-3.5 h-3.5" /> Download Style Sheet (.docx)
+              </button>
+            </a>
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-[11.5px] font-semibold rounded border border-[#1E5AA8] text-[#1E5AA8] bg-white hover:bg-[#EAF1FB] shadow-sm transition-all"
+              title="Upload an edited Editorial Style Sheet (.docx) and review its changes before applying them"
+            >
+              <Upload className="w-3.5 h-3.5" /> Import changes (.docx)
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) onImportDocx(file);
+              }}
+            />
+            <span className="text-[11px] text-navy-400">Also saved to CE support › Style sheet template on every save</span>
+          </div>
 
           {/* Consolidated exports — only shown when the stylesheet has stored file IDs */}
           {stylesheet.analyzed_file_ids && stylesheet.analyzed_file_ids.length > 0 && (

@@ -3113,6 +3113,7 @@ def api_v2_analyze_files_for_stylesheet(
         triggered_ce_rules.append(schemas_v2.TriggeredCERule(
             sno=sno,
             name=rule_name,
+            group=rule_meta.get("group", ""),
             dominant_option=dominant_opt,
             conflict=has_conflict,
             options=options_models,
@@ -6258,6 +6259,179 @@ async def api_v2_parse_docx_stylesheet(
             code="PARSE_FAILED",
             message=f"Failed to parse editorial style sheet: {str(e)}",
         )
+
+
+@router.get("/projects/{project_id}/stylesheets/{stylesheet_id}/style-sheet.docx")
+def api_v2_download_style_sheet_docx(
+    project_id: int,
+    stylesheet_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """The S4C Editorial Style Sheet (.docx) of a stylesheet, built from its current stylesheet.json payload."""
+    from starlette.responses import Response
+    from app.domains.projects.models import Project
+    from app.services.stylesheet_docx_export import build_style_sheet_docx
+
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    ss = (
+        db.query(ProjectStylesheet)
+        .filter(ProjectStylesheet.id == stylesheet_id, ProjectStylesheet.project_id == project_id)
+        .first()
+    )
+    if not ss:
+        raise HTTPException(status_code=404, detail="Stylesheet not found.")
+    project = db.query(Project).filter(Project.id == project_id).first()
+    content = build_style_sheet_docx(stylesheet_service.stylesheet_json_payload(db, ss), project or {})
+    code = re.sub(r"[^A-Za-z0-9_\-]", "_", (project.project_code if project and project.project_code else f"stylesheet_{ss.id}"))
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{code}_Editorial_Style_Sheet.docx"'},
+    )
+
+
+# --- Import edits made to the Editorial Style Sheet (.docx) back into the stylesheet ---
+def _project_stylesheet_or_404(db: Session, project_id: int, stylesheet_id: int) -> ProjectStylesheet:
+    ss = (
+        db.query(ProjectStylesheet)
+        .filter(ProjectStylesheet.id == stylesheet_id, ProjectStylesheet.project_id == project_id)
+        .first()
+    )
+    if not ss:
+        raise HTTPException(status_code=404, detail="Stylesheet not found.")
+    return ss
+
+
+def _docx_import_source(db: Session, project_id: int, source: str, upload_token: str | None,
+                        filename: str | None) -> bytes:
+    if source == "upload":
+        content = stylesheet_service.load_docx_upload(upload_token or "")
+        if content is None:
+            raise HTTPException(status_code=410, detail="The uploaded file has expired. Upload it again.")
+        return content
+    path = stylesheet_service.ce_support_docx_path(db, project_id=project_id, filename=filename or "")
+    if not path:
+        raise HTTPException(status_code=404, detail="Style sheet .docx not found in CE support.")
+    with open(path, "rb") as f:
+        return f.read()
+
+
+@router.get(
+    "/projects/{project_id}/stylesheets/docx-import/pending",
+    response_model=schemas_v2.DocxImportPendingResponse,
+)
+def api_v2_docx_import_pending(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Edited Editorial Style Sheets (.docx) in CE support with changes not yet reviewed."""
+    if not _require_cookie_user(user):
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    items = stylesheet_service.docx_pending_changes(db, project_id=project_id)
+    return schemas_v2.DocxImportPendingResponse(items=items)
+
+
+@router.post(
+    "/projects/{project_id}/stylesheets/{stylesheet_id}/docx-import/preview",
+    response_model=schemas_v2.DocxImportPreviewResponse,
+)
+async def api_v2_docx_import_preview(
+    project_id: int,
+    stylesheet_id: int,
+    file: UploadFile | None = FastAPIFile(None),
+    source: str = Form("upload"),
+    filename: str | None = Form(None),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Changes between an edited .docx (uploaded, or found in CE support) and the stylesheet. Saves nothing."""
+    from app.services.stylesheet_docx_import import DocxImportError
+
+    if not _require_cookie_user(user):
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    ss = _project_stylesheet_or_404(db, project_id, stylesheet_id)
+    token = None
+    if source == "upload":
+        if file is None or not (file.filename or "").lower().endswith(".docx"):
+            raise HTTPException(status_code=400, detail="Please upload a Microsoft Word document (.docx).")
+        content = await file.read()
+        if len(content) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="The file is larger than 20 MB.")
+        name = file.filename or "style_sheet.docx"
+    elif source == "ce_support":
+        content = _docx_import_source(db, project_id, source, None, filename)
+        name = filename or ""
+    else:
+        raise HTTPException(status_code=400, detail="source must be 'upload' or 'ce_support'.")
+    try:
+        result = stylesheet_service.preview_docx_import(db, ss, content)
+    except DocxImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error("Style sheet .docx import preview failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=422, detail=f"Could not read the style sheet: {exc}")
+    if source == "upload":
+        token = stylesheet_service.store_docx_upload(content)
+    return schemas_v2.DocxImportPreviewResponse(
+        source=source, upload_token=token, filename=name, format=result["format"], stylesheet_id=ss.id,
+        exported_from_id=result.get("stylesheet_id"), base_hash=result.get("base_hash"),
+        current_hash=stylesheet_service._stylesheet_hash(ss), stale=result["stale"], snapshot=result["snapshot"],
+        changes=result["changes"], warnings=result["warnings"],
+    )
+
+
+@router.post(
+    "/projects/{project_id}/stylesheets/{stylesheet_id}/docx-import/apply",
+    response_model=schemas_v2.DocxImportApplyResponse,
+)
+def api_v2_docx_import_apply(
+    project_id: int,
+    stylesheet_id: int,
+    payload: schemas_v2.DocxImportApplyRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Apply the accepted changes; stylesheet.json and the .docx are regenerated."""
+    from app.services.stylesheet_docx_import import DocxImportError
+
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    ss = _project_stylesheet_or_404(db, project_id, stylesheet_id)
+    if not payload.accepted:
+        raise HTTPException(status_code=400, detail="Select at least one change to apply.")
+    content = _docx_import_source(db, project_id, payload.source, payload.upload_token, payload.filename)
+    try:
+        ss, applied = stylesheet_service.apply_docx_import(
+            db, ss, content, accepted=payload.accepted, resolutions=payload.resolutions,
+            source=payload.source, user_label=getattr(viewer, "username", "") or "",
+        )
+    except DocxImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return schemas_v2.DocxImportApplyResponse(
+        stylesheet=stylesheet_service._serialize_stylesheet(ss, db=db), applied=[c["id"] for c in applied],
+    )
+
+
+@router.post("/projects/{project_id}/stylesheets/{stylesheet_id}/docx-import/dismiss")
+def api_v2_docx_import_dismiss(
+    project_id: int,
+    stylesheet_id: int,
+    payload: schemas_v2.DocxImportDismissRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Stop reporting an edited .docx in CE support as pending, without changing the stylesheet."""
+    if not _require_cookie_user(user):
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    ss = _project_stylesheet_or_404(db, project_id, stylesheet_id)
+    content = _docx_import_source(db, project_id, "ce_support", None, payload.filename)
+    stylesheet_service.mark_docx_handled(db, ss, stylesheet_service._sha256(content))
+    return {"status": "ok"}
 
 
 @router.get("/projects/{project_id}/stylesheets/{stylesheet_id}/export")

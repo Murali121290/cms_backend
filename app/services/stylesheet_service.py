@@ -129,6 +129,26 @@ def get_active_stylesheet_for_project(
 
 STYLESHEET_JSON_FORMAT = "cms-stylesheet/1"
 CANONICAL_STYLESHEET_JSON = "stylesheet.json"
+DOCX_HANDLED_KEY = "docx_handled_sha256"
+
+
+def _sha256(content: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(content).hexdigest()
+
+
+def _read_json(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _stylesheet_json_filename(ss: ProjectStylesheet) -> str:
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', ss.name).strip('_') or f"stylesheet_{ss.id}"
+    return f"{safe_name}_stylesheet.json"
 
 
 def _template_dir(project) -> str:
@@ -286,6 +306,14 @@ def _stylesheet_hash(ss: ProjectStylesheet) -> str:
     return content_hash(ss.name, ss.ce_rules, ss.selected_ia_rows, getattr(ss, "style_profile", None))
 
 
+def stylesheet_json_payload(db: Session, ss: ProjectStylesheet) -> dict:
+    """The stylesheet exactly as written to CE support/Style sheet template/stylesheet.json."""
+    data = _serialize_stylesheet(ss, db=db).model_dump(mode="json")
+    data["format"] = STYLESHEET_JSON_FORMAT
+    data["content_hash"] = _stylesheet_hash(ss)
+    return data
+
+
 def _save_stylesheet_to_disk(db: Session, ss: ProjectStylesheet) -> str | None:
     """Write the stylesheet to the project's 'CE support/Style sheet template' folder.
 
@@ -309,22 +337,52 @@ def _save_stylesheet_to_disk(db: Session, ss: ProjectStylesheet) -> str | None:
         filename = f"{safe_name}_stylesheet.json"
         file_path = os.path.join(ce_template_dir, filename)
 
-        data = _serialize_stylesheet(ss, db=db).model_dump(mode="json")
-        data["format"] = STYLESHEET_JSON_FORMAT
-        data["content_hash"] = _stylesheet_hash(ss)
+        data = stylesheet_json_payload(db, ss)
+
+        # The S4C Editorial Style Sheet (.docx) is built from the same JSON payload, so the
+        # Word file always matches stylesheet.json. A failure here never blocks the save.
+        docx_content: bytes | None = None
+        docx_name = docx_path = None
+        try:
+            from app.services.stylesheet_docx_export import build_style_sheet_docx, style_sheet_filename
+            docx_name = style_sheet_filename(ss.name)
+            docx_path = os.path.join(ce_template_dir, docx_name)
+            docx_content = build_style_sheet_docx(data, project)  # build first: never leave a half-written file
+        except Exception as exc:
+            logger.warning("Could not build Editorial Style Sheet (.docx) for stylesheet %s: %s", ss.id, exc)
+
+        # The .docx hash lets an edited copy in CE support be detected (docx_pending_changes).
+        # Hashes of edited copies already applied or dismissed are kept across saves.
+        file_data = dict(data)
+        handled = _read_json(file_path).get(DOCX_HANDLED_KEY) or []
+        if docx_content is not None:
+            file_data["docx_file"] = docx_name
+            file_data["docx_sha256"] = _sha256(docx_content)
+        if handled:
+            file_data[DOCX_HANDLED_KEY] = handled[-50:]
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(file_data, f, indent=2, ensure_ascii=False)
 
         canonical_path = os.path.join(ce_template_dir, CANONICAL_STYLESHEET_JSON)
         if ss.is_active:
             with open(canonical_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+                json.dump(file_data, f, indent=2, ensure_ascii=False)
             logger.info("Synced active stylesheet %s to disk at %s and %s", ss.id, file_path, canonical_path)
         else:
             logger.info("Synced stylesheet %s to disk at %s (inactive: %s untouched)", ss.id, file_path,
                         CANONICAL_STYLESHEET_JSON)
 
-        # Also register in models.File so it appears in Chapter File Manager under 'Style sheet template'
+        written: list[tuple[str, str, str]] = [(filename, file_path, ".json")]
+        if docx_content is not None:
+            try:
+                with open(docx_path, "wb") as f:
+                    f.write(docx_content)
+                written.append((docx_name, docx_path, ".docx"))
+                logger.info("Wrote Editorial Style Sheet for stylesheet %s at %s", ss.id, docx_path)
+            except Exception as exc:
+                logger.warning("Could not write Editorial Style Sheet (.docx) for stylesheet %s: %s", ss.id, exc)
+
+        # Also register in models.File so they appear in Chapter File Manager under 'Style sheet template'
         ce_chapter = (
             db.query(models.ChapterInfo)
             .filter(
@@ -334,33 +392,34 @@ def _save_stylesheet_to_disk(db: Session, ss: ProjectStylesheet) -> str | None:
             .first()
         )
         if ce_chapter:
-            db_file = (
-                db.query(models.File)
-                .filter(
-                    models.File.project_id == project.id,
-                    models.File.chapter_id == ce_chapter.id,
-                    models.File.filename == filename,
+            for reg_name, reg_path, reg_type in written:
+                db_file = (
+                    db.query(models.File)
+                    .filter(
+                        models.File.project_id == project.id,
+                        models.File.chapter_id == ce_chapter.id,
+                        models.File.filename == reg_name,
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if not db_file:
-                db_file = models.File(
-                    filename=filename,
-                    file_type=".json",
-                    path=file_path,
-                    project_id=project.id,
-                    chapter_id=ce_chapter.id,
-                    category="Style sheet template",
-                    is_original=True,
-                    uploaded_by_id=ss.created_by_id,
-                )
-                db.add(db_file)
-                db.commit()
-                logger.info("Registered stylesheet file in files DB table with ID %s", db_file.id)
-            else:
-                db_file.path = file_path
-                db_file.category = "Style sheet template"
-                db.commit()
+                if not db_file:
+                    db_file = models.File(
+                        filename=reg_name,
+                        file_type=reg_type,
+                        path=reg_path,
+                        project_id=project.id,
+                        chapter_id=ce_chapter.id,
+                        category="Style sheet template",
+                        is_original=True,
+                        uploaded_by_id=ss.created_by_id,
+                    )
+                    db.add(db_file)
+                    db.commit()
+                    logger.info("Registered stylesheet file %s in files DB table with ID %s", reg_name, db_file.id)
+                else:
+                    db_file.path = reg_path
+                    db_file.category = "Style sheet template"
+                    db.commit()
 
         return file_path
     except Exception as exc:
@@ -404,18 +463,27 @@ def _delete_stylesheet_from_disk(db: Session, ss: ProjectStylesheet) -> None:
                 os.remove(canonical_path)
                 logger.info("Removed %s of deleted stylesheet %s", canonical_path, ss.id)
 
-        db_file = (
-            db.query(models.File)
-            .filter(
-                models.File.project_id == project.id,
-                models.File.filename == filename,
-                models.File.category == "Style sheet template",
+        # The Editorial Style Sheet (.docx) generated for this stylesheet
+        from app.services.stylesheet_docx_export import style_sheet_filename
+        docx_name = style_sheet_filename(ss.name)
+        docx_path = os.path.join(ce_template_dir, docx_name)
+        if os.path.exists(docx_path):
+            os.remove(docx_path)
+            logger.info("Removed Editorial Style Sheet of deleted stylesheet: %s", docx_path)
+
+        for reg_name in (filename, docx_name):
+            db_file = (
+                db.query(models.File)
+                .filter(
+                    models.File.project_id == project.id,
+                    models.File.filename == reg_name,
+                    models.File.category == "Style sheet template",
+                )
+                .first()
             )
-            .first()
-        )
-        if db_file:
-            db.delete(db_file)
-            db.commit()
+            if db_file:
+                db.delete(db_file)
+                db.commit()
     except Exception as exc:
         logger.warning("Failed to remove deleted stylesheet %s from disk: %s", getattr(ss, "id", None), exc)
 
@@ -899,3 +967,169 @@ def activate_stylesheet(
     db.commit()
     _save_stylesheet_to_disk(db, target)
     return {"activated_id": stylesheet_id, "deactivated_ids": deactivated_ids}
+
+
+# --------------------------------------------------------------------------- import edits from the .docx
+# An editor may edit the S4C Editorial Style Sheet (.docx) in Word. The edits are read back
+# (stylesheet_docx_import), reviewed in Editorial Standards and applied only when accepted.
+DOCX_UPLOAD_TTL_SECONDS = 3600
+_PENDING_CACHE: dict[tuple[str, str, str], dict] = {}
+
+
+def _docx_upload_dir() -> str:
+    import tempfile
+    path = os.path.join(tempfile.gettempdir(), "cms_style_sheet_imports")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def store_docx_upload(content: bytes) -> str:
+    """Keep an uploaded .docx between preview and apply; returns its token."""
+    import time
+    import uuid
+    folder = _docx_upload_dir()
+    now = time.time()
+    for name in os.listdir(folder):  # drop expired uploads
+        p = os.path.join(folder, name)
+        try:
+            if now - os.path.getmtime(p) > DOCX_UPLOAD_TTL_SECONDS:
+                os.remove(p)
+        except OSError:
+            pass
+    token = uuid.uuid4().hex
+    with open(os.path.join(folder, f"{token}.docx"), "wb") as f:
+        f.write(content)
+    return token
+
+
+def load_docx_upload(token: str) -> bytes | None:
+    if not re.fullmatch(r"[0-9a-f]{32}", token or ""):
+        return None
+    path = os.path.join(_docx_upload_dir(), f"{token}.docx")
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def ce_support_docx_path(db: Session, *, project_id: int, filename: str) -> str | None:
+    """Path of a .docx in the project's 'CE support/Style sheet template' folder (name only, no paths)."""
+    from app.domains.projects.models import Project
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project or not project.project_code or not filename:
+        return None
+    name = os.path.basename(filename)
+    if name != filename or not name.lower().endswith(".docx"):
+        return None
+    path = os.path.join(_template_dir(project), name)
+    return path if os.path.isfile(path) else None
+
+
+def preview_docx_import(db: Session, ss: ProjectStylesheet, content: bytes) -> dict:
+    from app.services.stylesheet_docx_import import preview_docx_changes
+    return preview_docx_changes(content, stylesheet_json_payload(db, ss))
+
+
+def mark_docx_handled(db: Session, ss: ProjectStylesheet, sha: str) -> None:
+    """Remember an edited .docx as applied or dismissed, so it is no longer reported as pending."""
+    from app.domains.projects.models import Project
+    project = db.query(Project).filter(Project.id == ss.project_id).first()
+    if not project or not project.project_code:
+        return
+    path = os.path.join(_template_dir(project), _stylesheet_json_filename(ss))
+    data = _read_json(path)
+    if not data:
+        return
+    handled = [h for h in data.get(DOCX_HANDLED_KEY) or [] if h != sha] + [sha]
+    data[DOCX_HANDLED_KEY] = handled[-50:]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def apply_docx_import(
+    db: Session,
+    ss: ProjectStylesheet,
+    content: bytes,
+    *,
+    accepted: list[str],
+    resolutions: dict | None = None,
+    source: str = "upload",
+    user_label: str = "",
+) -> tuple[ProjectStylesheet, list[dict]]:
+    """Re-read the .docx (the client's diff is not trusted) and apply the accepted changes."""
+    from app.services.stylesheet_docx_import import apply_docx_changes, preview_docx_changes
+
+    current = stylesheet_json_payload(db, ss)
+    preview = preview_docx_changes(content, current)
+    ce_rules, profile, applied = apply_docx_changes(current, preview["changes"], accepted, resolutions)
+    if applied:
+        ss = update_stylesheet(db, stylesheet_id=ss.id, project_id=ss.project_id, name=None, description=None,
+                               selected_ia_rows=None, ce_rules=ce_rules, style_profile=profile) or ss
+    logger.info("Stylesheet %s: applied %d change(s) from the Editorial Style Sheet .docx (%s)%s: %s",
+                ss.id, len(applied), source, f" by {user_label}" if user_label else "",
+                ", ".join(c["id"] for c in applied))
+    if source == "ce_support":
+        mark_docx_handled(db, ss, _sha256(content))
+    return ss, applied
+
+
+def docx_pending_changes(db: Session, *, project_id: int) -> list[dict]:
+    """Edited Editorial Style Sheets (.docx) in CE support whose changes have not been reviewed.
+
+    A .docx counts as edited when its hash is neither the one this service wrote nor one
+    already applied or dismissed. Nothing is applied here.
+    """
+    from app.domains.projects.models import Project
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project or not project.project_code:
+        return []
+    folder = _template_dir(project)
+    if not os.path.isdir(folder):
+        return []
+
+    known: set[str] = set()
+    for name in os.listdir(folder):
+        if name.lower().endswith(".json"):
+            data = _read_json(os.path.join(folder, name))
+            if data.get("docx_sha256"):
+                known.add(data["docx_sha256"])
+            known.update(data.get(DOCX_HANDLED_KEY) or [])
+
+    stylesheets = {s.id: s for s in db.query(ProjectStylesheet).filter(ProjectStylesheet.project_id == project_id).all()}
+    out: list[dict] = []
+    for name in sorted(os.listdir(folder)):
+        if not name.lower().endswith(".docx") or name.startswith("~$"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            with open(path, "rb") as f:
+                content = f.read()
+            sha = _sha256(content)
+            if sha in known:
+                continue
+            import docx as _docx
+            import io as _io
+            from app.services.stylesheet_docx_export import IDENTIFIER_PREFIX
+            ident = _docx.Document(_io.BytesIO(content)).core_properties.identifier or ""
+            if not ident.startswith(IDENTIFIER_PREFIX):
+                continue  # not an S4C style sheet (customer files are imported by upload)
+            ss = stylesheets.get(int(ident[len(IDENTIFIER_PREFIX):]))
+            if ss is None:
+                continue
+            cache_key = (path, sha, _stylesheet_hash(ss))
+            if cache_key not in _PENDING_CACHE:
+                _PENDING_CACHE[cache_key] = preview_docx_import(db, ss, content)
+            preview = _PENDING_CACHE[cache_key]
+            if not preview["changes"]:
+                continue
+            out.append({
+                "stylesheet_id": ss.id,
+                "stylesheet_name": ss.name,
+                "filename": name,
+                "modified": datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc).isoformat(),
+                "change_count": len(preview["changes"]),
+                "sha256": sha,
+            })
+        except Exception as exc:
+            logger.debug("Could not check %s for style sheet edits: %s", path, exc)
+    return out

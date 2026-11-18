@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Sparkles,
   BookMarked,
+  Download,
 } from "lucide-react";
 
 import type {
@@ -389,6 +390,18 @@ export function StylesheetFormDrawer({
             >
               {isPending ? "Saving..." : editingStylesheet ? "Update" : "Create Stylesheet"}
             </button>
+
+            {editingStylesheet && (
+              <a
+                href={`/api/v2/projects/${projectId}/stylesheets/${editingStylesheet.id}/style-sheet.docx`}
+                download
+                title="Download the saved S4C Editorial Style Sheet (.docx) — save first to include current edits"
+                className="px-3 py-1.5 text-xs font-semibold text-[#1E5AA8] bg-white border border-[#1E5AA8]/40 rounded-md hover:bg-blue-50 transition-colors shadow-xs inline-flex items-center gap-1.5 no-underline"
+              >
+                <Download className="w-3.5 h-3.5" />
+                .docx
+              </a>
+            )}
 
             <div className="h-5 w-px bg-slate-200 mx-1" />
 

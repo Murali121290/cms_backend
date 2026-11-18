@@ -754,6 +754,74 @@ export interface StylesheetUpdateResponse {
   stylesheet: StylesheetSummary;
 }
 
+// --- Import edits from the S4C Editorial Style Sheet (.docx) ---
+export type DocxImportSection = "rules" | "words" | "orgs" | "abbr" | "settings";
+export type DocxImportKind =
+  | "changed" | "enabled" | "disabled" | "unresolved" | "conflict" | "added" | "removed" | "edited";
+
+export interface DocxImportCandidate {
+  option: number;
+  label: string;
+  preview: string;
+  score?: number | null;
+}
+
+export interface DocxImportChange {
+  id: string;
+  section: DocxImportSection;
+  kind: DocxImportKind;
+  target: string;
+  title: string;
+  before?: string | null;
+  after?: string | null;
+  detail: string;
+  default_selected: boolean;
+  sno?: number | null;
+  option?: number | string | null;
+  current?: string | null;
+  docx_text?: string | null;
+  candidates: DocxImportCandidate[];
+  best_option?: number | null;
+}
+
+export interface DocxImportPreviewResponse {
+  source: "upload" | "ce_support";
+  upload_token?: string | null;
+  filename: string;
+  format: "s4c" | "customer";
+  stylesheet_id: number;
+  exported_from_id?: number | null;
+  base_hash?: string | null;
+  current_hash?: string | null;
+  stale: boolean;
+  snapshot: boolean;
+  changes: DocxImportChange[];
+  warnings: string[];
+}
+
+export interface DocxImportApplyRequest {
+  source: "upload" | "ce_support";
+  upload_token?: string | null;
+  filename?: string | null;
+  accepted: string[];
+  resolutions: Record<string, number | string>;
+}
+
+export interface DocxImportApplyResponse {
+  status: "ok";
+  stylesheet: StylesheetSummary;
+  applied: string[];
+}
+
+export interface DocxImportPendingItem {
+  stylesheet_id: number;
+  stylesheet_name: string;
+  filename: string;
+  modified: string;
+  change_count: number;
+  sha256: string;
+}
+
 export interface StylesheetDeleteResponse {
   status: "ok";
   deleted_id: number;
@@ -789,6 +857,8 @@ export interface TriggeredCERuleOption {
 export interface TriggeredCERule {
   sno: number;
   name: string;
+  /** Catalog domain the rule belongs to (e.g. "Units and measurements"). */
+  group?: string;
   dominant_option: number;
   conflict: boolean;
   options: TriggeredCERuleOption[];
