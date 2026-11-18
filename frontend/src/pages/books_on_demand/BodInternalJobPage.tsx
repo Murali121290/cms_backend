@@ -797,19 +797,6 @@ export function BodInternalJobPage() {
             </Button>
           )}
 
-          {!isCompleted && job.current_stage_name === 'QC' && (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setShowQCModal(true)}
-              disabled={isAdvancing}
-              className="h-9 px-3.5 font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
-              rightIcon={!isAdvancing ? <CheckCircle size={14} /> : undefined}
-            >
-              {isAdvancing ? 'Loading...' : 'Mark Completed'}
-            </Button>
-          )}
-
           {!isCompleted && job.current_stage_name === 'Ready to Dispatch' && (
             <Button
               variant="primary"
