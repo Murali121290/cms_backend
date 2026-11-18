@@ -222,14 +222,14 @@ def _check_meta_values_com(soup, lines, prop, expected_values):
         m.get_text(strip=True)
         for m in soup.find_all("meta", attrs={"property": prop})
     }
-    missing = expected_values - found_values
-    if missing:
+    missing = [val for val in expected_values if val not in found_values]
+    for val in missing:
         issues.append({
             "type": f"missing_{prop.replace(':', '_')}",
-            "message": f"Missing required {prop} values: {', '.join(missing)}",
+            "message": f"Missing required {prop} values: {val}",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
-            "extract": prop,
+            "expected_text": f'<meta property="{prop}">{val}</meta>',
         })
     return issues
 
@@ -272,7 +272,7 @@ def validate_page_break_source(book_details, rule_config=None):
 def validate_access_mode(book_details, rule_config=None):
     """Validate schema:accessMode requirements based on configuration."""
     config_dict = (rule_config or {}).get("rule_config", {})
-    expected_values = set(config_dict.get("expected_values", []))
+    expected_values = config_dict.get("expected_values", [])
     if not expected_values:
         return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_values in rule_config for COM-META-006.", "category": "Error", "line_number": 0}]}
 
@@ -287,7 +287,7 @@ def validate_access_mode(book_details, rule_config=None):
 def validate_access_mode_sufficient(book_details, rule_config=None):
     """Validate schema:accessModeSufficient requirements based on configuration."""
     config_dict = (rule_config or {}).get("rule_config", {})
-    expected_values = set(config_dict.get("expected_values", []))
+    expected_values = config_dict.get("expected_values", [])
     if not expected_values:
         return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_values in rule_config for COM-META-007.", "category": "Error", "line_number": 0}]}
 

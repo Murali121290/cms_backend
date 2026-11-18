@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap, History, FileText, PauseCircle, HelpCircle } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ChevronDown, ArrowLeft, XCircle, Upload, CheckCircle2, CheckCircle, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock, Download, Sparkles, Calendar, Edit3, ArrowUp, ArrowDown, ArrowUpDown, X, Send, Loader2, Zap, History, FileText, PauseCircle, HelpCircle } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -54,7 +54,8 @@ export function BodInternalPage() {
 
   // History Drawer state
   const [historyJob, setHistoryJob] = useState<any | null>(null)
-  const [historyActiveTab, setHistoryActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files'>('stage')
+  const [historyActiveTab, setHistoryActiveTab] = useState<'stage' | 'assignment' | 'duedate' | 'priority' | 'files' | 'status'>('stage')
+  const [drawerHoldSupportFilter, setDrawerHoldSupportFilter] = useState<'all' | 'Hold' | 'Support'>('all')
 
   // Table heading filters & sorting
   const [colFilters, setColFilters] = useState({
@@ -3262,6 +3263,22 @@ export function BodInternalPage() {
                   File History
                 </button>
               )}
+              {((historyJob.hold_support_history && historyJob.hold_support_history.length > 0) || (historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) =>
+                h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status'))
+              ))) && (
+                <button
+                  onClick={() => setHistoryActiveTab('status')}
+                  className={`pb-2.5 text-xs font-bold transition-colors border-b-2 flex items-center gap-1.5 ${historyActiveTab === 'status' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                    }`}
+                >
+                  Hold & Support History
+                  {historyJob.hold_support_history && historyJob.hold_support_history.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-accent border border-border text-text font-mono font-normal">
+                      {historyJob.hold_support_history.length}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
 
             {/* Tab Contents */}
@@ -3492,6 +3509,162 @@ export function BodInternalPage() {
                       </p>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {historyActiveTab === 'status' && (
+                <div className="space-y-4">
+                  {/* 1. Structured Hold & Support Resolution History */}
+                  {historyJob.hold_support_history && Array.isArray(historyJob.hold_support_history) && historyJob.hold_support_history.length > 0 ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2 mb-2 pb-1 border-b border-border/40">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                          Hold & Support Tickets ({historyJob.hold_support_history.length})
+                        </span>
+                        {/* Filter Buttons: Hold and Support */}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDrawerHoldSupportFilter(drawerHoldSupportFilter === 'Hold' ? 'all' : 'Hold')}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${drawerHoldSupportFilter === 'Hold'
+                                ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-xs ring-1 ring-fuchsia-400'
+                                : 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400 hover:bg-fuchsia-500/20'
+                              }`}
+                            title={drawerHoldSupportFilter === 'Hold' ? 'Click to show both Hold and Support' : 'Click to filter Hold only'}
+                          >
+                            Hold {historyJob.hold_support_history.filter((h: any) => h.type === 'Hold').length > 0 && `(${historyJob.hold_support_history.filter((h: any) => h.type === 'Hold').length})`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDrawerHoldSupportFilter(drawerHoldSupportFilter === 'Support' ? 'all' : 'Support')}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${drawerHoldSupportFilter === 'Support'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
+                                : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20'
+                              }`}
+                            title={drawerHoldSupportFilter === 'Support' ? 'Click to show both Hold and Support' : 'Click to filter Support only'}
+                          >
+                            Support {historyJob.hold_support_history.filter((h: any) => h.type === 'Support').length > 0 && `(${historyJob.hold_support_history.filter((h: any) => h.type === 'Support').length})`}
+                          </button>
+                        </div>
+                      </div>
+                      {[...historyJob.hold_support_history]
+                        .filter((record: any) => drawerHoldSupportFilter === 'all' || record.type === drawerHoldSupportFilter)
+                        .reverse()
+                        .map((record: any, idx: number) => {
+                        const isOpen = record.status === 'Open'
+                        const isHold = record.type === 'Hold'
+                        const isSupport = record.type === 'Support'
+
+                        return (
+                          <div
+                            key={record.id || idx}
+                            className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
+                                ? isHold
+                                  ? 'border-fuchsia-500/50 ring-1 ring-fuchsia-500/20'
+                                  : 'border-indigo-500/50 ring-1 ring-indigo-500/20'
+                                : 'border-border'
+                              }`}
+                          >
+                            {/* Header */}
+                            <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
+                                    ? 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400'
+                                    : isSupport
+                                      ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400'
+                                      : 'bg-accent border-border text-text'
+                                  }`}>
+                                  {record.type}
+                                </span>
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isOpen
+                                    ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 animate-pulse'
+                                    : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                                  }`}>
+                                  {isOpen ? '● Pending / Open' : '✓ Resolved'}
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-muted">
+                                {record.id}
+                              </span>
+                            </div>
+
+                            {/* Query Reason */}
+                            <div className="space-y-1">
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-muted m-0">Query / Reason</p>
+                              <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans">
+                                {record.query_reason}
+                              </p>
+                              <p className="text-[10px] text-muted m-0 pt-0.5">
+                                Reported by <strong className="text-text/90">{record.created_by || 'Unknown'}</strong> at stage "{record.stage_at_hold || historyJob.current_stage_name}" • {formatDateTime(record.created_at)}
+                              </p>
+                            </div>
+
+                            {/* Resolution Details */}
+                            {record.status === 'Resolved' && (
+                              <div className="space-y-1 bg-emerald-500/5 p-2.5 rounded border border-emerald-500/20">
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 m-0 flex items-center gap-1">
+                                  <CheckCircle size={12} /> Resolution Notes
+                                </p>
+                                <p className="text-xs text-text leading-relaxed m-0 break-words font-sans">
+                                  {record.resolution_notes || <span className="text-muted italic">No resolution notes recorded</span>}
+                                </p>
+                                <p className="text-[10px] text-muted m-0 pt-0.5">
+                                  Resolved by <strong className="text-text/90">{record.resolved_by || 'Unknown'}</strong> • {formatDateTime(record.resolved_at)}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+
+                  {/* 2. Timeline fallback / Status transitions */}
+                  {historyJob.due_date_history && Array.isArray(historyJob.due_date_history) && historyJob.due_date_history.some((h: any) => h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status'))) && (
+                    <div className="space-y-2 pt-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted block">
+                        Status Change Activity Log
+                      </span>
+                      {[...historyJob.due_date_history]
+                        .filter((h: any) => h.field === 'Status' || (h.changes && h.changes.some((c: any) => c.field === 'Status')))
+                        .reverse()
+                        .map((historyItem: any, idx: number) => (
+                          <div key={idx} className="bg-background border border-border rounded-xl p-3.5 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-text">Status Change</span>
+                              <span className="text-[11px] text-muted font-medium">
+                                {formatDateTime(historyItem.timestamp)}
+                              </span>
+                            </div>
+                            <div className="space-y-1 pt-1 border-t border-border/50">
+                              {historyItem.changes ? (
+                                historyItem.changes.filter((c: any) => c.field === 'Status').map((change: any, cIdx: number) => (
+                                  <div key={cIdx} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                    <span className="text-muted line-through text-[11px]">{String(change.old)}</span>
+                                    <span className="text-muted text-[10px]">→</span>
+                                    <span className="font-semibold text-primary text-[11px]">{String(change.new)}</span>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                                  <span className="text-muted line-through text-[11px]">{String(historyItem.old_value)}</span>
+                                  <span className="text-muted text-[10px]">→</span>
+                                  <span className="font-semibold text-primary text-[11px]">{String(historyItem.new_value)}</span>
+                                </div>
+                              )}
+                            </div>
+                            {historyItem.reason && (
+                              <p className="text-xs text-text/80 m-0 break-words bg-muted/20 p-2 rounded-lg">
+                                <span className="text-muted font-medium">Reason / Note:</span> {historyItem.reason}
+                              </p>
+                            )}
+                            <p className="text-[10px] text-muted m-0">
+                              Changed By: <span className="font-medium text-text">{historyItem.changed_by || 'Unknown'}</span>
+                            </p>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
