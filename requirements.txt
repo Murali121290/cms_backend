@@ -38,3 +38,4 @@ saxonche
 python-pptx
 langdetect
 pyspellchecker
+paramiko>=3.4.0

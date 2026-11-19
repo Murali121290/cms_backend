@@ -7,6 +7,41 @@ from typing import List, Optional
 
 logger = logging.getLogger("app.ftp")
 
+try:
+    import paramiko
+except ImportError:
+    paramiko = None
+
+
+class SftpSessionProxy:
+    """Provides a compat layer for direct ftp.ftp calls like cwd, rename, etc."""
+    def __init__(self, sftp_client):
+        self._sftp = sftp_client
+
+    def cwd(self, path: str):
+        if not path or path == "/":
+            try:
+                self._sftp.chdir("/")
+            except Exception:
+                pass
+            return
+        # Resolve path
+        if not path.startswith("/"):
+            path = "/" + path
+        self._sftp.chdir(path)
+
+    def rename(self, from_path: str, to_path: str):
+        if not from_path.startswith("/"):
+            from_path = "/" + from_path
+        if not to_path.startswith("/"):
+            to_path = "/" + to_path
+        self._sftp.rename(from_path, to_path)
+
+    def delete(self, path: str):
+        if not path.startswith("/"):
+            path = "/" + path
+        self._sftp.remove(path)
+
 
 class PatchedFTP_TLS(FTP_TLS):
     """
@@ -149,7 +184,9 @@ class BodFtpService:
         else:
             self.ssl_verify = ssl_verify
 
-        self.ftp: Optional[FTP_TLS | FTP] = None
+        self.ssh_client = None
+        self.sftp = None
+        self.ftp: Optional[FTP_TLS | FTP | SftpSessionProxy] = None
 
     def _create_ssl_context(self) -> ssl.SSLContext:
         """Create and configure SSL context using ssl.create_default_context()."""
@@ -170,11 +207,37 @@ class BodFtpService:
         return context
 
     def connect(self):
-        """Establish connection and authenticate using Explicit FTPS."""
+        """Establish connection and authenticate using SFTP (if port 22) or FTP/FTPS."""
         if not self.host:
             raise ValueError("FTP host is not configured.")
 
         clean_host = self.host.strip()
+
+        # 1. SFTP Connection mode when port == 22
+        if self.port == 22:
+            if paramiko is None:
+                raise ImportError("paramiko is required for SFTP on port 22. Please install paramiko.")
+            logger.info(f"Connecting to SFTP server {clean_host}:{self.port} with user '{self.username}'...")
+            try:
+                self.ssh_client = paramiko.SSHClient()
+                self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.ssh_client.connect(
+                    clean_host,
+                    port=self.port,
+                    username=self.username,
+                    password=self.password,
+                    timeout=self.timeout
+                )
+                self.sftp = self.ssh_client.open_sftp()
+                self.ftp = SftpSessionProxy(self.sftp)
+                logger.info(f"Successfully established SFTP connection with {clean_host}:{self.port}")
+                return
+            except Exception as e:
+                logger.error(f"Failed to connect to SFTP {clean_host}:{self.port}: {str(e)}")
+                self.disconnect()
+                raise
+
+        # 2. Standard FTP / Explicit FTPS
         logger.info(f"Connecting to FTP server {clean_host}:{self.port} (TLS={self.use_tls}, Passive={self.passive}, VerifySSL={self.ssl_verify})...")
 
         try:
@@ -228,11 +291,24 @@ class BodFtpService:
             raise
 
     def disconnect(self):
-        if self.ftp:
+        if self.sftp:
             try:
-                self.ftp.quit()
+                self.sftp.close()
             except Exception:
-                self.ftp.close()
+                pass
+            self.sftp = None
+        if self.ssh_client:
+            try:
+                self.ssh_client.close()
+            except Exception:
+                pass
+            self.ssh_client = None
+        if self.ftp:
+            if not isinstance(self.ftp, SftpSessionProxy):
+                try:
+                    self.ftp.quit()
+                except Exception:
+                    self.ftp.close()
             self.ftp = None
 
     def __enter__(self):
@@ -244,6 +320,13 @@ class BodFtpService:
 
     def list_files(self) -> List[str]:
         """List all files in the current directory"""
+        if self.sftp:
+            try:
+                return self.sftp.listdir(".")
+            except Exception as e:
+                logger.error(f"Failed to list SFTP files on {self.host}: {str(e)}")
+                return []
+
         files = []
         try:
             self.ftp.retrlines("NLST", files.append)
@@ -260,7 +343,18 @@ class BodFtpService:
         return [f for f in files if f.lower().endswith('.pdf')]
 
     def download_file(self, remote_filename: str, local_path: str):
-        """Download a file from FTP to the local path"""
+        """Download a file from FTP/SFTP to the local path"""
+        if self.sftp:
+            try:
+                self.sftp.get(remote_filename, local_path)
+                logger.info(f"Downloaded via SFTP: {remote_filename} to {local_path}")
+                return
+            except Exception as e:
+                logger.error(f"Failed to download via SFTP {remote_filename}: {str(e)}")
+                if os.path.exists(local_path):
+                    os.remove(local_path)
+                raise
+
         try:
             with open(local_path, 'wb') as f:
                 self.ftp.retrbinary(f"RETR {remote_filename}", f.write)
@@ -274,7 +368,16 @@ class BodFtpService:
             raise
 
     def upload_file(self, local_path: str, remote_filename: str):
-        """Upload a local file to the FTP server"""
+        """Upload a local file to the FTP/SFTP server"""
+        if self.sftp:
+            try:
+                self.sftp.put(local_path, remote_filename)
+                logger.info(f"Uploaded via SFTP: {local_path} to {remote_filename}")
+                return
+            except Exception as e:
+                logger.error(f"Failed to upload via SFTP {local_path}: {str(e)}")
+                raise
+
         try:
             with open(local_path, 'rb') as f:
                 self.ftp.storbinary(f"STOR {remote_filename}", f)
@@ -287,6 +390,25 @@ class BodFtpService:
 
     def ensure_dir(self, remote_dir: str):
         """Create remote directory structure if it doesn't exist and navigate into it."""
+        if self.sftp:
+            try:
+                parts = [p for p in remote_dir.split('/') if p]
+                curr = "/"
+                for part in parts:
+                    curr = f"{curr.rstrip('/')}/{part}"
+                    try:
+                        self.sftp.stat(curr)
+                    except IOError:
+                        try:
+                            self.sftp.mkdir(curr)
+                        except Exception as mkerr:
+                            logger.warning(f"Could not mkdir {curr}: {mkerr}")
+                self.sftp.chdir(curr)
+                return
+            except Exception as e:
+                logger.error(f"Failed to ensure SFTP directory {remote_dir}: {e}")
+                raise
+
         try:
             self.ftp.cwd("/")
             parts = [p for p in remote_dir.split('/') if p]
@@ -305,7 +427,25 @@ class BodFtpService:
             raise
 
     def rename_or_move(self, from_path: str, to_path: str, overwrite: bool = True):
-        """Move or rename a remote file/directory on the FTP server. If target exists and overwrite is True, delete target first."""
+        """Move or rename a remote file/directory on the FTP/SFTP server. If target exists and overwrite is True, delete target first."""
+        if self.sftp:
+            try:
+                if not from_path.startswith("/"):
+                    from_path = "/" + from_path
+                if not to_path.startswith("/"):
+                    to_path = "/" + to_path
+                if overwrite:
+                    try:
+                        self.sftp.remove(to_path)
+                    except Exception:
+                        pass
+                self.sftp.rename(from_path, to_path)
+                logger.info(f"Moved SFTP file from '{from_path}' to '{to_path}'")
+                return
+            except Exception as e:
+                logger.error(f"Failed to move SFTP file '{from_path}' to '{to_path}': {e}")
+                raise
+
         try:
             if overwrite:
                 try:

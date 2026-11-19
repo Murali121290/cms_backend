@@ -421,45 +421,49 @@ def watch_ftp_for_new_pdfs():
                         )
 
                     # Move the processed file(s) from input folder to dedicated project folder under Production on FTP
-                    # Structure: {prod_folder}/{year}/{month}/{date}/{project_name}/
-                    prod_base = getattr(settings, "BOD_FTP_PRODUCTION_PATH", "Production") or "Production"
-                    prod_folder = prod_base.strip('/')
+                    # Only execute move if BOD_FTP_PRODUCTION_PATH is explicitly configured in env
+                    raw_prod_base = getattr(settings, "BOD_FTP_PRODUCTION_PATH", None)
+                    prod_base = raw_prod_base.strip() if isinstance(raw_prod_base, str) else ""
 
-                    # Date-based folder structure: YYYY/MM/DD
-                    year_str = now_utc.strftime("%Y")
-                    month_str = now_utc.strftime("%m")
-                    day_str = now_utc.strftime("%d")
-                    project_prod_dir = f"{prod_folder}/{year_str}/{month_str}/{day_str}/{project_name}"
+                    if prod_base:
+                        prod_folder = prod_base.strip('/')
+                        # Date-based folder structure: YYYY/MM/DD
+                        year_str = now_utc.strftime("%Y")
+                        month_str = now_utc.strftime("%m")
+                        day_str = now_utc.strftime("%d")
+                        project_prod_dir = f"{prod_folder}/{year_str}/{month_str}/{day_str}/{project_name}"
 
-                    try:
-                        # Ensure remote Production/{year}/{month}/{date}/{project_name} directory exists
-                        ftp.ensure_dir(project_prod_dir)
-                        
-                        # Move PDF: e.g. from target_dir/pdf_name -> {project_prod_dir}/pdf_name
-                        ftp.ftp.cwd("/")
-                        remote_input_pdf = f"{target_dir.strip('/')}/{pdf_name}" if target_dir != "/" else f"/{pdf_name}"
-                        remote_prod_pdf = f"{project_prod_dir}/{pdf_name}"
-                        ftp.rename_or_move(remote_input_pdf, remote_prod_pdf)
-
-                        # If cover was also downloaded, move cover file as well
-                        if cover_filename:
-                            remote_input_cover = f"{target_dir.strip('/')}/{cover_filename}" if target_dir != "/" else f"/{cover_filename}"
-                            remote_prod_cover = f"{project_prod_dir}/{cover_filename}"
-                            try:
-                                ftp.rename_or_move(remote_input_cover, remote_prod_cover)
-                            except Exception as ce:
-                                logger.warning(f"Could not move cover {cover_filename} to {project_prod_dir}: {ce}")
-
-                        # Switch back to input target_dir for remaining iterations
-                        ftp.ftp.cwd("/")
-                        ftp.ftp.cwd(target_dir)
-                    except Exception as move_err:
-                        logger.error(f"Failed to move {pdf_name} to {project_prod_dir} on FTP: {move_err}")
                         try:
+                            # Ensure remote Production/{year}/{month}/{date}/{project_name} directory exists
+                            ftp.ensure_dir(project_prod_dir)
+                            
+                            # Move PDF: e.g. from target_dir/pdf_name -> {project_prod_dir}/pdf_name
+                            ftp.ftp.cwd("/")
+                            remote_input_pdf = f"{target_dir.strip('/')}/{pdf_name}" if target_dir != "/" else f"/{pdf_name}"
+                            remote_prod_pdf = f"{project_prod_dir}/{pdf_name}"
+                            ftp.rename_or_move(remote_input_pdf, remote_prod_pdf)
+
+                            # If cover was also downloaded, move cover file as well
+                            if cover_filename:
+                                remote_input_cover = f"{target_dir.strip('/')}/{cover_filename}" if target_dir != "/" else f"/{cover_filename}"
+                                remote_prod_cover = f"{project_prod_dir}/{cover_filename}"
+                                try:
+                                    ftp.rename_or_move(remote_input_cover, remote_prod_cover)
+                                except Exception as ce:
+                                    logger.warning(f"Could not move cover {cover_filename} to {project_prod_dir}: {ce}")
+
+                            # Switch back to input target_dir for remaining iterations
                             ftp.ftp.cwd("/")
                             ftp.ftp.cwd(target_dir)
-                        except Exception:
-                            pass
+                        except Exception as move_err:
+                            logger.error(f"Failed to move {pdf_name} to {project_prod_dir} on FTP: {move_err}")
+                            try:
+                                ftp.ftp.cwd("/")
+                                ftp.ftp.cwd(target_dir)
+                            except Exception:
+                                pass
+                    else:
+                        logger.info(f"BOD_FTP_PRODUCTION_PATH not configured in environment. Skipping FTP move for {pdf_name}.")
                         
         except Exception as e:
             logger.error(f"Error processing FTP for BOD: {str(e)}")
