@@ -76,7 +76,8 @@
       "target_path": "OEBPS",
       "file_name_pattern": [
         "nav.xhtml",
-        "toc.ncx"
+        "toc.ncx",
+        "*.opf"
       ],
       "enabled": true,
       "rule_config": {
