@@ -569,6 +569,19 @@
       "category": "Image Check"
     },
     {
+      "id": "BOD-IMG-006",
+      "name": "Image captions must have the same alignment as the image and must be coded as instructed in BoD Standard CSS",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "rule_config": {
+        "exclude_files": [
+          "cover*.xhtml"
+        ]
+      },
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
       "id": "COM-LINK-001",
       "name": "citations must be linked to the corresponding block",
       "target_path": "OEBPS/xhtml",

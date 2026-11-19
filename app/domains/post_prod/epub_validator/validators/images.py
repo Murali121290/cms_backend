@@ -1,3 +1,5 @@
+import fnmatch
+import fnmatch
 import glob
 import os
 import re
@@ -987,6 +989,15 @@ def validate_figure_container(file_details, rule_config=None):
     full_path = file_details.get("full_path", "")
     rel_path = file_details.get("relative_path") or file_path
 
+    # Check exclude_files pattern from rule configuration if provided
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    exclude_files = cfg.get("exclude_files") if isinstance(cfg, dict) else []
+    if exclude_files:
+        filename = (file_details.get("file_name") or os.path.basename(full_path or file_path)).lower()
+        for pattern in exclude_files:
+            if fnmatch.fnmatch(filename, pattern.lower()):
+                return {"issues_count": 0, "issues": []}
+
     if not full_path or not os.path.exists(full_path):
         return {"issues_count": 0, "issues": []}
 
@@ -1043,6 +1054,143 @@ def validate_figure_container(file_details, rule_config=None):
                 "line_number": line_num,
                 "extract": str(figcap)[:150],
             })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-IMG-006")
+def validate_image_caption_structure_and_classes(file_details, rule_config=None):
+    """
+    Image captions must have the same alignment as the image and must be coded as instructed in BoD Standard CSS:
+    1. <figure> element wrapping images must include class="image".
+    2. Any caption element (<p class="caption"> or elements with 'caption' class) must be enclosed inside a <figcaption> tag.
+    3. Caption text inside <figcaption> should use <p class="caption">.
+    4. If figure has an alignment class (e.g. 'center', 'left', 'right'), the caption must match the same alignment class.
+    """
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+    rel_path = file_details.get("relative_path") or file_path
+
+    # Check exclude_files pattern from rule configuration if provided
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    exclude_files = cfg.get("exclude_files") if isinstance(cfg, dict) else []
+    if exclude_files:
+        filename = (file_details.get("file_name") or os.path.basename(full_path or file_path)).lower()
+        for pattern in exclude_files:
+            if fnmatch.fnmatch(filename, pattern.lower()):
+                return {"issues_count": 0, "issues": []}
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "read_error",
+            "message": f"Could not read file '{os.path.basename(full_path)}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
+    issues = []
+
+    def get_line_num(tag, tag_name, identifier):
+        line = getattr(tag, "sourceline", None)
+        if not line:
+            for idx, l in enumerate(lines, 1):
+                if f"<{tag_name}" in l and identifier in l:
+                    return idx
+        return line
+
+    # 1. Every <figure> that contains an <img> must have class="image"
+    for fig in soup.find_all("figure"):
+        img = fig.find("img")
+        if not img:
+            continue
+
+        fig_classes = fig.get("class", [])
+        if isinstance(fig_classes, str):
+            fig_classes = fig_classes.split()
+        fig_classes_lower = [c.lower() for c in fig_classes]
+
+        if "image" not in fig_classes_lower:
+            src = img.get("src", "")
+            line_num = getattr(fig, "sourceline", None) or get_line_num(fig, "figure", src or "figure")
+            issues.append({
+                "type": "figure_missing_image_class",
+                "message": f"<figure> element containing image ('{src or 'unknown'}') is missing required class='image'. Found class='{' '.join(fig_classes)}'.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "extract": str(fig)[:150],
+            })
+
+        # 2. Check caption alignment matching figure/image alignment if present
+        # Common alignment classes in BoD standard CSS: 'center', 'left', 'right', 'image-center', 'image-left', 'image-right'
+        align_classes = {"center", "left", "right", "image-center", "image-left", "image-right", "text-center", "text-left", "text-right"}
+        fig_align = next((c for c in fig_classes_lower if c in align_classes or c.replace("image-", "") in {"center", "left", "right"}), None)
+        norm_fig_align = fig_align.replace("image-", "").replace("text-", "") if fig_align else None
+
+        figcaption = fig.find("figcaption")
+        if figcaption:
+            cap_p = figcaption.find("p")
+            if cap_p:
+                cap_classes = cap_p.get("class", [])
+                if isinstance(cap_classes, str):
+                    cap_classes = cap_classes.split()
+                cap_classes_lower = [c.lower() for c in cap_classes]
+
+                # Check if <p> has class="caption"
+                if not any("caption" in c for c in cap_classes_lower):
+                    line_num = getattr(cap_p, "sourceline", None) or get_line_num(cap_p, "p", cap_p.get_text(strip=True)[:20])
+                    issues.append({
+                        "type": "caption_missing_class",
+                        "message": f"Paragraph inside <figcaption> must have class='caption'. Found class='{' '.join(cap_classes)}'.",
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_num,
+                        "extract": str(cap_p)[:150],
+                    })
+
+                # Check alignment match if figure has alignment
+                if norm_fig_align:
+                    cap_align = next((c for c in cap_classes_lower if c in align_classes or c.replace("text-", "").replace("caption-", "") in {"center", "left", "right"}), None)
+                    norm_cap_align = cap_align.replace("text-", "").replace("caption-", "") if cap_align else None
+                    if norm_cap_align and norm_cap_align != norm_fig_align:
+                        line_num = getattr(cap_p, "sourceline", None) or get_line_num(cap_p, "p", cap_p.get_text(strip=True)[:20])
+                        issues.append({
+                            "type": "caption_alignment_mismatch",
+                            "message": f"Image caption alignment ('{norm_cap_align}') does not match the image/figure alignment ('{norm_fig_align}'). Image captions must have the same alignment as the image.",
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_num,
+                            "extract": str(cap_p)[:150],
+                        })
+
+    # 3. Check for any <p class="caption"> whose parent is NOT <figcaption>
+    for p_tag in soup.find_all("p"):
+        p_classes = p_tag.get("class", [])
+        if isinstance(p_classes, str):
+            p_classes = p_classes.split()
+        p_classes_lower = [c.lower() for c in p_classes]
+
+        if any(c == "caption" or "caption" in c for c in p_classes_lower):
+            parent = p_tag.parent
+            if not parent or parent.name.lower() != "figcaption":
+                p_text = p_tag.get_text(strip=True)[:30]
+                line_num = getattr(p_tag, "sourceline", None) or get_line_num(p_tag, "p", p_text)
+                issues.append({
+                    "type": "caption_parent_not_figcaption",
+                    "message": f"<p class='{' '.join(p_classes)}'> parent element must be <figcaption>, but found <{parent.name if parent else 'none'}>.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_num,
+                    "extract": str(p_tag)[:150],
+                })
 
     return {"issues_count": len(issues), "issues": issues}
 
