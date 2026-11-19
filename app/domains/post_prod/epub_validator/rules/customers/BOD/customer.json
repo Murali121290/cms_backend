@@ -76,7 +76,8 @@
       "target_path": "OEBPS",
       "file_name_pattern": [
         "nav.xhtml",
-        "toc.ncx"
+        "toc.ncx",
+        "*.opf"
       ],
       "enabled": true,
       "rule_config": {
@@ -427,6 +428,17 @@
       "category": "Image Check"
     },
     {
+      "id": "BOD-COV-006",
+      "name": "Image must not exceed 5 MB file size",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.jpg",
+      "enabled": true,
+      "rule_config": {
+        "max_file_size_mb": 5
+      },
+      "category": "Image Check"
+    },
+    {
       "id": "BOD-COV-007",
       "name": "Cover image must have a default alt attribute",
       "target_path": "OEBPS/xhtml",
@@ -518,7 +530,7 @@
       "enabled": true,
       "rule_config": {
         "min_dimension": 850,
-        "max_pixels": 5600000,
+        "max_pixels": 3200000,
         "exclude_files": [
           "cover.jpg"
         ]
@@ -538,6 +550,35 @@
       "name": "Images and captions have to be contained inside a <figure> element",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-IMG-005",
+      "name": "All images must be JPG",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.*",
+      "rule_config": {
+        "allowed_extensions": [
+          ".jpg"
+        ],
+        "exclude_files": [
+          "cover.jpg"
+        ]
+      },
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
+      "id": "BOD-IMG-006",
+      "name": "Image captions must have the same alignment as the image and must be coded as instructed in BoD Standard CSS",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "rule_config": {
+        "exclude_files": [
+          "*cover*.xhtml"
+        ]
+      },
       "enabled": true,
       "category": "Image Check"
     },

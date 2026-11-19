@@ -1687,99 +1687,116 @@ export function BodInternalPage() {
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
-            {/* Group the first 3 columns (aligns under Overdue + Today Due + Today Receipt = 3 cols) */}
-            <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {/* 1. Add Job Stage (Awaiting CSV match) */}
-              <div
-                onClick={() => setCardFilter(cardFilter === 'add_job_all' ? 'all' : 'add_job_all')}
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[62px] ${cardFilter === 'add_job_all' ? 'border-blue-500/60 ring-2 ring-blue-500/20 bg-blue-500/[0.03]' : 'border-border/80 hover:border-blue-500/40'}`}
-                title="Jobs fetched from FTP awaiting CSV match"
-              >
-                <div className="flex items-center justify-between pb-1 border-b border-border/50">
-                  <div className="flex items-center gap-1">
-                    <div className="p-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded">
-                      <FileText size={11} />
-                    </div>
-                    <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider truncate">Add Job</span>
+            {/* 1. Total Jobs (Spans 1 col, under Overdue) */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'total_all' || cardFilter === 'all' ? 'all' : 'total_all')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${(cardFilter === 'total_all' || (cardFilter === 'all' && hasActiveFilters)) ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.04]' : 'border-border/80 hover:border-primary/40'}`}
+              title="Show all jobs"
+            >
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center gap-1">
+                  <div className="p-0.5 bg-primary/10 text-primary rounded">
+                    <Layers size={11} />
                   </div>
-                </div>
-                <div className="flex items-baseline justify-between mt-1 pt-0.5">
-                  <span className="text-lg font-bold text-text leading-none">{addJobTotal}</span>
-                  <span className="text-[8px] text-blue-600/80 dark:text-blue-400/80 truncate">Awaiting CSV</span>
+                  <span className="text-[9px] font-bold text-primary uppercase tracking-wider truncate">Total</span>
                 </div>
               </div>
+              <div className="flex items-baseline justify-between mt-1 pt-0.5">
+                <span className="text-lg font-bold text-text leading-none">{totalJobs}</span>
+                <span className="text-[8px] text-primary/80 truncate">All jobs</span>
+              </div>
+            </div>
 
-              {/* 2. Job Analysis (Cyan / Sky) */}
-              <div
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[62px] ${cardFilter.startsWith('analysis') || cardFilter.startsWith('fresh') ? 'border-cyan-500/60 ring-2 ring-cyan-500/20' : 'border-border/80 hover:border-cyan-500/30'}`}
-              >
-                <div className="flex items-center justify-between pb-1 border-b border-border/50">
-                  <div
-                    onClick={() => setCardFilter(cardFilter === 'analysis_all' ? 'all' : 'analysis_all')}
-                    className="flex items-center gap-1 cursor-pointer select-none group/title"
-                    title="Show all Job Analysis jobs"
-                  >
-                    <div className="p-0.5 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 rounded group-hover/title:bg-cyan-500/20 transition-colors">
-                      <Plus size={11} />
-                    </div>
-                    <span className="text-[9px] font-bold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider group-hover/title:underline truncate">Job Analysis</span>
+            {/* 2. Add Job Stage (Spans 1 col, under Today Due) */}
+            <div
+              onClick={() => setCardFilter(cardFilter === 'add_job_all' ? 'all' : 'add_job_all')}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'add_job_all' ? 'border-blue-500/60 ring-2 ring-blue-500/20 bg-blue-500/[0.03]' : 'border-border/80 hover:border-blue-500/40'}`}
+              title="Jobs fetched from FTP awaiting CSV match"
+            >
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center gap-1">
+                  <div className="p-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded">
+                    <FileText size={11} />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setCardFilter(cardFilter === 'analysis_all' ? 'all' : 'analysis_all')}
-                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'analysis_all' ? 'bg-cyan-600 text-white' : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20'}`}
-                    title="Show all Job Analysis jobs"
-                  >
-                    Total {analysisTotal}
-                  </button>
+                  <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider truncate">Add Job</span>
                 </div>
+              </div>
+              <div className="flex items-baseline justify-between mt-1 pt-0.5">
+                <span className="text-lg font-bold text-text leading-none">{addJobTotal}</span>
+                <span className="text-[8px] text-blue-600/80 dark:text-blue-400/80 truncate">Awaiting CSV</span>
+              </div>
+            </div>
 
-                <div className="grid grid-cols-2 gap-1.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setCardFilter(cardFilter === 'analysis_previous' ? 'all' : 'analysis_previous')}
-                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_previous' ? 'bg-cyan-500/10 border-cyan-500/40 ring-1 ring-cyan-500/30' : 'bg-background/60 border-border/60 hover:border-cyan-500/30 hover:bg-accent/40'}`}
-                    title="Job Analysis jobs added in previous days"
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-600/80 dark:text-cyan-400/80 flex items-center gap-1 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/60 shrink-0"></span>
-                        Backlog
-                      </span>
-                      <span className="text-xs font-bold text-text shrink-0">{analysisPreviousJobs}</span>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCardFilter(cardFilter === 'analysis_today' ? 'all' : 'analysis_today')}
-                    className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_today' ? 'bg-cyan-500/10 border-cyan-500/40 ring-1 ring-cyan-500/30' : 'bg-background/60 border-border/60 hover:border-cyan-500/30 hover:bg-accent/40'}`}
-                    title="Job Analysis jobs added today"
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 flex items-center gap-1 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>
-                        Today
-                      </span>
-                      <span className="text-xs font-bold text-text shrink-0">{analysisTodayJobs}</span>
-                    </div>
-                  </button>
+            {/* 3. Job Analysis (Spans 1 col, under Today Receipt) */}
+            <div
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter.startsWith('analysis') || cardFilter.startsWith('fresh') ? 'border-cyan-500/60 ring-2 ring-cyan-500/20' : 'border-border/80 hover:border-cyan-500/30'}`}
+            >
+              <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div
+                  onClick={() => setCardFilter(cardFilter === 'analysis_all' ? 'all' : 'analysis_all')}
+                  className="flex items-center gap-1 cursor-pointer select-none group/title"
+                  title="Show all Job Analysis jobs"
+                >
+                  <div className="p-0.5 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 rounded group-hover/title:bg-cyan-500/20 transition-colors">
+                    <Plus size={11} />
+                  </div>
+                  <span className="text-[9px] font-bold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider group-hover/title:underline truncate">Job Analysis</span>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'analysis_all' ? 'all' : 'analysis_all')}
+                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'analysis_all' ? 'bg-cyan-600 text-white' : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20'}`}
+                  title="Show all Job Analysis jobs"
+                >
+                  Total {analysisTotal}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'analysis_previous' ? 'all' : 'analysis_previous')}
+                  className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_previous' ? 'bg-cyan-500/10 border-cyan-500/40 ring-1 ring-cyan-500/30' : 'bg-background/60 border-border/60 hover:border-cyan-500/30 hover:bg-accent/40'}`}
+                  title="Job Analysis jobs added in previous days"
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-600/80 dark:text-cyan-400/80 flex items-center gap-1 truncate">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/60 shrink-0"></span>
+                      Backlog
+                    </span>
+                    <span className="text-xs font-bold text-text shrink-0">{analysisPreviousJobs}</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCardFilter(cardFilter === 'analysis_today' ? 'all' : 'analysis_today')}
+                  className={`px-2 py-1 rounded text-left transition-all border ${cardFilter === 'analysis_today' ? 'bg-cyan-500/10 border-cyan-500/40 ring-1 ring-cyan-500/30' : 'bg-background/60 border-border/60 hover:border-cyan-500/30 hover:bg-accent/40'}`}
+                  title="Job Analysis jobs added today"
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 flex items-center gap-1 truncate">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>
+                      Today
+                    </span>
+                    <span className="text-xs font-bold text-text shrink-0">{analysisTodayJobs}</span>
+                  </div>
+                </button>
               </div>
             </div>
 
             {/* Container for Production & QC: exactly spanning 3 cols to align under Date Filters (cols 4, 5, 6) */}
-            <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {/* 3. Production: subdivided into YTS and In Progress */}
+            <div className="col-span-1 sm:col-span-2 lg:col-span-2 xl:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
+              {/* 4. Production: subdivided into YTS and In Progress */}
               <div
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[62px] ${cardFilter.startsWith('prod_') ? 'border-purple-500/60 ring-2 ring-purple-500/20' : 'border-border/80 hover:border-purple-500/30'}`}
+                className={`bg-card border rounded-lg px-2 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[62px] min-w-0 ${cardFilter.startsWith('prod_') ? 'border-purple-500/60 ring-2 ring-purple-500/20' : 'border-border/80 hover:border-purple-500/30'}`}
               >
-                <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center justify-between pb-1 border-b border-border/50 gap-1">
                   <div
                     onClick={() => setCardFilter(cardFilter === 'prod_all' ? 'all' : 'prod_all')}
-                    className="flex items-center gap-1 cursor-pointer select-none group/title"
+                    className="flex items-center gap-1 cursor-pointer select-none group/title min-w-0"
                     title="Show all Production jobs"
                   >
-                    <div className="p-0.5 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded group-hover/title:bg-purple-500/20 transition-colors">
+                    <div className="p-0.5 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded group-hover/title:bg-purple-500/20 transition-colors shrink-0">
                       <RefreshCw size={11} />
                     </div>
                     <span className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider group-hover/title:underline truncate">Production</span>
@@ -1787,57 +1804,57 @@ export function BodInternalPage() {
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'prod_all' ? 'all' : 'prod_all')}
-                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'prod_all' ? 'bg-purple-600 text-white' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20'}`}
+                    className={`px-1 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 whitespace-nowrap ${cardFilter === 'prod_all' ? 'bg-purple-600 text-white' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20'}`}
                     title="Show all Production jobs"
                   >
                     Total {prodTotal}
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-1 pt-1">
+                <div className="grid grid-cols-2 gap-1 pt-1 min-w-0">
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'prod_yts' ? 'all' : 'prod_yts')}
-                    className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'prod_yts' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                    className={`px-1 py-0.5 rounded text-left transition-all border min-w-0 ${cardFilter === 'prod_yts' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
                     title="Assigned, pending PDF download"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1 truncate">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[7.5px] font-bold uppercase tracking-tight text-amber-600 dark:text-amber-400 flex items-center gap-0.5 truncate">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
                         YTS
                       </span>
-                      <span className="text-xs font-bold text-text">{prodYtsJobs}</span>
+                      <span className="text-xs font-bold text-text shrink-0">{prodYtsJobs}</span>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'prod_in_progress' ? 'all' : 'prod_in_progress')}
-                    className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'prod_in_progress' ? 'bg-purple-500/10 border-purple-500/40 ring-1 ring-purple-500/30' : 'bg-background/60 border-border/60 hover:border-purple-500/30 hover:bg-accent/40'}`}
+                    className={`px-1 py-0.5 rounded text-left transition-all border min-w-0 ${cardFilter === 'prod_in_progress' ? 'bg-purple-500/10 border-purple-500/40 ring-1 ring-purple-500/30' : 'bg-background/60 border-border/60 hover:border-purple-500/30 hover:bg-accent/40'}`}
                     title="Work started, PDF downloaded"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 flex items-center gap-1 truncate">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[7.5px] font-bold uppercase tracking-tight text-purple-600 dark:text-purple-400 flex items-center gap-0.5 truncate">
                         <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse shrink-0"></span>
-                        In Progress
+                        IN PROGRESS
                       </span>
-                      <span className="text-xs font-bold text-text">{prodInProgressJobs}</span>
+                      <span className="text-xs font-bold text-text shrink-0">{prodInProgressJobs}</span>
                     </div>
                   </button>
                 </div>
               </div>
 
-              {/* 4. QC: subdivided into YTS and In Progress */}
+              {/* 5. QC: subdivided into YTS and In Progress */}
               <div
-                className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[62px] ${cardFilter.startsWith('qc_') ? 'border-blue-500/60 ring-2 ring-blue-500/20' : 'border-border/80 hover:border-blue-500/30'}`}
+                className={`bg-card border rounded-lg px-2 py-1.5 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[62px] min-w-0 ${cardFilter.startsWith('qc_') ? 'border-blue-500/60 ring-2 ring-blue-500/20' : 'border-border/80 hover:border-blue-500/30'}`}
               >
-                <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                <div className="flex items-center justify-between pb-1 border-b border-border/50 gap-1">
                   <div
                     onClick={() => setCardFilter(cardFilter === 'qc_all' ? 'all' : 'qc_all')}
-                    className="flex items-center gap-1 cursor-pointer select-none group/title"
+                    className="flex items-center gap-1 cursor-pointer select-none group/title min-w-0"
                     title="Show all QC jobs"
                   >
-                    <div className="p-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded group-hover/title:bg-blue-500/20 transition-colors">
+                    <div className="p-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded group-hover/title:bg-blue-500/20 transition-colors shrink-0">
                       <CheckCircle2 size={11} />
                     </div>
                     <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider group-hover/title:underline truncate">QC</span>
@@ -1845,48 +1862,48 @@ export function BodInternalPage() {
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'qc_all' ? 'all' : 'qc_all')}
-                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 ${cardFilter === 'qc_all' ? 'bg-blue-600 text-white' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20'}`}
+                    className={`px-1 py-0.5 rounded text-[8px] font-bold transition-colors shrink-0 whitespace-nowrap ${cardFilter === 'qc_all' ? 'bg-blue-600 text-white' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20'}`}
                     title="Show all QC jobs"
                   >
                     Total {qcTotal}
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-1 pt-1">
+                <div className="grid grid-cols-2 gap-1 pt-1 min-w-0">
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'qc_yts' ? 'all' : 'qc_yts')}
-                    className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'qc_yts' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
+                    className={`px-1 py-0.5 rounded text-left transition-all border min-w-0 ${cardFilter === 'qc_yts' ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : 'bg-background/60 border-border/60 hover:border-amber-500/30 hover:bg-accent/40'}`}
                     title="Unassigned in QC"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[7.5px] font-bold uppercase tracking-tight text-amber-600 dark:text-amber-400 flex items-center gap-0.5 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
                         YTS
                       </span>
-                      <span className="text-xs font-bold text-text">{qcYtsJobs}</span>
+                      <span className="text-xs font-bold text-text shrink-0">{qcYtsJobs}</span>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setCardFilter(cardFilter === 'qc_in_progress' ? 'all' : 'qc_in_progress')}
-                    className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'qc_in_progress' ? 'bg-blue-500/10 border-blue-500/40 ring-1 ring-blue-500/30' : 'bg-background/60 border-border/60 hover:border-blue-500/30 hover:bg-accent/40'}`}
+                    className={`px-1 py-0.5 rounded text-left transition-all border min-w-0 ${cardFilter === 'qc_in_progress' ? 'bg-blue-500/10 border-blue-500/40 ring-1 ring-blue-500/30' : 'bg-background/60 border-border/60 hover:border-blue-500/30 hover:bg-accent/40'}`}
                     title="Assigned in QC"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-1 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-                        In Progress
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[7.5px] font-bold uppercase tracking-tight text-blue-600 dark:text-blue-400 flex items-center gap-0.5 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0"></span>
+                        IN PROGRESS
                       </span>
-                      <span className="text-xs font-bold text-text">{qcInProgressJobs}</span>
+                      <span className="text-xs font-bold text-text shrink-0">{qcInProgressJobs}</span>
                     </div>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* 5. Ready to Dispatch (Aligns under Dispatched = 2 cols) */}
+            {/* 6. Ready to Dispatch (Aligns under Dispatched = 2 cols) */}
             <div
               onClick={() => setCardFilter(cardFilter === 'ready_to_dispatch' ? 'all' : 'ready_to_dispatch')}
               className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter === 'ready_to_dispatch' ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-emerald-500/[0.03]' : 'border-border/80 hover:border-emerald-500/40'}`}

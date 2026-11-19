@@ -1459,18 +1459,21 @@ def validate_copyright_last_page(file_details, rule_config=None):
         re.IGNORECASE
     )
 
-    def is_copyright_match(label_text, href_or_src):
+    def is_copyright_match(label_text, href_or_src, require_both=False):
         target = os.path.basename((href_or_src or "").split("#")[0]).strip()
         # If the target file is a half title or title page file, it is NOT a valid copyright page!
         if target and _is_forbidden_frontmatter_file(target, forbidden_fm_filename_re):
             return False
 
         lbl = (label_text or "").strip()
-        if lbl and terms_re.search(lbl):
-            return True
-        if target and copyright_filename_re.search(target):
-            return True
-        return False
+        label_matches = bool(lbl and terms_re.search(lbl))
+        file_matches = bool(target and copyright_filename_re.search(target))
+
+        if require_both:
+            # Both the TOC link text and target file must match valid copyright conventions
+            return label_matches and file_matches
+
+        return label_matches or file_matches
 
     issues = []
     file_path = file_details.get("full_path") or ""
@@ -1496,8 +1499,61 @@ def validate_copyright_last_page(file_details, rule_config=None):
         return 1
 
     is_ncx = file_name.lower().endswith(".ncx") or "toc.ncx" in file_name.lower()
+    is_opf = file_name.lower().endswith(".opf")
 
-    if is_ncx:
+    if is_opf:
+        detected_lang = get_book_language(file_details)
+        expected_term = term_map.get(detected_lang, term_map.get("en", "Copyright"))
+
+        soup = BeautifulSoup(text, "xml")
+        manifest = soup.find("manifest")
+        spine = soup.find("spine")
+
+        # Map item id -> href and media-type
+        manifest_items = {}
+        if manifest:
+            for item in manifest.find_all("item"):
+                item_id = item.get("id", "").strip()
+                item_href = item.get("href", "").strip()
+                if item_id:
+                    manifest_items[item_id] = item_href
+
+        if spine:
+            itemrefs = spine.find_all("itemref")
+            if itemrefs:
+                last_itemref = itemrefs[-1]
+                last_idref = last_itemref.get("idref", "").strip()
+                last_href = manifest_items.get(last_idref, "")
+
+                if not is_copyright_match("", last_href):
+                    line_no = (
+                        getattr(last_itemref, "sourceline", None)
+                        or find_line_in_content(last_idref, str(last_itemref))
+                    )
+                    raw_extract = str(last_itemref)[:200]
+                    target_fn = os.path.basename((last_href or "").split("#")[0]).strip()
+
+                    if target_fn and _is_forbidden_frontmatter_file(target_fn, forbidden_fm_filename_re):
+                        reason = f"the last <itemref> in <spine> targets forbidden front matter file '{target_fn}' instead of a valid {expected_term} page"
+                    elif target_fn:
+                        reason = f"the last <itemref idref=\"{last_idref}\"> targets '{target_fn}' instead of a valid {expected_term} page"
+                    else:
+                        reason = f"the last <itemref idref=\"{last_idref}\"> does not point to a valid {expected_term} page"
+
+                    issues.append({
+                        "type": "copyright_not_last_in_opf_spine",
+                        "message": (
+                            f"The copyright page must be placed as the last page of the ePub file. "
+                            f"In '{rel_path}' (<spine>), {reason}."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_no,
+                        "snippet": raw_extract,
+                        "extract": raw_extract,
+                    })
+
+    elif is_ncx:
         detected_lang = get_book_language(file_details)
         expected_term = term_map.get(detected_lang, term_map.get("en", "Copyright"))
 
@@ -1534,14 +1590,19 @@ def validate_copyright_last_page(file_details, rule_config=None):
                 last_src = content_elem.get("src", "").strip() if content_elem is not None else ""
                 np_id = last_navpoint.get("id", "").strip()
 
-                if not is_copyright_match(last_label, last_src):
+                if not is_copyright_match(last_label, last_src, require_both=True):
                     raw_extract = ET.tostring(last_navpoint, encoding="unicode")[:200]
                     line_no = find_line_in_content(np_id, last_src, last_label)
                     target_fn = os.path.basename((last_src or "").split("#")[0]).strip()
+                    lbl_ok = bool(last_label and terms_re.search(last_label))
+                    fn_ok = bool(target_fn and copyright_filename_re.search(target_fn))
+
                     if target_fn and _is_forbidden_frontmatter_file(target_fn, forbidden_fm_filename_re):
                         reason = f"the last entry targets forbidden front matter file '{target_fn}' instead of a valid {expected_term} page"
-                    elif last_label and terms_re.search(last_label):
-                        reason = f"the last entry '{last_label}' targets '{last_src}' instead of a valid {expected_term} page"
+                    elif fn_ok and not lbl_ok:
+                        reason = f"the last entry title '{last_label}' does not match expected term '{expected_term}'"
+                    elif lbl_ok and not fn_ok:
+                        reason = f"the last entry targets '{last_src}' instead of a valid {expected_term} page"
                     else:
                         reason = f"the last item is '{last_label or last_src}' instead of {expected_term}"
 
@@ -1610,7 +1671,7 @@ def validate_copyright_last_page(file_details, rule_config=None):
                     last_text = a_tag.get_text(strip=True) if a_tag else last_li.get_text(strip=True)
                     last_href = a_tag.get("href", "").strip() if a_tag else ""
 
-                    if not is_copyright_match(last_text, last_href):
+                    if not is_copyright_match(last_text, last_href, require_both=True):
                         line_no = (
                             getattr(last_li, "sourceline", None)
                             or (getattr(a_tag, "sourceline", None) if a_tag else None)
@@ -1618,10 +1679,15 @@ def validate_copyright_last_page(file_details, rule_config=None):
                         )
                         raw_extract = str(last_li)[:200]
                         target_fn = os.path.basename((last_href or "").split("#")[0]).strip()
+                        lbl_ok = bool(last_text and terms_re.search(last_text))
+                        fn_ok = bool(target_fn and copyright_filename_re.search(target_fn))
+
                         if target_fn and _is_forbidden_frontmatter_file(target_fn, forbidden_fm_filename_re):
                             reason = f"the last entry targets forbidden front matter file '{target_fn}' instead of a valid {expected_term} page"
-                        elif last_text and terms_re.search(last_text):
-                            reason = f"the last entry '{last_text}' targets '{last_href}' instead of a valid {expected_term} page"
+                        elif fn_ok and not lbl_ok:
+                            reason = f"the last entry title '{last_text}' does not match expected term '{expected_term}'"
+                        elif lbl_ok and not fn_ok:
+                            reason = f"the last entry targets '{last_href}' instead of a valid {expected_term} page"
                         else:
                             reason = f"the last entry is '{last_text or last_href}' instead of {expected_term}"
 

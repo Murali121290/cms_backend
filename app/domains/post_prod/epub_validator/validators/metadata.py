@@ -229,10 +229,10 @@ def _check_meta_values_com(soup, lines, prop, expected_values):
             line_num = getattr(m, "sourceline", None) or _find_line(lines, val) or _find_line(lines, prop)
             issues.append({
                 "type": f"invalid_{prop.replace(':', '_')}",
-                "message": f"Unexpected or disallowed value for {prop}: '{val}'. Allowed values: {', '.join(sorted(expected_values))}",
+                "message": f'Unexpected or disallowed value for {prop}: \"{val}\". This value is not permitted by the guideline. Please remove this meta tag.\"<meta property=\"{prop}\">{val}</meta>\"',
                 "category": "Error",
                 "line_number": line_num,
-                "extract": val,
+                "extract": f'<meta property=\"{prop}\">{val}</meta>',
             })
 
     missing = [val for val in expected_values if val not in found_values]

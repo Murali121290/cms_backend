@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     BOD_FTP_USERNAME: str = ""
     BOD_FTP_PASSWORD: str = ""
     BOD_FTP_BASE_PATH: str = "Input"
-    BOD_FTP_PRODUCTION_PATH: str = "Production"
+    BOD_FTP_PRODUCTION_PATH: Optional[str] = None
     BOD_FTP_DELIVERY_PATH: str = "Delivery"
     BOD_MANAGER_EMAIL: str = ""
     BOD_DAILY_SUMMARY_TIME: Optional[str] = None
