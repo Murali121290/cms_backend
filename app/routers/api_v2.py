@@ -5269,7 +5269,13 @@ def api_v2_combine_project_book(
                 ).first()
                 
                 if existing_file:
-                    version_service.archive_existing_file(db, existing_file=existing_file)
+                    base_path = os.path.dirname(existing_file.path) if existing_file.path and os.path.isabs(existing_file.path) else dest_dir
+                    version_service.archive_existing_file(
+                        db,
+                        existing_file=existing_file,
+                        base_path=base_path,
+                        uploaded_by_id=viewer.id,
+                    )
                     shutil.copy2(src_file_path, dest_file_path)
                     existing_file.version += 1
                     existing_file.uploaded_at = datetime.now(timezone.utc)
@@ -11715,6 +11721,238 @@ def api_v2_chapter_bulk_download(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{safe_filename}_bulk.zip"'}
     )
+
+
+# ── Project Bulk Download & Summary ──────────────────────────────────────────
+
+@router.get(
+    "/projects/{project_id}/bulk-files-summary",
+    response_model=schemas_v2.ProjectBulkFilesSummaryResponse,
+)
+def api_v2_get_project_bulk_files_summary(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    # Fetch project chapters (excluding "Final files" pseudo-chapter)
+    chapters = (
+        db.query(models.ChapterInfo)
+        .filter(
+            models.ChapterInfo.project == project.project_code,
+            ~models.ChapterInfo.chapters.ilike("final files"),
+        )
+        .all()
+    )
+
+    # Single grouped count query
+    counts_query = (
+        db.query(
+            models.File.chapter_id,
+            models.File.category,
+            func.count(models.File.id).label("cnt"),
+        )
+        .filter(
+            models.File.project_id == project.id,
+            models.File.chapter_id.isnot(None),
+        )
+        .group_by(models.File.chapter_id, models.File.category)
+        .all()
+    )
+
+    from app.services.file_service import CATEGORY_TO_LABEL
+    counts_by_chapter: dict[int, dict[str, int]] = {}
+    for ch_id, cat, cnt in counts_query:
+        if ch_id not in counts_by_chapter:
+            counts_by_chapter[ch_id] = {
+                "Manuscript": 0,
+                "XML": 0,
+                "InDesign": 0,
+                "Proof": 0,
+                "Final Delivery": 0,
+                "Art": 0,
+            }
+        folder_label = CATEGORY_TO_LABEL.get(cat, cat)
+        counts_by_chapter[ch_id][folder_label] = counts_by_chapter[ch_id].get(folder_label, 0) + cnt
+
+    result_chapters = []
+    for ch in chapters:
+        c_map = counts_by_chapter.get(
+            ch.id,
+            {
+                "Manuscript": 0,
+                "XML": 0,
+                "InDesign": 0,
+                "Proof": 0,
+                "Final Delivery": 0,
+                "Art": 0,
+            },
+        )
+        result_chapters.append(
+            schemas_v2.ChapterFilesSummaryItem(
+                chapter_id=ch.id,
+                number=ch.chapters,
+                title=ch.chapter_title,
+                counts=c_map,
+            )
+        )
+
+    return schemas_v2.ProjectBulkFilesSummaryResponse(chapters=result_chapters)
+
+
+@router.post("/projects/{project_id}/bulk-download")
+def api_v2_project_bulk_download(
+    project_id: int,
+    payload: schemas_v2.ProjectBulkDownloadRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    import os
+    import tempfile
+    import zipfile
+    from starlette.background import BackgroundTask
+    from app.services.file_service import normalize_category, get_file_for_download, CATEGORY_TO_LABEL
+
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    if not payload.chapter_ids or not payload.categories:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="NO_FILES",
+            message="No chapters or categories selected.",
+        )
+
+    # Validate chapter_ids belong to this project
+    chapters = (
+        db.query(models.ChapterInfo)
+        .filter(
+            models.ChapterInfo.project == project.project_code,
+            models.ChapterInfo.id.in_(payload.chapter_ids),
+        )
+        .all()
+    )
+    if not chapters:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_CHAPTERS",
+            message="None of the specified chapters belong to this project.",
+        )
+
+    chapters_map = {ch.id: ch for ch in chapters}
+
+    # Normalize categories
+    normalized_categories = {normalize_category(c) for c in payload.categories}
+
+    # Query latest active files (FileVersion records are excluded)
+    files = (
+        db.query(models.File)
+        .filter(
+            models.File.project_id == project.id,
+            models.File.chapter_id.in_(chapters_map.keys()),
+            models.File.category.in_(normalized_categories),
+        )
+        .all()
+    )
+
+    if not files:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="NO_FILES",
+            message="No files found matching the selected chapters and categories.",
+        )
+
+    fd, temp_zip_path = tempfile.mkstemp(suffix=".zip", prefix="proj_bulk_")
+    os.close(fd)
+
+    added_files = 0
+    missing_files = []
+
+    try:
+        with zipfile.ZipFile(temp_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_rec in files:
+                ch = chapters_map.get(file_rec.chapter_id)
+                chap_name = ch.chapters if ch else str(file_rec.chapter_id)
+                if chap_name.isdigit():
+                    chap_folder = f"{int(chap_name):02d}"
+                else:
+                    chap_folder = chap_name
+
+                folder_label = CATEGORY_TO_LABEL.get(file_rec.category, file_rec.category)
+                arcname = f"{chap_folder}/{folder_label}/{file_rec.filename}"
+
+                # Resolve physical path
+                resolved = get_file_for_download(db, file_id=file_rec.id)
+                if resolved and hasattr(resolved, "physical_path") and resolved.physical_path and os.path.exists(resolved.physical_path):
+                    zf.write(resolved.physical_path, arcname)
+                    added_files += 1
+                else:
+                    missing_files.append(arcname)
+
+            if missing_files:
+                missing_report = (
+                    "The following files are registered in the database but could not be located on disk:\n\n"
+                    + "\n".join(f"- {m}" for m in missing_files)
+                    + "\n"
+                )
+                zf.writestr("_missing_files.txt", missing_report)
+
+        if added_files == 0:
+            if os.path.exists(temp_zip_path):
+                os.unlink(temp_zip_path)
+            return _error_response(
+                status_code=status.HTTP_404_NOT_FOUND,
+                code="NO_FILES",
+                message="None of the matched files could be located on disk.",
+            )
+
+        cleanup = BackgroundTask(lambda: os.path.exists(temp_zip_path) and os.unlink(temp_zip_path))
+        date_str = datetime.now().strftime("%Y%m%d")
+        safe_code = (project.project_code or project.code or f"project_{project.id}").replace(" ", "_")
+        zip_filename = f"{safe_code}_bulk_{date_str}.zip"
+
+        return FileResponse(
+            path=temp_zip_path,
+            filename=zip_filename,
+            media_type="application/zip",
+            background=cleanup,
+            headers={
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Missing-Count",
+                "X-Missing-Count": str(len(missing_files)),
+            },
+        )
+    except Exception:
+        if os.path.exists(temp_zip_path):
+            os.unlink(temp_zip_path)
+        raise
 
 
 # ── Project Book Map ─────────────────────────────────────────────────────────

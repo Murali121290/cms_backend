@@ -4,7 +4,8 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Truck, Search, Trash2
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send, Truck, Search, Trash2,
+  Download, Upload
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -31,6 +32,8 @@ import { getApiErrorMessage } from '@/api/client'
 import { uploadChapterFiles } from '@/api/files'
 import { useRBAC } from '@/hooks/useRBAC'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
+import { BulkDownloadModal } from '@/features/projects/bulk/BulkDownloadModal'
+import { ProjectBulkUploadModal } from '@/features/projects/bulk/ProjectBulkUploadModal'
 
 interface FinalDeliveryFile {
   id: number
@@ -922,8 +925,11 @@ export function ProjectWorkflow() {
   const { roles, viewer, canAccess } = useRBAC()
   const showBatchButtons = roles.some(role => {
     const r = role.toLowerCase()
-    return r === 'admin' || r === 'xml operator' || r === 'xml manager'
+    return r === 'admin' || r === 'xml operator' || r === 'xml manager' || isPrivilegedRole(role)
   })
+
+  const [bulkDownloadOpen, setBulkDownloadOpen] = useState(false)
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false)
 
   const [project, setProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -2111,6 +2117,44 @@ export function ProjectWorkflow() {
               >
                 Combine Book
               </button>
+              <button
+                type="button"
+                onClick={() => setBulkDownloadOpen(true)}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border hover:bg-surface text-text flex items-center gap-1.5 transition-colors"
+              >
+                <Download size={13} />
+                Bulk Download
+              </button>
+              <button
+                type="button"
+                onClick={() => setBulkUploadOpen(true)}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border hover:bg-surface text-text flex items-center gap-1.5 transition-colors"
+              >
+                <Upload size={13} />
+                Bulk Upload
+              </button>
+            </>
+          )}
+
+          {showBatchButtons && activeTab === 'art' && (
+            <>
+              <span className="w-px h-5 bg-border mx-1" />
+              <button
+                type="button"
+                onClick={() => setBulkDownloadOpen(true)}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border hover:bg-surface text-text flex items-center gap-1.5 transition-colors"
+              >
+                <Download size={13} />
+                Bulk Download
+              </button>
+              <button
+                type="button"
+                onClick={() => setBulkUploadOpen(true)}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border hover:bg-surface text-text flex items-center gap-1.5 transition-colors"
+              >
+                <Upload size={13} />
+                Bulk Upload
+              </button>
             </>
           )}
 
@@ -2379,7 +2423,7 @@ export function ProjectWorkflow() {
               projectsApi.getById(id).then(res => {
                 const updated = (res as any)?.project || res
                 if (updated?.id) setProject(updated)
-              }).catch(() => {})
+              }).catch(() => { })
             }
           }}
         />
@@ -3276,6 +3320,26 @@ export function ProjectWorkflow() {
         confirmLabel={deletingChapter ? "Deleting..." : "Delete"}
         loading={deletingChapter}
       />
+
+      {/* Bulk Download & Bulk Upload Modals */}
+      {project && (
+        <>
+          <BulkDownloadModal
+            isOpen={bulkDownloadOpen}
+            onClose={() => setBulkDownloadOpen(false)}
+            projectId={project.id}
+            chapters={chapters}
+            initialTrack={activeTab === 'art' ? 'art' : 'manuscript'}
+          />
+          <ProjectBulkUploadModal
+            isOpen={bulkUploadOpen}
+            onClose={() => setBulkUploadOpen(false)}
+            projectId={project.id}
+            chapters={chapters}
+            initialTrack={activeTab === 'art' ? 'art' : 'manuscript'}
+          />
+        </>
+      )}
 
     </div>
   )

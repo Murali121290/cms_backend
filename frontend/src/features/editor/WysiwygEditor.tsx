@@ -67,6 +67,7 @@ import {
   CornerDownRight,
   CheckCircle2,
   Sigma,
+  Omega,
   Eye,
   EyeOff,
   Keyboard,
@@ -91,10 +92,12 @@ import { CommentDialog } from "./CommentDialog";
 import { useCommentsQuery, useCommentMutations } from "./useComments";
 import { SearchReplace } from "./SearchReplace";
 import { MathNode } from "./MathNode";
+import { convertMathForSave } from "./convertMathForSave";
 import { SdtBlock } from "./SdtBlock";
 import { SdtInline } from "./SdtInline";
 import { ImageNode } from "./ImageNode";
-import katex from "katex";
+import { SpecialSpaceMarks } from "./SpecialSpaceMarks";
+import { SpecialCharPicker, insertSpecialChar } from "./SpecialCharPicker";
 
 
 /**
@@ -208,6 +211,11 @@ const SHORTCUT_GROUPS: {
         { label: "Insert Table 3×3", combo: "Ctrl+Alt+T" },
         { label: "Insert Page Break", combo: "Ctrl+Enter" },
         { label: "Insert Math Equation", combo: "Ctrl+Alt+E" },
+        { label: "Insert Symbol / Special Space", combo: "Ctrl+Alt+S" },
+        { label: "Non-breaking Space", combo: "Ctrl+Shift+Space" },
+        { label: "Ellipsis …", combo: "Ctrl+Alt+." },
+        { label: "En Dash –", combo: "Ctrl+Alt+-" },
+        { label: "Em Dash —", combo: "Ctrl+Alt+Shift+-" },
         { label: "Add Comment", combo: "Ctrl+Alt+M" },
       ],
     },
@@ -689,6 +697,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       | { mode: "edit"; commentUuid: string; initialText: string; quotedText: string }
       | null
     >(null);
+    const [showSpecialChars, setShowSpecialChars] = useState(false);
+    const closeSpecialChars = useCallback(() => setShowSpecialChars(false), []);
+    const specialCharAnchorRef = useRef<HTMLDivElement>(null);
     const [currentFontSize, setCurrentFontSize] = useState("default");
     const [currentFontFamily, setCurrentFontFamily] = useState("default");
 
@@ -744,6 +755,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         SdtBlock,
         SdtInline,
         ImageNode,
+        SpecialSpaceMarks,
         CustomListShortcuts,
       ],
       content: "",
@@ -1388,12 +1400,26 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           switch (code) {
             case "KeyX": return fire(() => editor.chain().focus().toggleStrike().run());
             case "Equal": return fire(() => editor.chain().focus().toggleSuperscript().run());
+            // Word-style non-breaking space
+            case "Space": return fire(() => insertSpecialChar(editor, " "));
+          }
+        }
+
+        // Mod + Alt + Shift + key
+        if (e.altKey && e.shiftKey) {
+          switch (code) {
+            case "Minus":
+            case "NumpadSubtract": return fire(() => insertSpecialChar(editor, "—")); // em dash
           }
         }
 
         // Mod + Alt + key
         if (e.altKey && !e.shiftKey) {
           switch (code) {
+            case "Period": return fire(() => insertSpecialChar(editor, "…")); // ellipsis
+            case "Minus":
+            case "NumpadSubtract": return fire(() => insertSpecialChar(editor, "–")); // en dash
+            case "KeyS": return fire(() => setShowSpecialChars(true));
             case "KeyT": return fire(() =>
               editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
             );
@@ -1410,81 +1436,6 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     }, [editor, openCommentDialog]);
 
     const handleToggleTrackChanges = () => setTcEnabled(!tcEnabled);
-
-    // Convert client-only math spans to <math> elements on save. Priority:
-    //   1. data-omml (raw OMML from the source DOCX, unchanged) — the backend
-    //      will inject it byte-for-byte. Lossless round-trip.
-    //   2. data-mathml (MathML captured either from source or from Mathlive
-    //      after an edit) — backend runs it through mathml2omml.
-    //   3. data-latex (equation authored via the ∑ button and edited only in
-    //      LaTeX) — backend converts LaTeX → MathML → OMML.
-    // Comment spans (`span[data-comment-id]`) are preserved so the backend
-    // can pair each highlighted range with its metadata when generating DOCX.
-    function convertMathForSave(html: string): string {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-
-      const mathSpans = doc.querySelectorAll("span.math-node, span[data-latex], span[data-mathml], span[data-omml]");
-      mathSpans.forEach(span => {
-        const latex = span.getAttribute("data-latex") || "";
-        const mathml = span.getAttribute("data-mathml") || "";
-        const omml = span.getAttribute("data-omml") || "";
-        const display = span.getAttribute("data-display") || "inline";
-
-        try {
-          let mathEl: Element | null = null;
-          if (mathml) {
-            const temp = document.createElement("div");
-            temp.innerHTML = mathml;
-            mathEl = temp.querySelector("math");
-          }
-          if (!mathEl && latex) {
-            const temp = document.createElement("div");
-            temp.innerHTML = katex.renderToString(latex, { output: "mathml", throwOnError: false });
-            mathEl = temp.querySelector("math");
-          }
-          if (!mathEl) {
-            // Neither MathML nor KaTeX gave us a parseable <math>. Build a
-            // minimal one so the equation still round-trips: the backend has
-            // a data-omml / data-mathml / data-latex priority chain and can
-            // rebuild the OMML from any of them. Dropping the node here would
-            // silently delete the user's equation.
-            if (!omml && !mathml && !latex) {
-              // Truly nothing to save — safe to remove.
-              span.parentNode?.removeChild(span);
-              return;
-            }
-            const doc2 = span.ownerDocument || document;
-            mathEl = doc2.createElementNS("http://www.w3.org/1998/Math/MathML", "math");
-          }
-          if (omml) mathEl.setAttribute("data-omml", omml);
-          if (mathml) mathEl.setAttribute("data-mathml", mathml);
-          if (latex) mathEl.setAttribute("data-latex", latex);
-          if (display) mathEl.setAttribute("data-display", display);
-          // Carry the wrapper formatting so the backend can inject it into
-          // every <m:r>'s <m:rPr>/<w:rPr> on the OMML side. If data-omml was
-          // preserved for a byte-perfect round-trip, wrapper attrs are still
-          // honored by post-processing the raw OMML on the server.
-          const carry = [
-            "data-wrapper-bold",
-            "data-wrapper-italic",
-            "data-wrapper-color",
-            "data-wrapper-bg",
-            "data-wrapper-size",
-            "data-wrapper-font",
-          ];
-          for (const attr of carry) {
-            const v = span.getAttribute(attr);
-            if (v) mathEl.setAttribute(attr, v);
-          }
-          span.parentNode?.replaceChild(mathEl, span);
-        } catch (err) {
-          console.error("Failed to serialize math node on save:", err);
-        }
-      });
-
-      return doc.body.innerHTML;
-    }
 
     const handleSave = async () => {
       if (!editor) return;
@@ -1941,6 +1892,23 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             >
               <Sigma className="w-4 h-4 text-amber-500" />
             </ToolbarButton>
+
+            {/* Insert Symbol / Special Space picker */}
+            <div ref={specialCharAnchorRef} data-special-char-toggle>
+              <ToolbarButton
+                active={showSpecialChars}
+                onClick={() => setShowSpecialChars((v) => !v)}
+                title={`Insert Symbol / Special Space (${kbd("Ctrl+Alt+S")})`}
+              >
+                <Omega className="w-4 h-4 text-amber-500" />
+              </ToolbarButton>
+              <SpecialCharPicker
+                editor={editor}
+                open={showSpecialChars}
+                onClose={closeSpecialChars}
+                anchorRef={specialCharAnchorRef}
+              />
+            </div>
 
             {/* Keyboard Shortcuts Reference */}
             <ToolbarButton
@@ -2744,6 +2712,27 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
         .sdt-inline[data-alias*="Bib"]::before, .sdt-inline[data-alias*="Ref"]::before {
           background: #6366f1 !important;
+        }
+
+        /* ── Special spaces (on-screen markers only, never saved) ───────── */
+        .ProseMirror .special-space {
+          background: rgba(245, 158, 11, 0.22);
+          border-radius: 1px;
+          box-shadow: inset 0 -1px 0 rgba(217, 119, 6, 0.6);
+        }
+        .ProseMirror .special-space--nbsp {
+          position: relative;
+        }
+        .ProseMirror .special-space--nbsp::after {
+          content: "°";
+          position: absolute;
+          left: 50%;
+          top: -0.35em;
+          transform: translateX(-50%);
+          font-size: 0.7em;
+          line-height: 1;
+          color: rgba(217, 119, 6, 0.9);
+          pointer-events: none;
         }
 
         /* ── SDT Inline ───────────────────────────────────────────────────── */

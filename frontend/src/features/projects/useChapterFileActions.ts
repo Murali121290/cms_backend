@@ -8,6 +8,7 @@ import {
   deleteFile,
   downloadFile,
 } from "@/api/files";
+import { downloadBlob } from "@/utils/download";
 import type { FileRecord } from "@/types/api";
 
 type FileActionKind = "download" | "checkout" | "cancel_checkout" | "delete";
@@ -23,17 +24,6 @@ interface FileActionStatus {
 interface UseChapterFileActionsOptions {
   projectId: number | null;
   chapterId: number | null;
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const objectUrl = window.URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  window.URL.revokeObjectURL(objectUrl);
 }
 
 export function useChapterFileActions({

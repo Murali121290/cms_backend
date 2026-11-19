@@ -1399,6 +1399,22 @@ class BulkDownloadPayload(BaseModel):
     files: list[BulkDownloadFileItem]
 
 
+class ProjectBulkDownloadRequest(BaseModel):
+    chapter_ids: list[int]
+    categories: list[str]
+
+
+class ChapterFilesSummaryItem(BaseModel):
+    chapter_id: int
+    number: str
+    title: str | None = None
+    counts: dict[str, int]
+
+
+class ProjectBulkFilesSummaryResponse(BaseModel):
+    chapters: list[ChapterFilesSummaryItem]
+
+
 class BulkTransitionItemPreview(BaseModel):
     chapter_id: int
     chapter_number: str

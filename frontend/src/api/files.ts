@@ -20,7 +20,7 @@ export interface GenerateFigureAssessmentResponse {
 }
 
 
-function getDownloadFilename(contentDisposition: string | undefined, fallbackFilename: string) {
+export function getDownloadFilename(contentDisposition: string | undefined, fallbackFilename: string) {
   if (!contentDisposition) {
     return fallbackFilename;
   }
@@ -36,6 +36,35 @@ function getDownloadFilename(contentDisposition: string | undefined, fallbackFil
   }
 
   return fallbackFilename;
+}
+
+export interface BulkDownloadProjectFilesPayload {
+  chapter_ids: number[];
+  categories: string[];
+}
+
+export async function bulkDownloadProjectFiles(
+  projectId: number,
+  payload: BulkDownloadProjectFilesPayload
+) {
+  const response = await apiClient.post<Blob>(
+    `/projects/${projectId}/bulk-download`,
+    payload,
+    {
+      responseType: "blob",
+    }
+  );
+
+  const fallbackFilename = `project_${projectId}_bulk.zip`;
+  const filename = getDownloadFilename(response.headers["content-disposition"], fallbackFilename);
+  const rawMissing = response.headers["x-missing-count"];
+  const missingCount = rawMissing ? parseInt(rawMissing, 10) : 0;
+
+  return {
+    blob: response.data,
+    filename,
+    missingCount,
+  };
 }
 
 export async function downloadFile(fileId: number, fallbackFilename: string) {

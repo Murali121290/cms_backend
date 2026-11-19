@@ -260,6 +260,22 @@ export const projectsApi = {
     const r = await api.put<{ message: string; project_id: number; bookmap: any }>(`/projects/${projectId}/bookmap`, { bookmap })
     return r.data
   },
+
+  getBulkFilesSummary: async (projectId: number): Promise<BulkFilesSummaryResponse> => {
+    const r = await api.get<BulkFilesSummaryResponse>(`/projects/${projectId}/bulk-files-summary`)
+    return r.data
+  },
+}
+
+export interface ChapterFileSummary {
+  chapter_id: number
+  number: string
+  title: string | null
+  counts: Record<string, number>
+}
+
+export interface BulkFilesSummaryResponse {
+  chapters: ChapterFileSummary[]
 }
 
 export interface ProjectDocument {
@@ -289,5 +305,6 @@ export const finalizeMapping = projectsApi.finalizeMapping
 export const getProjectDocuments = projectsApi.getDocuments
 export const getBookmap = projectsApi.getBookmap
 export const updateBookmap = projectsApi.updateBookmap
+export const getBulkFilesSummary = projectsApi.getBulkFilesSummary
 
 

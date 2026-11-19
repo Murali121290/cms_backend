@@ -240,6 +240,33 @@ def get_project_and_chapter(db: Session, *, project_id: int, chapter_id: int):
     return project, chapter
 
 
+CATEGORY_TO_LABEL = {
+    "Misc": "Final Delivery",
+    "Manuscript": "Manuscript",
+    "XML": "XML",
+    "InDesign": "InDesign",
+    "Proof": "Proof",
+    "Art": "Art",
+}
+
+
+def normalize_category(category: str) -> str:
+    cat_lower = (category or "").strip().lower()
+    if cat_lower in ("misc", "final delivery", "final_delivery", "miscellaneous"):
+        return "Misc"
+    elif cat_lower in ("xml",):
+        return "XML"
+    elif cat_lower in ("proof",):
+        return "Proof"
+    elif cat_lower in ("indesign", "design"):
+        return "InDesign"
+    elif cat_lower in ("manuscript",):
+        return "Manuscript"
+    elif cat_lower in ("art",):
+        return "Art"
+    return category
+
+
 def upload_chapter_files(
     db: Session,
     *,
@@ -257,22 +284,7 @@ def upload_chapter_files(
     uploaded_results = []
     skipped_results = []
 
-    # Normalize category string (e.g., "Final delivery", "misc", "miscellaneous" -> "Misc")
-    cat_lower = (category or "").strip().lower()
-    if cat_lower in ("misc", "final delivery", "final_delivery", "miscellaneous"):
-        normalized_category = "Misc"
-    elif cat_lower in ("xml",):
-        normalized_category = "XML"
-    elif cat_lower in ("proof",):
-        normalized_category = "Proof"
-    elif cat_lower in ("indesign", "design"):
-        normalized_category = "InDesign"
-    elif cat_lower in ("manuscript",):
-        normalized_category = "Manuscript"
-    elif cat_lower in ("art",):
-        normalized_category = "Art"
-    else:
-        normalized_category = category
+    normalized_category = normalize_category(category)
 
     for upload in files:
         if not upload.filename:
