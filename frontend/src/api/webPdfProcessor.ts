@@ -202,20 +202,20 @@ export async function generateLinks(
   linkType: 'one_way' | 'two_way',
   analyzeOnly: boolean = false,
   preserveExisting: boolean = true
-): Promise<{ 
-  success: boolean; 
-  total_links: number; 
-  one_way_links: number; 
+): Promise<{
+  success: boolean;
+  total_links: number;
+  one_way_links: number;
   two_way_links: number;
   existing_preserved?: number;
   not_linked?: number;
   details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean; preserved?: boolean }[];
 }> {
   try {
-    const { data } = await api.post<{ 
-      success: boolean; 
-      total_links: number; 
-      one_way_links: number; 
+    const { data } = await api.post<{
+      success: boolean;
+      total_links: number;
+      one_way_links: number;
       two_way_links: number;
       existing_preserved?: number;
       details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean; preserved?: boolean }[];

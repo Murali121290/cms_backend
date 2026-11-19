@@ -430,6 +430,10 @@ def find_toc_entries(doc):
     last_title = ""
     last_letter = None
     last_entry = None
+    stop_author_re = re.compile(
+        r'^(?:chapter\b|part\b|section\b|introduction\b|preface\b|foreword\b|acknowledg|conclusion\b|epilogue\b|afterword\b|appendix\b|index\b|notes\b|references\b|glossary\b|poetic interruption\b|\d{1,3}[\.\s]|\d+\s+[A-Za-z]|[IVXLCDM]+[\.\s])',
+        re.IGNORECASE
+    )
     
     for p_idx in toc_page_indices:
         page = doc[p_idx]
@@ -445,10 +449,10 @@ def find_toc_entries(doc):
             # Skip standalone headers or bare page folios
             cln_lt = re.sub(r'[\s•·\-\–—|]+', ' ', lt).strip().lower()
             is_top_running_header = (
-                rect.y0 <= 90
+                rect.y0 <= 55
                 and not re.search(r'\s+([ivxlcdm]+|\d+)$', lt.strip(), re.IGNORECASE)
                 and (
-                    bool(re.match(r'^(?:[ivxlcdm]+|\d+)\s+[A-Za-z]', lt.strip(), re.IGNORECASE))
+                    bool(re.match(r'^(?:[ivxlcdm]+)\s+[A-Za-z]', lt.strip(), re.IGNORECASE))
                     or bool(re.search(r'\b(?:contents|table of contents)\b', lt.strip(), re.IGNORECASE))
                 )
             )
@@ -523,20 +527,12 @@ def find_toc_entries(doc):
                 }
                 toc_entries.append(last_entry)
                 i += lines_consumed
-                # Skip author / contributor line immediately following this entry
-                while i < len(lines):
+                author_skip_count = 0
+                while i < len(lines) and author_skip_count < 2:
                     nxt_author = lines[i]['text'].strip()
-                    if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|conclusion\b|notes\b|\d{1,3}[\.\s]|[IVXLCDM]+\.\s+[A-Z]|(?:SECTION|PART)\b)', nxt_author, re.IGNORECASE):
-                        is_wrap_first_line = False
-                        if i + 1 < len(lines):
-                            line_after = lines[i+1]['text'].strip()
-                            m_nxt_end = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', line_after, re.IGNORECASE)
-                            if m_nxt_end and (lines[i+1]['rect'].y0 - lines[i]['rect'].y1 <= 25) and abs(lines[i+1]['rect'].x0 - lines[i]['rect'].x0) <= 25:
-                                is_wrap_first_line = True
-                        if not is_wrap_first_line:
-                            i += 1
-                        else:
-                            break
+                    if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not stop_author_re.match(nxt_author):
+                        i += 1
+                        author_skip_count += 1
                     else:
                         break
                 continue
@@ -573,19 +569,12 @@ def find_toc_entries(doc):
                     toc_entries.append(last_entry)
                     i += 1
                     # Skip author line(s)
-                    while i < len(lines):
+                    author_skip_count = 0
+                    while i < len(lines) and author_skip_count < 2:
                         nxt_t = lines[i]['text'].strip()
-                        if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_t, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|conclusion\b|notes\b|\d{1,3}[\.\s]|[IVXLCDM]+\.\s+[A-Z]|(?:SECTION|PART)\b)', nxt_t, re.IGNORECASE):
-                            is_wrap_first_line = False
-                            if i + 1 < len(lines):
-                                line_after = lines[i+1]['text'].strip()
-                                m_nxt_end = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', line_after, re.IGNORECASE)
-                                if m_nxt_end and (lines[i+1]['rect'].y0 - lines[i]['rect'].y1 <= 25) and abs(lines[i+1]['rect'].x0 - lines[i]['rect'].x0) <= 25:
-                                    is_wrap_first_line = True
-                            if not is_wrap_first_line:
-                                i += 1
-                            else:
-                                break
+                        if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_t, re.IGNORECASE) and not stop_author_re.match(nxt_t):
+                            i += 1
+                            author_skip_count += 1
                         else:
                             break
                     continue
@@ -616,19 +605,12 @@ def find_toc_entries(doc):
                             toc_entries.append(last_entry)
                             i += 2
                             # Skip author line(s)
-                            while i < len(lines):
+                            author_skip_count = 0
+                            while i < len(lines) and author_skip_count < 2:
                                 nxt_author = lines[i]['text'].strip()
-                                if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|conclusion\b|notes\b|\d{1,3}[\.\s]|[IVXLCDM]+\.\s+[A-Z]|(?:SECTION|PART)\b)', nxt_author, re.IGNORECASE):
-                                    is_wrap_first_line = False
-                                    if i + 1 < len(lines):
-                                        line_after = lines[i+1]['text'].strip()
-                                        m_nxt_end = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', line_after, re.IGNORECASE)
-                                        if m_nxt_end and (lines[i+1]['rect'].y0 - lines[i]['rect'].y1 <= 25) and abs(lines[i+1]['rect'].x0 - lines[i]['rect'].x0) <= 25:
-                                            is_wrap_first_line = True
-                                    if not is_wrap_first_line:
-                                        i += 1
-                                    else:
-                                        break
+                                if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not stop_author_re.match(nxt_author):
+                                    i += 1
+                                    author_skip_count += 1
                                 else:
                                     break
                             continue
@@ -755,18 +737,15 @@ def find_toc_entries(doc):
                     i = j
 
                 # Skip author / contributor line immediately following a chapter heading
-                if i < len(lines):
+                author_skip_count = 0
+                while i < len(lines) and author_skip_count < 2:
                     nxt_author = lines[i]['text'].strip()
                     # If this line has no page number and isn't a new chapter/section/part heading
-                    if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm\d]+|section\s+[ivxlcdm\d]+|poetic interruption\b|appendix\b|index\b|conclusion\b|notes\b|\d{1,3}\.|\d+\s+[A-Z])', nxt_author, re.IGNORECASE):
-                        is_wrap_first_line = False
-                        if i + 1 < len(lines):
-                            line_after = lines[i+1]['text'].strip()
-                            m_nxt_end = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', line_after, re.IGNORECASE)
-                            if m_nxt_end and (lines[i+1]['rect'].y0 - lines[i]['rect'].y1 <= 25) and abs(lines[i+1]['rect'].x0 - lines[i]['rect'].x0) <= 25:
-                                is_wrap_first_line = True
-                        if not is_wrap_first_line:
-                            i += 1
+                    if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not stop_author_re.match(nxt_author):
+                        i += 1
+                        author_skip_count += 1
+                    else:
+                        break
 
                 lvl = get_toc_entry_level(clean_title, is_roman=is_roman)
                 is_part_entry = ch_prefix.upper().startswith(('PART', 'SECTION'))
@@ -969,19 +948,14 @@ def find_toc_entries(doc):
                         toc_entries.append(last_entry)
                         i += consumed
                         # Skip author / contributor line if any
-                        # But do NOT skip if the next line is part of a wrapped title whose following line has a page number!
-                        if i < len(lines):
+                        author_skip_count = 0
+                        while i < len(lines) and author_skip_count < 2:
                             nxt_author = lines[i]['text'].strip()
-                            if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|\d{1,3}\.|\d+\s+[A-Z]|[IVXLCDM]+\.\s+[A-Z]|(?:SECTION|PART)\b)', nxt_author, re.IGNORECASE):
-                                # Check if lines[i] is followed by a line with a page number (multi-line wrap)
-                                is_wrap_first_line = False
-                                if i + 1 < len(lines):
-                                    line_after = lines[i+1]['text'].strip()
-                                    m_nxt_end = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', line_after, re.IGNORECASE)
-                                    if m_nxt_end and (lines[i+1]['rect'].y0 - lines[i]['rect'].y1 <= 22) and abs(lines[i+1]['rect'].x0 - lines[i]['rect'].x0) <= 15:
-                                        is_wrap_first_line = True
-                                if not is_wrap_first_line:
-                                    i += 1
+                            if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not stop_author_re.match(nxt_author):
+                                i += 1
+                                author_skip_count += 1
+                            else:
+                                break
                         continue
 
             if m_inline and not re.match(r'^(chapter|part|appendix|annex)\b', lt, re.IGNORECASE):
@@ -1010,20 +984,15 @@ def find_toc_entries(doc):
                     }
                     toc_entries.append(last_entry)
                     i += 1
-                    # Skip author / contributor line immediately following this entry (e.g. 'B. A. LeFrançois' after 'Poetic Interruption I: Abolition 33')
-                    # But do NOT skip if the next line is part of a wrapped title whose following line has a page number!
-                    if i < len(lines):
+                    # Skip author / contributor line immediately following this entry
+                    author_skip_count = 0
+                    while i < len(lines) and author_skip_count < 2:
                         nxt_author = lines[i]['text'].strip()
-                        if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b|appendix\b|index\b|\d{1,3}\.|\d+\s+[A-Z]|[IVXLCDM]+\.\s+[A-Z]|(?:SECTION|PART)\b)', nxt_author, re.IGNORECASE):
-                            # Check if lines[i] is followed by a line with a page number (multi-line wrap)
-                            is_wrap_first_line = False
-                            if i + 1 < len(lines):
-                                line_after = lines[i+1]['text'].strip()
-                                m_nxt_end = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', line_after, re.IGNORECASE)
-                                if m_nxt_end and (lines[i+1]['rect'].y0 - lines[i]['rect'].y1 <= 22) and abs(lines[i+1]['rect'].x0 - lines[i]['rect'].x0) <= 15:
-                                    is_wrap_first_line = True
-                            if not is_wrap_first_line:
-                                i += 1
+                        if not re.search(r'\s+([ivxlcdm]+|\d+)$', nxt_author, re.IGNORECASE) and not stop_author_re.match(nxt_author):
+                            i += 1
+                            author_skip_count += 1
+                        else:
+                            break
                     continue
             elif not re.match(r'^(chapter|part|appendix|annex)\b', lt, re.IGNORECASE) and (
                 re.match(r'^[IVXLCDM]+\.\s+', lt.strip())
@@ -1374,8 +1343,20 @@ def find_title_on_page(page, title):
                 cr |= r
             cluster_rects.append(cr)
 
-        # Pick the cluster with the largest height (dominant heading font size) or topmost in header
-        res = max(cluster_rects, key=lambda cr: (cr.height, -cr.y0))
+        # Pick the cluster with the largest font size (dominant heading style) near the top of the page
+        def _score_cluster(cr):
+            spans_in_cr = []
+            for b in page.get_text('dict')['blocks']:
+                if b.get('type') == 0:
+                    for l in b['lines']:
+                        for s in l['spans']:
+                            if fitz.Rect(s['bbox']).intersects(cr):
+                                spans_in_cr.append(s)
+            max_size = max((s['size'] for s in spans_in_cr), default=0)
+            is_top = cr.y0 < page_height * 0.35
+            return (round(max_size, 1), is_top, -cr.y0)
+
+        res = max(cluster_rects, key=_score_cluster)
 
         # Check if page has a separate CHAPTER / PART / SECTION label and number adjacent to this title
         # (e.g. 'CHAPTER\n1' graphic block placed next to the chapter title)
@@ -1394,6 +1375,17 @@ def find_title_on_page(page, title):
             for lp in label_pats:
                 cands.extend(page.search_for(lp, clip=header_clip))
             cands.extend(page.search_for(num, clip=header_clip))
+            int_to_word = {
+                1: 'ONE', 2: 'TWO', 3: 'THREE', 4: 'FOUR', 5: 'FIVE',
+                6: 'SIX', 7: 'SEVEN', 8: 'EIGHT', 9: 'NINE', 10: 'TEN',
+                11: 'ELEVEN', 12: 'TWELVE', 13: 'THIRTEEN', 14: 'FOURTEEN',
+                15: 'FIFTEEN', 16: 'SIXTEEN', 17: 'SEVENTEEN', 18: 'EIGHTEEN',
+                19: 'NINETEEN', 20: 'TWENTY'
+            }
+            if num.isdigit() and int(num) in int_to_word:
+                w = int_to_word[int(num)]
+                cands.extend(page.search_for(w, clip=header_clip))
+                cands.extend(page.search_for(w.capitalize(), clip=header_clip))
             for r_cand in cands:
                 # Merge if placed to the left or above the main title within reasonable distance
                 if (res.y0 - 80 <= r_cand.y1 <= res.y0 + 25) or (abs(r_cand.y0 - res.y0) < 40 and r_cand.x1 <= res.x0 + 40):
@@ -1580,8 +1572,19 @@ def find_subheading_on_page(page, title: str):
     if not cands:
         return None
 
+    best_size = None
     if len(cands) == 1:
         cand = fitz.Rect(cands[0])
+        blocks = page.get_text('dict')['blocks']
+        for b in blocks:
+            if b.get('type') == 0:
+                for l in b['lines']:
+                    for s in l.get('spans', []):
+                        if fitz.Rect(s['bbox']).intersects(cand):
+                            best_size = s.get('size')
+                            break
+                    if best_size: break
+            if best_size: break
     else:
         # Multiple candidates found (e.g. heading + body text mentions)
         # Score each candidate to identify the TRUE heading
@@ -1647,12 +1650,12 @@ def find_subheading_on_page(page, title: str):
                     l_font_size = max((s.get('size', 0) for s in l.get('spans', [])), default=0)
                     if 'best_size' in locals() and best_size and l_font_size < best_size - 1.5:
                         continue
-                    if lr.intersects(cand) or (0 <= lr.y0 - cand.y1 < 25 and abs(lr.x0 - cand.x0) < 80):
-                        if (cand | lr).height <= 50.0:
+                    if lr.intersects(cand) or (0 <= lr.y0 - cand.y1 < 25 and abs(lr.x0 - cand.x0) < 100):
+                        if (cand | lr).height <= 140.0:
                             cand |= lr
 
-    if cand is not None and cand.height > 50.0:
-        cand = fitz.Rect(cand.x0, cand.y0, cand.x1, min(cand.y1, cand.y0 + 35.0))
+    if cand is not None and cand.height > 140.0:
+        cand = fitz.Rect(cand.x0, cand.y0, cand.x1, min(cand.y1, cand.y0 + 120.0))
 
     return cand
 
@@ -2241,14 +2244,21 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
         skip_brief_backlink = (has_brief_and_detailed and source_page_idx in brief_toc_pages)
 
         if link_type == "two_way" and not is_cross_toc and not skip_brief_backlink:
+                word_num_pat = r'(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty(?:-[a-z]+)?)'
+                is_chapter_title = bool(re.match(
+                    rf'^(?:chapter\s+\d+|part\s+[ivxlcdm]+|appendix\b|index\b|conclusion\b|notes\b|bibliography\b|references\b|glossary\b|\d{{1,3}}[\.\s]|[IVXLCDM]+\.\s+[A-Z]|{word_num_pat}\b)',
+                    entry['title'].strip(),
+                    re.IGNORECASE
+                ))
                 # Distinguish major Chapter/Part/Section headings vs in-body subheadings
-                is_subheading = (
+                is_subheading = not is_chapter_title and (
                     entry.get('level', 1) > 1
                     or bool(re.match(r'^\d+\.\d+', entry['title'].strip()))
                 )
                 is_major_heading = not is_subheading and (
                     entry.get('level') == 1
                     or entry.get('is_part', False)
+                    or is_chapter_title
                     or bool(re.match(r'^(?:chapter|part|section|appendix|introduction|conclusion|bibliography|filmography|index|preface|foreword|glossary|\d+(?:\.|\s+)[A-Za-z]|[ivxlcdm]+[\.\s])\b', entry['title'].strip(), re.IGNORECASE))
                 )
                 
@@ -2264,8 +2274,8 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
                         title_rect = find_title_on_page(target_page, entry['title'])
 
                 # Height cap: a single sub-heading backlink rect shouldn't cover whole page column
-                if not is_major_heading and title_rect is not None and title_rect.height > 50.0:
-                    title_rect = fitz.Rect(title_rect.x0, title_rect.y0, title_rect.x1, min(title_rect.y1, title_rect.y0 + 35.0))
+                if not is_major_heading and title_rect is not None and title_rect.height > 140.0:
+                    title_rect = fitz.Rect(title_rect.x0, title_rect.y0, title_rect.x1, min(title_rect.y1, title_rect.y0 + 120.0))
                 elif is_major_heading and title_rect is not None and title_rect.height > 260.0:
                     title_rect = fitz.Rect(title_rect.x0, title_rect.y0, title_rect.x1, min(title_rect.y1, title_rect.y0 + 220.0))
 
@@ -2304,6 +2314,29 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
                             if -45 <= gap <= 95:
                                 title_rect = fitz.Rect(title_rect) | fitz.Rect(b[:4])
                                 curr_top = min(curr_top, b[1])
+
+                        # Also check if title_rect matched only the top banner (e.g. 'CHAPTER FIVE'),
+                        # and expand downwards to include the chapter title below the banner
+                        t_txt = re.sub(r'(?<=\b[A-Za-z])\s+(?=[A-Za-z]\b)', '', target_page.get_text('text', clip=title_rect).strip())
+                        is_banner_only = bool(banner_re.match(t_txt))
+                        if is_banner_only:
+                            title_clean = re.sub(rf'^(?:chapter|part|section|appendix|{word_num_pat}|\d+)\s*', '', entry['title'].strip(), flags=re.I).strip()
+                            title_clean_no_dots = re.sub(r'^[\s\.\u2026]+', '', title_clean).strip()
+                            title_words = set(re.findall(r'[a-zA-Z0-9]+', title_clean_no_dots.lower()))
+                            if title_words:
+                                down_cands = []
+                                for b in target_page.get_text('blocks'):
+                                    if b[1] >= title_rect.y1 - 15 and b[1] < target_page_height * 0.55:
+                                        b_words = set(re.findall(r'[a-zA-Z0-9]+', b[4].lower()))
+                                        if b_words and b_words.issubset(title_words):
+                                            down_cands.append(b)
+                                down_cands.sort(key=lambda b: b[1])
+                                curr_bottom = title_rect.y1
+                                for b in down_cands:
+                                    gap = b[1] - curr_bottom
+                                    if -15 <= gap <= 95 and (title_rect | fitz.Rect(b[:4])).height <= 220.0:
+                                        title_rect |= fitz.Rect(b[:4])
+                                        curr_bottom = max(curr_bottom, b[3])
                     # Check if this chapter title already has a two-way link to a TOC page
                     # (we preserve the link to the first/primary TOC instead of overwriting it).
                     already_linked_to_prior_toc = False
@@ -2320,7 +2353,10 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
 
                     if not already_linked_to_prior_toc:
                         if not analyze_only:
-                            # Remove any existing back link for this title rect before inserting
+                            # Remove any existing back link on this target page pointing to this TOC page
+                            for old_l in old_two_way:
+                                target_page.delete_link(old_l)
+                            # Remove any existing back link overlapping this title rect before inserting
                             for l in existing_target_links:
                                 if l.get('kind') == fitz.LINK_GOTO and _rects_overlap(l.get('from'), title_rect, threshold=0.5):
                                     target_page.delete_link(l)
