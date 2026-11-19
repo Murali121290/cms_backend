@@ -553,6 +553,22 @@
       "category": "Image Check"
     },
     {
+      "id": "BOD-IMG-005",
+      "name": "All images must be JPG",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.*",
+      "rule_config": {
+        "allowed_extensions": [
+          ".jpg"
+        ],
+        "exclude_files": [
+          "cover.jpg"
+        ]
+      },
+      "enabled": true,
+      "category": "Image Check"
+    },
+    {
       "id": "COM-LINK-001",
       "name": "citations must be linked to the corresponding block",
       "target_path": "OEBPS/xhtml",

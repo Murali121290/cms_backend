@@ -24,18 +24,29 @@ def _iter_manifest_images(opf_path: str):
 
 
 @rule("ASP-IMG-001")
+@rule("BOD-IMG-005")
 def validate_images_are_jpeg(file_details, rule_config=None):
     """All image files in OEBPS/images must match allowed extensions."""
     file_path = file_details.get("file_path", "")
     full_path = file_details.get("full_path", "")
 
     ext = os.path.splitext(file_path)[1].lower()
+    base_name = os.path.basename(file_path).lower()
 
-    # Get allowed extensions from rule config (default to .jpg, .jpeg)
+    # Get allowed extensions and exclude_files from rule config
     inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+    exclude_files = [f.lower() for f in inner_config.get("exclude_files", [])]
+
+    # Skip excluded files (e.g. cover.jpg)
+    if base_name in exclude_files:
+        return {"issues_count": 0, "issues": []}
+
     allowed_extensions = []
     if "allowed_extensions" in inner_config:
-        allowed_extensions = [e.lower() for e in inner_config["allowed_extensions"]]
+        allowed_extensions = [
+            (e if e.startswith(".") else f".{e}").lower()
+            for e in inner_config["allowed_extensions"]
+        ]
     if not allowed_extensions:
         return {"issues_count": 1, "issues": [{
             "type": "rule_configuration_error",
