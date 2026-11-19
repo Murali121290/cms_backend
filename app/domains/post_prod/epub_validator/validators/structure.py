@@ -383,11 +383,250 @@ def validate_no_unicode_in_filenames(book_details, rule_config=None):
                     "rule_name": "Do not use unicode in file names",
                     "type": "unicode_in_filename",
                     "message": f"Filename '{name}' contains non-ASCII/Unicode character(s): {chars_display}. Use only ASCII characters (a-z, A-Z, 0-9, _, -).",
-                    "category": "Structure Check",
+                    "category": "Error",
                     "file_path": rel_path,
                     "line_number": 1,
                     "snippet": f"Filename: {name}",
                     "extract": f"Filename: {name}",
                 })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-FN-002")
+def validate_xhtml_naming_convention(book_details, rule_config=None):
+    """
+    HTML / XHTML files must be named according to BoD naming rules:
+    1. Front matter files must start with a single uppercase letter prefix: [A-Z]_<name>.xhtml
+       (e.g., A_cover.xhtml, B_toc.xhtml, C_dedication.xhtml)
+    2. Chapter files must start with consecutive 2-digit numbers: 01_<title>.xhtml, 02_<title>.xhtml, etc.
+       (e.g., 01_XX.xhtml, 15_Wo_die_D_monen_sind.xhtml, or 01_chapter01.xhtml if no chapter name)
+    3. The title portion of the filename is derived from the <title> tag inside the XHTML file,
+       where whitespace, special characters, and non-ASCII characters (e.g., umlauts ä, ö, ü)
+       are replaced with an underscore ('_').
+    All standard front matter titles across languages are read dynamically from rule_config.
+    """
+    epub = book_details.get("epub_path") or ""
+    issues = []
+
+    if not epub or not os.path.isdir(epub):
+        return {"issues_count": 0, "issues": []}
+
+    # Helper to convert title string into underscore-separated ASCII slug (1-to-1 character replacement)
+    def title_to_slug(title_str: str) -> str:
+        chars = []
+        for c in title_str:
+            if (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9'):
+                chars.append(c)
+            else:
+                chars.append('_')
+        # Do not collapse consecutive underscores: e.g. 'ß ' -> '__'
+        slug = ''.join(chars).strip('_')
+        return slug
+
+    # Read front matter titles dynamically from rule_config
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    frontmatter_dict = cfg.get("frontmatter_titles_by_language")
+
+    if not frontmatter_dict or not isinstance(frontmatter_dict, dict):
+        return {
+            "issues_count": 1,
+            "issues": [{
+                "rule_name": "HTML files naming convention check",
+                "type": "configuration_error",
+                "message": "Missing required 'frontmatter_titles_by_language' in rule configuration for BOD-FN-002.",
+                "category": "Error",
+                "file_path": "OEBPS",
+                "line_number": 0,
+            }]
+        }
+
+    configured_fm_slugs = set()
+    for _lang, titles in frontmatter_dict.items():
+        if isinstance(titles, list):
+            for t in titles:
+                s = title_to_slug(t).lower()
+                if s:
+                    configured_fm_slugs.add(s)
+        elif isinstance(titles, dict):
+            for _k, t in titles.items():
+                s = title_to_slug(t).lower()
+                if s:
+                    configured_fm_slugs.add(s)
+
+    def is_frontmatter_slug(slug: str) -> bool:
+        s = slug.lower().strip("_")
+        for std in configured_fm_slugs:
+            if s == std or s.startswith(std + "_") or std.startswith(s + "_"):
+                return True
+        return False
+
+    # Find OPF reading order (spine) if available
+    spine_files = []
+    opf_path = _find_opf(epub)
+    if opf_path and os.path.isfile(opf_path):
+        try:
+            with open(opf_path, "r", encoding="utf-8") as f:
+                opf_soup = BeautifulSoup(f.read(), "xml")
+            manifest = opf_soup.find("manifest")
+            spine = opf_soup.find("spine")
+            if manifest and spine:
+                items = {}
+                for it in manifest.find_all("item"):
+                    iid = it.get("id", "").strip()
+                    href = it.get("href", "").strip()
+                    if iid and href:
+                        items[iid] = href
+                for ref in spine.find_all("itemref"):
+                    idref = ref.get("idref", "").strip()
+                    if idref in items:
+                        target = items[idref].split("#")[0].strip()
+                        if target.lower().endswith((".xhtml", ".html")):
+                            spine_files.append(os.path.basename(target))
+        except Exception:
+            pass
+
+    # Locate XHTML files inside OEBPS/xhtml or throughout epub
+    xhtml_dir = os.path.join(epub, "OEBPS", "xhtml")
+    if not os.path.isdir(xhtml_dir):
+        xhtml_dir = os.path.join(epub, "OEBPS")
+        if not os.path.isdir(xhtml_dir):
+            xhtml_dir = epub
+
+    xhtml_map = {}
+    for root, _dirs, files in os.walk(xhtml_dir):
+        for f in files:
+            if f.lower().endswith((".xhtml", ".html")):
+                full_fpath = os.path.join(root, f)
+                rel_fpath = os.path.relpath(full_fpath, epub).replace("\\", "/")
+                xhtml_map[f] = (full_fpath, rel_fpath)
+
+    # Order files according to spine if available, otherwise sort naturally
+    if spine_files:
+        ordered_filenames = [fn for fn in spine_files if fn in xhtml_map]
+        for fn in sorted(xhtml_map.keys()):
+            if fn not in ordered_filenames:
+                ordered_filenames.append(fn)
+    else:
+        ordered_filenames = sorted(xhtml_map.keys())
+
+    expected_chapter_num = 1
+    for filename in ordered_filenames:
+        # Ignore nav.xhtml as it is a structural navigation document
+        if filename.lower() in ("nav.xhtml", "nav.html", "toc.xhtml"):
+            continue
+
+        full_item_path, rel_path = xhtml_map[filename]
+        stem, _ = os.path.splitext(filename)
+
+        # Read <title> from XHTML file
+        doc_title = ""
+        try:
+            with open(full_item_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            soup = BeautifulSoup(content, "html.parser")
+            title_tag = soup.find("title")
+            if title_tag:
+                doc_title = title_tag.get_text(strip=True)
+        except Exception:
+            pass
+
+        expected_slug = title_to_slug(doc_title) if doc_title else ""
+
+        # Check if Front Matter pattern: ^[A-Z]_(.+)$
+        fm_match = re.match(r"^([A-Z])_(.+)$", stem)
+        # Check if Chapter pattern: ^(\d{2})_(.+)$
+        ch_match = re.match(r"^(\d{2})_(.+)$", stem)
+
+        if fm_match:
+            # Front matter: [A-Z]_<name>
+            prefix_letter = fm_match.group(1)
+            name_part = fm_match.group(2)
+            name_part_lower = name_part.lower()
+
+            # Generic front matter files (e.g. fm, frontmatter) only need to start with an uppercase letter
+            if name_part_lower in ("fm", "frontmatter", "front_matter", "front"):
+                continue
+
+            # Verify against doc_title or known front matter titles
+            if expected_slug:
+                match_exact = (name_part_lower == expected_slug.lower())
+                match_prefix = expected_slug.lower().startswith(name_part_lower) or name_part_lower.startswith(expected_slug.lower())
+                match_known = is_frontmatter_slug(name_part_lower) or is_frontmatter_slug(expected_slug)
+
+                if not (match_exact or match_prefix or match_known):
+                    issues.append({
+                        "rule_name": "HTML file naming convention",
+                        "type": "frontmatter_title_mismatch",
+                        "message": (
+                            f"Front matter file '{filename}' name part '{name_part}' does not match "
+                            f"the document <title> '{doc_title}' (expected slug: '{expected_slug}')."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": 1,
+                        "snippet": f"Filename: {filename}, <title>: {doc_title}",
+                        "extract": f"Filename: {filename}, <title>: {doc_title}",
+                    })
+        elif ch_match:
+            # Chapter file: \d{2}_<title>
+            num_str = ch_match.group(1)
+            name_part = ch_match.group(2)
+            num_val = int(num_str)
+
+            # 1. Consecutive numbering check
+            expected_prefix = f"{expected_chapter_num:02d}_"
+            if num_val != expected_chapter_num:
+                issues.append({
+                    "rule_name": "HTML file naming convention",
+                    "type": "non_consecutive_chapter_numbering",
+                    "message": (
+                        f"Chapter file '{filename}' has number '{num_str}', but expected consecutive number "
+                        f"'{expected_chapter_num:02d}' (expected prefix: '{expected_prefix}')."
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": 1,
+                    "snippet": f"Filename: {filename}",
+                    "extract": f"Filename: {filename}",
+                })
+
+            expected_chapter_num += 1
+
+            # 2. Title matching check
+            if expected_slug:
+                # If title slug doesn't match name_part
+                # Allow fallback pattern e.g. chapter01 or ch01
+                fallback_ch_names = {f"chapter{num_str}", f"chap{num_str}", f"kapitel{num_str}", f"ch{num_str}", "xx"}
+                if name_part.lower() != expected_slug.lower() and name_part.lower() not in fallback_ch_names:
+                    issues.append({
+                        "rule_name": "HTML file naming convention",
+                        "type": "chapter_title_mismatch",
+                        "message": (
+                            f"Chapter file '{filename}' name part '{name_part}' does not match the document <title> "
+                            f"'{doc_title}' (expected: '{num_str}_{expected_slug}.xhtml')."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": 1,
+                        "snippet": f"Filename: {filename}, <title>: {doc_title}",
+                        "extract": f"Filename: {filename}, <title>: {doc_title}",
+                    })
+        else:
+            # Filename matches neither [A-Z]_ nor \d{2}_ pattern
+            issues.append({
+                "rule_name": "HTML file naming convention",
+                "type": "invalid_html_filename_format",
+                "message": (
+                    f"HTML file '{filename}' does not follow the required naming convention. "
+                    f"Front matter must start with an uppercase letter (e.g. 'A_cover.xhtml', 'B_toc.xhtml') "
+                    f"and chapters must start with a 2-digit consecutive number (e.g. '{expected_chapter_num:02d}_{expected_slug or 'chapter' + f'{expected_chapter_num:02d}'}.xhtml')."
+                ),
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": 1,
+                "snippet": f"Filename: {filename}",
+                "extract": f"Filename: {filename}",
+            })
 
     return {"issues_count": len(issues), "issues": issues}

@@ -709,6 +709,7 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
 
     p_tags = soup.find_all(["p", "div"])
     missing_items = []
+    cpytxt_tag_issues = []
 
     for item in expected_items:
         if not item:
@@ -719,6 +720,23 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
             p_text_norm = normalize_str(p.get_text(" ", strip=True))
             if norm_item in p_text_norm:
                 item_found = True
+                # Validate tag and class: must be <p> with class="cpytxt"
+                p_classes = p.get("class", [])
+                if isinstance(p_classes, str):
+                    p_classes = p_classes.split()
+                p_classes_lower = [c.lower() for c in p_classes]
+
+                if p.name.lower() != "p" or "cpytxt" not in p_classes_lower:
+                    line_no = getattr(p, "sourceline", None) or 1
+                    cpytxt_tag_issues.append({
+                        "type": "invalid_copyright_publisher_tag",
+                        "message": f"Publisher address paragraph must be coded as <p class=\"cpytxt\">. Found <{p.name} class=\"{' '.join(p_classes)}\">.",
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_no,
+                        "snippet": str(p)[:150],
+                        "extract": str(p)[:150],
+                    })
                 break
         if not item_found:
             missing_items.append(item)
@@ -762,6 +780,8 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
             "expected_text": expected_url_str,
             "extract": f"Expected URL: {expected_url_str}",
         })
+    elif cpytxt_tag_issues:
+        issues.extend(cpytxt_tag_issues)
 
     return {"issues_count": len(issues), "issues": issues}
 

@@ -45,6 +45,192 @@
       "category": "Structure Check"
     },
     {
+      "id": "BOD-FN-002",
+      "name": "HTML files naming convention check",
+      "scope": "book",
+      "enabled": true,
+      "rule_config": {
+        "frontmatter_titles_by_language": {
+          "English": [
+            "Title Page",
+            "Copyright",
+            "Table of Contents",
+            "Epigraph",
+            "Dedication",
+            "Acknowledge ments",
+            "Start of Text",
+            "About the book",
+            "About the author",
+            "Further information",
+            "Notes",
+            "Cover"
+          ],
+          "German": [
+            "Titelseite",
+            "Impressum",
+            "Inhaltsverzeichnis",
+            "Motto",
+            "Widmung",
+            "Danksagung",
+            "Textbeginn",
+            "Über das Buch",
+            "Über den Autor",
+            "die Autorin",
+            "Weitere Informationen",
+            "Hinweise"
+          ],
+          "French": [
+            "Page de titre",
+            "Page de copyright",
+            "Sommaire",
+            "Epigraphe",
+            "Dédicace",
+            "Remerciements",
+            "Début du texte",
+            "À propos du livre",
+            "À propos de l’auteur",
+            "Plus d‘infos",
+            "Indication"
+          ],
+          "Danish": [
+            "Titelside",
+            "Kolofon",
+            "Indholdsforteg nelse",
+            "Epigraf",
+            "Dedikation",
+            "Takkeord",
+            "Tekstbegyndelse",
+            "Om bogen",
+            "Om forfatteren",
+            "Yderligere oplysninger",
+            "Obs"
+          ],
+          "Swedish": [
+            "Titelsida",
+            "Impressum",
+            "Innehållsförteckning",
+            "Motto",
+            "Dedikation",
+            "Tackord",
+            "Textens inledning",
+            "Om bogen",
+            "Om boken",
+            "Om författaren",
+            "Mer information",
+            "Anmärkning"
+          ],
+          "Finnish": [
+            "Nimiösivu",
+            "Valmistus merkinnät",
+            "Sisällysluettelo",
+            "Motto",
+            "Omistuskirjoitus",
+            "Kiitokset",
+            "Tekstin alku",
+            "Lisätietoja kirjasta",
+            "Lisätietoja kirjailijasta",
+            "Lisätietoja",
+            "Huomautus"
+          ],
+          "Italian": [
+            "Frontespizio",
+            "Colophon",
+            "Indice",
+            "Motto",
+            "Dedica",
+            "Ringraziamento",
+            "Inizio del Testo",
+            "Sull‘libro",
+            "Sull‘autor",
+            "Informazione aggiuntiva",
+            "Notizia"
+          ],
+          "Spanish": [
+            "Portada",
+            "Pie de Imprenta",
+            "Indice",
+            "Lema",
+            "Dedicación",
+            "Agradecimiento",
+            "Inicio del Texto",
+            "Sobre el libro",
+            "Sobre el autor",
+            "Sobre la autora",
+            "Más informaciones",
+            "Indicación"
+          ],
+          "Portuguese": [
+            "Frontispício",
+            "Pé-de-Imprensa",
+            "Índice",
+            "Epígrafe",
+            "Dedicatória",
+            "Ação de Graças",
+            "Início do texto",
+            "Sobre o livro",
+            "Sobre o autor",
+            "Outras informações",
+            "Anotações"
+          ],
+          "Norwegian": [
+            "Tittelside",
+            "Kolofonside",
+            "Innholdsfortegnelse",
+            "Epigraf",
+            "Dedikasjon",
+            "Takkeord",
+            "Tekstbegynnelse",
+            "Om boken",
+            "Om forfatteren",
+            "Mer informasjon",
+            "Merknader"
+          ],
+          "Dutch": [
+            "Titelpagina",
+            "Copyright",
+            "Inhoudsopgave",
+            "Epigraaf",
+            "Opdracht",
+            "Dankwoord",
+            "Begin van",
+            "Over het boek",
+            "Over de auteur",
+            "Verdere informatie",
+            "Noten"
+          ],
+          "Catalan": [
+            "Portada",
+            "Drets d’autor",
+            "Índex",
+            "Epígraf",
+            "Dedicatòria",
+            "Agraïments",
+            "Inici del text",
+            "Sobre el llibre",
+            "Sobre l’autor",
+            "Sobre l’autora",
+            "Més informació",
+            "Notes"
+          ],
+          "Valencian": [
+            "Portada",
+            "Drets d’autor",
+            "Índex",
+            "Epígraf",
+            "Dedicatòria",
+            "Agraïments",
+            "Inici del text",
+            "Sobre el llibre",
+            "Sobre l´autor",
+            "Sobre l´autora",
+            "Més informació",
+            "Notes"
+          ]
+        }
+      },
+      "category": "Structure Check"
+    },
+    {
       "id": "BOD-FM-001",
       "name": "If half title and title page are part of the source files’ front matter, they must be removed from the E-Book",
       "scope": "book",
@@ -107,7 +293,19 @@
         "*impressum*.xhtml",
         "*copyright*.xhtml",
         "*kolofon*.xhtml",
-        "*colophon*.xhtml"
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml"
       ],
       "enabled": true,
       "rule_config": {
@@ -133,7 +331,19 @@
         "*impressum*.xhtml",
         "*copyright*.xhtml",
         "*kolofon*.xhtml",
-        "*colophon*.xhtml"
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml"
       ],
       "enabled": true,
       "category": "Copyright Check"
@@ -146,17 +356,29 @@
         "*impressum*.xhtml",
         "*copyright*.xhtml",
         "*kolofon*.xhtml",
-        "*colophon*.xhtml"
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml"
       ],
       "enabled": true,
       "rule_config": {
         "expected_statement_by_language": {
           "de": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen gemäß § 44b UrhG („Text und Data Mining“) zu gewinnen, ist untersagt.",
           "ch": "Die automatisierte Analyse des Werkes, um daraus Informationen insbesondere über Muster, Trends und Korrelationen („Text und Data Mining“) zu gewinnen, ist untersagt.",
-          "da": "Den automatiserede analyse af et værk med henblik på at indhente oplysninger, især om mønstre, tendenser og sammenhænge (”Text and Datamining”) er forbudt.",
+          "dk": "Den automatiserede analyse af et værk med henblik på at indhente oplysninger, især om mønstre, tendenser og sammenhænge (”Text and Datamining”) er forbudt.",
           "fi": "Työn automaattinen analysointi tietojen saamiseksi erityisesti kuvioista, suuntauksista ja korrelaatioista (”tekstin ja tietojen hakeminen”) on kielletty.",
           "fr": "L’analyse automatique du travail, pour obtenir des informations, notamment sur les motifs, les tendances et les corrélations («data and text mining») est interdite.",
-          "sv": "Automatiserad teknik vilken används för att analysera text och data i digital form i syfte att generera information, enligt 15a, 15b och 15c §§ upphovsrättslagen (text- och datautvinning), är förbjuden.",
+          "se": "Automatiserad teknik vilken används för att analysera text och data i digital form i syfte att generera information, enligt 15a, 15b och 15c §§ upphovsrättslagen (text- och datautvinning), är förbjuden.",
           "es": "El análisis automatizado del trabajo para obtener información en particular sobre patrones, tendencias y correlaciones („minería de datos y textos“) está prohibido.",
           "no": "Automatisert analyse av verket for å innhente informasjon, særlig om mønstre, trender og sammenhenger („tekst- og datautvinning“) er forbudt."
         }
@@ -171,31 +393,31 @@
         "*impressum*.xhtml",
         "*copyright*.xhtml",
         "*kolofon*.xhtml",
-        "*colophon*.xhtml"
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml"
       ],
       "enabled": true,
       "rule_config": {
         "expected_publisher_by_language": {
           "de": "Herstellung und Verlag:",
           "ch": "Herstellung und Verlag:",
-          "da": [
-            "Forlag:",
-            "Fremstilling:"
-          ],
-          "fi": [
-            "Kustantaja:",
-            "Valmistaja:"
-          ],
+          "dk": "Forlag: BoD · Books on Demand GmbH, Hellerup, Danmark",
+          "fi": "Kustantaja: BoD · Books on Demand GmbH, Helsinki, Suomi",
           "fr": "Édition et impression :",
-          "sv": [
-            "Förlag:",
-            "Produktion:"
-          ],
+          "se": "Förlag: BoD · Books on Demand, Stockholm, Sverige",
           "es": "Producción y editorial:",
-          "no": [
-            "Forlag:",
-            "Produksjon:"
-          ]
+          "no": "Forlag:"
         }
       },
       "category": "Copyright Check"
@@ -208,31 +430,55 @@
         "*impressum*.xhtml",
         "*copyright*.xhtml",
         "*kolofon*.xhtml",
-        "*colophon*.xhtml"
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml"
       ],
       "enabled": true,
       "rule_config": {
         "expected_publisher_address_by_language": {
-          "de": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg",
-          "ch": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Deutschland",
-          "da": [
-            "BoD · Books on Demand GmbH, Hellerup, Danmark",
-            "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamborg, Tyskland"
-          ],
-          "fi": [
-            "BoD · Books on Demand GmbH, Helsinki, Suomi",
-            "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Saksa"
-          ],
-          "fr": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Allemagne",
-          "sv": [
-            "BoD · Books on Demand, Stockholm, Sverige",
-            "BoD · Books on Demand, Hamburg, Tyskland"
-          ],
-          "es": "BoD · Books on Demand GmbH Überseering 33, 22297 Hamburgo, Alemania",
-          "no": [
-            "BoD · Books on Demand, Oslo, Norge",
-            "BoD · Books on Demand, Überseering 33, 22297 Hamburg, Tyskland"
-          ]
+          "de": {
+            "address": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg",
+            "url": "http://www.bod.de"
+          },
+          "ch": {
+            "address": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Deutschland",
+            "url": "http://www.bod.ch/"
+          },
+          "dk": {
+            "address": "Fremstilling: BoD · Books on Demand GmbH, Überseering 33, 22297 Hamborg, Tyskland",
+            "url": "http://www.bod.dk"
+          },
+          "fi": {
+            "address": "Valmistaja: BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Saksa",
+            "url": "http://www.bod.fi"
+          },
+          "fr": {
+            "address": "BoD · Books on Demand GmbH, Überseering 33, 22297 Hamburg, Allemagne",
+            "url": "http://www.bod.fr"
+          },
+          "se": {
+            "address": "Produktion: BoD · Books on Demand, Hamburg, Tyskland",
+            "url": "http://www.bod.se"
+          },
+          "es": {
+            "address": "BoD · Books on Demand GmbH Überseering 33, 22297 Hamburgo, Alemania",
+            "url": "https://www.bod.com.es/"
+          },
+          "no": {
+            "address": "BoD · Books on Demand, Oslo, Norge Produksjon: BoD · Books on Demand, Überseering 33, 22297 Hamburg, Tyskland",
+            "url": "https://www.bod.no/"
+          }
         }
       },
       "category": "Copyright Check"
@@ -245,7 +491,19 @@
         "*impressum*.xhtml",
         "*copyright*.xhtml",
         "*kolofon*.xhtml",
-        "*colophon*.xhtml"
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml"
       ],
       "enabled": true,
       "category": "Copyright Check"
@@ -258,7 +516,19 @@
         "*impressum*.xhtml",
         "*copyright*.xhtml",
         "*kolofon*.xhtml",
-        "*colophon*.xhtml"
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml"
       ],
       "enabled": true,
       "category": "Copyright Check"
@@ -271,7 +541,19 @@
         "*impressum*.xhtml",
         "*copyright*.xhtml",
         "*kolofon*.xhtml",
-        "*colophon*.xhtml"
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml"
       ],
       "enabled": true,
       "category": "Copyright Check"
@@ -592,7 +874,28 @@
         "*_[cC]h*.xhtml",
         "*[cC]hapter*.xhtml",
         "*[cC]hap*.xhtml",
-        "*[cC]h[0-9]*.xhtml"
+        "*[cC]h[0-9]*.xhtml",
+        "[0-9]*.xhtml",
+        "*_[kK]apitel*.xhtml",
+        "*[kK]apitel*.xhtml",
+        "*_[cC]hapitre*.xhtml",
+        "*[cC]hapitre*.xhtml",
+        "*_[lL]uku*.xhtml",
+        "*[lL]uku*.xhtml",
+        "*_[cC]apitolo*.xhtml",
+        "*[cC]apitolo*.xhtml",
+        "*_[cC]apítulo*.xhtml",
+        "*[cC]apítulo*.xhtml",
+        "*_[cC]apitulo*.xhtml",
+        "*[cC]apitulo*.xhtml",
+        "*_[kK]apittel*.xhtml",
+        "*[kK]apittel*.xhtml",
+        "*_[hH]oofdstuk*.xhtml",
+        "*[hH]oofdstuk*.xhtml",
+        "*_[cC]apítol*.xhtml",
+        "*[cC]apítol*.xhtml",
+        "*_[cC]apitol*.xhtml",
+        "*[cC]apitol*.xhtml"
       ],
       "include_mapped_chapters": true,
       "enabled": true,

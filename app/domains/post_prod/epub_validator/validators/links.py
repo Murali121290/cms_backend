@@ -446,8 +446,8 @@ def validate_page_citation_links(file_details, rule_config=None):
     issues = []
     body = soup.find("body") or soup
     
-    # Unwrap inline formatting tags to prevent fragmented text nodes
-    for tag in body.find_all(['span', 'strong', 'b', 'i', 'em', 'sup', 'sub', 'u']):
+    # Unwrap inline formatting tags to prevent fragmented text nodes (including small caps, strike, etc.)
+    for tag in body.find_all(['span', 'strong', 'b', 'i', 'em', 'sup', 'sub', 'u', 'small', 'big', 'font', 'strike', 'del', 'ins', 'mark', 'cite', 'abbr', 'time', 'code']):
         tag.unwrap()
     if hasattr(body, 'smooth'):
         body.smooth()
