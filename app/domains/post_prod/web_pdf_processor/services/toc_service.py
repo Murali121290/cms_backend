@@ -153,8 +153,9 @@ def clean_toc_title(raw_title: str) -> str:
     """
     if not raw_title:
         return ""
-    # Strip soft hyphens and zero-width spaces
+    # Strip soft hyphens, zero-width spaces, and control characters (e.g. \x07, \x00-\x1f)
     cleaned = raw_title.replace('\xad', '').replace('\u00ad', '').replace('\u200b', '')
+    cleaned = re.sub(r'[\x00-\x1f\x7f]', ' ', cleaned)
     # Strip sequences of dots / bullets / underscores separated by spaces
     cleaned = re.sub(r'(\s*\.\s*){2,}', ' ', cleaned)
     cleaned = re.sub(r'(\s*·\s*){2,}', ' ', cleaned)
@@ -210,6 +211,8 @@ def get_page_visual_lines(page):
             row['spans'].sort(key=lambda s: s['bbox'][0])
             full_text = ' '.join(s['text'] for s in row['spans'])
             full_text = full_text.replace('\xa0', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+            full_text = full_text.replace('\xad', '').replace('\u00ad', '').replace('\u200b', '')
+            full_text = re.sub(r'[\x00-\x1f\x7f]', ' ', full_text)
             # Only collapse spaces between single capitalized letters if ALL text spans in the row were single characters
             # (e.g. tracking spaced words 'C H A P T E R', 'C O N T E N T S')
             letter_spans = [s['text'].strip() for s in row['spans'] if not s['text'].strip().isdigit()]
@@ -466,25 +469,37 @@ def find_toc_entries(doc):
                 is_roman = False
                 lines_consumed = 1
 
-                if i + 1 < len(lines):
-                    nxt_line = lines[i+1]['text'].strip()
-                    nxt_rect = lines[i+1]['rect']
-                    # Ensure next line is not a new chapter/part/author heading
-                    if not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|section\b|\d{1,3}[\.\s]|[ivxlcdm]+\.\s+[A-Z])', nxt_line, re.IGNORECASE):
-                        m_nxt_pg = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', nxt_line, re.IGNORECASE)
-                        if m_nxt_pg:
-                            nxt_rem = m_nxt_pg.group(1).strip()
-                            clean_sec_title = clean_toc_title(lt + ' ' + nxt_rem)
-                            pg_str = m_nxt_pg.group(2).strip()
-                            is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
-                            sec_printed_page = roman_to_int(pg_str) if is_roman else int(pg_str)
-                            comb_sec_rect = rect | nxt_rect
-                            lines_consumed = 2
-                        elif (nxt_rect.y0 - rect.y1 <= 25) and abs(nxt_rect.x0 - x0) <= 20:
-                            # Continuation line without page number
-                            clean_sec_title = clean_toc_title(lt + ' ' + nxt_line)
-                            comb_sec_rect = rect | nxt_rect
-                            lines_consumed = 2
+                # Assemble multi-line Part / Section titles (including centered / indented lines)
+                while i + lines_consumed < len(lines):
+                    nxt_obj = lines[i + lines_consumed]
+                    nxt_line = nxt_obj['text'].strip()
+                    nxt_rect = nxt_obj['rect']
+                    if nxt_rect.y0 - comb_sec_rect.y1 > 25:
+                        break
+                    # Stop if next line is a new chapter/part/author heading
+                    if re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|section\b|\d{1,3}[\.\s]|[ivxlcdm]+\.\s+[A-Z]|appendix\b|index\b)', nxt_line, re.IGNORECASE):
+                        break
+                    m_nxt_pg = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', nxt_line, re.IGNORECASE)
+                    if m_nxt_pg:
+                        nxt_rem = m_nxt_pg.group(1).strip()
+                        clean_sec_title = clean_toc_title(clean_sec_title + ' ' + nxt_rem)
+                        pg_str = m_nxt_pg.group(2).strip()
+                        is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                        sec_printed_page = roman_to_int(pg_str) if is_roman else int(pg_str)
+                        comb_sec_rect |= nxt_rect
+                        lines_consumed += 1
+                        break
+                    elif (nxt_rect.y0 - comb_sec_rect.y1 <= 25) and (abs(nxt_rect.x0 - x0) <= 80 or nxt_rect.x0 >= x0 - 15):
+                        # Skip if it is an author line with credentials
+                        if any(re.search(r'\b(PhD|EdD|ATC|LAT|MS|RDN|MD|PT|RRT|RCP|FAARC|MAACVPR)\b', s['text']) for s in nxt_obj.get('spans', [])):
+                            break
+                        clean_sec_title = clean_toc_title(clean_sec_title + ' ' + nxt_line)
+                        comb_sec_rect |= nxt_rect
+                        lines_consumed += 1
+                        if lines_consumed >= 4:
+                            break
+                    else:
+                        break
 
                 last_title = clean_sec_title
                 last_letter = None
@@ -756,31 +771,57 @@ def find_toc_entries(doc):
                     y_max = max(bl['rect'].y1 for bl in bullet_lines)
                     page_words = page.get_text('words')
                     
-                    def _match_sub_rect(t_str):
+                    def _get_sub_topic_rects(raw_title):
+                        # Extract clean alpha-numeric words for precise matching
+                        t_words = [w.lower().replace('\u2002', '').strip() for w in re.findall(r'[a-zA-Z0-9]+', raw_title)]
+                        if not t_words:
+                            return []
                         cands = [w for w in page_words if y_min - 4 <= w[1] <= y_max + 4]
-                        t_words = [w.lower() for w in t_str.split()]
                         matched = []
                         idx_w = 0
                         for w in cands:
-                            cln = w[4].replace('\u2002', '').strip().lower()
-                            if not cln: continue
-                            if cln == t_words[idx_w]:
+                            # Tokenize hyphenated words like 'Evidence-Based' or 'Soft-Tissue' into subwords
+                            w_sub = [sw.lower() for sw in re.findall(r'[a-zA-Z0-9]+', w[4])]
+                            if not w_sub:
+                                continue
+                            if t_words[idx_w : idx_w + len(w_sub)] == w_sub:
                                 matched.append(w)
-                                idx_w += 1
+                                idx_w += len(w_sub)
                                 if idx_w == len(t_words):
                                     break
                             else:
-                                if idx_w > 0 and cln == t_words[0]:
+                                if idx_w > 0 and t_words[:len(w_sub)] == w_sub:
                                     matched = [w]
-                                    idx_w = 1
+                                    idx_w = len(w_sub)
                                 else:
                                     matched = []
                                     idx_w = 0
-                        if len(matched) == len(t_words):
-                            r_res = fitz.Rect(matched[0][:4])
-                            for mw in matched[1:]: r_res |= fitz.Rect(mw[:4])
-                            return r_res
-                        return None
+
+                        if idx_w != len(t_words):
+                            # Fallback: search_for on page within the vertical slice
+                            clean_s = re.sub(r'[\xad\u00ad\u200b]', '', raw_title).strip()
+                            s_cands = page.search_for(clean_s, clip=fitz.Rect(0, y_min - 4, page.rect.width, y_max + 4))
+                            return s_cands if s_cands else []
+
+                        # Group matched words by visual line to avoid multi-line union boxes
+                        lines_dict = {}
+                        for mw in matched:
+                            found_line = False
+                            for l_y in lines_dict:
+                                if abs(mw[1] - l_y) < 4:
+                                    lines_dict[l_y].append(mw)
+                                    found_line = True
+                                    break
+                            if not found_line:
+                                lines_dict[mw[1]] = [mw]
+
+                        rects = []
+                        for l_y, words_on_line in sorted(lines_dict.items(), key=lambda item: item[0]):
+                            r = fitz.Rect(words_on_line[0][:4])
+                            for w in words_on_line[1:]:
+                                r |= fitz.Rect(w[:4])
+                            rects.append(r)
+                        return rects
 
                     raw_parts = combined_bullet_text.split('•')
                     for p_part in raw_parts:
@@ -796,19 +837,18 @@ def find_toc_entries(doc):
                             if m_obj:
                                 sub_title = sub_title[m_obj.start():].strip()
                             if len(sub_title) >= 3:
-                                sub_rect = _match_sub_rect(sub_title)
-                                if sub_rect is None:
-                                    sub_rect = bullet_lines[0]['rect']
-                                toc_entries.append({
-                                    'title': clean_toc_title(sub_title),
-                                    'printed_page': sub_page,
-                                    'source_page': p_idx,
-                                    'rect': sub_rect,
-                                    'x0': sub_rect.x0,
-                                    'is_part': False,
-                                    'is_roman': False,
-                                    'level': 2
-                                })
+                                sub_rects = _get_sub_topic_rects(sub_title)
+                                for sub_r in sub_rects:
+                                    toc_entries.append({
+                                        'title': clean_toc_title(sub_title),
+                                        'printed_page': sub_page,
+                                        'source_page': p_idx,
+                                        'rect': sub_r,
+                                        'x0': sub_r.x0,
+                                        'is_part': False,
+                                        'is_roman': False,
+                                        'level': 2
+                                    })
                     i = k
                     continue
 
@@ -1255,21 +1295,39 @@ def find_title_on_page(page, title):
     # 1. Direct search for full title (PyMuPDF search_for returns a rect list for multi-line wraps)
     rects = page.search_for(norm_title, clip=header_clip)
     if not rects:
-        # Try stripping leading label/prefix like 'Introduction: ', 'Postscript: ', 'CHAPTER 1. '
-        clean_title = re.sub(r'^(?:(?:chapter|part|section)\s+)?(?:\d+|[ivxlcdm]+)[\.:\s\-–—]+\s*', '', norm_title, flags=re.I).strip()
+        # Colons/dashes in TOC (e.g. "Title: Subtitle") often correspond to line breaks without colon on the page
+        clean_colons = re.sub(r'[:\-\–—]', ' ', norm_title)
+        clean_colons = re.sub(r'\s+', ' ', clean_colons).strip()
+        rects = page.search_for(clean_colons, clip=header_clip)
+    if not rects:
+        # Try stripping leading label/prefix like 'Introduction: ', 'Postscript: ', 'CHAPTER 1. ', 'Appendix D '
+        clean_title = re.sub(r'^(?:(?:chapter|part|section|appendix)\s+)?(?:\d+|[ivxlcdm]+|[a-z]\b)[\.:\s\-–—\x00-\x1f]+\s*', '', norm_title, flags=re.I).strip()
         if not clean_title or clean_title == norm_title:
-            clean_title = re.sub(r'^[a-zA-Z0-9\s]+:\s*', '', norm_title).strip()
+            clean_title = re.sub(r'^(?:introduction|foreword|preface|postscript|appendix|contents):\s*', '', norm_title, flags=re.I).strip()
         if clean_title and clean_title != norm_title:
             rects = page.search_for(clean_title, clip=header_clip)
 
     if rects:
-        # If multiple rects were returned for a wrapped title, merge them into a single bounding rect
-        # Exclude an isolated small chapter label at the top if it is separated from the main title box
-        res = fitz.Rect()
-        for r in rects:
-            if len(rects) > 1 and r.height < 15 and r.y1 < rects[-1].y0 - 8:
-                continue
-            res |= r
+        # PyMuPDF search_for returns all occurrences on the page.
+        # Group returned rects into contiguous vertical clusters (gap <= 20pt) representing distinct occurrences/wrapped headings.
+        # This prevents unioning heading text with body text mentions lower on the page (e.g. Part II description).
+        sorted_rects = sorted(rects, key=lambda r: (r.y0, r.x0))
+        clusters = [[sorted_rects[0]]]
+        for r in sorted_rects[1:]:
+            if -15 <= r.y0 - clusters[-1][-1].y1 <= 25:
+                clusters[-1].append(r)
+            else:
+                clusters.append([r])
+
+        cluster_rects = []
+        for c in clusters:
+            cr = fitz.Rect(c[0])
+            for r in c[1:]:
+                cr |= r
+            cluster_rects.append(cr)
+
+        # Pick the cluster with the largest height (dominant heading font size) or topmost in header
+        res = max(cluster_rects, key=lambda cr: (cr.height, -cr.y0))
 
         # Check if page has a separate CHAPTER label and number adjacent to this title
         # (e.g. 'CHAPTER\n1' graphic block placed next to the chapter title)
@@ -1297,13 +1355,14 @@ def find_title_on_page(page, title):
     try:
         blocks = page.get_text('dict')['blocks']
         norm_title_nfkd = unicodedata.normalize('NFKD', norm_title)
-        clean_title = re.sub(r'^(?:(?:chapter|part|section)\s+)?(?:\d+|[ivxlcdm]+)[\.:\s\-–—]+\s*', '', norm_title, flags=re.I).strip()
+        clean_title = re.sub(r'^(?:(?:chapter|part|section|appendix)\s+)?(?:\d+|[ivxlcdm]+|[a-z]\b)[\.:\s\-–—\x00-\x1f]+\s*', '', norm_title, flags=re.I).strip()
         clean_words = set(re.findall(r'[a-zA-Z0-9]+', clean_title.lower()))
         title_words = set(re.findall(r'[a-zA-Z0-9]+', norm_title_nfkd.lower()))
-        m_ch_num = re.search(r'\b(?:CHAPTER|PART|SECTION)?\s*(\d+|[IVXLCDM]+)\b', norm_title_nfkd, re.IGNORECASE)
+        m_ch_num = re.search(r'\b(?:CHAPTER|PART|SECTION|APPENDIX)?\s*(\d+|[IVXLCDM]+|[A-Z])\b', norm_title_nfkd, re.IGNORECASE)
         if m_ch_num:
             title_words.add(m_ch_num.group(1).lower())
         title_words.add('chapter')
+        title_words.add('appendix')
 
         matching_rects = []
         for b in blocks:
@@ -1311,6 +1370,8 @@ def find_title_on_page(page, title):
                 continue
             for l in b.get('lines', []):
                 raw_line = ''.join(s['text'] for s in l.get('spans', []))
+                raw_line = raw_line.replace('\xad', '').replace('\u00ad', '').replace('\u200b', '')
+                raw_line = re.sub(r'[\x00-\x1f\x7f]', ' ', raw_line)
                 line_text = unicodedata.normalize('NFKD', raw_line).strip()
                 if not line_text:
                     continue
@@ -1324,22 +1385,22 @@ def find_title_on_page(page, title):
                 if line_words and line_words.issubset(title_words):
                     spans = l.get('spans', [])
                     max_s = max((s.get('size', 0) for s in spans), default=0)
-                    is_label = bool(re.match(r'^(?:chapter|part|section|postscript|introduction|preface|foreword|acknowledgements|contents|index)\b', line_text, re.I))
+                    is_label = bool(re.match(r'^(?:chapter|part|section|appendix|postscript|introduction|preface|foreword|acknowledgements|contents|index)\b', line_text, re.I))
                     if max_s >= 12.0 or is_label or (clean_words and line_words.issubset(clean_words)):
                         matching_rects.append(fitz.Rect(l['bbox']))
 
         if matching_rects:
-            # Sort by vertical position and merge only strictly contiguous lines (gap < 20pt)
+            # Sort by vertical position and merge only strictly contiguous lines (gap <= 25pt, allowing slight bbox overlap)
             # Never union across body text gaps!
             matching_rects.sort(key=lambda r: r.y0)
             res = fitz.Rect(matching_rects[0])
             for extra in matching_rects[1:]:
-                if 0 <= (extra.y0 - res.y1) < 20 and (res | extra).height <= 85.0:
+                if -15 <= (extra.y0 - res.y1) <= 25 and (res | extra).height <= 220.0:
                     res |= extra
-                elif extra.y0 > res.y1 + 20:
+                elif extra.y0 > res.y1 + 25:
                     # Gap between lines means body text or footnote -> stop merging!
                     break
-            if res.height <= 85.0:
+            if res.height <= 220.0:
                 return res
     except Exception:
         pass
@@ -1348,7 +1409,7 @@ def find_title_on_page(page, title):
         if not r_list: return None
         res = fitz.Rect(r_list[0])
         for extra in r_list[1:]:
-            if 0 <= (extra.y0 - res.y1) < 25 and abs(extra.x0 - res.x0) < 50:
+            if -15 <= (extra.y0 - res.y1) <= 25 and abs(extra.x0 - res.x0) < 50:
                 res |= extra
         return res
 
@@ -1445,10 +1506,21 @@ def find_subheading_on_page(page, title: str):
 
     cands = page.search_for(norm_title)
     if not cands:
+        clean_colons = re.sub(r'[:\-\–—]', ' ', norm_title)
+        clean_colons = re.sub(r'\s+', ' ', clean_colons).strip()
+        cands = page.search_for(clean_colons)
+    if not cands:
         clean_hyphens = norm_title.replace('- ', '-').replace(' -', '-')
         cands = page.search_for(clean_hyphens)
+    clean_title = re.sub(r'^(?:(?:chapter|part|section)\s+)?(?:\d+|[ivxlcdm]+)[\.:\s\-–—]+\s*', '', norm_title, flags=re.I).strip()
+    if not cands and clean_title and clean_title != norm_title:
+        cands = page.search_for(clean_title)
+        if not cands:
+            clean_hyphens = clean_title.replace('- ', '-').replace(' -', '-')
+            cands = page.search_for(clean_hyphens)
     if not cands:
-        words = [w for w in norm_title.split() if len(w) > 2]
+        search_base = clean_title if clean_title else norm_title
+        words = [w for w in search_base.split() if len(w) > 2]
         if len(words) >= 3:
             cands = page.search_for(' '.join(words[:3]))
         elif len(words) >= 2:
@@ -1458,55 +1530,75 @@ def find_subheading_on_page(page, title: str):
         return None
 
     if len(cands) == 1:
-        return cands[0]
+        cand = fitz.Rect(cands[0])
+    else:
+        # Multiple candidates found (e.g. heading + body text mentions)
+        # Score each candidate to identify the TRUE heading
+        blocks = page.get_text('dict')['blocks']
+        scored = []
 
-    # Multiple candidates found (e.g. heading + body text mentions)
-    # Score each candidate to identify the TRUE heading
-    blocks = page.get_text('dict')['blocks']
-    scored = []
+        for r in cands:
+            best_span = None
+            is_standalone = False
+            for b in blocks:
+                if b.get('type') == 0:
+                    for l in b['lines']:
+                        line_txt = ''.join(s['text'] for s in l['spans']).strip()
+                        for s in l['spans']:
+                            sr = fitz.Rect(s['bbox'])
+                            if sr.intersects(r) and (sr.intersect(r).get_area() / r.get_area() > 0.4):
+                                best_span = s
+                                if line_txt.lower() == norm_title.lower() or abs(len(line_txt) - len(norm_title)) < 10:
+                                    is_standalone = True
+                                break
+                        if best_span: break
+                if best_span: break
 
-    for r in cands:
-        best_span = None
-        is_standalone = False
+            font_size = best_span['size'] if best_span else 9.0
+            font_name = best_span['font'].lower() if best_span else ''
+            is_bold = any(k in font_name for k in ['bold', 'medium', 'heavy', 'black', 'semibold'])
+
+            score = font_size
+            if is_bold:
+                score += 5.0
+            if is_standalone:
+                score += 10.0
+
+            scored.append((score, r, is_standalone, font_size))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_r, best_standalone, best_size = scored[0]
+
+        # For multi-line subheadings, only merge candidate rects that have matching heading score/size
+        # (NEVER merge body-text occurrences of the words into the heading link!)
+        cand = fitz.Rect(best_r)
+        for score, r, is_stand, size in scored[1:]:
+            if score < best_score - 3.0 or size < best_size - 1.0:
+                continue
+            vertical_dist = r.y0 - cand.y1
+            if -10 <= vertical_dist < 25 and (abs(r.x0 - cand.x0) < 100 or abs(r.x1 - cand.x1) < 100):
+                cand |= r
+
+    # Expand candidate to include continuation lines strictly belonging to multi-line headings
+    target_words = set(re.findall(r'[a-zA-Z0-9]+', (clean_title or norm_title).lower()))
+    if len(target_words) >= 2:
+        blocks = page.get_text('dict')['blocks']
         for b in blocks:
             if b.get('type') == 0:
                 for l in b['lines']:
-                    line_txt = ''.join(s['text'] for s in l['spans']).strip()
-                    for s in l['spans']:
-                        sr = fitz.Rect(s['bbox'])
-                        if sr.intersects(r) and (sr.intersect(r).get_area() / r.get_area() > 0.4):
-                            best_span = s
-                            if line_txt.lower() == norm_title.lower() or abs(len(line_txt) - len(norm_title)) < 10:
-                                is_standalone = True
-                            break
-                    if best_span: break
-            if best_span: break
+                    lr = fitz.Rect(l['bbox'])
+                    l_txt = ''.join(s['text'] for s in l['spans']).strip()
+                    l_words = set(re.findall(r'[a-zA-Z0-9]+', l_txt.lower()))
+                    if not l_words or not l_words.issubset(target_words):
+                        continue
+                    l_font_size = max((s.get('size', 0) for s in l.get('spans', [])), default=0)
+                    if 'best_size' in locals() and best_size and l_font_size < best_size - 1.5:
+                        continue
+                    if lr.intersects(cand) or (0 <= lr.y0 - cand.y1 < 25 and abs(lr.x0 - cand.x0) < 80):
+                        if (cand | lr).height <= 140.0:
+                            cand |= lr
 
-        font_size = best_span['size'] if best_span else 9.0
-        font_name = best_span['font'].lower() if best_span else ''
-        is_bold = any(k in font_name for k in ['bold', 'medium', 'heavy', 'black', 'semibold'])
-
-        score = font_size
-        if is_bold:
-            score += 5.0
-        if is_standalone:
-            score += 10.0
-
-        scored.append((score, r))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    best_score, best_r = scored[0]
-
-    # For multi-line subheadings, merge candidate rects that are contiguous vertically
-    # (either overlapping or line spacing < 25pt) and part of the same heading block (horizontal offset < 100pt)
-    combined = fitz.Rect(best_r)
-    for score, r in scored[1:]:
-        vertical_dist = r.y0 - combined.y1
-        # Accept vertically overlapping or adjacent lines up to 25pt gap
-        if -10 <= vertical_dist < 25 and (abs(r.x0 - combined.x0) < 100 or abs(r.x1 - combined.x1) < 100):
-            combined |= r
-
-    return combined
+    return cand
 
 def determine_hierarchy(toc_entries):
     """
@@ -1898,6 +1990,8 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
                     else:
                         level = level + 1
             target_page_1based = entry['target_p_idx'] + 1
+            if final_bookmarks and final_bookmarks[-1][1] == entry['title'] and final_bookmarks[-1][2] == target_page_1based:
+                continue
             final_bookmarks.append([level, entry['title'], target_page_1based])
 
     if back_cover:
@@ -1967,12 +2061,16 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
     primary_toc_pages = detailed_toc_pages if has_brief_and_detailed else toc_page_set
 
     if not analyze_only and not preserve_existing:
-        # Clean up existing back-links from body pages back to TOC pages ONLY if not preserving existing
+        # Clean up existing TOC links and back-links ONLY if not preserving existing
         for p_idx in range(len(doc)):
-            if p_idx not in toc_page_set:
-                p = doc[p_idx]
-                for l in p.get_links():
-                    if l.get('kind') == fitz.LINK_GOTO and l.get('page') in toc_page_set:
+            p = doc[p_idx]
+            for l in p.get_links():
+                if l.get('kind') == fitz.LINK_GOTO:
+                    # On body pages: delete backlinks to TOC
+                    if p_idx not in toc_page_set and l.get('page') in toc_page_set:
+                        p.delete_link(l)
+                    # On TOC pages: delete outgoing links to body pages
+                    elif p_idx in toc_page_set and l.get('page') not in toc_page_set:
                         p.delete_link(l)
     
     for idx, entry in enumerate(toc_entries):
@@ -2082,7 +2180,11 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
 
         if link_type == "two_way" and not is_cross_toc and not skip_brief_backlink:
                 # Distinguish major Chapter/Part/Section headings vs in-body subheadings
-                is_major_heading = bool(re.match(r'^(?:chapter|part|section|appendix|introduction|conclusion|bibliography|filmography|index|preface|foreword|glossary)\b', entry['title'].strip(), re.IGNORECASE))
+                is_major_heading = (
+                    entry.get('level') == 1
+                    or entry.get('is_part', False)
+                    or bool(re.match(r'^(?:chapter|part|section|appendix|introduction|conclusion|bibliography|filmography|index|preface|foreword|glossary|\d+[\.\s]|[ivxlcdm]+[\.\s])\b', entry['title'].strip(), re.IGNORECASE))
+                )
                 
                 if is_major_heading:
                     title_rect = find_title_on_page(target_page, entry['title'])
@@ -2095,25 +2197,50 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
                     if title_rect is None:
                         title_rect = find_title_on_page(target_page, entry['title'])
 
-                # Strict height cap: a title/heading backlink rect must NEVER exceed 85pt height
-                if title_rect is not None and title_rect.height > 85.0:
-                    # Fallback to subheading search or clamp
+                # Height cap: a single sub-heading backlink rect shouldn't cover whole page column
+                if not is_major_heading and title_rect is not None and title_rect.height > 150.0:
                     sub_r = find_subheading_on_page(target_page, entry['title'])
-                    if sub_r is not None and sub_r.height <= 85.0:
+                    if sub_r is not None and sub_r.height <= 150.0:
                         title_rect = sub_r
                     else:
-                        title_rect = fitz.Rect(title_rect.x0, title_rect.y0, title_rect.x1, min(title_rect.y1, title_rect.y0 + 50.0))
+                        title_rect = fitz.Rect(title_rect.x0, title_rect.y0, title_rect.x1, min(title_rect.y1, title_rect.y0 + 120.0))
+                elif is_major_heading and title_rect is not None and title_rect.height > 260.0:
+                    title_rect = fitz.Rect(title_rect.x0, title_rect.y0, title_rect.x1, min(title_rect.y1, title_rect.y0 + 220.0))
 
                 if title_rect is not None:
                     # Expand title_rect upwards to also cover any associated CHAPTER / PART / SECTION banner
+                    # (including spaced tracking letters 'C H A P T E R', 'PART I', 'CHAPTER ONE', or standalone numbers/labels)
                     # placed directly above the title within the top 50% of the page
                     target_page_height = target_page.rect.height
+                    word_num_pat = r'(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)'
+                    banner_re = re.compile(
+                        rf'^(?:'
+                        rf'c\s*h\s*a\s*p\s*t\s*e\s*r(?:\s*.*)?'
+                        rf'|p\s*a\s*r\s*t(?:\s*.*)?'
+                        rf'|s\s*e\s*c\s*t\s*i\s*o\s*n(?:\s*.*)?'
+                        rf'|appendix(?:\s*.*)?'
+                        rf'|{word_num_pat}'
+                        rf'|(?:\d{{1,3}}\s*)+'
+                        rf'|[ivxlcdm]+'
+                        rf')$',
+                        re.IGNORECASE
+                    )
+                    banner_cands = []
                     for b in target_page.get_text('blocks'):
-                        if b[1] < title_rect.y0 and b[1] < target_page_height * 0.50 and (title_rect.y0 - b[3] <= 40):
-                            b_text = b[4].strip()
-                            # Check if block matches chapter/part number banner (e.g. 'CHAPTER 1', 'PART I', 'SECTION 1')
-                            if re.match(r'^(?:chapter\s+\d+|part\s+[ivxlcdm\d]+|section\s+\d+|appendix\b)', b_text, re.IGNORECASE):
-                                title_rect = fitz.Rect(title_rect) | fitz.Rect(b[:4])
+                        if b[1] < title_rect.y0 and b[1] < target_page_height * 0.50:
+                            b_text = re.sub(r'\s+', ' ', b[4]).strip()
+                            clean_b = re.sub(r'(?<=\b[A-Za-z])\s+(?=[A-Za-z]\b)', '', b_text)
+                            if banner_re.match(clean_b) or banner_re.match(b_text):
+                                banner_cands.append(b)
+
+                    # Sort by bottom edge descending (closest to title first)
+                    banner_cands.sort(key=lambda b: b[3], reverse=True)
+                    curr_top = title_rect.y0
+                    for b in banner_cands:
+                        gap = curr_top - b[3]
+                        if -15 <= gap <= 95:
+                            title_rect = fitz.Rect(title_rect) | fitz.Rect(b[:4])
+                            curr_top = min(curr_top, b[1])
                     # Check if this chapter title already has a two-way link to a TOC page
                     # (we preserve the link to the first/primary TOC instead of overwriting it).
                     already_linked_to_prior_toc = False
@@ -2140,6 +2267,7 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
                                 "page": source_page_idx
                             }
                             target_page.insert_link(back_link_dict)
+                            existing_target_links.append(back_link_dict)
                         two_way_count += 1
                         link_details.append({
                             "type": "two_way",
