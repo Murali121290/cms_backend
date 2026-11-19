@@ -1319,8 +1319,10 @@ def get_validation_diff(
         if project_obj and report.get("success"):
             if report.get("status") == "passed":
                 project_obj.validation_status = "Passed"
+                project_obj.status = "Validated"
             elif report.get("status") == "warnings":
                 project_obj.validation_status = "Passed"
+                project_obj.status = "Validated"
             else:
                 project_obj.validation_status = "Failed"
             db.commit()

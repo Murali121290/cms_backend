@@ -28,6 +28,7 @@ import {
   ChevronRight,
   Folder,
   CornerDownRight,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -342,7 +343,7 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
           </div>
         </div>
 
-        {/* Assignee + Status badge row */}
+        {/* Assignee + Status badge / Download row */}
         <div className="mt-3 flex items-center justify-between text-[11px] gap-2">
           <div className="flex items-center gap-1 text-muted min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
             <UserIcon size={12} className="text-muted/70 shrink-0" />
@@ -352,7 +353,32 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
               users={users}
             />
           </div>
-          <ValidationBadge status={project.validation_status} />
+          {(() => {
+            const isCompleted =
+              project.status === 'Glossary Linked' ||
+              project.validation_status === 'Completed' ||
+              project.validation_status === 'Passed' ||
+              project.validation_status === 'pass' ||
+              project.validation_status === 'validated' ||
+              !!project.completed_at;
+
+            if (isCompleted) {
+              return (
+                <a
+                  href={`/api/v2/post-prod/web-pdf-processor/projects/${project.id}/final-pdf`}
+                  download
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 border border-emerald-500/30 transition-colors shrink-0"
+                  title="Download Final Web PDF"
+                >
+                  <Download size={11} />
+                  <span>Download</span>
+                </a>
+              );
+            }
+
+            return <ValidationBadge status={project.validation_status} />;
+          })()}
         </div>
 
         {/* Progress bar visual indicator */}
@@ -371,15 +397,28 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
               'Crossref Linked': 10,
               'Index Linked': 11,
               'Glossary Linked': 12,
+              'Validated': 13,
             };
-            const currentStep = statusSteps[project.status] || 0;
-            const progressPercent = (currentStep / 12) * 100;
+            const isProjectCompleted =
+              project.status === 'Glossary Linked' ||
+              project.status === 'Validated' ||
+              project.validation_status === 'Completed' ||
+              project.validation_status === 'Passed' ||
+              project.validation_status === 'pass' ||
+              project.validation_status === 'validated' ||
+              !!project.completed_at;
+            let currentStep = statusSteps[project.status] || 0;
+            // If project is marked completed or validated, ensure 13/13 is represented
+            if (isProjectCompleted && currentStep < 13) {
+              currentStep = 13;
+            }
+            const progressPercent = Math.min((currentStep / 13) * 100, 100);
 
             return (
               <>
                 <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
                   <span>Progress</span>
-                  <span>{currentStep}/12 Steps · {Math.round(progressPercent)}%</span>
+                  <span>{currentStep}/13 Steps · {Math.round(progressPercent)}%</span>
                 </div>
                 <div className="h-2 w-full bg-border rounded-full overflow-hidden">
                   <div
@@ -393,8 +432,38 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
         </div>
       </div>
 
+      {/* Timeline Dates: Assigned, Started, Completed */}
+      {(project.assigned_at || project.started_at || project.completed_at) && (
+        <div className="mt-2.5 pt-2 border-t border-border/40 grid grid-cols-2 gap-y-1 gap-x-2 text-[10px]">
+          {project.assigned_at && (
+            <div className="flex flex-col">
+              <span className="text-muted/70 text-[9px]">Assigned</span>
+              <span className="text-text font-medium truncate" title={formatDateTime(project.assigned_at)}>
+                {formatDateTime(project.assigned_at)}
+              </span>
+            </div>
+          )}
+          {project.started_at && (
+            <div className="flex flex-col">
+              <span className="text-muted/70 text-[9px]">Started</span>
+              <span className="text-blue-600 font-medium truncate" title={formatDateTime(project.started_at)}>
+                {formatDateTime(project.started_at)}
+              </span>
+            </div>
+          )}
+          {project.completed_at && (
+            <div className="flex flex-col col-span-2">
+              <span className="text-muted/70 text-[9px]">Completed</span>
+              <span className="text-emerald-600 font-medium truncate" title={formatDateTime(project.completed_at)}>
+                {formatDateTime(project.completed_at)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Footer */}
-      <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
+      <div className="mt-3 pt-2 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
         <span>
           Created: {formatDateTime(project.uploaded_at)}
         </span>
@@ -1070,15 +1139,35 @@ export function PostProdWebPdfProcessor() {
     setEditingBookmarksList(list);
   };
 
-  const addBookmark = (index: number) => {
+  const bookmarkContainerRef = useRef<HTMLDivElement>(null);
+
+  const addBookmark = (index?: number) => {
     const list = [...editingBookmarksList];
-    const sourceBm = list[index];
-    list.splice(index + 1, 0, {
+    const targetIndex = (index !== undefined && index >= 0) ? index : list.length - 1;
+    const sourceBm = targetIndex >= 0 ? list[targetIndex] : null;
+    const insertAt = targetIndex >= 0 ? targetIndex + 1 : 0;
+
+    const newBm: BookmarkItem = {
       title: 'New Bookmark',
       level: sourceBm ? sourceBm.level : 1,
-      page: sourceBm ? sourceBm.page : 1
-    });
+      page: sourceBm ? sourceBm.page : (previewPage ?? 1)
+    };
+
+    list.splice(insertAt, 0, newBm);
     setEditingBookmarksList(list);
+
+    // Scroll to the newly added bookmark and focus its title input
+    setTimeout(() => {
+      if (bookmarkContainerRef.current) {
+        const items = bookmarkContainerRef.current.querySelectorAll<HTMLInputElement>('input[data-bookmark-title]');
+        if (items.length > insertAt) {
+          const input = items[insertAt];
+          input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          input.focus();
+          input.select();
+        }
+      }
+    }, 100);
   };
 
   // ── QUICK BOOKMARK SHORTCUT (Ctrl + B / Cmd + B for Windows & Mac) ────────
@@ -1158,7 +1247,8 @@ export function PostProdWebPdfProcessor() {
     setLinksAnalysisStatus(null);
     setLinksStatus(null);
     try {
-      const result = await generateLinks(selectedProject.id, targetType === 'none' ? 'one_way' : targetType, true, preserveExistingLinks);
+      const targetLinkType: 'one_way' | 'two_way' = targetType === 'two_way' ? 'two_way' : 'one_way';
+      const result = await generateLinks(selectedProject.id, targetLinkType, true, preserveExistingLinks);
       setLinksAnalysisStatus(result);
       toast.success('Link analysis complete');
       if (result.not_linked === 0 || result.total_links === 0) {
@@ -1669,23 +1759,30 @@ export function PostProdWebPdfProcessor() {
                     <span>Drag ⋮⋮ to reorder • ◀ ▶ to change levels</span>
                     <button
                       type="button"
-                      onClick={() => addBookmark(editingBookmarksList.length - 1)}
-                      className="text-primary hover:text-primary/80 font-bold"
+                      onClick={() => addBookmark()}
+                      className="text-primary hover:text-primary/80 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
                     >
                       + Add
                     </button>
                   </div>
 
                   {/* Scrollable draggable bookmarks tree */}
-                  <div className="flex-1 overflow-y-auto p-2 space-y-1 select-none">
+                  <div ref={bookmarkContainerRef} className="flex-1 overflow-y-auto p-2 space-y-1 select-none">
                     {loadingBookmarks ? (
                       <div className="py-16 flex flex-col items-center justify-center gap-2 text-gray-400">
                         <RefreshCw size={20} className="animate-spin text-primary" />
                         <span className="text-xs">Loading bookmarks...</span>
                       </div>
                     ) : editingBookmarksList.length === 0 ? (
-                      <div className="p-6 text-center text-gray-400 text-xs">
-                        No bookmarks found. Generate or add one!
+                      <div className="p-6 text-center text-gray-400 text-xs flex flex-col items-center gap-2">
+                        <span>No bookmarks found.</span>
+                        <button
+                          type="button"
+                          onClick={() => addBookmark()}
+                          className="px-2.5 py-1 text-xs bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 rounded font-semibold cursor-pointer"
+                        >
+                          + Add First Bookmark
+                        </button>
                       </div>
                     ) : (
                       editingBookmarksList.map((bm, index) => {
@@ -1753,6 +1850,7 @@ export function PostProdWebPdfProcessor() {
                             {/* Bookmark Title */}
                             <input
                               type="text"
+                              data-bookmark-title
                               value={bm.title}
                               onClick={(e) => e.stopPropagation()}
                               onChange={(e) => {
@@ -1773,6 +1871,7 @@ export function PostProdWebPdfProcessor() {
                               <input
                                 type="number"
                                 min="1"
+                                data-bookmark-page
                                 value={bm.page}
                                 onChange={(e) => {
                                   const list = [...editingBookmarksList];
@@ -1787,6 +1886,19 @@ export function PostProdWebPdfProcessor() {
                                 className="w-10 text-[10px] font-mono font-bold text-gray-200 bg-transparent outline-none text-center"
                               />
                             </div>
+
+                            {/* Add below button on hover */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                addBookmark(index);
+                              }}
+                              className="p-1 text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Add new bookmark below"
+                            >
+                              <Plus size={11} />
+                            </button>
 
                             {/* Delete button on hover */}
                             <button
@@ -2289,33 +2401,25 @@ export function PostProdWebPdfProcessor() {
                   <div className="p-4 border-t border-border flex flex-col gap-4">
                     {/* If existing bookmarks detected in PDF, present the choice */}
                     {existingBookmarksInfo && existingBookmarksInfo.has_existing_bookmarks && (
-                      <div className="p-3 rounded-lg border border-primary/20 bg-primary/5 flex flex-col gap-2.5">
+                      <div className="p-3 rounded-xl border border-primary/20 bg-primary/5 flex flex-col gap-2.5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <Bookmark size={15} className="text-primary" />
-                            <span className="text-xs font-bold text-text">
-                              Existing Bookmarks Detected ({existingBookmarksInfo.count} items)
+                            <span className="text-xs font-semibold text-text">
+                              Existing Bookmarks Detected
                             </span>
                           </div>
-                          <span className="text-[10px] font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                            In PDF
+                          <span className="text-[10px] font-bold bg-primary/15 text-primary px-2 py-0.5 rounded-full">
+                            {existingBookmarksInfo.count} items
                           </span>
                         </div>
-                        <p className="text-[11px] text-muted m-0">
-                          This PDF already contains <strong>{existingBookmarksInfo.count} bookmarks</strong>. You can set them as default to immediately unlock TOC links, or generate a fresh set from the Table of Contents.
-                        </p>
-                        {existingBookmarksInfo.sample_titles.length > 0 && (
-                          <div className="text-[10px] text-muted/80 bg-background/60 p-2 rounded border border-border/50 truncate">
-                            Sample: {existingBookmarksInfo.sample_titles.join(' • ')}
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2">
                           <Button
                             size="sm"
                             onClick={handleAcceptExistingBookmarks}
                             disabled={acceptingExistingBookmarks || generatingBookmarks}
-                            leftIcon={acceptingExistingBookmarks ? <RefreshCw size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-                            className="text-xs font-semibold h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white"
+                            leftIcon={acceptingExistingBookmarks ? <RefreshCw size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                            className="text-xs font-medium h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
                           >
                             {acceptingExistingBookmarks ? 'Saving...' : 'Set as Default'}
                           </Button>
@@ -2324,8 +2428,8 @@ export function PostProdWebPdfProcessor() {
                             variant="secondary"
                             onClick={handleGenerateBookmarks}
                             disabled={generatingBookmarks || acceptingExistingBookmarks}
-                            leftIcon={generatingBookmarks ? <RefreshCw size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                            className="text-xs font-semibold h-7 px-3"
+                            leftIcon={generatingBookmarks ? <RefreshCw size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                            className="text-xs font-medium h-7 px-3"
                           >
                             {generatingBookmarks ? 'Generating...' : 'Scan & Re-generate'}
                           </Button>
@@ -2333,21 +2437,16 @@ export function PostProdWebPdfProcessor() {
                       </div>
                     )}
 
-                    <div className="flex items-start justify-between shrink-0 gap-3">
-                      <div className="flex flex-col gap-3">
-                        <p className="text-[11px] text-muted m-0">
-                          Automatically scan for Table of Contents, extract headings, and generate PDF bookmarks.
-                        </p>
-                        <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-text">
-                          <input
-                            type="checkbox"
-                            checked={includeSubheadings}
-                            onChange={(e) => setIncludeSubheadings(e.target.checked)}
-                            className="rounded border-border bg-background focus:ring-primary accent-primary w-3.5 h-3.5"
-                          />
-                          Include Chapter Subheadings (H3)
-                        </label>
-                      </div>
+                    <div className="flex items-center justify-between shrink-0 gap-3">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-text">
+                        <input
+                          type="checkbox"
+                          checked={includeSubheadings}
+                          onChange={(e) => setIncludeSubheadings(e.target.checked)}
+                          className="rounded border-border bg-background focus:ring-primary accent-primary w-3.5 h-3.5"
+                        />
+                        Include Chapter Subheadings (H3)
+                      </label>
                       {(!existingBookmarksInfo || !existingBookmarksInfo.has_existing_bookmarks) && (
                         <Button
                           onClick={handleGenerateBookmarks}
@@ -2388,7 +2487,7 @@ export function PostProdWebPdfProcessor() {
                       </div>
                     )}
 
-                    {(['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) || bookmarksStatus?.success || existingBookmarksInfo?.has_existing_bookmarks) && !showEditBookmarksModal && (
+                    {(['Bookmarked', 'TOC Linked', 'URL Linked', 'Email Linked', 'Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) || bookmarksStatus?.success || existingBookmarksInfo?.has_existing_bookmarks) && (
                       <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">
                         <div className="flex items-center gap-1.5 text-[11px] text-muted">
                           <span className="flex items-center gap-1 font-mono text-[10px] bg-muted/30 px-1.5 py-0.5 rounded border border-border/60">
@@ -2401,202 +2500,20 @@ export function PostProdWebPdfProcessor() {
                           <span className="text-[11px] text-muted ml-0.5">Quick add</span>
                         </div>
                         <Button
-                          variant="secondary"
+                          variant={showEditBookmarksModal ? "primary" : "secondary"}
                           size="sm"
-                          onClick={handleOpenEditBookmarks}
+                          onClick={() => {
+                            if (showEditBookmarksModal) {
+                              setShowEditBookmarksModal(false);
+                            } else {
+                              handleOpenEditBookmarks();
+                            }
+                          }}
                           leftIcon={<Edit size={13} />}
                           className="text-xs h-7 px-2.5 font-medium"
                         >
-                          Edit Bookmarks
+                          {showEditBookmarksModal ? 'Editing Bookmarks' : 'Edit Bookmarks'}
                         </Button>
-                      </div>
-                    )}
-
-                    {showEditBookmarksModal && (
-                      <div className="mt-4 pt-4 border-t border-border flex flex-col gap-4">
-                        {loadingBookmarks ? (
-                          <div className="py-12 flex justify-center items-center">
-                            <RefreshCw size={24} className="animate-spin text-primary" />
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex items-center justify-between">
-                              <h4 className="font-bold text-sm text-text m-0">Edit Bookmarks</h4>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={async () => {
-                                    let text = window.getSelection()?.toString().trim() || '';
-                                    if (!text && navigator.clipboard && navigator.clipboard.readText) {
-                                      try {
-                                        text = (await navigator.clipboard.readText()).trim();
-                                      } catch {}
-                                    }
-                                    if (text) text = text.replace(/\s+/g, ' ');
-
-                                    const newTitle = text || 'New Bookmark';
-                                    const lastPage = editingBookmarksList.length > 0 ? editingBookmarksList[editingBookmarksList.length - 1].page : 1;
-                                    const updated = [...editingBookmarksList, { title: newTitle, level: 1, page: lastPage }];
-                                    setEditingBookmarksList(updated);
-                                    toast.success(`Added "${newTitle}"! Set page number and click Save Changes.`);
-
-                                    setTimeout(() => {
-                                      const pageInputs = document.querySelectorAll<HTMLInputElement>('input[data-bookmark-page]');
-                                      if (pageInputs.length > 0) {
-                                        const last = pageInputs[pageInputs.length - 1];
-                                        last.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                                        last.focus();
-                                        last.select();
-                                      }
-                                    }, 100);
-                                  }}
-                                  leftIcon={<Plus size={13} />}
-                                  className="text-xs h-6 px-2 font-medium"
-                                  title="Add new bookmark from selected or copied text"
-                                >
-                                  + Quick Add
-                                </Button>
-                              </div>
-                            </div>
-
-                            <div className="flex-1 max-h-[60vh] overflow-y-auto border border-border rounded-xl bg-background p-2 space-y-1.5 shadow-inner">
-                              {editingBookmarksList.length === 0 ? (
-                                <div className="p-8 flex flex-col items-center justify-center border border-dashed border-border rounded-lg bg-card text-center mt-2">
-                                  <p className="text-xs text-muted mb-3">No bookmarks found.</p>
-                                  <Button size="sm" variant="secondary" leftIcon={<Plus size={14} />} onClick={() => setEditingBookmarksList([{ title: 'New Bookmark', level: 1, page: 1 }])}>
-                                    Add Bookmark
-                                  </Button>
-                                </div>
-                              ) : (
-                                editingBookmarksList.map((bm, index) => {
-                                  const isDragging = draggedBookmarkIndex === index;
-                                  const isDragOver = dragOverIndex === index && draggedBookmarkIndex !== index;
-                                  const levelColors = [
-                                    'bg-blue-500/10 text-blue-500 border-blue-500/30',
-                                    'bg-purple-500/10 text-purple-500 border-purple-500/30',
-                                    'bg-amber-500/10 text-amber-500 border-amber-500/30',
-                                    'bg-emerald-500/10 text-emerald-500 border-emerald-500/30',
-                                    'bg-rose-500/10 text-rose-500 border-rose-500/30',
-                                    'bg-cyan-500/10 text-cyan-500 border-cyan-500/30',
-                                  ];
-                                  const badgeClass = levelColors[(bm.level - 1) % levelColors.length];
-
-                                  return (
-                                    <div
-                                      key={index}
-                                      draggable
-                                      onDragStart={(e) => handleBookmarkDragStart(e, index)}
-                                      onDragOver={(e) => handleBookmarkDragOver(e, index)}
-                                      onDrop={(e) => handleBookmarkDrop(e, index)}
-                                      onDragEnd={handleBookmarkDragEnd}
-                                      className={`flex items-center gap-2 p-1.5 rounded-lg border transition-all ${
-                                        isDragging ? 'opacity-30 border-dashed border-primary bg-primary/5' :
-                                        isDragOver ? 'border-primary ring-2 ring-primary/30 bg-primary/10' :
-                                        'border-border/60 hover:border-border hover:bg-muted/10 bg-card/60'
-                                      }`}
-                                      style={{ marginLeft: `${(bm.level - 1) * 1.25}rem` }}
-                                    >
-                                      {/* Drag Handle */}
-                                      <div
-                                        className="cursor-grab active:cursor-grabbing p-1 text-muted/50 hover:text-text rounded hover:bg-muted/20 shrink-0"
-                                        title="Drag up or down to reorder"
-                                      >
-                                        <GripVertical size={14} />
-                                      </div>
-
-                                      {/* Level Badge + Indent / Outdent */}
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${badgeClass} font-mono`} title={`Hierarchy Level ${bm.level}`}>
-                                          L{bm.level}
-                                        </span>
-                                        <div className="flex items-center bg-muted/20 rounded p-0.5 border border-border/40">
-                                          <button
-                                            onClick={() => changeBookmarkLevel(index, -1)}
-                                            disabled={bm.level <= 1}
-                                            className="p-1 hover:bg-background hover:text-primary rounded disabled:opacity-20 transition-colors"
-                                            title="Promote (Level Up / Outdent)"
-                                          >
-                                            <ArrowLeft size={11} />
-                                          </button>
-                                          <button
-                                            onClick={() => changeBookmarkLevel(index, 1)}
-                                            disabled={bm.level >= 6}
-                                            className="p-1 hover:bg-background hover:text-primary rounded disabled:opacity-20 rotate-180 transition-colors"
-                                            title="Demote (Indent / Child of above)"
-                                          >
-                                            <ArrowLeft size={11} />
-                                          </button>
-                                        </div>
-                                      </div>
-
-                                      {/* Bookmark Title */}
-                                      <div className="flex-1 min-w-0">
-                                        <input
-                                          type="text"
-                                          value={bm.title}
-                                          onChange={(e) => {
-                                            const list = [...editingBookmarksList];
-                                            list[index].title = e.target.value;
-                                            setEditingBookmarksList(list);
-                                          }}
-                                          className="w-full text-xs px-2 py-1 bg-transparent hover:bg-background border border-transparent hover:border-border rounded focus:border-primary focus:bg-background outline-none transition-colors font-medium text-text"
-                                          placeholder="Bookmark title..."
-                                        />
-                                      </div>
-
-                                      {/* Page Number & Actions */}
-                                      <div className="shrink-0 flex items-center gap-1.5">
-                                        <button
-                                          type="button"
-                                          onClick={() => setPreviewPage(bm.page)}
-                                          className="flex items-center bg-muted/20 hover:bg-muted/40 rounded px-1.5 py-0.5 border border-border/60 transition-colors"
-                                          title={`Jump PDF preview to page ${bm.page}`}
-                                        >
-                                          <span className="text-[10px] text-muted font-mono mr-1">p.</span>
-                                          <input
-                                            type="number"
-                                            min="1"
-                                            data-bookmark-page
-                                            value={bm.page}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onChange={(e) => {
-                                              const list = [...editingBookmarksList];
-                                              list[index].page = parseInt(e.target.value) || 1;
-                                              setEditingBookmarksList(list);
-                                            }}
-                                            className="w-9 text-[10px] font-mono font-bold text-text bg-transparent outline-none"
-                                          />
-                                        </button>
-                                        <button
-                                          onClick={() => addBookmark(index)}
-                                          className="p-1 text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded transition-colors"
-                                          title="Insert bookmark below"
-                                        >
-                                          <Plus size={13} />
-                                        </button>
-                                        <button
-                                          onClick={() => removeBookmark(index)}
-                                          className="p-1 text-muted hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
-                                          title="Delete bookmark"
-                                        >
-                                          <Trash2 size={13} />
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
-
-                            <div className="flex items-center justify-end gap-3 pt-2">
-                              <Button variant="ghost" size="sm" onClick={() => setShowEditBookmarksModal(false)} disabled={savingBookmarks} className="text-xs">Cancel</Button>
-                              <Button size="sm" onClick={handleSaveBookmarks} disabled={savingBookmarks || loadingBookmarks} leftIcon={savingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : undefined} className="text-xs">
-                                Save Changes
-                              </Button>
-                            </div>
-                          </>
-                        )}
                       </div>
                     )}
                   </div>

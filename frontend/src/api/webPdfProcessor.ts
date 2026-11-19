@@ -15,6 +15,9 @@ export interface WebPdfProject {
   uploaded_by_id?: number;
   uploaded_at: string;
   updated_at: string;
+  assigned_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
 }
 
 export async function listProjects(): Promise<WebPdfProject[]> {
@@ -205,6 +208,7 @@ export async function generateLinks(
   one_way_links: number; 
   two_way_links: number;
   existing_preserved?: number;
+  not_linked?: number;
   details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean; preserved?: boolean }[];
 }> {
   try {
