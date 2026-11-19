@@ -575,7 +575,7 @@
       "file_name_pattern": "*.xhtml",
       "rule_config": {
         "exclude_files": [
-          "cover*.xhtml"
+          "*cover*.xhtml"
         ]
       },
       "enabled": true,
