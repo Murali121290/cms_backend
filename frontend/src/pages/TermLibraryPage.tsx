@@ -215,9 +215,18 @@ function TermListCard({ list, canEdit, onOpen, onDelete }: {
   onOpen: () => void
   onDelete: () => void
 }) {
+  // Client-specific lists show the actual associated client's name
+  // (``Client.company`` on the backend) instead of the generic label.
+  // Falls back to ``Client`` when the backend returned ``null`` — covers
+  // dangling FKs (``ON DELETE SET NULL``) and any legacy row without a
+  // linked client — so the card never prints a misleading or empty name.
+  // Long names stay on one line via ``max-w`` + ``truncate``; the full
+  // string lives in the ``title`` attribute for hover.
+  const rawClientName = (list.client_name ?? '').trim()
+  const clientLabel = rawClientName || 'Client'
   const scopeMeta = list.scope === 'generic'
-    ? { Icon: Globe, label: 'Generic', cls: 'bg-sky-100 text-sky-700' }
-    : { Icon: Users, label: 'Client', cls: 'bg-violet-100 text-violet-700' }
+    ? { Icon: Globe, label: 'Generic', cls: 'bg-sky-100 text-sky-700', title: undefined as string | undefined }
+    : { Icon: Users, label: clientLabel, cls: 'bg-violet-100 text-violet-700', title: rawClientName || undefined }
   return (
     <div
       onClick={onOpen}
@@ -231,8 +240,13 @@ function TermListCard({ list, canEdit, onOpen, onDelete }: {
           <FileSpreadsheet size={20} />
         </div>
         <div className="flex items-center gap-1.5">
-          <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 ${scopeMeta.cls}`}>
-            <scopeMeta.Icon size={10} /> {scopeMeta.label}
+          <span
+            className={`text-[11px] px-2 py-0.5 rounded-full font-semibold inline-flex items-center gap-1 max-w-[180px] ${scopeMeta.cls}`}
+            title={scopeMeta.title}
+            data-testid={`termlist-scope-${list.id}`}
+          >
+            <scopeMeta.Icon size={10} className="shrink-0" />
+            <span className="truncate">{scopeMeta.label}</span>
           </span>
           {canEdit && (
             <button

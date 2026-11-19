@@ -29,7 +29,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.domains.auth.security import get_current_user_from_cookie
@@ -121,12 +121,27 @@ class AssignTermListsRequest(BaseModel):
 # ─── Serializers ──────────────────────────────────────────────────────────────
 
 def _ser_list(tl: TermList, *, assigned_project_ids: Optional[list[int]] = None) -> dict:
+    # Pull the associated client's display name (Client.company — the
+    # column marked "client name" on the model) via the TermList.client
+    # relationship. ``client_name`` stays ``None`` for scope='generic'
+    # rows AND for client-scoped rows whose FK is dangling (``ON DELETE
+    # SET NULL``) or whose linked client row disappeared — the Term
+    # Library card then falls back to the plain "Client" badge rather
+    # than displaying a misleading or empty name.
+    client_name: Optional[str] = None
+    if tl.client_id is not None:
+        linked = getattr(tl, "client", None)
+        if linked is not None:
+            raw = (getattr(linked, "company", None) or "").strip()
+            client_name = raw or None
+
     out = {
         "id": tl.id,
         "name": tl.name,
         "description": tl.description,
         "scope": tl.scope,
         "client_id": tl.client_id,
+        "client_name": client_name,
         "source_file": tl.source_file,
         "term_count": tl.term_count,
         "is_active": tl.is_active,
@@ -162,7 +177,10 @@ def list_term_lists(
     current_user: Optional[User] = Depends(get_current_user_from_cookie),
 ):
     _require_language_user(current_user)
-    q = db.query(TermList)
+    # Eager-load the client relationship so serialisation stays O(1)
+    # round-trips even when the library grows — the card badge reads
+    # ``TermList.client.company`` per row.
+    q = db.query(TermList).options(joinedload(TermList.client))
     if not include_inactive:
         q = q.filter(TermList.is_active == True)  # noqa: E712
     if scope:

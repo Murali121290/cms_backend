@@ -36,6 +36,7 @@ from app.processing.language_editing import (
 )
 from app.processing.language_editing.rules import load_rules_from_dict, load_house_style_from_dict
 from app.services.language_rule_service import (
+    DEFAULT_DASH_PROFILE,
     get_available_style_profiles,
     get_project_language_rules,
     get_project_language_rules_history,
@@ -325,8 +326,21 @@ def update_project_rules(
         existing = None
         dash_profile = body.dash_profile
         if dash_profile is None:
+            # Preserve an explicit admin-set profile, but DERIVE from the
+            # incoming ``profile_keys`` when the persisted value is the
+            # legacy default ``"all"`` (the only value today's Rules UI
+            # can produce). Without this, picking Chicago in the UI would
+            # silently keep the ``"all"`` profile and the engine would
+            # never fire the Chicago-specific en-dash rules. ``None`` is
+            # passed through to the service when neither the persisted
+            # value nor the new ``profile_keys`` yield a dash profile —
+            # the service then applies its own default.
             existing = existing or get_project_language_rules(db, project_id=project_id)
-            dash_profile = existing.get("dash_profile")
+            persisted = existing.get("dash_profile")
+            if persisted in (None, DEFAULT_DASH_PROFILE):
+                dash_profile = None   # let the service derive from pkeys
+            else:
+                dash_profile = persisted
         rule_overrides = body.rule_overrides
         if rule_overrides is None:
             existing = existing or get_project_language_rules(db, project_id=project_id)

@@ -533,7 +533,7 @@ def analyze(
 # ``app/processing/language_editing/`` in a way that changes finding
 # output. Not bumping means stale results linger until the file bytes
 # or user-visible configuration happens to change.
-CACHE_VERSION: str = "v7"  # bumped for Abbreviations Phase 4 (URL/email/code exclusion, table_note/figure_legend subroles, section scope_reset scaffolding)
+CACHE_VERSION: str = "v8"  # bumped for Hyphenation Step-7 overlap resolver, pipeline reorder (En_Dash_Terms → Detect_List → Dash_Rules), U+2010/U+2011 Detect_List matching, joint-eponym "both" surfacing, and profile_keys → dash_profile derivation
 
 
 # Rule IDs that emit findings with ``original == suggestion`` on
