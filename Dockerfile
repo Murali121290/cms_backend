@@ -36,6 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install @daisy/ace and epubchecker globally
 RUN npm install -g @daisy/ace epubchecker && npm cache clean --force
+# RUN npm config set strict-ssl false && \
+#     NODE_TLS_REJECT_UNAUTHORIZED=0 npm install -g @daisy/ace epubchecker && \
+#     npm cache clean --force
 
 # ImageMagick's default policy blocks PS/EPS/PDF as a security default. We need
 # EPS decoding for the Image Review & Editor's preview + convert pipeline, so

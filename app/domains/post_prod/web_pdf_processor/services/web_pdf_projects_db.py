@@ -1,18 +1,55 @@
+import zoneinfo
 from datetime import datetime, timezone
 from typing import Any, Optional
 from sqlalchemy.orm import Session
 from ..models import WebPdfProject, WebPdfHistory
 
+_KOLKATA_TZ = zoneinfo.ZoneInfo("Asia/Kolkata")
+
 
 def _iso_utc(dt_val: Optional[datetime]) -> Optional[str]:
     if not dt_val:
         return None
+    # Timestamps in the PostgreSQL DB are recorded in local Asia/Kolkata time without tzinfo.
+    # We attach the local timezone and convert to UTC before sending to frontend.
     if dt_val.tzinfo is None:
-        return dt_val.replace(tzinfo=timezone.utc).isoformat()
+        dt_val = dt_val.replace(tzinfo=_KOLKATA_TZ)
     return dt_val.astimezone(timezone.utc).isoformat()
 
 
-def _serialize(p: WebPdfProject) -> dict[str, Any]:
+def _get_project_timeline_meta(db: Session, project_ids: list[int]) -> dict[int, dict[str, Optional[str]]]:
+    if not project_ids:
+        return {}
+    from sqlalchemy import text
+    query = text("""
+        SELECT 
+            p.id,
+            COALESCE(
+                (SELECT max(h.created_at) FROM post_prod_web_pdf_history h WHERE h.project_id = p.id AND h.result_type = 'assignee_change' AND h.new_assignee IS NOT NULL),
+                CASE WHEN p.assignee IS NOT NULL THEN p.uploaded_at ELSE NULL END
+            ) as assigned_at,
+            (SELECT min(h.created_at) FROM post_prod_web_pdf_history h WHERE h.project_id = p.id AND h.result_type != 'assignee_change') as started_at,
+            CASE 
+                WHEN p.status IN ('Glossary Linked', 'Completed') 
+                     OR EXISTS (SELECT 1 FROM post_prod_web_pdf_history h WHERE h.project_id = p.id AND h.result_type IN ('glossary_links', 'final_validation'))
+                THEN (SELECT max(h.created_at) FROM post_prod_web_pdf_history h WHERE h.project_id = p.id AND h.result_type IN ('glossary_links', 'final_validation'))
+                ELSE NULL
+            END as completed_at
+        FROM post_prod_web_pdf_projects p
+        WHERE p.id IN :ids
+    """)
+    rows = db.execute(query.bindparams(ids=tuple(project_ids))).fetchall()
+    result = {}
+    for r in rows:
+        result[r[0]] = {
+            "assigned_at": _iso_utc(r[1]),
+            "started_at": _iso_utc(r[2]),
+            "completed_at": _iso_utc(r[3]),
+        }
+    return result
+
+
+def _serialize(p: WebPdfProject, meta: Optional[dict[str, Optional[str]]] = None) -> dict[str, Any]:
     return {
         "id": p.id,
         "client": p.client,
@@ -28,6 +65,9 @@ def _serialize(p: WebPdfProject) -> dict[str, Any]:
         "uploaded_by_id": p.uploaded_by_id,
         "uploaded_at": _iso_utc(p.uploaded_at),
         "updated_at": _iso_utc(p.updated_at),
+        "assigned_at": meta.get("assigned_at") if meta else None,
+        "started_at": meta.get("started_at") if meta else None,
+        "completed_at": meta.get("completed_at") if meta else None,
     }
 
 
@@ -38,7 +78,9 @@ def list_projects(db: Session) -> list[dict[str, Any]]:
         .order_by(WebPdfProject.uploaded_at.desc())
         .all()
     )
-    return [_serialize(p) for p in rows]
+    p_ids = [p.id for p in rows]
+    meta_map = _get_project_timeline_meta(db, p_ids)
+    return [_serialize(p, meta_map.get(p.id)) for p in rows]
 
 
 def get_project_by_id(db: Session, project_id: int) -> Optional[dict[str, Any]]:
@@ -47,7 +89,10 @@ def get_project_by_id(db: Session, project_id: int) -> Optional[dict[str, Any]]:
         .filter(WebPdfProject.id == project_id, WebPdfProject.is_deleted.is_(False))
         .first()
     )
-    return _serialize(p) if p else None
+    if not p:
+        return None
+    meta_map = _get_project_timeline_meta(db, [p.id])
+    return _serialize(p, meta_map.get(p.id))
 
 
 def get_project_by_folder(db: Session, folder_name: str) -> Optional[WebPdfProject]:
