@@ -1883,6 +1883,22 @@ def upload_epub(
     if not file.filename.endswith('.epub'):
         raise HTTPException(status_code=400, detail="File must be an EPUB")
 
+    # Reject EPUB file if it exceeds 100 MB
+    MAX_EPUB_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+    try:
+        file.file.seek(0, os.SEEK_END)
+        file_size = file.file.tell()
+        file.file.seek(0)
+    except Exception:
+        file_size = None
+
+    if file_size is not None and file_size > MAX_EPUB_SIZE_BYTES:
+        size_mb = round(file_size / (1024 * 1024), 2)
+        raise HTTPException(
+            status_code=400,
+            detail=f"EPUB file size ({size_mb} MB) exceeds the maximum allowed limit of 100 MB. Please reduce the file size and try again."
+        )
+
     settings = get_settings()
     upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
     bod_upload_dir = os.path.join(upload_dir, "bod")

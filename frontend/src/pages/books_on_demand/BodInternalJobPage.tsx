@@ -433,6 +433,14 @@ export function BodInternalJobPage() {
     if (!e.target.files || e.target.files.length === 0) return
     const file = e.target.files[0]
 
+    const MAX_EPUB_SIZE_BYTES = 100 * 1024 * 1024 // 100 MB
+    if (file.size > MAX_EPUB_SIZE_BYTES) {
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(2)
+      toast.error(`EPUB file size (${sizeMb} MB) exceeds the maximum allowed limit of 100 MB.`)
+      if (e.target) e.target.value = ''
+      return
+    }
+
     const formData = new FormData()
     formData.append('file', file)
 
