@@ -139,3 +139,76 @@ def validate_footnote_endnote_two_way(book_details):
         })
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-NOTE-001")
+def validate_numeric_footnotes(file_details, rule_config=None):
+    """
+    BOD-NOTE-001: Non-numeric footnotes check.
+    Guideline:
+    If necessary, non-numeric footnotes (like '*' e.g.) are to be transformed into
+    numeric footnotes that follow consecutive numbering per chapter.
+    (Find <li id="any character">* and show this as error)
+    """
+    issues = []
+    full_path = file_details.get("full_path") or ""
+    file_path = file_details.get("file_path") or file_details.get("relative_path") or ""
+    content = file_details.get("content")
+
+    if not content:
+        if full_path and os.path.exists(full_path):
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                return {"issues_count": 0, "issues": []}
+        else:
+            return {"issues_count": 0, "issues": []}
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
+
+    for li in soup.find_all("li"):
+        li_id = li.get("id")
+        if not li_id:
+            continue
+
+        raw_text = li.get_text()
+        stripped_text = raw_text.lstrip()
+
+        if stripped_text.startswith("*") or (stripped_text and stripped_text[0] in "*†‡§#"):
+            marker = stripped_text[0]
+            li_str = str(li)
+            # Short representation of the tag for snippet
+            opening_tag = re.search(r"<li[^>]*>", li_str)
+            opening_str = opening_tag.group(0) if opening_tag else f'<li id="{li_id}">'
+
+            line_number = None
+            if hasattr(li, "sourceline") and li.sourceline:
+                line_number = li.sourceline
+            else:
+                for idx, l in enumerate(lines, 1):
+                    if f'id="{li_id}"' in l or f"id='{li_id}'" in l:
+                        line_number = idx
+                        break
+
+            preview = stripped_text[:60] + ("..." if len(stripped_text) > 60 else "")
+            extract_str = f"{opening_str}{stripped_text[:30]}"
+
+            issues.append({
+                "type": "non_numeric_footnote",
+                "category": "Error",
+                "message": (
+                    f"Non-numeric footnote marker '{marker}' found in footnote/endnote item (<li id=\"{li_id}\">). "
+                    f"Non-numeric footnotes (like '*') must be transformed into numeric footnotes that follow consecutive numbering per chapter. "
+                    f"Guideline: In reflowable ePubs, footnotes and endnotes must use numeric identifiers and consecutive numbering per chapter."
+                ),
+                "file_path": file_path,
+                "line_number": line_number,
+                "extract": extract_str,
+                "snippet": preview
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+

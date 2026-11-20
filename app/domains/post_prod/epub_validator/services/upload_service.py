@@ -113,6 +113,16 @@ async def process_upload(
         epub_path = os.path.join(extract_folder, actual_epub_file)
         pdf_path = os.path.join(extract_folder, actual_pdf_file)
 
+        # Validate EPUB file size (must not exceed 100 MB)
+        MAX_EPUB_SIZE_BYTES = 100 * 1024 * 1024
+        epub_size = os.path.getsize(epub_path)
+        if epub_size > MAX_EPUB_SIZE_BYTES:
+            size_mb = round(epub_size / (1024 * 1024), 2)
+            return {
+                "status": False,
+                "message": f"EPUB file '{actual_epub_file}' size ({size_mb} MB) exceeds the maximum allowed limit of 100 MB."
+            }
+
         epub_extract_path = os.path.join(extract_folder, "epub")
         os.makedirs(epub_extract_path, exist_ok=True)
 

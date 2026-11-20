@@ -1140,6 +1140,114 @@ def validate_french_depot_legal(file_details, rule_config=None):
     return {"issues_count": 0, "issues": []}
 
 
+@rule("BOD-PRICE-001")
+def validate_no_price_symbols(file_details, rule_config=None):
+    """
+    BOD-PRICE-001: Look in Copyright Page and About the Author files.
+    Find Euro (€ / EUR), Dollar ($ / USD), Pound (£ / GBP) price symbols / amounts and highlight as Error.
+    Config-driven: regex loaded from rule_config.price_regex (or forbidden_symbols).
+    """
+    import os
+    full_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(full_path)
+    rel_path = file_details.get("relative_path") or file_name
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    price_regex_str = cfg.get("price_regex")
+
+    if not price_regex_str:
+        return {
+            "issues_count": 1,
+            "issues": [{
+                "rule_name": (rule_config.get("name") if rule_config and isinstance(rule_config, dict) else None) or "Price Symbol Check",
+                "type": "configuration_error",
+                "message": "Missing required 'price_regex' in rule_config for BOD-PRICE-001.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": 0,
+            }]
+        }
+
+    try:
+        price_regex = re.compile(price_regex_str, re.IGNORECASE)
+    except Exception as e:
+        return {
+            "issues_count": 1,
+            "issues": [{
+                "rule_name": (rule_config.get("name") if rule_config and isinstance(rule_config, dict) else None) or "Price Symbol Check",
+                "type": "configuration_error",
+                "message": f"Invalid 'price_regex' pattern in rule_config for BOD-PRICE-001: {e}",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": 0,
+            }]
+        }
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        soup = BeautifulSoup(content, "html.parser")
+    except Exception as e:
+        return {
+            "issues_count": 1,
+            "issues": [{
+                "type": "read_error",
+                "message": f"Could not read file '{file_name}': {e}",
+                "category": "Error",
+                "file_path": rel_path,
+            }]
+        }
+
+    lines = content.splitlines()
+
+    def get_line_num(node, matched_str):
+        parent = getattr(node, "parent", None)
+        line = getattr(parent, "sourceline", None) if parent else None
+        if not line:
+            for idx, l in enumerate(lines, 1):
+                if matched_str in l:
+                    return idx
+        return line or 1
+
+    issues = []
+    body = soup.find("body") or soup
+
+    for text_node in body.find_all(string=True):
+        parent = text_node.parent
+        # Skip script / style tags
+        if parent and parent.name in ["script", "style"]:
+            continue
+
+        node_str = str(text_node)
+        for m in price_regex.finditer(node_str):
+            matched = m.group(0).strip()
+            if not matched:
+                continue
+
+            line_num = get_line_num(text_node, matched)
+            start_ctx = max(0, m.start() - 25)
+            end_ctx = min(len(node_str), m.end() + 25)
+            snippet = node_str[start_ctx:end_ctx].strip()
+            parent_extract = str(parent)[:150] if parent else matched
+
+            issues.append({
+                "rule_name": (rule_config.get("name") if rule_config and isinstance(rule_config, dict) else None) or "Price Symbol Check",
+                "type": "forbidden_price_symbol_present",
+                "message": f"Price indication '{matched}' was found in '{file_name}'. Prices and currency symbols (€, $, £) are not allowed on the Copyright or About the Author pages. Please remove it.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "snippet": snippet,
+                "extract": parent_extract,
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+
 
 
 

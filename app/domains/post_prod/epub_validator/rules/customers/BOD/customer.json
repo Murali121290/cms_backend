@@ -559,6 +559,45 @@
       "category": "Copyright Check"
     },
     {
+      "id": "BOD-PRICE-001",
+      "name": "Price symbol check (Euro / Dollar / Pound)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml",
+        "*about*author*.xhtml",
+        "*About*Author*.xhtml",
+        "*uber*die*autor*.xhtml",
+        "*ber*die*autor*.xhtml",
+        "*ber*den*autor*.xhtml",
+        "*Die*Autoren*.xhtml",
+        "*die*autoren*.xhtml",
+        "*author*.xhtml",
+        "*Author*.xhtml",
+        "*autor*.xhtml",
+        "*Autor*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "price_regex": "(?:[€$£]|&euro;|&pound;|&dollar;|\\b(?:EUR|USD|GBP)\\b)\\s*\\d+(?:[.,]\\d+)?|\\d+(?:[.,]\\d+)?\\s*(?:[€$£]|&euro;|&pound;|&dollar;|\\b(?:EUR|USD|GBP)\\b)|[€$£]"
+      },
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
@@ -583,6 +622,35 @@
       "rule_config": {
         "max_file_size_mb": 30
       },
+      "category": "XHTML Check"
+    },
+    {
+      "id": "BOD-TAB-001",
+      "name": "Table row length, cell length, and column count check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "max_row_chars": 40,
+        "max_cell_chars": 30,
+        "max_columns": 4
+      },
+      "category": "XHTML Check"
+    },
+    {
+      "id": "BOD-PUNCT-001",
+      "name": "No space characters in front of question or exclamation marks check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
+      "id": "BOD-NOTE-001",
+      "name": "Non-numeric footnotes check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
       "category": "XHTML Check"
     },
     {
@@ -906,6 +974,43 @@
           "de": "\\b(?:siehe\\s+)?(?:(?:seiten?|s\\.)(?![a-zA-Z])[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-\\u2013][ \\t]*\\d{1,4})?|(?:kapitel|kap\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:abbildung|abb\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:tabelle|tab\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:anlage|anl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:tafel|taf\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|karte(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|kasten(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:abschnitt|abschn\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:teil|tl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:anhang|anh\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:illustration|illus\\.|ill\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{1,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig)(?:[ \\t]*[\\-\\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(anhang))\\b"
         }
       },
+      "category": "Link Check"
+    },
+    {
+      "id": "BOD-PAGE-001",
+      "name": "Page reference arrow substitution and linking check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*_[cC]hapter*.xhtml",
+        "*_[cC]hap*.xhtml",
+        "*_[cC]h*.xhtml",
+        "*[cC]hapter*.xhtml",
+        "*[cC]hap*.xhtml",
+        "*[cC]h[0-9]*.xhtml",
+        "[0-9]*.xhtml",
+        "*_[kK]apitel*.xhtml",
+        "*[kK]apitel*.xhtml",
+        "*_[cC]hapitre*.xhtml",
+        "*[cC]hapitre*.xhtml",
+        "*_[lL]uku*.xhtml",
+        "*[lL]uku*.xhtml",
+        "*_[cC]apitolo*.xhtml",
+        "*[cC]apitolo*.xhtml",
+        "*_[cC]apítulo*.xhtml",
+        "*[cC]apítulo*.xhtml",
+        "*_[cC]apitulo*.xhtml",
+        "*[cC]apitulo*.xhtml",
+        "*_[kK]apittel*.xhtml",
+        "*[kK]apittel*.xhtml",
+        "*_[hH]oofdstuk*.xhtml",
+        "*[hH]oofdstuk*.xhtml",
+        "*_[cC]apítol*.xhtml",
+        "*[cC]apítol*.xhtml",
+        "*_[cC]apitol*.xhtml",
+        "*[cC]apitol*.xhtml",
+        "*.xhtml"
+      ],
+      "enabled": true,
       "category": "Link Check"
     },
     {
