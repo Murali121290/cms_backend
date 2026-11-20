@@ -710,6 +710,7 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
     p_tags = soup.find_all(["p", "div"])
     missing_items = []
     cpytxt_tag_issues = []
+    matching_address_elements = []
 
     for item in expected_items:
         if not item:
@@ -720,6 +721,7 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
             p_text_norm = normalize_str(p.get_text(" ", strip=True))
             if norm_item in p_text_norm:
                 item_found = True
+                matching_address_elements.append(p)
                 # Validate tag and class: must be <p> with class="cpytxt"
                 p_classes = p.get("class", [])
                 if isinstance(p_classes, str):
@@ -741,11 +743,22 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
         if not item_found:
             missing_items.append(item)
 
+    # Check URL specifically inside the publisher address paragraph(s), NOT other links in the document
     url_matched = True
     found_urls = []
+    address_line_no = 1
+    address_snippet = ""
+
+    if matching_address_elements:
+        first_addr_p = matching_address_elements[0]
+        address_line_no = getattr(first_addr_p, "sourceline", None) or 1
+        address_snippet = str(first_addr_p)[:150]
+
     if expected_url_items:
         url_matched = False
-        for p in p_tags:
+        # Look ONLY inside the matching publisher address element(s)
+        search_elements = matching_address_elements if matching_address_elements else p_tags
+        for p in search_elements:
             for a_tag in p.find_all("a"):
                 href = a_tag.get("href", "")
                 if href:
@@ -769,16 +782,30 @@ def validate_copyright_publisher_address_by_language(file_details, rule_config=N
         })
     elif not url_matched and expected_url_items:
         expected_url_str = ", ".join(expected_url_items)
-        found_url_str = ", ".join(found_urls) if found_urls else "None"
+        if not found_urls:
+            message = (
+                f"Copyright publisher address URL link is missing. "
+                f"Publisher name in '{address_snippet or expected_address}' must be linked to '{expected_url_str}' "
+                f"(e.g., <a href=\"{expected_url_str}\">BoD · Books on Demand GmbH</a>)."
+            )
+            snippet = address_snippet or "Missing <a> link in publisher address"
+        else:
+            found_url_str = ", ".join(found_urls)
+            message = (
+                f"Copyright page publisher address URL is incorrect. "
+                f"Expected href='{expected_url_str}', but found href='{found_url_str}'"
+            )
+            snippet = f"Found: {found_url_str} (Expected: {expected_url_str})"
+
         issues.append({
-            "type": "missing_copyright_publisher_address",
-            "message": f"Copyright page publisher address URL is incorrect. Expected href='{expected_url_str}', but found href='{found_url_str}'",
+            "type": "missing_copyright_publisher_url",
+            "message": message,
             "category": "Error",
             "file_path": rel_path,
-            "line_number": 1,
-            "snippet": f"Found: {found_url_str} (Expected: {expected_url_str})",
+            "line_number": address_line_no,
+            "snippet": snippet,
             "expected_text": expected_url_str,
-            "extract": f"Expected URL: {expected_url_str}",
+            "extract": snippet,
         })
     elif cpytxt_tag_issues:
         issues.extend(cpytxt_tag_issues)

@@ -1526,25 +1526,70 @@ def validate_copyright_last_page(file_details, rule_config=None):
                 last_href = manifest_items.get(last_idref, "")
 
                 if not is_copyright_match("", last_href):
-                    line_no = (
-                        getattr(last_itemref, "sourceline", None)
-                        or find_line_in_content(last_idref, str(last_itemref))
-                    )
+                    # Search specifically for the itemref tag in the spine to pinpoint the exact spine line (e.g. <itemref idref="nav_23"/>)
+                    # rather than the manifest item declaration
+                    exact_itemref_pattern = f'<itemref[^>]*idref=["\']{re.escape(last_idref)}["\']'
+                    line_no = getattr(last_itemref, "sourceline", None)
+                    if not line_no:
+                        for idx, line in enumerate(lines, 1):
+                            if re.search(exact_itemref_pattern, line):
+                                line_no = idx
+                                break
+                    if not line_no:
+                        line_no = find_line_in_content(last_idref, str(last_itemref))
+
                     raw_extract = str(last_itemref)[:200]
                     target_fn = os.path.basename((last_href or "").split("#")[0]).strip()
 
+                    # Find where the copyright/impressum item is in manifest and spine (e.g. nav_02 -> B_impressum.xhtml)
+                    impressum_idref = None
+                    impressum_fn = None
+                    for mid, mhref in manifest_items.items():
+                        if is_copyright_match("", mhref):
+                            impressum_idref = mid
+                            impressum_fn = os.path.basename((mhref or "").split("#")[0]).strip()
+                            break
+
+                    impressum_itemref_tag = None
+                    impressum_line_no = None
+                    if impressum_idref:
+                        # Find the actual <itemref idref="..."> element in spine
+                        for ir in itemrefs:
+                            if ir.get("idref", "").strip() == impressum_idref:
+                                impressum_itemref_tag = ir
+                                break
+
+                        exact_impressum_pattern = f'<itemref[^>]*idref=["\']{re.escape(impressum_idref)}["\']'
+                        for idx, line in enumerate(lines, 1):
+                            if re.search(exact_impressum_pattern, line):
+                                impressum_line_no = idx
+                                break
+
+                    # If the copyright/impressum item is found in the spine, highlight it directly
+                    if impressum_itemref_tag is not None:
+                        line_no = impressum_line_no or getattr(impressum_itemref_tag, "sourceline", None) or line_no
+                        raw_extract = str(impressum_itemref_tag)[:200]
+                    elif impressum_idref:
+                        if impressum_line_no:
+                            line_no = impressum_line_no
+                        raw_extract = f'<itemref idref="{impressum_idref}"/>'
+
+                    impressum_hint = ""
+                    if impressum_idref:
+                        impressum_hint = f" The copyright/impressum entry (<itemref idref=\"{impressum_idref}\"/> targeting '{impressum_fn or expected_term}') must be moved to the end of <spine>."
+
                     if target_fn and _is_forbidden_frontmatter_file(target_fn, forbidden_fm_filename_re):
-                        reason = f"the last <itemref> in <spine> targets forbidden front matter file '{target_fn}' instead of a valid {expected_term} page"
+                        reason = f"the last <itemref> in <spine> targets forbidden front matter file '{target_fn}' instead of a valid {expected_term} page.{impressum_hint}"
                     elif target_fn:
-                        reason = f"the last <itemref idref=\"{last_idref}\"> targets '{target_fn}' instead of a valid {expected_term} page"
+                        reason = f"the last <itemref idref=\"{last_idref}\"> targets '{target_fn}' instead of a valid {expected_term} page.{impressum_hint}"
                     else:
-                        reason = f"the last <itemref idref=\"{last_idref}\"> does not point to a valid {expected_term} page"
+                        reason = f"the last <itemref idref=\"{last_idref}\"> does not point to a valid {expected_term} page.{impressum_hint}"
 
                     issues.append({
                         "type": "copyright_not_last_in_opf_spine",
                         "message": (
                             f"The copyright page must be placed as the last page of the ePub file. "
-                            f"In '{rel_path}' (<spine>), {reason}."
+                            f"In '{rel_path}' (<spine>), {reason}"
                         ),
                         "category": "Error",
                         "file_path": rel_path,

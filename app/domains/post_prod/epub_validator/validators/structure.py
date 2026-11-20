@@ -548,6 +548,30 @@ def validate_xhtml_naming_convention(book_details, rule_config=None):
             if name_part_lower in ("fm", "frontmatter", "front_matter", "front"):
                 continue
 
+            # Verify that this file is legitimately a front matter / impressum file
+            is_fm = (
+                is_frontmatter_slug(name_part_lower)
+                or (expected_slug and is_frontmatter_slug(expected_slug))
+            )
+
+            # If it is NOT a front matter / impressum title, it is a chapter and must start with a 2-digit consecutive number!
+            if not is_fm:
+                issues.append({
+                    "rule_name": "HTML file naming convention",
+                    "type": "chapter_alphabetic_prefix",
+                    "message": (
+                        f"HTML file '{filename}' does not follow the required naming convention. "
+                        f"Only front matter and impressum files can start with an uppercase letter prefix (e.g. 'A_cover.xhtml', 'B_impressum.xhtml'). "
+                        f"Chapters must start with a 2-digit consecutive number (expected prefix: '{expected_chapter_num:02d}_')."
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": 1,
+                    "snippet": f"Filename: {filename}, <title>: {doc_title}",
+                    "extract": f"Filename: {filename}, <title>: {doc_title}",
+                })
+                continue
+
             # Verify against doc_title or known front matter titles
             if expected_slug:
                 match_exact = (name_part_lower == expected_slug.lower())
@@ -573,6 +597,26 @@ def validate_xhtml_naming_convention(book_details, rule_config=None):
             num_str = ch_match.group(1)
             name_part = ch_match.group(2)
             num_val = int(num_str)
+
+            # Check if this file is actually a front matter / end matter section (e.g. impressum, copyright, cover, toc)
+            # that was incorrectly given a numeric prefix (like 00_impressum.xhtml) instead of an alphabetic prefix [A-Z]_
+            is_fm = is_frontmatter_slug(name_part) or (expected_slug and is_frontmatter_slug(expected_slug))
+            if is_fm:
+                issues.append({
+                    "rule_name": "HTML file naming convention",
+                    "type": "frontmatter_numeric_prefix",
+                    "message": (
+                        f"HTML file '{filename}' does not follow the required naming convention. "
+                        f"Front matter and impressum files must start with an uppercase letter prefix (e.g. 'A_cover.xhtml', 'B_{name_part}.xhtml'), "
+                        f"while chapters must start with a 2-digit consecutive number (e.g. '01_<title>.xhtml')."
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": 1,
+                    "snippet": f"Filename: {filename}",
+                    "extract": f"Filename: {filename}",
+                })
+                continue
 
             # 1. Consecutive numbering check
             expected_prefix = f"{expected_chapter_num:02d}_"

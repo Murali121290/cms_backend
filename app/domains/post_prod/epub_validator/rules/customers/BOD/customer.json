@@ -58,11 +58,6 @@
             "Epigraph",
             "Dedication",
             "Acknowledge ments",
-            "Start of Text",
-            "About the book",
-            "About the author",
-            "Further information",
-            "Notes",
             "Cover"
           ],
           "German": [
@@ -71,39 +66,21 @@
             "Inhaltsverzeichnis",
             "Motto",
             "Widmung",
-            "Danksagung",
-            "Textbeginn",
-            "Über das Buch",
-            "Über den Autor",
-            "die Autorin",
-            "Weitere Informationen",
-            "Hinweise"
+            "Danksagung"
           ],
           "French": [
             "Page de titre",
             "Page de copyright",
             "Sommaire",
             "Epigraphe",
-            "Dédicace",
-            "Remerciements",
-            "Début du texte",
-            "À propos du livre",
-            "À propos de l’auteur",
-            "Plus d‘infos",
-            "Indication"
+            "Dédicace"
           ],
           "Danish": [
             "Titelside",
             "Kolofon",
             "Indholdsforteg nelse",
             "Epigraf",
-            "Dedikation",
-            "Takkeord",
-            "Tekstbegyndelse",
-            "Om bogen",
-            "Om forfatteren",
-            "Yderligere oplysninger",
-            "Obs"
+            "Dedikation"
           ],
           "Swedish": [
             "Titelsida",
@@ -111,13 +88,7 @@
             "Innehållsförteckning",
             "Motto",
             "Dedikation",
-            "Tackord",
-            "Textens inledning",
-            "Om bogen",
-            "Om boken",
-            "Om författaren",
-            "Mer information",
-            "Anmärkning"
+            "Tackord"
           ],
           "Finnish": [
             "Nimiösivu",
@@ -125,25 +96,14 @@
             "Sisällysluettelo",
             "Motto",
             "Omistuskirjoitus",
-            "Kiitokset",
-            "Tekstin alku",
-            "Lisätietoja kirjasta",
-            "Lisätietoja kirjailijasta",
-            "Lisätietoja",
-            "Huomautus"
+            "Kiitokset"
           ],
           "Italian": [
             "Frontespizio",
             "Colophon",
             "Indice",
             "Motto",
-            "Dedica",
-            "Ringraziamento",
-            "Inizio del Testo",
-            "Sull‘libro",
-            "Sull‘autor",
-            "Informazione aggiuntiva",
-            "Notizia"
+            "Dedica"
           ],
           "Spanish": [
             "Portada",
@@ -151,52 +111,28 @@
             "Indice",
             "Lema",
             "Dedicación",
-            "Agradecimiento",
-            "Inicio del Texto",
-            "Sobre el libro",
-            "Sobre el autor",
-            "Sobre la autora",
-            "Más informaciones",
-            "Indicación"
+            "Agradecimiento"
           ],
           "Portuguese": [
             "Frontispício",
             "Pé-de-Imprensa",
             "Índice",
             "Epígrafe",
-            "Dedicatória",
-            "Ação de Graças",
-            "Início do texto",
-            "Sobre o livro",
-            "Sobre o autor",
-            "Outras informações",
-            "Anotações"
+            "Dedicatória"
           ],
           "Norwegian": [
             "Tittelside",
             "Kolofonside",
             "Innholdsfortegnelse",
             "Epigraf",
-            "Dedikasjon",
-            "Takkeord",
-            "Tekstbegynnelse",
-            "Om boken",
-            "Om forfatteren",
-            "Mer informasjon",
-            "Merknader"
+            "Dedikasjon"
           ],
           "Dutch": [
             "Titelpagina",
             "Copyright",
             "Inhoudsopgave",
             "Epigraaf",
-            "Opdracht",
-            "Dankwoord",
-            "Begin van",
-            "Over het boek",
-            "Over de auteur",
-            "Verdere informatie",
-            "Noten"
+            "Opdracht"
           ],
           "Catalan": [
             "Portada",
@@ -204,13 +140,7 @@
             "Índex",
             "Epígraf",
             "Dedicatòria",
-            "Agraïments",
-            "Inici del text",
-            "Sobre el llibre",
-            "Sobre l’autor",
-            "Sobre l’autora",
-            "Més informació",
-            "Notes"
+            "Agraïments"
           ],
           "Valencian": [
             "Portada",
@@ -218,13 +148,7 @@
             "Índex",
             "Epígraf",
             "Dedicatòria",
-            "Agraïments",
-            "Inici del text",
-            "Sobre el llibre",
-            "Sobre l´autor",
-            "Sobre l´autora",
-            "Més informació",
-            "Notes"
+            "Agraïments"
           ]
         }
       },
@@ -606,6 +530,14 @@
       "category": "XHTML Check"
     },
     {
+      "id": "XHTML003",
+      "name": "Declare language on all content pages (matching OPF language)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
       "id": "XHTML006",
       "name": "Single <h1> per page and no adjacent headings",
       "target_path": "OEBPS/xhtml",
@@ -771,17 +703,6 @@
       "name": "Cover must not exceed 5 MB file size",
       "target_path": "OEBPS/images",
       "file_name_pattern": "cover.*",
-      "enabled": true,
-      "rule_config": {
-        "max_file_size_mb": 5
-      },
-      "category": "Image Check"
-    },
-    {
-      "id": "BOD-COV-006",
-      "name": "Image must not exceed 5 MB file size",
-      "target_path": "OEBPS/images",
-      "file_name_pattern": "*.jpg",
       "enabled": true,
       "rule_config": {
         "max_file_size_mb": 5

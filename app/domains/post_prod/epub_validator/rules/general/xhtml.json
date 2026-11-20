@@ -104,13 +104,10 @@
     },
     {
       "id": "XHTML003",
-      "name": "Declare language on all content pages",
+      "name": "Declare language on all content pages (matching OPF language)",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true,
-      "rule_config": {
-        "expected_lang": "en"
-      },
       "category": "XHTML Check"
     },
     {
