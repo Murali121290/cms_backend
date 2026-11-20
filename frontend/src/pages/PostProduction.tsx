@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Layers, FileText, Download, ChevronRight, Lock, BookOpen, FileCheck, FileCog } from 'lucide-react'
+import { Layers, FileText, Download, ChevronRight, Lock, BookOpen, FileCheck, FileCog, ListChecks } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { POST_PROD_SERVICES } from '@/config/postProdConfig'
 
@@ -43,6 +43,7 @@ export function PostProduction() {
                     {service.icon === 'BookOpen' && <BookOpen size={20} />}
                     {service.icon === 'FileCheck' && <FileCheck size={20} />}
                     {service.icon === 'FileCog' && <FileCog size={20} />}
+                    {service.icon === 'ListChecks' && <ListChecks size={20} />}
                   </div>
                   {!isEnabled ? (
                     <span className="flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-muted/10 text-muted rounded-md">

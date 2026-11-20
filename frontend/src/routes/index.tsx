@@ -59,6 +59,7 @@ import { PostProduction } from '@/pages/PostProduction'
 import { PostProdWordConversion } from '@/pages/PostProdWordConversion'
 import { PostProdChaptersPage } from '@/pages/PostProdChaptersPage'
 import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
+import { PostProdEocValidator } from '@/pages/PostProdEocValidator'
 import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
 import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
 import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
@@ -210,6 +211,7 @@ const router = createBrowserRouter([
       { path: 'post-production/word-conversion', element: <PostProdGuard><PostProdWordConversion /></PostProdGuard> },
       { path: 'post-production/word-conversion/:projectId', element: <PostProdGuard><PostProdChaptersPage /></PostProdGuard> },
       { path: 'post-production/epub-css-matcher', element: <PostProdGuard><PostProdCssMatcher /></PostProdGuard> },
+      { path: 'post-production/eoc-validator', element: <PostProdGuard><PostProdEocValidator /></PostProdGuard> },
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
       { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },

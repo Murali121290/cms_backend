@@ -44,6 +44,13 @@ export const POST_PROD_SERVICES: PostProdService[] = [
     enabled: true,
   },
   {
+    id: 'eoc-validator',
+    title: 'G-W EOC/EOL Question Validator',
+    description: 'Validate EOC/EOL assessment Word files against the extraction requirements: shuffle rules, answer asterisks, Title, Learning Outcome and Reference IDs.',
+    icon: 'ListChecks',
+    enabled: true,
+  },
+  {
     id: 'xml-conversion',
     title: 'PDF2XML Conversion',
     description: 'Upload PDFs and convert them into structured JATS or BITS XML formats with DTD validation.',
