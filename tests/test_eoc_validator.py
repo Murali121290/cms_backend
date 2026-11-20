@@ -394,6 +394,26 @@ def test_stray_title_after_reference_two_dot_title_and_lo_hyphen_are_fixed():
     assert [i for i in check_run([parse_docx(fixed, "machfun2028_tx_ch05.docx")], PREFIX) if i.severity == "error"] == []
 
 
+def test_title_of_60_chars_or_fewer_gets_no_warning_or_info():
+    # trailing period only (was info)
+    a = q_block(1, "First", GOOD_OPTS, title="First.")
+    # question ≤ 60 chars but title shortened (was a warning)
+    b = q_block(2, "Steel parts are often hardened by heating and quenching them.", GOOD_OPTS,
+                title="Steel parts are often hardened by heating and …")
+    # short title when one more word would fit (was a warning)
+    long_q = "Installation of HVAC systems is the primary responsibility of the mechanical contractor."
+    c = q_block(3, long_q, GOOD_OPTS, title="Installation of HVAC systems is the primary …")
+    issues = run(a + b + c)
+    assert not any(i.rule == "T1" and i.severity in ("warning", "info") for i in issues)
+    # …but real errors on short titles are still reported
+    bad_end = q_block(1, "Steel parts are often hardened by heating and quenching them.", GOOD_OPTS,
+                      title="Steel parts are often hardened by heating and...")
+    assert "T1" in rules(run(bad_end), "error")
+    wrong = q_block(1, "Cast iron plates are affected by temperature changes.", ["*True", "False"],
+                    shuffle=False, title="Cast iron plates are affected by temperature.")
+    assert "T1" in rules(run(wrong), "error")
+
+
 def test_title_dropping_only_a_blank_is_fine():
     q = "The recommended minimum bending radius for 1/2 PEX is _____."
     lines = q_block(1, q, ["A.\t10", "B.\t9", "C.\t7", "*D.\t5"], shuffle=False,

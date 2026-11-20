@@ -156,8 +156,21 @@ def title_looks_like_typo(stem: str, title: str) -> bool:
     return changed <= 3
 
 
+SHORT_TITLE_MAX = 60
+
+
 def check_title(q: Question, title: str) -> list[tuple[str, str]]:
-    """Return a list of (severity, message)."""
+    """Return a list of (severity, message).
+
+    A title of 60 characters or fewer gets no warnings or info notes — only
+    real errors (wrong text, wrong ending) are reported for it."""
+    results = _check_title(q, title)
+    if len(title.strip()) <= SHORT_TITLE_MAX:
+        results = [(sev, msg) for sev, msg in results if sev == ERROR]
+    return results
+
+
+def _check_title(q: Question, title: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     stem = q.stem.strip()
     t = title.strip()

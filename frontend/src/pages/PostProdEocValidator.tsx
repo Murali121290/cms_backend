@@ -385,14 +385,6 @@ export function PostProdEocValidator() {
               </label>
             ))}
           </div>
-          <p className="mt-3 text-xs text-muted leading-relaxed flex items-start gap-1.5">
-            <Info size={13} className="text-blue-500 shrink-0 mt-0.5" />
-            <span>
-              <b className="text-text">Number choices:</b> years in date order (e.g. <code>1681 | 1781 | 1870 | 1981</code>) must not
-              shuffle — error, fixed. Numbers listed by size (e.g. <code>200 lb | 225 lb | 250 lb</code>) — warning to confirm
-              Shuffle, never changed. <b className="text-text">Not checked:</b> numbers in mixed order (e.g. <code>8′ | 12′ | 10′ | 15′</code>).
-            </span>
-          </p>
         </fieldset>
 
         <div className="flex items-center justify-end gap-3">
