@@ -646,6 +646,14 @@
       "category": "XHTML Check"
     },
     {
+      "id": "BOD-NOTE-001",
+      "name": "Non-numeric footnotes check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
       "id": "BOD-ENC-001",
       "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp;, &lt;, &gt;, &#8617; allowed)",
       "target_path": "OEBPS",
