@@ -248,31 +248,98 @@ export async function generateLinkManual(
 }
 
 export interface UrlLinkDetail {
+  page: number;
+  page_idx?: number;
   url: string;
   display_text: string;
-  page: number;
+  original_text?: string;
+  reconstructed_url?: string;
+  annotation_dest?: string | null;
   is_linked: boolean;
+  is_multiline?: boolean;
+  line_count?: number;
   rect: number[] | null;
+  all_rects?: number[][];
+  segments?: string[];
   http_status: number | null;
   http_description: string;
   http_ok: boolean;
+  validation_status?: string;
+  final_url?: string | null;
+  issue_type?: string | null;
+  correction_suggestion?: string | null;
+  correction_status?: string;
+  error_description?: string | null;
+  is_edited?: boolean;
 }
 
-export async function generateUrlLinks(
-  projectId: number,
-  analyzeOnly: boolean = true,
-  colorUrls: boolean = false
-): Promise<{
+export interface UrlLinkSummary {
+  total_urls: number;
+  total_annotations: number;
+  already_linked: number;
+  not_linked: number;
+  multiline_reconstructed: number;
+  valid_urls: number;
+  broken_urls: number;
+  redirected_urls: number;
+  invalid_urls: number;
+  access_restricted: number;
+  timeouts: number;
+  ssl_errors: number;
+  missing_annotations: number;
+  destination_mismatches: number;
+  malformed_annotations: number;
+  duplicate_annotations: number;
+  automatically_corrected: number;
+  needs_manual_review: number;
+}
+
+export interface GenerateUrlLinksResponse {
   success: boolean;
   total_urls: number;
   already_linked: number;
   not_linked: number;
   details: UrlLinkDetail[];
-}> {
+  summary?: UrlLinkSummary;
+  verification?: {
+    verified: boolean;
+    corrected_count: number;
+    total_links_in_pdf: number;
+    verified_items_count: number;
+    content_integrity_verified: boolean;
+    message: string;
+  };
+}
+
+export interface GenerateUrlLinksOptions {
+  analyzeOnly?: boolean;
+  colorUrls?: boolean;
+  fixMultiline?: boolean;
+  fixMissing?: boolean;
+  fixMalformed?: boolean;
+  removeDuplicates?: boolean;
+  customDetails?: UrlLinkDetail[];
+}
+
+export async function generateUrlLinks(
+  projectId: number,
+  analyzeOnly: boolean = true,
+  colorUrls: boolean = false,
+  options?: GenerateUrlLinksOptions
+): Promise<GenerateUrlLinksResponse> {
   try {
-    const { data } = await api.post(
+    const payload = {
+      analyze_only: options?.analyzeOnly ?? analyzeOnly,
+      color_urls: options?.colorUrls ?? colorUrls,
+      fix_multiline: options?.fixMultiline ?? true,
+      fix_missing: options?.fixMissing ?? true,
+      fix_malformed: options?.fixMalformed ?? true,
+      remove_duplicates: options?.removeDuplicates ?? true,
+      custom_details: options?.customDetails ?? undefined,
+    };
+    const { data } = await api.post<GenerateUrlLinksResponse>(
       `/post-prod/web-pdf-processor/projects/${projectId}/generate-url-links`,
-      { analyze_only: analyzeOnly, color_urls: colorUrls }
+      payload
     );
     return data;
   } catch (err) {
@@ -320,7 +387,8 @@ export interface EndnoteDetail {
 
 export async function generateEndnoteLinks(
   projectId: number,
-  analyzeOnly: boolean = true
+  analyzeOnly: boolean = true,
+  customDetails?: any[]
 ): Promise<{
   success: boolean;
   total_notes: number;
@@ -331,7 +399,7 @@ export async function generateEndnoteLinks(
   try {
     const { data } = await api.post(
       `/post-prod/web-pdf-processor/projects/${projectId}/generate-endnote-links`,
-      { analyze_only: analyzeOnly }
+      { analyze_only: analyzeOnly, custom_details: customDetails }
     );
     return data;
   } catch (err) {

@@ -82,12 +82,17 @@ def _extract_page_descriptors(page) -> Dict[str, Any]:
     }
 
 
-def compare_pdfs(baseline_path: str, final_path: str) -> Dict[str, Any]:
+def compare_pdfs(
+    baseline_path: str,
+    final_path: str,
+    pages_to_check: Optional[List[int]] = None
+) -> Dict[str, Any]:
     """
     Compare baseline PDF against the final PDF across:
     1. Text content fidelity (missing or altered words).
     2. Font fidelity (font family or size changes).
     3. Layout alignment (bounding box shift delta x, delta y).
+    If pages_to_check is provided (0-indexed page list), only those pages are compared.
     """
     if not os.path.exists(baseline_path):
         return {
@@ -116,7 +121,12 @@ def compare_pdfs(baseline_path: str, final_path: str) -> Dict[str, Any]:
     font_discrepancies: List[Dict[str, Any]] = []
     alignment_drifts: List[Dict[str, Any]] = []
 
-    for page_idx in range(total_pages_to_check):
+    if pages_to_check is not None:
+        target_indices = [idx for idx in pages_to_check if 0 <= idx < total_pages_to_check]
+    else:
+        target_indices = list(range(total_pages_to_check))
+
+    for page_idx in target_indices:
         page_num = page_idx + 1
         base_desc = _extract_page_descriptors(base_doc[page_idx])
         final_desc = _extract_page_descriptors(final_doc[page_idx])

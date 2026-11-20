@@ -29,6 +29,13 @@ import {
   Folder,
   CornerDownRight,
   Download,
+  Check,
+  X,
+  Edit2,
+  ExternalLink,
+  Link2,
+  AlertTriangle,
+  Globe,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -551,6 +558,13 @@ export function PostProdWebPdfProcessor() {
   const [analyzingUrlLinks, setAnalyzingUrlLinks] = useState(false);
   const [applyingUrlLinks, setApplyingUrlLinks] = useState(false);
   const [colorUrls, setColorUrls] = useState(false);
+  const [fixMultilineUrls, setFixMultilineUrls] = useState(true);
+  const [fixMissingUrls, setFixMissingUrls] = useState(true);
+  const [urlFilterTab, setUrlFilterTab] = useState<'all' | 'unlinked' | 'multiline' | 'broken' | 'mismatch' | 'valid'>('all');
+  const [editingUrlIdx, setEditingUrlIdx] = useState<number | null>(null);
+  const [editingUrlValue, setEditingUrlValue] = useState<string>('');
+  const [urlSearchQuery, setUrlSearchQuery] = useState<string>('');
+  const [showUrlSettings, setShowUrlSettings] = useState<boolean>(false);
 
   // Email Links (Step 8)
   const [emailLinksAnalysis, setEmailLinksAnalysis] = useState<any>(null);
@@ -1330,7 +1344,6 @@ export function PostProdWebPdfProcessor() {
       setPdfRefreshKey((prev) => prev + 1);
       if (result.not_linked === 0) {
         setSelectedProject(prev => prev ? { ...prev, status: 'URL Linked' } : prev);
-        setActiveStep(8);
       }
     } catch (err: any) {
       toast.error(err.message || 'Failed to analyze URL links');
@@ -1339,16 +1352,47 @@ export function PostProdWebPdfProcessor() {
     }
   };
 
+  const handleSaveEditedUrl = (detailIndex: number) => {
+    if (!urlLinksAnalysis?.details) return;
+    const trimmed = editingUrlValue.trim();
+    if (!trimmed) {
+      toast.error('URL cannot be empty');
+      return;
+    }
+    const updatedDetails = [...urlLinksAnalysis.details];
+    const targetItem = updatedDetails[detailIndex];
+    if (targetItem) {
+      targetItem.reconstructed_url = trimmed;
+      targetItem.url = trimmed;
+      targetItem.annotation_dest = trimmed;
+      targetItem.issue_type = 'user_edited';
+      targetItem.is_edited = true;
+      targetItem.is_linked = false;
+    }
+    setUrlLinksAnalysis({
+      ...urlLinksAnalysis,
+      details: updatedDetails,
+    });
+    setEditingUrlIdx(null);
+    toast.success(`URL target updated for Page ${targetItem.page}. Click "Apply / Fix" to apply.`);
+  };
+
   const handleApplyUrlLinks = async () => {
     if (!selectedProject) return;
     setApplyingUrlLinks(true);
     try {
-      const result = await generateUrlLinks(selectedProject.id, false, colorUrls);
+      const result = await generateUrlLinks(selectedProject.id, false, colorUrls, {
+        analyzeOnly: false,
+        colorUrls: colorUrls,
+        fixMultiline: fixMultilineUrls,
+        fixMissing: fixMissingUrls,
+        customDetails: urlLinksAnalysis?.details,
+      });
       setUrlLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
       setSelectedProject(prev => prev ? { ...prev, status: 'URL Linked' } : prev);
-      toast.success(`Hyperlinked ${result.not_linked} URL(s) successfully${colorUrls ? ' with link blue color' : ''}`);
-      setActiveStep(8);
+      const msg = result.verification?.message || `Hyperlinked ${result.not_linked ?? 0} URL(s) successfully${colorUrls ? ' with link blue color' : ''}`;
+      toast.success(msg);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply URL links');
     } finally {
@@ -1412,16 +1456,32 @@ export function PostProdWebPdfProcessor() {
     }
   };
 
+  const handleDeleteEndnote = (detailIndex: number) => {
+    if (!endnoteLinksAnalysis?.details) return;
+    const updatedDetails = [...endnoteLinksAnalysis.details];
+    const removedItem = updatedDetails.splice(detailIndex, 1)[0];
+    const total = updatedDetails.length;
+    const linked = updatedDetails.filter((d: EndnoteDetail) => d.is_linked).length;
+    const notLinked = total - linked;
+    setEndnoteLinksAnalysis({
+      ...endnoteLinksAnalysis,
+      total_notes: total,
+      linked,
+      not_linked: notLinked,
+      details: updatedDetails,
+    });
+    toast.success(`Removed Note ${removedItem.note_number} (Page ${removedItem.reference_page || '-'}) from list`);
+  };
+
   const handleApplyEndnoteLinks = async () => {
     if (!selectedProject) return;
     setApplyingEndnoteLinks(true);
     try {
-      const result = await generateEndnoteLinks(selectedProject.id, false);
+      const result = await generateEndnoteLinks(selectedProject.id, false, endnoteLinksAnalysis?.details);
       setEndnoteLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
       setSelectedProject(prev => prev ? { ...prev, status: 'Endnote Linked' } : prev);
-      toast.success(`Created ${result.not_linked} endnote link(s) successfully`);
-      setActiveStep(10);
+      toast.success(`Created endnote link(s) successfully`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply endnote links');
     } finally {
@@ -2727,77 +2787,280 @@ export function PostProdWebPdfProcessor() {
                 </button>
 
                 {activeStep === 7 && (
-                  <div className="p-4 border-t border-border/30 space-y-4">
-                    <p className="text-xs text-muted">
-                      Scan the PDF for plain-text web addresses and convert them into active clickable hyperlinks.
-                    </p>
-
-                    {/* Summary */}
-                    {urlLinksAnalysis && (
-                      <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1 text-sm text-blue-800">
-                        <p className="font-semibold">URL Report:</p>
-                        <ul className="list-disc list-inside space-y-0.5">
-                          <li>Total URLs found: <strong>{urlLinksAnalysis.total_urls}</strong></li>
-                          <li className="text-emerald-700">Already linked: <strong>{urlLinksAnalysis.already_linked}</strong></li>
-                          <li className="text-red-600">Not linked (needs fix): <strong>{urlLinksAnalysis.not_linked}</strong></li>
-                        </ul>
-                      </div>
+                  <div className="p-3 border-t border-border/30 space-y-3">
+                    {!urlLinksAnalysis && (
+                      <p className="text-xs text-muted">
+                        Click &quot;Analyze URLs&quot; to scan and detect hyperlinks in the document.
+                      </p>
                     )}
 
-                    {/* URL Table */}
+                    {/* Filter Tabs & Search Bar & URL Card List */}
                     {urlLinksAnalysis?.details?.length > 0 && (
-                      <div className="max-h-72 overflow-y-auto rounded border border-blue-200 text-xs">
-                        <table className="w-full border-collapse">
-                          <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
-                            <tr>
-                              <th className="text-left p-2 border-b border-blue-200">URL</th>
-                              <th className="p-2 border-b border-blue-200 w-12 text-center">Page</th>
-                              <th className="p-2 border-b border-blue-200 w-20 text-center">PDF Link</th>
-                              <th className="p-2 border-b border-blue-200 w-28 text-center">URL Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {urlLinksAnalysis.details.map((item: UrlLinkDetail, i: number) => {
-                              const isSelected = previewPage === item.page && highlightSearch === item.display_text;
+                      <div className="space-y-2">
+                        {/* Filter Tabs */}
+                        <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+                          <button
+                            type="button"
+                            onClick={() => setUrlFilterTab('all')}
+                            className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'all' ? 'bg-primary text-white' : 'bg-muted/15 text-muted hover:bg-muted/25'}`}
+                          >
+                            All ({urlLinksAnalysis.details.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUrlFilterTab('unlinked')}
+                            className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'unlinked' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20'}`}
+                          >
+                            Needs Fix ({urlLinksAnalysis.details.filter((d: UrlLinkDetail) => !d.is_linked).length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUrlFilterTab('multiline')}
+                            className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'multiline' ? 'bg-purple-600 text-white' : 'bg-purple-500/10 text-purple-700 dark:text-purple-400 hover:bg-purple-500/20'}`}
+                          >
+                            Multi-line ({urlLinksAnalysis.details.filter((d: UrlLinkDetail) => d.is_multiline).length})
+                          </button>
+                          {urlLinksAnalysis.details.some((d: UrlLinkDetail) => d.issue_type === 'destination_mismatch') && (
+                            <button
+                              type="button"
+                              onClick={() => setUrlFilterTab('mismatch')}
+                              className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'mismatch' ? 'bg-orange-600 text-white' : 'bg-orange-500/10 text-orange-700 dark:text-orange-400 hover:bg-orange-500/20'}`}
+                            >
+                              Mismatches ({urlLinksAnalysis.details.filter((d: UrlLinkDetail) => d.issue_type === 'destination_mismatch').length})
+                            </button>
+                          )}
+                          {urlLinksAnalysis.details.some((d: UrlLinkDetail) => ['Broken', 'Invalid', 'Timeout', 'SSL Error'].includes(d.validation_status || '')) && (
+                            <button
+                              type="button"
+                              onClick={() => setUrlFilterTab('broken')}
+                              className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'broken' ? 'bg-red-600 text-white' : 'bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20'}`}
+                            >
+                              Broken ({urlLinksAnalysis.details.filter((d: UrlLinkDetail) => ['Broken', 'Invalid', 'Timeout', 'SSL Error'].includes(d.validation_status || '')).length})
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Search Input */}
+                        <div className="relative">
+                          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                          <input
+                            type="text"
+                            value={urlSearchQuery}
+                            onChange={(e) => setUrlSearchQuery(e.target.value)}
+                            placeholder="Filter by URL, text, or page..."
+                            className="w-full pl-8 pr-7 py-1 text-xs rounded-md border border-border/60 bg-surface text-text placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          {urlSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setUrlSearchQuery('')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Interactive URL Cards List */}
+                        <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
+                          {(() => {
+                            const filteredList = urlLinksAnalysis.details.filter((item: UrlLinkDetail) => {
+                              if (urlFilterTab === 'unlinked' && item.is_linked) return false;
+                              if (urlFilterTab === 'multiline' && !item.is_multiline) return false;
+                              if (urlFilterTab === 'broken' && !['Broken', 'Invalid', 'Timeout', 'SSL Error'].includes(item.validation_status || '')) return false;
+                              if (urlFilterTab === 'mismatch' && item.issue_type !== 'destination_mismatch') return false;
+                              if (urlFilterTab === 'valid' && item.validation_status !== 'Valid' && !item.http_ok) return false;
+
+                              if (urlSearchQuery.trim()) {
+                                const q = urlSearchQuery.toLowerCase();
+                                const matchesUrl = (item.reconstructed_url || item.url || '').toLowerCase().includes(q);
+                                const matchesText = (item.original_text || item.display_text || '').toLowerCase().includes(q);
+                                const matchesPage = String(item.page).includes(q);
+                                const matchesDest = (item.annotation_dest || '').toLowerCase().includes(q);
+                                if (!matchesUrl && !matchesText && !matchesPage && !matchesDest) return false;
+                              }
+                              return true;
+                            });
+
+                            if (filteredList.length === 0) {
                               return (
-                                <tr
-                                  key={i}
-                                  onClick={() => {
-                                    setPreviewPage(item.page);
-                                    setHighlightSearch(item.display_text || item.url);
-                                  }}
-                                  className={`border-b border-blue-100 last:border-0 cursor-pointer transition-colors ${isSelected ? 'bg-blue-100/70 font-medium' : 'hover:bg-blue-50/50'}`}
-                                  title="Click to view and highlight on PDF page"
-                                >
-                                  <td className="p-2 max-w-[160px]">
-                                    <span className="truncate block text-blue-700 underline decoration-blue-300 underline-offset-2" title={item.url}>{item.display_text}</span>
-                                  </td>
-                                  <td className="p-2 text-center font-semibold text-blue-800">{item.page}</td>
-                                  <td className="p-2 text-center">
-                                    {item.is_linked ? (
-                                      <span className="text-emerald-600 font-bold" title="Hyperlinked in PDF">✓ Linked</span>
-                                    ) : (
-                                      <span className="text-red-500 font-bold" title="Not hyperlinked in PDF">✗ Not linked</span>
-                                    )}
-                                  </td>
-                                  <td className="p-2 text-center">
-                                    {item.http_ok ? (
-                                      <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                                        {item.http_status} {item.http_description}
-                                      </span>
-                                    ) : (
-                                      <span className="inline-flex items-center gap-1 text-red-500 font-semibold" title={item.http_description}>
-                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
-                                        {item.http_status ? `${item.http_status} ${item.http_description}` : item.http_description}
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
+                                <div className="text-center py-6 px-4 border border-dashed border-border/60 rounded-lg text-muted text-xs">
+                                  No URLs match current filter or search query.
+                                </div>
                               );
-                            })}
-                          </tbody>
-                        </table>
+                            }
+
+                            return filteredList.map((item: UrlLinkDetail, i: number) => {
+                              const originalIndex = urlLinksAnalysis.details.indexOf(item);
+                              const isEditingThis = editingUrlIdx === originalIndex;
+                              const isSelected = previewPage === item.page && highlightSearch === (item.display_text || item.original_text);
+
+                              return (
+                                <div
+                                  key={i}
+                                  className={`rounded-lg border transition-all text-xs ${
+                                    isSelected
+                                      ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
+                                      : 'border-border/60 bg-surface hover:border-border hover:bg-muted/5'
+                                  }`}
+                                >
+                                  {/* Card Header */}
+                                  <div className="p-2.5 pb-1 flex items-center justify-between gap-1.5">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setPreviewPage(item.page);
+                                          setHighlightSearch(item.display_text || item.original_text || item.url);
+                                        }}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
+                                        title="Click to jump to this page in PDF preview"
+                                      >
+                                        Page {item.page}
+                                      </button>
+                                      {item.is_multiline && (
+                                        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20 shrink-0" title={`Stitched from ${item.line_count || 2} lines`}>
+                                          {item.line_count || 2}L
+                                        </span>
+                                      )}
+                                      {item.is_edited && (
+                                        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 shrink-0">
+                                          Edited
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {item.is_linked ? (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full" title="Active hyperlink annotation in PDF">
+                                          <CheckCircle2 size={11} /> Linked
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-500/10 px-2 py-0.5 rounded-full" title="Plain-text URL without link annotation">
+                                          <AlertCircle size={11} /> Needs link
+                                        </span>
+                                      )}
+                                      {!isEditingThis && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingUrlIdx(originalIndex);
+                                            setEditingUrlValue(item.reconstructed_url || item.url || '');
+                                          }}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-muted hover:text-primary hover:bg-primary/10 border border-border/70 transition-colors"
+                                          title="Edit target URL manually"
+                                        >
+                                          <Edit2 size={11} /> Edit
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Card Body */}
+                                  <div className="px-2.5 pb-2.5 pt-1 space-y-1.5">
+                                    {isEditingThis ? (
+                                      <div className="space-y-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
+                                        <label className="text-[10px] font-semibold text-text uppercase tracking-wider block">Target Web URL</label>
+                                        <input
+                                          type="text"
+                                          value={editingUrlValue}
+                                          onChange={(e) => setEditingUrlValue(e.target.value)}
+                                          className="w-full text-xs font-mono px-2.5 py-1.5 border border-primary rounded-md bg-surface text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                                          placeholder="https://..."
+                                          autoFocus
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleSaveEditedUrl(originalIndex);
+                                            if (e.key === 'Escape') setEditingUrlIdx(null);
+                                          }}
+                                        />
+                                        <div className="flex items-center justify-between gap-2 pt-0.5">
+                                          <span className="text-[10px] text-muted">Press Enter to save</span>
+                                          <div className="flex items-center gap-1.5">
+                                            <button
+                                              type="button"
+                                              onClick={() => setEditingUrlIdx(null)}
+                                              className="px-2 py-0.5 text-[11px] rounded border border-border text-muted hover:bg-muted/20"
+                                            >
+                                              Cancel
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleSaveEditedUrl(originalIndex)}
+                                              className="px-2.5 py-0.5 text-[11px] font-medium rounded bg-primary text-white hover:bg-primary/90 flex items-center gap-1"
+                                            >
+                                              <Check size={11} /> Save
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div
+                                        className="cursor-pointer"
+                                        onClick={() => {
+                                          setPreviewPage(item.page);
+                                          setHighlightSearch(item.display_text || item.original_text || item.url);
+                                        }}
+                                      >
+                                        {/* Reconstructed URL with external link */}
+                                        <div className="flex items-start justify-between gap-1.5">
+                                          <div className="flex items-center gap-1.5 min-w-0">
+                                            <Globe size={12} className="text-primary shrink-0 mt-0.5" />
+                                            <span
+                                              className="font-mono text-xs text-primary font-medium break-all hover:underline"
+                                              title={item.reconstructed_url || item.url}
+                                            >
+                                              {item.reconstructed_url || item.url}
+                                            </span>
+                                          </div>
+                                          <a
+                                            href={item.reconstructed_url || item.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="text-muted hover:text-primary p-0.5 rounded transition-colors shrink-0"
+                                            title="Open link in browser"
+                                          >
+                                            <ExternalLink size={12} />
+                                          </a>
+                                        </div>
+
+                                        {/* Mismatch Warning */}
+                                        {item.issue_type === 'destination_mismatch' && item.annotation_dest && (
+                                          <div className="mt-1.5 p-1.5 bg-amber-500/10 border border-amber-500/20 rounded text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-1.5">
+                                            <AlertTriangle size={12} className="shrink-0 text-amber-600 mt-0.5" />
+                                            <div className="min-w-0 flex-1">
+                                              <span className="font-medium">Current PDF target:</span>
+                                              <span className="font-mono text-[10px] block break-all text-amber-700 dark:text-amber-400 mt-0.5">
+                                                {item.annotation_dest}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        {/* Raw Extracted Text */}
+                                        <div className="mt-1 pt-1 border-t border-border/30 flex items-center justify-between text-[10px] text-muted">
+                                          <span className="truncate max-w-[220px] font-mono" title={item.original_text || item.display_text}>
+                                            Text: {item.original_text || item.display_text}
+                                          </span>
+                                          {item.validation_status && (
+                                            <span className={`shrink-0 font-medium ${
+                                              item.validation_status === 'Valid' ? 'text-emerald-600' :
+                                              item.validation_status === 'Broken' ? 'text-red-500' :
+                                              item.validation_status === 'Redirected' ? 'text-blue-500' : 'text-muted'
+                                            }`}>
+                                              {item.http_status ? `${item.http_status} ` : ''}{item.validation_status}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
                       </div>
                     )}
 
@@ -2805,49 +3068,110 @@ export function PostProdWebPdfProcessor() {
                       <p className="text-sm text-muted text-center py-2">No plain-text URLs found in the PDF.</p>
                     )}
 
-                    {/* Color URLs Toggle */}
-                    <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/10">
-                      <div>
-                        <p className="text-xs font-semibold text-text m-0">Change URL Text Color</p>
-                        <p className="text-[10px] text-muted m-0">
-                          {colorUrls
-                            ? 'URL text will be colored link blue (#0f73bf) upon applying links.'
-                            : 'Keep existing text color in the PDF (no font color change).'}
-                        </p>
-                      </div>
+                    {/* Advanced Options Accordion */}
+                    <div className="border border-border/40 rounded-lg overflow-hidden text-xs">
                       <button
                         type="button"
-                        onClick={() => setColorUrls(!colorUrls)}
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${colorUrls ? 'bg-primary' : 'bg-muted/40'}`}
-                        role="switch"
-                        aria-checked={colorUrls}
+                        onClick={() => setShowUrlSettings(!showUrlSettings)}
+                        className="w-full flex items-center justify-between p-2.5 bg-muted/10 text-muted hover:text-text transition-colors"
                       >
-                        <span
-                          aria-hidden="true"
-                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${colorUrls ? 'translate-x-4' : 'translate-x-0'}`}
-                        />
+                        <span className="flex items-center gap-1.5 font-medium">
+                          <SlidersHorizontal size={13} /> Link Options & Styling
+                        </span>
+                        <ChevronDown size={14} className={`transition-transform duration-200 ${showUrlSettings ? 'rotate-180' : ''}`} />
                       </button>
+                      {showUrlSettings && (
+                        <div className="p-3 bg-muted/5 space-y-2.5 border-t border-border/30">
+                          {/* Multi-line URL Reconstruction Toggle */}
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-medium text-text m-0">Reconstruct Multi-line Wrapped URLs</p>
+                              <p className="text-[10px] text-muted m-0">
+                                Stitch URLs broken across lines into clickable links.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setFixMultilineUrls(!fixMultilineUrls)}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${fixMultilineUrls ? 'bg-primary' : 'bg-muted/40'}`}
+                              role="switch"
+                              aria-checked={fixMultilineUrls}
+                            >
+                              <span
+                                aria-hidden="true"
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fixMultilineUrls ? 'translate-x-4' : 'translate-x-0'}`}
+                              />
+                            </button>
+                          </div>
+
+                          {/* Add Missing Hyperlinks Toggle */}
+                          <div className="flex items-center justify-between pt-2 border-t border-border/30">
+                            <div>
+                              <p className="font-medium text-text m-0">Add Missing Hyperlink Annotations</p>
+                              <p className="text-[10px] text-muted m-0">
+                                Convert plain web addresses into clickable PDF links.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setFixMissingUrls(!fixMissingUrls)}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${fixMissingUrls ? 'bg-primary' : 'bg-muted/40'}`}
+                              role="switch"
+                              aria-checked={fixMissingUrls}
+                            >
+                              <span
+                                aria-hidden="true"
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fixMissingUrls ? 'translate-x-4' : 'translate-x-0'}`}
+                              />
+                            </button>
+                          </div>
+
+                          {/* Color URLs Toggle */}
+                          <div className="flex items-center justify-between pt-2 border-t border-border/30">
+                            <div>
+                              <p className="font-medium text-text m-0">Publishing Blue Styling (#0563C1)</p>
+                              <p className="text-[10px] text-muted m-0">
+                                {colorUrls
+                                  ? 'Color URL text publishing blue (#0563C1).'
+                                  : 'Preserve original PDF font colors (no visual alteration).'}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setColorUrls(!colorUrls)}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${colorUrls ? 'bg-primary' : 'bg-muted/40'}`}
+                              role="switch"
+                              aria-checked={colorUrls}
+                            >
+                              <span
+                                aria-hidden="true"
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${colorUrls ? 'translate-x-4' : 'translate-x-0'}`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Buttons */}
-                    <div className="flex gap-3 mt-2">
+                    {/* Action Buttons */}
+                    <div className="flex gap-2.5 pt-1">
                       <Button
                         onClick={handleAnalyzeUrlLinks}
                         disabled={analyzingUrlLinks || applyingUrlLinks}
                         variant={urlLinksAnalysis ? 'outline' : 'primary'}
-                        leftIcon={analyzingUrlLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
-                        className="flex-1"
+                        leftIcon={analyzingUrlLinks ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />}
+                        className="flex-1 text-xs"
                       >
-                        {analyzingUrlLinks ? 'Analyzing...' : 'Analyze URLs'}
+                        {analyzingUrlLinks ? 'Analyzing URLs...' : 'Analyze URLs'}
                       </Button>
 
                       <Button
                         onClick={handleApplyUrlLinks}
-                        disabled={applyingUrlLinks || analyzingUrlLinks || !urlLinksAnalysis || urlLinksAnalysis.not_linked === 0}
-                        leftIcon={applyingUrlLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
-                        className="flex-1"
+                        disabled={applyingUrlLinks || analyzingUrlLinks || !urlLinksAnalysis || (urlLinksAnalysis.not_linked === 0 && !urlLinksAnalysis.details?.some((d: UrlLinkDetail) => d.is_edited))}
+                        leftIcon={applyingUrlLinks ? <RefreshCw size={15} className="animate-spin" /> : <Play size={15} />}
+                        className="flex-1 text-xs"
                       >
-                        {applyingUrlLinks ? 'Applying...' : 'Apply / Fix'}
+                        {applyingUrlLinks ? 'Applying & Verifying...' : 'Apply / Fix'}
                       </Button>
                     </div>
                   </div>
@@ -3062,23 +3386,42 @@ export function PostProdWebPdfProcessor() {
                         <table className="w-full border-collapse">
                           <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
                             <tr>
-                              <th className="text-left p-2 border-b border-blue-200 w-12 text-center">Note#</th>
-                              <th className="p-2 border-b border-blue-200 w-20 text-center">Reference Page</th>
-                              <th className="p-2 border-b border-blue-200 w-20 text-center">Definition Page</th>
-                              <th className="p-2 border-b border-blue-200">
-                                <div className="flex flex-col items-center gap-1">
+                              <th className="p-2 border-b border-blue-200 w-12 text-center">Note#</th>
+                              <th className="p-2 border-b border-blue-200 w-16 text-center">Ref Page</th>
+                              <th className="p-2 border-b border-blue-200 w-16 text-center">Def Page</th>
+                              <th className="p-2 border-b border-blue-200 text-center">
+                                <div className="flex flex-col items-center gap-0.5">
                                   <span>Link Status</span>
-                                  <span className="font-normal text-blue-600 text-[9px]">(Bidirectional?)</span>
+                                  <span className="font-normal text-blue-600 text-[9px]">(Bidirectional)</span>
                                 </div>
                               </th>
+                              <th className="p-2 border-b border-blue-200 w-12 text-center">Action</th>
                             </tr>
                           </thead>
                           <tbody>
                             {endnoteLinksAnalysis.details.map((item: EndnoteDetail, i: number) => (
                               <tr key={i} className="border-b border-blue-100 last:border-0 hover:bg-blue-50/30">
                                 <td className="p-2 text-center font-bold text-blue-700">{item.note_number}</td>
-                                <td className="p-2 text-center text-muted">{item.reference_page || '-'}</td>
-                                <td className="p-2 text-center text-muted">{item.definition_page || '-'}</td>
+                                <td className="p-2 text-center text-muted">
+                                  <button
+                                    type="button"
+                                    onClick={() => item.reference_page && setPreviewPage(item.reference_page)}
+                                    className="hover:underline hover:text-primary cursor-pointer font-medium"
+                                    title="Go to reference page in preview"
+                                  >
+                                    {item.reference_page || '-'}
+                                  </button>
+                                </td>
+                                <td className="p-2 text-center text-muted">
+                                  <button
+                                    type="button"
+                                    onClick={() => item.definition_page && setPreviewPage(item.definition_page)}
+                                    className="hover:underline hover:text-primary cursor-pointer font-medium"
+                                    title="Go to definition page in preview"
+                                  >
+                                    {item.definition_page || '-'}
+                                  </button>
+                                </td>
                                 <td className="p-2 text-center">
                                   {item.is_linked ? (
                                     <div className="flex flex-col items-center gap-0.5">
@@ -3091,6 +3434,16 @@ export function PostProdWebPdfProcessor() {
                                       <span className="text-[9px] text-red-500/70">{item.status || 'Needs fix'}</span>
                                     </div>
                                   )}
+                                </td>
+                                <td className="p-2 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteEndnote(i)}
+                                    className="p-1 rounded text-muted hover:text-red-600 hover:bg-red-50 transition-colors mx-auto inline-flex items-center justify-center"
+                                    title="Delete / Exclude this reference"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
                                 </td>
                               </tr>
                             ))}
@@ -3117,7 +3470,7 @@ export function PostProdWebPdfProcessor() {
 
                       <Button
                         onClick={handleApplyEndnoteLinks}
-                        disabled={applyingEndnoteLinks || analyzingEndnoteLinks || !endnoteLinksAnalysis || endnoteLinksAnalysis.not_linked === 0}
+                        disabled={applyingEndnoteLinks || analyzingEndnoteLinks || !endnoteLinksAnalysis || endnoteLinksAnalysis.details.length === 0}
                         leftIcon={applyingEndnoteLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
                         className="flex-1"
                       >

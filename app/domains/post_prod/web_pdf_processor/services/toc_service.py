@@ -302,6 +302,71 @@ def get_toc_page_indices(doc) -> list[int]:
 
     return toc_pages
 
+def segment_toc_pages(doc, toc_pages: list[int]):
+    """
+    Classifies pages in toc_pages into contiguous semantic sections:
+    - brief_pages: set of page indices for Brief Contents
+    - detailed_pages: set of page indices for Detailed Contents (or primary Table of Contents)
+    - fig_tab_pages: set of page indices for List of Figures, List of Tables, etc.
+    """
+    if not toc_pages:
+        return set(), set(), set()
+
+    start_pages = {}
+    for p_i in toc_pages:
+        pg = doc[p_i]
+        top_blocks = [b for b in pg.get_text('blocks') if b[1] < pg.rect.height * 0.30 and b[4].strip()]
+        top_blocks.sort(key=lambda b: (b[1], b[0]))
+        for b in top_blocks:
+            txt = b[4].strip()
+            # Skip if this block is a dot-leader TOC line (not a section header)
+            if re.search(r'(?:\.|\s){3,}\s*(?:[ivxlcdm]+|\d+)$', txt, re.IGNORECASE):
+                continue
+            txt_u = txt.upper()
+            if re.search(r'^(?:BRIEF CONTENTS)\b', txt_u):
+                start_pages[p_i] = 'brief'
+                break
+            elif re.search(r'^(?:DETAILED CONTENTS|TABLE OF CONTENTS|^CONTENTS)\b', txt_u):
+                start_pages[p_i] = 'detailed'
+                break
+            elif re.search(r'^(?:LIST OF (?:FIGURES|TABLES|ILLUSTRATIONS|MAPS|EXHIBITS|BOXES|CASES))\b', txt_u):
+                start_pages[p_i] = 'figures_tables'
+                break
+
+    brief_pages, detailed_pages, fig_tab_pages = set(), set(), set()
+    curr = None
+    for p_i in toc_pages:
+        if p_i in start_pages:
+            curr = start_pages[p_i]
+        elif curr is None:
+            b_text = ' '.join(b[4].strip() for b in doc[p_i].get_text('blocks') if b[3] > doc[p_i].rect.height * 0.80 and b[4].strip()).upper()
+            if 'BRIEF CONTENTS' in b_text:
+                curr = 'brief'
+            elif any(k in b_text for k in ['LIST OF FIGURES', 'LIST OF TABLES', 'LIST OF ILLUSTRATIONS']):
+                curr = 'figures_tables'
+            else:
+                curr = 'detailed'
+
+        b_text = ' '.join(b[4].strip() for b in doc[p_i].get_text('blocks') if b[3] > doc[p_i].rect.height * 0.80 and b[4].strip()).upper()
+        if 'BRIEF CONTENTS' in b_text and curr != 'brief':
+            curr = 'brief'
+        elif 'DETAILED CONTENTS' in b_text and curr != 'detailed':
+            curr = 'detailed'
+        elif any(k in b_text for k in ['LIST OF FIGURES', 'LIST OF TABLES', 'LIST OF ILLUSTRATIONS']) and curr != 'figures_tables':
+            curr = 'figures_tables'
+
+        if curr == 'brief':
+            brief_pages.add(p_i)
+        elif curr == 'detailed':
+            detailed_pages.add(p_i)
+        elif curr == 'figures_tables':
+            fig_tab_pages.add(p_i)
+
+    if not detailed_pages and not brief_pages:
+        detailed_pages = set(p for p in toc_pages if p not in fig_tab_pages)
+
+    return brief_pages, detailed_pages, fig_tab_pages
+
 ROMAN_NUMS_SET = {
     'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
     'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
@@ -417,15 +482,7 @@ def find_toc_entries(doc):
     toc_page_indices = get_toc_page_indices(doc)
 
     # Detect if document has both Brief Contents and Detailed Contents
-    brief_toc_pages = set()
-    detailed_toc_pages = set()
-    for p_i in toc_page_indices:
-        pg = doc[p_i]
-        full_text = pg.get_text().upper()
-        if 'BRIEF CONTENTS' in full_text:
-            brief_toc_pages.add(p_i)
-        elif any(w in full_text for w in ['CONTENTS', 'TABLE OF CONTENTS', 'DETAILED CONTENTS']):
-            detailed_toc_pages.add(p_i)
+    brief_toc_pages, detailed_toc_pages, _ = segment_toc_pages(doc, toc_page_indices)
     has_brief_and_detailed = bool(brief_toc_pages and detailed_toc_pages)
     last_title = ""
     last_letter = None
@@ -1364,8 +1421,9 @@ def find_title_on_page(page, title):
         label = ch_match.group(1).upper() if ch_match else None
         num = ch_match.group(2) if ch_match else None
         if not ch_match:
-            m_num = re.match(r'^\s*([ivxlcdm0-9]+)\b', norm_title, re.I)
-            if m_num:
+            # Only treat as a chapter number if the entry is an actual top-level chapter starting with a number
+            m_num = re.match(r'^\s*(\d{1,3})[\.\s]', norm_title, re.I)
+            if m_num and not re.search(r'\b(?:and|or|in|of|the|with)\b', norm_title[:15], re.I):
                 label = 'CHAPTER'
                 num = m_num.group(1)
 
@@ -1374,7 +1432,6 @@ def find_title_on_page(page, title):
             cands = []
             for lp in label_pats:
                 cands.extend(page.search_for(lp, clip=header_clip))
-            cands.extend(page.search_for(num, clip=header_clip))
             int_to_word = {
                 1: 'ONE', 2: 'TWO', 3: 'THREE', 4: 'FOUR', 5: 'FIVE',
                 6: 'SIX', 7: 'SEVEN', 8: 'EIGHT', 9: 'NINE', 10: 'TEN',
@@ -1386,6 +1443,28 @@ def find_title_on_page(page, title):
                 w = int_to_word[int(num)]
                 cands.extend(page.search_for(w, clip=header_clip))
                 cands.extend(page.search_for(w.capitalize(), clip=header_clip))
+
+            # Only search for bare digits if they represent a true standalone chapter number/banner,
+            # NEVER matching digits inside citations, footnotes, or body sentences!
+            raw_digit_cands = page.search_for(num, clip=header_clip)
+            for r_cand in raw_digit_cands:
+                txt_cand = page.get_text('text', clip=r_cand).strip()
+                if txt_cand == num:
+                    cand_line = ''
+                    for b in page.get_text('dict')['blocks']:
+                        if b.get('type') == 0:
+                            for l in b['lines']:
+                                if fitz.Rect(l['bbox']).intersects(r_cand):
+                                    cand_line = ''.join(s['text'] for s in l['spans']).strip()
+                                    break
+                            if cand_line: break
+                    clean_cand_line = re.sub(r'[\s•·\-\–—|]+', ' ', cand_line).strip()
+                    if (
+                        clean_cand_line == num
+                        or re.match(rf'^(?:chapter|part|section)?\s*{re.escape(num)}$', clean_cand_line, re.I)
+                    ):
+                        cands.append(r_cand)
+
             for r_cand in cands:
                 # Merge if placed to the left or above the main title within reasonable distance
                 if (res.y0 - 80 <= r_cand.y1 <= res.y0 + 25) or (abs(r_cand.y0 - res.y0) < 40 and r_cand.x1 <= res.x0 + 40):
@@ -1547,27 +1626,50 @@ def find_subheading_on_page(page, title: str):
         return None
     norm_title = re.sub(r'\s+', ' ', title).strip()
 
-    cands = page.search_for(norm_title)
+    cands = []
+    def _add_cand(rect):
+        if not any(abs(rect.y0 - c.y0) < 3 and abs(rect.x0 - c.x0) < 3 for c in cands):
+            cands.append(rect)
+
+    for r in page.search_for(norm_title):
+        _add_cand(r)
+    # Search with en-space or non-breaking space after numbering (common in professional typesetting)
+    m_num_prefix = re.match(r'^(\d+[\.:]|[A-Za-z][\.:]|[IVXLCDM]+[\.:])\s+(.*)$', norm_title)
+    if m_num_prefix:
+        for r in page.search_for(m_num_prefix.group(1) + '\u2002 ' + m_num_prefix.group(2)):
+            _add_cand(r)
+        for r in page.search_for(m_num_prefix.group(1) + '\u2002' + m_num_prefix.group(2)):
+            _add_cand(r)
+        for r in page.search_for(m_num_prefix.group(1) + '\u00a0' + m_num_prefix.group(2)):
+            _add_cand(r)
+
     if not cands:
         clean_colons = re.sub(r'[:\-\–—]', ' ', norm_title)
         clean_colons = re.sub(r'\s+', ' ', clean_colons).strip()
-        cands = page.search_for(clean_colons)
+        for r in page.search_for(clean_colons):
+            _add_cand(r)
     if not cands:
         clean_hyphens = norm_title.replace('- ', '-').replace(' -', '-')
-        cands = page.search_for(clean_hyphens)
-    clean_title = re.sub(r'^(?:(?:chapter|part|section)\s+)?(?:\d+|[ivxlcdm]+)[\.:\s\-–—]+\s*', '', norm_title, flags=re.I).strip()
-    if not cands and clean_title and clean_title != norm_title:
-        cands = page.search_for(clean_title)
-        if not cands:
-            clean_hyphens = clean_title.replace('- ', '-').replace(' -', '-')
-            cands = page.search_for(clean_hyphens)
+        for r in page.search_for(clean_hyphens):
+            _add_cand(r)
+
+    clean_title = re.sub(r'^(?:(?:chapter|part|section)\s+)?(?:\d+|[ivxlcdm]+|[a-z])[\.:\s\-–—]+\s*', '', norm_title, flags=re.I).strip()
+    if clean_title and clean_title != norm_title:
+        for r in page.search_for(clean_title):
+            _add_cand(r)
+        clean_hyphens = clean_title.replace('- ', '-').replace(' -', '-')
+        for r in page.search_for(clean_hyphens):
+            _add_cand(r)
+
     if not cands:
         search_base = clean_title if clean_title else norm_title
         words = [w for w in search_base.split() if len(w) > 2]
         if len(words) >= 3:
-            cands = page.search_for(' '.join(words[:3]))
+            for r in page.search_for(' '.join(words[:3])):
+                _add_cand(r)
         elif len(words) >= 2:
-            cands = page.search_for(' '.join(words[:2]))
+            for r in page.search_for(' '.join(words[:2])):
+                _add_cand(r)
 
     if not cands:
         return None
@@ -1587,22 +1689,25 @@ def find_subheading_on_page(page, title: str):
             if best_size: break
     else:
         # Multiple candidates found (e.g. heading + body text mentions)
-        # Score each candidate to identify the TRUE heading
+        # Score each candidate using rigorous typographic and syntactic features
         blocks = page.get_text('dict')['blocks']
         scored = []
 
         for r in cands:
             best_span = None
             is_standalone = False
+            line_txt = ''
             for b in blocks:
                 if b.get('type') == 0:
                     for l in b['lines']:
-                        line_txt = ''.join(s['text'] for s in l['spans']).strip()
+                        candidate_line_txt = ''.join(s['text'] for s in l['spans']).strip()
                         for s in l['spans']:
                             sr = fitz.Rect(s['bbox'])
                             if sr.intersects(r) and (sr.intersect(r).get_area() / r.get_area() > 0.4):
                                 best_span = s
-                                if line_txt.lower() == norm_title.lower() or abs(len(line_txt) - len(norm_title)) < 10:
+                                line_txt = candidate_line_txt
+                                clean_candidate_line = re.sub(r'[\u2002\u2003\u00a0\t]+', ' ', candidate_line_txt).strip()
+                                if clean_candidate_line.lower() == norm_title.lower() or abs(len(clean_candidate_line) - len(norm_title)) < 10:
                                     is_standalone = True
                                 break
                         if best_span: break
@@ -1611,12 +1716,25 @@ def find_subheading_on_page(page, title: str):
             font_size = best_span['size'] if best_span else 9.0
             font_name = best_span['font'].lower() if best_span else ''
             is_bold = any(k in font_name for k in ['bold', 'medium', 'heavy', 'black', 'semibold'])
+            is_italic = any(k in font_name for k in ['italic', 'oblique'])
+            is_heading_family = any(k in font_name for k in ['frutiger', 'helvetica', 'arial', 'sans', 'calibri', 'myriad', 'futura'])
 
             score = font_size
             if is_bold:
                 score += 5.0
+            if is_italic:
+                score += 5.0
+            if is_heading_family:
+                score += 4.0
             if is_standalone:
                 score += 10.0
+
+            clean_line = re.sub(r'[\u2002\u2003\u00a0\t]+', ' ', line_txt).strip()
+            # Penalty for trailing commas/semicolons indicating inline body text or list items
+            if clean_line.endswith((',', ';')) or re.search(r',\s*$', line_txt):
+                score -= 15.0
+            if clean_line and clean_line[0].islower():
+                score -= 10.0
 
             scored.append((score, r, is_standalone, font_size))
 
@@ -1863,6 +1981,7 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
         
     toc_pages = get_toc_page_indices(doc)
     page_map = build_page_map(doc, toc_pages)
+    brief_pages, detailed_pages, fig_tab_pages = segment_toc_pages(doc, toc_pages)
     toc_entries = find_toc_entries(doc)
     
     linked_count = 0
@@ -1875,15 +1994,15 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
         if entry.get('is_roman'):
             roman_map = page_map.get('_roman', {})
             cand = roman_map.get(p_page) if p_page in roman_map else (roman_map.get(str(p_page).lower()) if isinstance(p_page, str) else None)
-            if cand in toc_pages:
+            if cand in (brief_pages | detailed_pages):
                 cand = None
             if cand is None and isinstance(p_page, int):
                 for offset in range(-2, 3):
                     cand_p = p_page + offset
-                    if cand_p in roman_map and roman_map[cand_p] not in toc_pages:
+                    if cand_p in roman_map and roman_map[cand_p] not in (brief_pages | detailed_pages):
                         cand = roman_map[cand_p] - offset
                         break
-            if cand is not None and cand not in toc_pages:
+            if cand is not None and cand not in (brief_pages | detailed_pages):
                 target_p_idx = cand
             else:
                 # Fallback: search for front-matter heading page in the PDF body (outside TOC)
@@ -1965,17 +2084,6 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
     # build bookmarks from the Detailed Contents (plus a single Brief Contents bookmark)
     # so we avoid duplicate chapter bookmarks at the root.
     bookmark_entries = toc_entries
-    brief_pages = set()
-    detailed_pages = set()
-    for p_i in toc_pages:
-        pg = doc[p_i]
-        hb = [b for b in pg.get_text('blocks') if b[1] < pg.rect.height * 0.18 and b[4].strip()]
-        hdr = ' '.join(b[4].strip() for b in hb).upper()
-        if 'BRIEF CONTENTS' in hdr:
-            brief_pages.add(p_i)
-        elif 'CONTENTS' in hdr or 'DETAILED CONTENTS' in hdr:
-            detailed_pages.add(p_i)
-
     has_both_contents = bool(brief_pages and detailed_pages)
 
     # Find the Contents / Table of Contents page
@@ -2016,12 +2124,16 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
             # Add a single Contents bookmark pointing to the start of Detailed Contents
             contents_entry = {'title': 'Contents', 'linked': True, 'target_p_idx': min(detailed_pages), 'level': 1}
             filtered_bm_entries.append(contents_entry)
-            # Filter out redundant 'Brief Contents' or 'Contents' items inside detailed_entries
+            # Filter out redundant 'Brief Contents', 'Contents', 'Detailed Contents', 'Table of Contents' items inside detailed_entries
             for e in detailed_entries:
                 tl = e.get('title', '').strip().lower()
-                if tl not in ['brief contents', 'contents', 'table of contents']:
+                if tl not in ['brief contents', 'contents', 'table of contents', 'detailed contents']:
                     filtered_bm_entries.append(e)
             bookmark_entries = filtered_bm_entries
+
+    # Handle include_subheadings toggle:
+    if not include_subheadings:
+        bookmark_entries = [e for e in bookmark_entries if e.get('level', 1) == 1 or e.get('is_part')]
 
     # If document has PART or SECTION divider headers, nest subsequent chapters and their subheadings under them
     has_parts = any(e.get('is_part') for e in bookmark_entries)
@@ -2111,17 +2223,7 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
     toc_page_set = set(toc_pages)
     
     # Detect if document has both Brief Contents and Detailed Contents
-    brief_toc_pages = set()
-    detailed_toc_pages = set()
-    for p_i in toc_pages:
-        pg = doc[p_i]
-        h = pg.rect.height
-        hb = [b for b in pg.get_text('blocks') if b[1] < h * 0.18 and b[4].strip()]
-        hdr = ' '.join(b[4].strip() for b in hb).upper()
-        if 'BRIEF CONTENTS' in hdr:
-            brief_toc_pages.add(p_i)
-        elif 'CONTENTS' in hdr or 'TABLE OF CONTENTS' in hdr or 'DETAILED CONTENTS' in hdr:
-            detailed_toc_pages.add(p_i)
+    brief_toc_pages, detailed_toc_pages, _ = segment_toc_pages(doc, toc_pages)
     has_brief_and_detailed = bool(brief_toc_pages and detailed_toc_pages)
     primary_toc_pages = detailed_toc_pages if has_brief_and_detailed else toc_page_set
 
@@ -2245,16 +2347,16 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
 
         if link_type == "two_way" and not is_cross_toc and not skip_brief_backlink:
                 word_num_pat = r'(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty(?:-[a-z]+)?)'
-                is_chapter_title = bool(re.match(
+                # Distinguish major Chapter/Part/Section headings vs in-body subheadings
+                is_subheading = (
+                    entry.get('level', 1) > 1
+                    or bool(re.match(r'^\d+\.\d+', entry['title'].strip()))
+                )
+                is_chapter_title = not is_subheading and bool(re.match(
                     rf'^(?:chapter\s+\d+|part\s+[ivxlcdm]+|appendix\b|index\b|conclusion\b|notes\b|bibliography\b|references\b|glossary\b|\d{{1,3}}[\.\s]|[IVXLCDM]+\.\s+[A-Z]|{word_num_pat}\b)',
                     entry['title'].strip(),
                     re.IGNORECASE
                 ))
-                # Distinguish major Chapter/Part/Section headings vs in-body subheadings
-                is_subheading = not is_chapter_title and (
-                    entry.get('level', 1) > 1
-                    or bool(re.match(r'^\d+\.\d+', entry['title'].strip()))
-                )
                 is_major_heading = not is_subheading and (
                     entry.get('level') == 1
                     or entry.get('is_part', False)
@@ -2283,7 +2385,7 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
                     if is_major_heading:
                         # Expand title_rect upwards to also cover any associated CHAPTER / PART / SECTION banner
                         # (including spaced tracking letters 'C H A P T E R', 'PART I', 'CHAPTER ONE', or standalone numbers/labels)
-                        # placed directly above the title within the top 50% of the page
+                        # placed directly above the title within the top 50% of the page (ignoring running headers at y0 <= 55)
                         target_page_height = target_page.rect.height
                         word_num_pat = r'(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)'
                         banner_re = re.compile(
@@ -2300,7 +2402,7 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
                         )
                         banner_cands = []
                         for b in target_page.get_text('blocks'):
-                            if b[1] < title_rect.y0 and b[1] < target_page_height * 0.50:
+                            if 55 <= b[1] < title_rect.y0 and b[1] < target_page_height * 0.50:
                                 b_text = re.sub(r'\s+', ' ', b[4]).strip()
                                 clean_b = re.sub(r'(?<=\b[A-Za-z])\s+(?=[A-Za-z]\b)', '', b_text)
                                 if banner_re.match(clean_b) or banner_re.match(b_text):

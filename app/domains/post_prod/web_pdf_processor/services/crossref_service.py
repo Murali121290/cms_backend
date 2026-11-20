@@ -30,6 +30,17 @@ def _rects_overlap(rect1, rect2, threshold: float = 0.5) -> bool:
         return False
 
 
+def _any_rect_overlap(r_cand, existing_r, threshold: float = 0.5) -> bool:
+    """Check if any rectangle in r_cand overlaps any rectangle in existing_r."""
+    r_cands = r_cand if isinstance(r_cand, list) else [r_cand]
+    existing_rs = existing_r if isinstance(existing_r, list) else [existing_r]
+    for rc in r_cands:
+        for er in existing_rs:
+            if _rects_overlap(rc, er, threshold):
+                return True
+    return False
+
+
 def find_crossrefs_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     """
     Scan PDF for cross-reference text and create links to targets.
@@ -275,6 +286,45 @@ def _get_exact_match_rect(page, match_text: str, line_bbox: fitz.Rect) -> fitz.R
     return line_bbox
 
 
+def _resolve_match_rects(page, check_item: dict, matched_str: str, raw_id: str, keyword: str):
+    """
+    Returns a list of fitz.Rect covering the matched reference,
+    handling single-line matches and multi-line / hyphenated line breaks.
+    """
+    if not check_item.get("is_split"):
+        r = _get_exact_match_rect(page, matched_str, check_item["r_primary"])
+        return [r] if r else [check_item["r_primary"]]
+
+    line1_rect = check_item["r_primary"]
+    line2_rect = check_item["r_secondary"]
+    clip1 = fitz.Rect(line1_rect.x0 - 2, line1_rect.y0 - 2, line1_rect.x1 + 2, line1_rect.y1 + 2)
+    clip2 = fitz.Rect(line2_rect.x0 - 2, line2_rect.y0 - 2, line2_rect.x1 + 2, line2_rect.y1 + 2)
+
+    if check_item.get("is_hyphenated"):
+        part1 = check_item.get("part1", "")
+        r1 = page.search_for(part1 + "-", clip=clip1) or page.search_for(part1, clip=clip1)
+        next_text = check_item.get("next_text", "")
+        m_p2 = re.match(r'^([A-Za-z]+\s+' + re.escape(raw_id) + r')', next_text)
+        p2_text = m_p2.group(1) if m_p2 else raw_id
+        r2 = page.search_for(p2_text, clip=clip2) or page.search_for(raw_id, clip=clip2)
+        res = []
+        if r1:
+            res.append(r1[0])
+        if r2:
+            res.append(r2[0])
+        return res if res else [line1_rect, line2_rect]
+    else:
+        # Space split (e.g. "Table" on line 1, "1.1" on line 2)
+        r1 = page.search_for(keyword, clip=clip1)
+        r2 = page.search_for(raw_id, clip=clip2)
+        res = []
+        if r1:
+            res.append(r1[0])
+        if r2:
+            res.append(r2[0])
+        return res if res else [line1_rect, line2_rect]
+
+
 def _find_references(doc, targets: dict, skip_pages: set) -> list:
     """
     Find cross-reference text that mentions the targets.
@@ -315,35 +365,63 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                 line_rect = curr_l["rect"]
 
                 # Candidate texts to check: single line and stitched across consecutive lines
-                check_lines = [(line_text, line_rect, None)]
+                check_items = [
+                    {
+                        "text": line_text,
+                        "r_primary": line_rect,
+                        "r_secondary": None,
+                        "is_split": False,
+                        "is_hyphenated": False,
+                    }
+                ]
                 if i + 1 < len(lines):
                     next_l = lines[i + 1]
-                    # If current line ends with a cross-ref prefix or hyphen
-                    if re.search(r'\b(?:Figure|Fig\.?|Table|Tab\.?|Chapter|Ch\.?|Box|Case)\s*$', line_text, re.I) or line_text.endswith('-'):
-                        stitched_text = line_text + " " + next_l["text"]
-                        check_lines.append((stitched_text, line_rect, next_l["rect"]))
+                    # Check A: Hyphenated across lines (e.g. "Using Ta-" \n "ble 1.1")
+                    m_hyphen = re.search(r'([A-Za-z]+)[-\u2010\u00ad\u2013]\s*$', line_text)
+                    if m_hyphen:
+                        part1 = m_hyphen.group(1)
+                        stitched_dehyphen = re.sub(r'[-\u2010\u00ad\u2013]\s*$', '', line_text) + next_l["text"]
+                        check_items.append({
+                            "text": stitched_dehyphen,
+                            "r_primary": line_rect,
+                            "r_secondary": next_l["rect"],
+                            "is_split": True,
+                            "is_hyphenated": True,
+                            "part1": part1,
+                            "next_text": next_l["text"]
+                        })
 
-                for text_to_check, r_primary, r_secondary in check_lines:
+                    # Check B: Split at space across lines (e.g. "see Table" \n "1.1")
+                    if re.search(r'\b(?:Figure|Fig\.?|Table|Tab\.?|Chapter|Ch\.?|Box|Case)\s*$', line_text, re.I):
+                        stitched_space = line_text + " " + next_l["text"]
+                        check_items.append({
+                            "text": stitched_space,
+                            "r_primary": line_rect,
+                            "r_secondary": next_l["rect"],
+                            "is_split": True,
+                            "is_hyphenated": False,
+                            "next_text": next_l["text"]
+                        })
+
+                for item in check_items:
+                    text_to_check = item["text"]
                     # 1. Figure references
                     for fig_match in re.finditer(r'\b(?:see|refer\s+to|look\s+at)?\s*(?:Figure|Fig\.?)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
-                        # Normalize identifier (e.g. 12.6a -> 12.6, 12-6 -> 12.6)
                         raw_id = fig_match.group(1)
                         norm_id = re.sub(r'[\-–]', '.', re.sub(r'[a-z]+$', '', raw_id))
                         fig_id = f"figure_{norm_id}"
                         if fig_id in targets:
                             if targets[fig_id]["page_idx"] == page_idx and line_text.startswith(fig_match.group(0).lstrip()):
                                 continue
-                            exact_rect = _get_exact_match_rect(page, fig_match.group(0), r_primary)
-                            if r_secondary:
-                                exact_rect = exact_rect | r_secondary
+                            exact_rect = _resolve_match_rects(page, item, fig_match.group(0), raw_id, "Figure")
                             # Avoid duplicates
-                            if not any(_rects_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
+                            if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
                                 references.append({
                                     "page_idx": page_idx,
                                     "page": physical_page,
                                     "rect": exact_rect,
                                     "type": "figure",
-                                    "text": fig_match.group(0),
+                                    "text": fig_match.group(0).strip(),
                                     "target_info": targets[fig_id],
                                 })
 
@@ -355,37 +433,34 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                         if table_id in targets:
                             if targets[table_id]["page_idx"] == page_idx and line_text.startswith(table_match.group(0).lstrip()):
                                 continue
-                            exact_rect = _get_exact_match_rect(page, table_match.group(0), r_primary)
-                            if r_secondary:
-                                exact_rect = exact_rect | r_secondary
-                            if not any(_rects_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
+                            exact_rect = _resolve_match_rects(page, item, table_match.group(0), raw_id, "Table")
+                            if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
                                 references.append({
                                     "page_idx": page_idx,
                                     "page": physical_page,
                                     "rect": exact_rect,
                                     "type": "table",
-                                    "text": table_match.group(0),
+                                    "text": table_match.group(0).strip(),
                                     "target_info": targets[table_id],
                                 })
 
                     # 3. Chapter references
                     for ch_match in re.finditer(r'\b(?:see|refer\s+to|read)?\s*(?:Chapter|Ch\.?)\s+(\d+)', text_to_check, re.I):
-                        ch_id = f"chapter_{ch_match.group(1)}"
+                        raw_id = ch_match.group(1)
+                        ch_id = f"chapter_{raw_id}"
                         if ch_id in targets:
                             target_chapter = targets[ch_id]
                             is_chapter_header = (page_idx == target_chapter["page_idx"] and line_text.startswith(ch_match.group(0).lstrip()))
                             is_section_header = len(line_text) < 50
                             if not is_chapter_header and not is_section_header:
-                                exact_rect = _get_exact_match_rect(page, ch_match.group(0), r_primary)
-                                if r_secondary:
-                                    exact_rect = exact_rect | r_secondary
-                                if not any(_rects_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
+                                exact_rect = _resolve_match_rects(page, item, ch_match.group(0), raw_id, "Chapter")
+                                if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
                                     references.append({
                                         "page_idx": page_idx,
                                         "page": physical_page,
                                         "rect": exact_rect,
                                         "type": "chapter",
-                                        "text": ch_match.group(0),
+                                        "text": ch_match.group(0).strip(),
                                         "target_info": target_chapter,
                                     })
 
@@ -398,16 +473,14 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                             # Don't create a link on the target caption itself
                             if targets[box_id]["page_idx"] == page_idx and line_text.startswith(box_match.group(0).lstrip()):
                                 continue
-                            exact_rect = _get_exact_match_rect(page, box_match.group(0), r_primary)
-                            if r_secondary:
-                                exact_rect = exact_rect | r_secondary
-                            if not any(_rects_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
+                            exact_rect = _resolve_match_rects(page, item, box_match.group(0), raw_id, "Box")
+                            if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
                                 references.append({
                                     "page_idx": page_idx,
                                     "page": physical_page,
                                     "rect": exact_rect,
                                     "type": "box",
-                                    "text": box_match.group(0),
+                                    "text": box_match.group(0).strip(),
                                     "target_info": targets[box_id],
                                 })
 
@@ -443,13 +516,16 @@ def _check_link_exists(doc, page_idx: int, rect) -> bool:
     """Check if a link already exists in the given area."""
     try:
         page = doc[page_idx]
-        rect = fitz.Rect(rect)
+        rect_list = rect if isinstance(rect, list) else [rect]
         for link in page.get_links():
             is_link = link.get('kind') in (fitz.LINK_URI, fitz.LINK_GOTO)
             if is_link:
                 link_rect = link.get('from')
-                if link_rect and fitz.Rect(link_rect).intersects(rect):
-                    return True
+                if link_rect:
+                    lr = fitz.Rect(link_rect)
+                    for r in rect_list:
+                        if lr.intersects(fitz.Rect(r)):
+                            return True
     except Exception:
         pass
     return False
@@ -459,11 +535,13 @@ def _create_crossref_link(doc, ref_page_idx: int, ref_rect, target_page_idx: int
     """Create a link from a cross-reference to its target."""
     try:
         page = doc[ref_page_idx]
-        page.insert_link({
-            "kind": fitz.LINK_GOTO,
-            "from": fitz.Rect(ref_rect),
-            "page": target_page_idx,
-        })
+        rect_list = ref_rect if isinstance(ref_rect, list) else [ref_rect]
+        for r in rect_list:
+            page.insert_link({
+                "kind": fitz.LINK_GOTO,
+                "from": fitz.Rect(r),
+                "page": target_page_idx,
+            })
         logger.debug(f"Created cross-reference link for '{ref_text}' to page {target_page_idx + 1}")
     except Exception as e:
         logger.error(f"Failed to create cross-reference link: {e}")

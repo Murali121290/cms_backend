@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
+def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_details: list = None) -> dict:
     """
     Scan PDF for superscript note references and chapter-based endnotes/references.
 
@@ -28,8 +28,8 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     1. Use PDF bookmarks (TOC) to identify chapter page ranges and the
        references/notes section start page. Fall back to text scanning when
        no bookmarks exist.
-    2. Collect all superscript digit spans in the body text, grouped by their
-       owning chapter. Expand bounding boxes slightly so hover/click hits reliably.
+    2. Collect all superscript digit spans and bracketed citations in body text,
+       grouped by their owning chapter.
     3. Parse the references section. Detect chapter / section subheadings that
        restart numbering, and assign each numbered entry to a (chapter, num) pair.
     4. Match each in-body reference to the correct definition by chapter.
@@ -40,30 +40,49 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     # ------------------------------------------------------------------
     # Step 1 – Locate notes/references section and chapter boundaries
     # ------------------------------------------------------------------
+    toc = doc.get_toc()
+
+    # Detect all references/notes TOC entries
+    ref_toc_entries = []
+    for lvl, title, page_1based in toc:
+        if re.search(r'^(?:References?|Notes?|Endnotes?|Bibliography|Works\s+Cited)(?:\s*[:\-–].*)?$', title.strip(), re.IGNORECASE):
+            ref_toc_entries.append((lvl, page_1based - 1))
+
+    is_chapter_based = len(ref_toc_entries) > 1 or any(lvl > 1 for lvl, _ in ref_toc_entries)
     chapter_page_ranges = _get_chapter_ranges_from_toc(doc)
-    notes_section_start = _find_notes_section_start(doc, chapter_page_ranges)
 
-    if notes_section_start is None:
-        logger.debug("No notes/references section found in PDF")
-        doc.close()
-        return {"total_notes": 0, "linked": 0, "not_linked": 0, "details": []}
+    ref_pages_set = set()
+    if is_chapter_based:
+        # Each chapter has its own references section page(s)
+        for _, p_idx in ref_toc_entries:
+            ref_pages_set.add(p_idx)
+        # Also check page following ref_start if it continues references
+        for p_idx in list(ref_pages_set):
+            if p_idx + 1 < len(doc):
+                next_p = doc[p_idx + 1]
+                t_sample = next_p.get_text()[:300]
+                if re.search(r'^\s*(?:\[\d+\]|\d+[\.\)])', t_sample, re.MULTILINE):
+                    ref_pages_set.add(p_idx + 1)
+        body_pages = [p for p in range(len(doc)) if p not in ref_pages_set]
+        ref_pages = sorted(ref_pages_set)
+    else:
+        notes_section_start = _find_notes_section_start(doc, chapter_page_ranges)
+        if notes_section_start is None:
+            logger.debug("No notes/references section found in PDF")
+            doc.close()
+            return {"total_notes": 0, "linked": 0, "not_linked": 0, "details": []}
 
-    logger.debug(f"Notes/references section starts at page {notes_section_start + 1}")
-
-    # Determine body-text page range (everything before the notes section)
-    body_end_page = notes_section_start - 1
-
-    # Detect end of notes section (e.g. where Index starts, if any)
-    notes_section_end = len(doc)
-    try:
-        for _lvl, title, page_1based in doc.get_toc():
+        notes_section_end = len(doc)
+        for _lvl, title, page_1based in toc:
             if re.search(r'\bIndex\b', title, re.IGNORECASE):
                 p_idx = page_1based - 1
                 if p_idx > notes_section_start:
                     notes_section_end = p_idx
                     break
-    except Exception:
-        pass
+
+        body_pages = list(range(notes_section_start))
+        ref_pages = list(range(notes_section_start, notes_section_end))
+        ref_pages_set = set(ref_pages)
 
     # ------------------------------------------------------------------
     # Step 2 – Collect note references in body text
@@ -73,7 +92,7 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     # ------------------------------------------------------------------
     note_references: dict[tuple, list] = defaultdict(list)
 
-    for page_idx in range(body_end_page + 1):
+    for page_idx in body_pages:
         page = doc[page_idx]
         chapter_num = _page_to_chapter(page_idx, chapter_page_ranges)
 
@@ -102,6 +121,8 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                         r = fitz.Rect(span["bbox"])
                         r_click = fitz.Rect(r.x0 - 1.5, r.y0 - 1.5, r.x1 + 1.5, r.y1 + 1.5)
                         for note_num in nums:
+                            if note_num >= 1900:
+                                continue
                             key = (chapter_num, note_num)
                             note_references[key].append({
                                 "page_idx": page_idx,
@@ -123,14 +144,28 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                     line_rect = fitz.Rect(line["bbox"])
                     bracket_rects = page.search_for(bracket_str, clip=line_rect)
                     if not bracket_rects:
-                        bracket_rects = page.search_for(bracket_str)
+                        bracket_rects = page.search_for(bracket_str, clip=fitz.Rect(line_rect.x0, line_rect.y0 - 2, line_rect.x1, line_rect.y1 + 2))
                     if not bracket_rects:
                         continue
 
                     target_bracket_rect = bracket_rects[0]
 
+                    # Fast-path for single numbers like [1] or (2) without calling heavy rawdict
+                    if content.isdigit():
+                        val = int(content)
+                        if val >= 1900:  # Skip 4-digit years
+                            continue
+                        r_click = fitz.Rect(target_bracket_rect.x0 - 1.5, target_bracket_rect.y0 - 1.5, target_bracket_rect.x1 + 1.5, target_bracket_rect.y1 + 1.5)
+                        key = (chapter_num, val)
+                        note_references[key].append({
+                            "page_idx": page_idx,
+                            "page": page_idx + 1,
+                            "rect": r_click,
+                            "chapter_num": chapter_num,
+                        })
+                        continue
+
                     # Parse individual note numbers or ranges (e.g. "12, 17" or "1-3")
-                    # Use rawdict within target_bracket_rect to locate exact character bboxes
                     raw_clip = page.get_text("rawdict", clip=target_bracket_rect)
                     clip_chars = []
                     for cb in raw_clip.get("blocks", []):
@@ -220,8 +255,11 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     note_definitions: dict[tuple, list] = defaultdict(list)
     curr_chapter_num = 0
 
-    for page_idx in range(notes_section_start, notes_section_end):
+    for page_idx in ref_pages:
         page = doc[page_idx]
+        if is_chapter_based:
+            curr_chapter_num = _page_to_chapter(page_idx, chapter_page_ranges)
+
         raw_blocks = [b for b in page.get_text("dict")["blocks"] if b["type"] == 0]
         # Skip header (<45 pt) and footer (>740 pt)
         content_blocks = [b for b in raw_blocks if not (b["bbox"][1] < 45 or b["bbox"][1] > 740)]
@@ -247,18 +285,20 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                     curr_chapter_num = 99
                     continue
 
-                # Match numbered note definitions: "1.", "1.\t", "1) ", "10.\t Marvin..."
-                defn_match = re.match(r'^(\d{1,4})[\.\)\:\-](?:\t|\s+|$)', line_text)
+                # Match numbered note definitions: "[1]", "1.", "1.\t", "1) ", "10.\t Marvin..."
+                defn_match = re.match(r'^(?:\[(\d{1,4})\]|(\d{1,4})[\.\)\:\-])(?:\t|\s+|$)', line_text)
                 if defn_match and line.get("spans"):
+                    note_num = int(defn_match.group(1) or defn_match.group(2))
+                    if note_num >= 1900:  # Skip years that wrap to line start
+                        continue
+
                     span = line["spans"][0]
-                    # Filter out hanging indent false positives (e.g. publication years like "1995." that wrap to line start)
-                    # Numbered citations start on hanging indent margins: x0 < 85 (left column) or 250 < x0 < 336 (right column)
+                    # Filter out hanging indent false positives
                     x0 = span["bbox"][0]
-                    is_valid_margin = (x0 < 85) or (250 < x0 < 336)
+                    is_valid_margin = (x0 < 160) or (220 < x0 < 380)
                     if not is_valid_margin:
                         continue
 
-                    note_num = int(defn_match.group(1))
                     r_span = fitz.Rect(span["bbox"])
                     r_line = fitz.Rect(line["bbox"])
                     # Make rect generous enough to hover and click (e.g. width at least 35pt)
@@ -309,7 +349,17 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
 
     # If applying links, first clear existing inaccurate/corrupt endnote links
     if not analyze_only:
-        _clear_existing_endnote_links(doc, notes_section_start, notes_section_end)
+        _clear_existing_endnote_links(doc, ref_pages_set)
+
+    # Filter active references if custom_details (user exclusions) provided
+    active_ref_pairs = None
+    if custom_details is not None:
+        active_ref_pairs = set()
+        for d in custom_details:
+            rp = d.get("reference_page")
+            nn = d.get("note_number")
+            if rp is not None and nn is not None:
+                active_ref_pairs.add((rp, nn))
 
     all_keys = set(note_references.keys()) | set(
         (chap, num) for chap, num in note_definitions.keys())
@@ -322,6 +372,10 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
 
         if has_refs and has_defs:
             for ref_idx, ref in enumerate(refs):
+                # If excluded by user, skip it
+                if active_ref_pairs is not None and (ref["page"], note_num) not in active_ref_pairs:
+                    continue
+
                 def_info = reference_to_definition.get((chap, note_num, ref_idx))
                 if def_info is None:
                     note_entries.append({
@@ -356,6 +410,8 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
 
         elif has_refs:
             for ref in refs:
+                if active_ref_pairs is not None and (ref["page"], note_num) not in active_ref_pairs:
+                    continue
                 note_entries.append({
                     "note_number": note_num,
                     "chapter": chap,
@@ -365,7 +421,7 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                     "status": "missing_definition",
                     "reference_count": len(refs),
                 })
-        elif has_defs:
+        elif has_defs and not is_chapter_based:
             for def_info in (note_definitions.get((chap, note_num)) or []):
                 note_entries.append({
                     "note_number": note_num,
@@ -436,7 +492,7 @@ def _identify_toc_pages(doc) -> set:
     return toc_pages
 
 
-def _clear_existing_endnote_links(doc, notes_section_start: int, notes_section_end: int):
+def _clear_existing_endnote_links(doc, ref_pages_set: set):
     """
     Safely remove existing GOTO links between body pages and notes pages.
     PROTECTS:
@@ -471,11 +527,9 @@ def _clear_existing_endnote_links(doc, notes_section_start: int, notes_section_e
                     # Not an endnote link (probably a heading or banner link) -> protect it!
                     continue
 
-                # Link from body to notes section
-                if page_idx < notes_section_start and (notes_section_start <= target_page < notes_section_end):
-                    page.delete_link(link)
-                # Link from notes section back to body
-                elif (notes_section_start <= page_idx < notes_section_end) and target_page < notes_section_start:
+                # Link between body and references pages
+                if (page_idx not in ref_pages_set and target_page in ref_pages_set) or \
+                   (page_idx in ref_pages_set and target_page not in ref_pages_set):
                     page.delete_link(link)
 
 
@@ -531,31 +585,26 @@ def _get_chapter_ranges_from_toc(doc) -> list:
     chapter_ranges = []
     try:
         toc = doc.get_toc()
-        notes_start = _find_notes_section_start(doc, [])
         sections = []
 
         for item in toc:
-            _lvl, title, page_1based = item
+            lvl, title, page_1based = item
             p_idx = page_1based - 1
-            if notes_start is not None and p_idx >= notes_start:
-                break
             t = title.strip()
             m_num = re.search(r'\b(?:Chapter|CHAPTER)\s+(\d+)\b', t, re.IGNORECASE) or re.search(r'^(\d+)\s+[\w\W]', t)
-            if m_num:
+            if m_num and (lvl == 1 or m_num.group(1)):
                 chap_num = int(m_num.group(1))
-            elif re.search(r'\bIntroduction\b', t, re.IGNORECASE):
+                sections.append((chap_num, p_idx))
+            elif re.search(r'\bIntroduction\b', t, re.IGNORECASE) and lvl == 1:
                 chap_num = 0
-            elif re.search(r'\bPostscript\b', t, re.IGNORECASE):
+                sections.append((chap_num, p_idx))
+            elif re.search(r'\bPostscript\b', t, re.IGNORECASE) and lvl == 1:
                 chap_num = 99
-            else:
-                chap_num = None
-
-            if chap_num is not None:
                 sections.append((chap_num, p_idx))
 
         sections.sort(key=lambda x: x[1])
         for i, (chap_num, start_idx) in enumerate(sections):
-            end_idx = sections[i + 1][1] - 1 if i + 1 < len(sections) else ((notes_start - 1) if notes_start else len(doc) - 1)
+            end_idx = sections[i + 1][1] - 1 if i + 1 < len(sections) else len(doc) - 1
             chapter_ranges.append((chap_num, start_idx, end_idx))
     except Exception as e:
         logger.debug(f"Could not build chapter ranges from TOC: {e}")

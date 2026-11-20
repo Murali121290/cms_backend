@@ -1,7 +1,7 @@
 import os
 import shutil
 import fitz
-from typing import Optional, Any
+from typing import Optional, Any, List, Dict
 from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -966,6 +966,11 @@ def generate_link_manual(
 class UrlLinkRequest(BaseModel):
     analyze_only: bool = True
     color_urls: bool = False
+    fix_multiline: bool = True
+    fix_missing: bool = True
+    fix_malformed: bool = True
+    remove_duplicates: bool = True
+    custom_details: Optional[List[Dict[str, Any]]] = None
 
 
 @router.post("/projects/{project_id}/generate-url-links")
@@ -997,7 +1002,12 @@ def generate_url_links(
         result = url_service.find_urls_in_pdf(
             bookmarked_pdf_path,
             analyze_only=request.analyze_only,
-            color_urls=request.color_urls
+            color_urls=request.color_urls,
+            fix_multiline=request.fix_multiline,
+            fix_missing=request.fix_missing,
+            fix_malformed=request.fix_malformed,
+            remove_duplicates=request.remove_duplicates,
+            custom_details=request.custom_details,
         )
 
         # Always record the analysis
@@ -1083,6 +1093,7 @@ def generate_email_links(
 
 class EndnoteRequest(BaseModel):
     analyze_only: bool = True
+    custom_details: Optional[List[Dict[str, Any]]] = None
 
 
 class CrossrefRequest(BaseModel):
@@ -1123,7 +1134,7 @@ def generate_endnote_links(
             raise HTTPException(status_code=404, detail="No PDF file available.")
 
     try:
-        result = endnote_service.find_endnotes_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        result = endnote_service.find_endnotes_in_pdf(bookmarked_pdf_path, request.analyze_only, request.custom_details)
 
         # Always record the analysis
         web_pdf_projects_db.record_step_completion(
