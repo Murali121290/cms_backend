@@ -64,7 +64,9 @@ def test_valid_file_has_no_errors():
     (["A.\tx", "B.\ty", "*C.\tNone of the above"], False, "None"),
     (["A.\tx", "B.\ty", "*C.\tBoth A and B"], False, "Both"),
     (["A.\tx", "B.\ty", "*C.\tNeither A nor B"], False, "Neither"),
-    (["A.\t1", "*B.\t1 1/2", "C.\t2", "D.\t2 1/2"], None, "numeric — not checked"),
+    (["A.\t1", "*B.\t1 1/2", "C.\t2", "D.\t2 1/2"], False, "numbers by size — review"),
+    (["A.\t1681", "*B.\t1781", "C.\t1870", "D.\t1981"], False, "years in order"),
+    (["A.\t8′", "B.\t12′", "*C.\t10′", "D.\t15′"], None, "mixed numbers — not checked"),
     (["A.\tFirst", "B.\tSecond", "*C.\tThird"], False, "ordinal"),
     (["A.\tLondon", "*B.\tParis", "C.\tRome"], True, "independent"),
 ])
@@ -95,11 +97,11 @@ def test_true_false_with_shuffle_is_error():
 
 
 @pytest.mark.parametrize("opts", [
-    ["A.\t1/8″", "B.\t1/16″", "*C.\t3/32″", "D.\t1/32″"],  # not in order
-    ["A.\t24′", "B.\t12′", "*C.\t6′", "D.\t3′"],          # descending, as in the PDF
+    ["A.\t1/8″", "B.\t1/16″", "*C.\t3/32″", "D.\t1/32″"],  # mixed order
+    ["A.\t8′", "B.\t12′", "*C.\t10′", "D.\t15′"],          # mixed order
 ])
 @pytest.mark.parametrize("shuffle", [True, False])
-def test_numeric_options_are_not_checked_for_shuffle(opts, shuffle):
+def test_numbers_in_mixed_order_are_not_checked(opts, shuffle):
     issues = run(q_block(1, "How far?", opts, shuffle=shuffle))
     assert not any(i.rule == "SH3" for i in issues)
 
@@ -160,13 +162,13 @@ def test_file_wide_wrong_prefix_reported_once():
 
 def test_title_rules():
     long_q = "The Industrial Revolution could not have taken place without the cheap, convenient power of the _____."
-    ok = q_block(1, long_q, GOOD_OPTS, title="The Industrial Revolution could not have taken place…")
+    ok = q_block(1, long_q, GOOD_OPTS, title="The Industrial Revolution could not have taken place …")
     assert "T1" not in rules(run(ok), "error")
     no_ellipsis = q_block(1, long_q, GOOD_OPTS, title="The Industrial Revolution could not have taken place")
     assert "T1" in rules(run(no_ellipsis), "error")
-    typo = q_block(1, long_q, GOOD_OPTS, title="The Industrial Revolutions could not have taken place…")
+    typo = q_block(1, long_q, GOOD_OPTS, title="The Industrial Revolutions could not have taken place …")
     assert "T1" in rules(run(typo), "error")
-    mid_word = q_block(1, long_q, GOOD_OPTS, title="The Industrial Revolution could not have taken pla…")
+    mid_word = q_block(1, long_q, GOOD_OPTS, title="The Industrial Revolution could not have taken pla …")
     assert "T1" in rules(run(mid_word), "error")
     mismatch = q_block(1, "Cast iron plates are affected by temperature changes.", ["*True", "False"],
                        shuffle=False, title="Cast iron plates are affected by temperature.")
@@ -281,11 +283,11 @@ def test_fixer_title_regenerated_but_typo_left_for_human():
     wrong = q_block(1, long_q, GOOD_OPTS, title="Something else entirely")
     out, fixes, _ = fix_and_lines(wrong)
     assert "Title: " + make_title(long_q) in out
-    assert make_title(long_q).endswith("…") and len(make_title(long_q)) <= 61
+    assert make_title(long_q).endswith(" …") and len(make_title(long_q)) <= 62
     typo_q = "What type of workholding de2vices are most likely to be used on a lathe?"
-    typo = q_block(1, typo_q, GOOD_OPTS, title="What type of workholding devices are most likely to be…")
+    typo = q_block(1, typo_q, GOOD_OPTS, title="What type of workholding devices are most likely to be …")
     out, fixes, _ = fix_and_lines(typo)
-    assert "Title: What type of workholding devices are most likely to be…" in out
+    assert "Title: What type of workholding devices are most likely to be …" in out
     assert not any(f.rule == "T1" for f in fixes)
 
 
@@ -334,12 +336,27 @@ def test_fixes_are_tracked_changes_and_reject_restores_original():
     assert not any(s.startswith(("Reference:", "Learning Outcome")) for s in ins_texts)
 
 
-def test_numbers_in_order_are_not_flagged_or_changed():
-    for shuffle in (True, False):
-        lines = q_block(1, "Load rating?", ["A.\t200 lb", "*B.\t225 lb", "C.\t250 lb", "D.\t300 lb"], shuffle=shuffle)
-        assert not any(i.rule == "SH3" for i in run(lines))
-        out, fixes, _ = fix_and_lines(lines)
-        assert ("Shuffle: True" in out) is shuffle and not any(f.rule.startswith("SH") for f in fixes)
+@pytest.mark.parametrize("opts", [
+    ["A.\t200 lb", "*B.\t225 lb", "C.\t250 lb", "D.\t300 lb"],   # ascending
+    ["A.\t100′", "B.\t65′", "*C.\t45′", "D.\t25′"],              # descending
+])
+def test_numbers_by_size_with_shuffle_are_a_warning_and_not_changed(opts):
+    lines = q_block(1, "Load rating?", opts, shuffle=True)
+    sh3 = [i for i in run(lines) if i.rule == "SH3"]
+    assert sh3 and all(i.severity == "warning" for i in sh3)
+    out, fixes, _ = fix_and_lines(lines)
+    assert "Shuffle: True" in out and not any(f.rule.startswith("SH") for f in fixes)
+    # without Shuffle: nothing to report
+    assert not any(i.rule == "SH3" for i in run(q_block(1, "Load rating?", opts, shuffle=False)))
+
+
+def test_years_in_chronological_order_with_shuffle_are_error_and_fixed():
+    lines = q_block(1, "When was the first water closet patented?", ["A.\t1681", "*B.\t1781", "C.\t1870", "D.\t1981"], shuffle=True)
+    sh3 = [i for i in run(lines) if i.rule == "SH3"]
+    assert sh3 and sh3[0].severity == "error" and "chronological" in sh3[0].message
+    out, fixes, fixed = fix_and_lines(lines)
+    assert "Shuffle: True" not in out and any(f.rule == "SH3" for f in fixes)
+    assert [i for i in check_run([parse_docx(fixed, "machfun2028_tx_ch05.docx")], PREFIX) if i.severity == "error"] == []
 
 
 def test_ordering_question_is_parsed_as_one_question():
@@ -372,7 +389,7 @@ def test_stray_title_after_reference_two_dot_title_and_lo_hyphen_are_fixed():
     assert {"T1", "L1", "R2"} <= set(rules(issues, "error"))
     out, fixes, fixed = fix_and_lines(lines)
     assert "Title: lines in all buildings." not in out
-    assert "Title: Pressure pipe and fittings are required for drain/waste…" in out
+    assert "Title: Pressure pipe and fittings are required for drain/waste …" in out
     assert "Learning Outcome: 5.1" in out
     assert [i for i in check_run([parse_docx(fixed, "machfun2028_tx_ch05.docx")], PREFIX) if i.severity == "error"] == []
 
@@ -380,7 +397,7 @@ def test_stray_title_after_reference_two_dot_title_and_lo_hyphen_are_fixed():
 def test_title_dropping_only_a_blank_is_fine():
     q = "The recommended minimum bending radius for 1/2 PEX is _____."
     lines = q_block(1, q, ["A.\t10", "B.\t9", "C.\t7", "*D.\t5"], shuffle=False,
-                    title="The recommended minimum bending radius for 1/2 PEX is…")
+                    title="The recommended minimum bending radius for 1/2 PEX is …")
     assert not any(i.rule == "T1" and i.severity in ("error", "warning") for i in run(lines))
 
 
@@ -389,11 +406,25 @@ def test_three_dot_title_is_error_and_fixed_to_ellipsis():
     lines = q_block(1, long_q, GOOD_OPTS, title="According to National Safety Council statistics, the most...")
     assert "T1" in rules(run(lines), "error")
     out, fixes, fixed = fix_and_lines(lines)
-    assert "Title: According to National Safety Council statistics, the most…" in out
+    assert "Title: According to National Safety Council statistics, the most …" in out
     # tracked change touches only the dots
     body = docx.Document(io.BytesIO(fixed)).element.body
     assert ["".join(t.text for t in e.iter(qn("w:delText"))) for e in body.iter(qn("w:del"))] == ["..."]
-    assert ["".join(t.text for t in e.iter(qn("w:t"))) for e in body.iter(qn("w:ins"))] == ["…"]
+    assert ["".join(t.text for t in e.iter(qn("w:t"))) for e in body.iter(qn("w:ins"))] == [" …"]
+    assert [i for i in check_run([parse_docx(fixed, "machfun2028_tx_ch05.docx")], PREFIX) if i.severity == "error"] == []
+
+
+def test_ellipsis_without_space_is_error_and_space_added():
+    long_q = "According to National Safety Council statistics, the most common injuries are _____."
+    lines = q_block(1, long_q, GOOD_OPTS, title="According to National Safety Council statistics, the most…")
+    assert any(i.rule == "T1" and "space" in i.message for i in run(lines) if i.severity == "error")
+    out, fixes, fixed = fix_and_lines(lines)
+    assert "Title: According to National Safety Council statistics, the most …" in out
+    assert any("space before the ellipsis" in f.action for f in fixes)
+    # only a space is inserted; the existing '…' stays
+    body = docx.Document(io.BytesIO(fixed)).element.body
+    assert ["".join(t.text for t in e.iter(qn("w:t"))) for e in body.iter(qn("w:ins"))] == [" "]
+    assert list(body.iter(qn("w:del"))) == []
     assert [i for i in check_run([parse_docx(fixed, "machfun2028_tx_ch05.docx")], PREFIX) if i.severity == "error"] == []
 
 

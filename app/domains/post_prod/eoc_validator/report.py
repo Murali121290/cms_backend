@@ -12,6 +12,12 @@ from .rules import ERROR, INFO, RULE_TITLES, WARNING, Issue
 
 SEVERITY_ORDER = {ERROR: 0, WARNING: 1, INFO: 2}
 
+NOT_CHECKED_NOTE = (
+    "Choices that are all numbers in mixed order (e.g. 8′ | 12′ | 10′ | 15′). "
+    "Numbers listed by size (e.g. 200 lb | 225 lb | 250 lb) only get a warning to confirm Shuffle and are never changed; "
+    "years in chronological order (e.g. 1681 | 1781 | 1870 | 1981) must not shuffle and are fixed."
+)
+
 
 def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix: str) -> dict:
     by_file: dict[str, Counter] = {}
@@ -53,6 +59,7 @@ def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix
             "info": totals.get(INFO, 0),
         },
         "rules": [{"rule": r, "title": RULE_TITLES.get(r, r), "count": n} for r, n in sorted(by_rule.items())],
+        "not_checked": [NOT_CHECKED_NOTE],
         "files": summary,
         "issues": [i.to_dict() for i in sorted_issues],
     }
@@ -99,6 +106,8 @@ def to_xlsx(report: dict, fixes: list[dict] | None = None) -> bytes:
     ws.append(["Reference prefix", report["reference_prefix"]])
     ws.append(["Files", t["files"], "Questions", t["questions"]])
     ws.append(["Errors", t["errors"], "Warnings", t["warnings"], "Info", t["info"]])
+    ws.append(["Not checked", NOT_CHECKED_NOTE])
+    ws.cell(ws.max_row, 1).font = bold
     ws.append([])
     cols = ["File", "Chapter", "Questions", "MC", "T/F", "Shuffle lines", "Images", "Errors", "Warnings", "Info", "Status"]
     ws.append(cols)

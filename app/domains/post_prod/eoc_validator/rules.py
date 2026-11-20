@@ -65,6 +65,7 @@ NO_SHUFFLE_PATTERNS = [
     (re.compile(r"\b[A-H]\s*(?:,\s*[A-H]\s*)*(?:and|or|&)\s*[A-H]\b(?!\w)"), "an option that refers to other option letters"),
 ]
 
+YEAR_RE = re.compile(r"^(?:c\.\s*)?(1\d{3}|20\d{2})s?\.?$")
 ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
 _NUM_RE = re.compile(
     r"^[−\-+]?\s*(\d+\s+\d+/\d+|\d+/\d+|\d+(?:[.,]\d+)?|\.\d+)"
@@ -115,9 +116,16 @@ def shuffle_decision(q: Question) -> tuple[Optional[bool], str, bool]:
             return False, "options are ordinal and in sequence", False
     nums = [_numeric_value(t) for t in texts]
     if all(n is not None for n in nums):
-        # Numeric options (200 lb / 225 lb / …) follow the source PDF's order;
-        # the editor decides Shuffle for these — not checked, never changed.
-        return None, "numeric options (not checked)", False
+        in_order = nums == sorted(nums) or nums == sorted(nums, reverse=True)
+        if in_order and all(YEAR_RE.match(t.strip()) for t in texts):
+            # "Chronological dates" is named in the shuffle instruction.
+            return False, "options are years in chronological order", False
+        if in_order:
+            # Amounts listed by size: house-style order, not clearly a "sequence"
+            # — flag for a person to confirm, never changed automatically.
+            return False, "options are numbers listed by size (ascending/descending) — confirm whether they should shuffle", True
+        # Numbers in mixed order: not checked, never changed.
+        return None, "numeric options in mixed order (not checked)", False
     return True, "independent options", False
 
 
@@ -159,14 +167,16 @@ def check_title(q: Question, title: str) -> list[tuple[str, str]]:
         return out
     ns, nt = _norm_quotes(stem), _norm_quotes(t)
     if re.search(r"(?<!\.)\.\.$", nt):
-        return [(ERROR, "Title ends with two dots '..' — a shortened title must end with the ellipsis character '…'")]
+        return [(ERROR, "Title ends with two dots '..' — a shortened title must end with a space and the ellipsis ' …'")]
     ellipsis = nt.endswith("…")
     three_dots = nt.endswith("...")
     body = nt[:-1] if ellipsis else (nt[:-3] if three_dots else nt)
     body = body.rstrip()
 
     if three_dots:
-        out.append((ERROR, "Title ends with three dots '...' — must use the ellipsis character '…'"))
+        out.append((ERROR, "Title ends with three dots '...' — must end with a space and the ellipsis ' …'"))
+    elif ellipsis and not nt.endswith(" …"):
+        out.append((ERROR, "No space before the ellipsis — must end with a space and the ellipsis ' …'"))
 
     if not (ellipsis or three_dots):
         # Full question expected.
@@ -176,7 +186,7 @@ def check_title(q: Question, title: str) -> list[tuple[str, str]]:
             out.append((INFO, "Title differs from the question only by a trailing period"))
             return out
         if ns.startswith(nt):
-            out.append((ERROR, "Title is a shortened question but does not end with an ellipsis '…'"))
+            out.append((ERROR, "Title is a shortened question but does not end with a space and the ellipsis ' …'"))
         else:
             out.append((ERROR, "Title does not match the question text"))
         return out

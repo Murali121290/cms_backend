@@ -38,6 +38,7 @@ from .rules import ERROR, LO_VALUE_RE, check_title, shuffle_decision, title_look
 from .tracked import Tracker, _run_text, has_tracked_changes, make_run
 
 TITLE_MAX = 60
+ELLIPSIS = " …"  # shortened titles end with a space + the ellipsis character
 DEFAULT_AUTHOR = "EOC Validator"
 
 
@@ -64,21 +65,21 @@ def _norm(s: str) -> str:
 
 
 def make_title(stem: str) -> str:
-    """Title rule: full question if it fits, else cut at a full word ≈50–60 chars + '…'."""
+    """Title rule: full question if it fits, else cut at a full word ≈50–60 chars + ' …'."""
     s = stem.strip()
     if len(s) <= TITLE_MAX:
         return s
     cut = s[:TITLE_MAX + 1]
     sp = cut.rfind(" ")
     body = (cut[:sp] if sp > 0 else s[:TITLE_MAX]).rstrip(" ,;:—–-")
-    return body + "…"
+    return body + ELLIPSIS
 
 
 def _title_runs(tpara: Paragraph, qpara: Paragraph, title: str) -> Optional[list]:
     """Runs for the full new title line: a plain 'Title: ' run (formatting of
     the existing title's first run) + clones of the question's runs so italics
     carry over. None if the question runs can't be mapped cleanly."""
-    want = title[:-1] if title.endswith("…") else title
+    want = title[: -len(ELLIPSIS)] if title.endswith(ELLIPSIS) else title
     full = qpara.text
     m = QUESTION_RE.match(full)
     if not m:
@@ -105,9 +106,9 @@ def _title_runs(tpara: Paragraph, qpara: Paragraph, title: str) -> Optional[list
         consumed += len(piece)
     if "".join(_run_text(r) for r in out) != want:
         return None
-    if title.endswith("…"):
+    if title.endswith(ELLIPSIS):
         last_t = out[-1].find(qn("w:t"))
-        last_t.text = last_t.text.rstrip() + "…"
+        last_t.text = last_t.text.rstrip() + ELLIPSIS
     first = tpara._p.find(qn("w:r"))
     rpr = copy.deepcopy(first.find(qn("w:rPr"))) if first is not None and first.find(qn("w:rPr")) is not None else None
     return [make_run("Title: ", rpr)] + out
@@ -184,14 +185,18 @@ def fix_docx(
             val = re.sub(r"^Title\s*:\s*", "", raw, flags=re.I)
             has_error = any(sev == ERROR for sev, _ in check_title(q, val))
             tp = P(q.title_line.idx)
-            # Shortened title ending in '...' or '..' → ellipsis character '…'
-            # (only the dots change, when the rest of the title matches the question).
-            dots = re.search(r"\.{2,3}\s*$", val)
+            # Shortened title ending in '...', '..' or '…' without a space →
+            # space + ellipsis ' …' (only the ending changes, when the rest of
+            # the title matches the question).
+            dots = re.search(r"(\.{2,3}|…)\s*$", val)
             body_d = val[:dots.start()].rstrip() if dots else ""
-            if dots and body_d and _norm(q.stem).startswith(_norm(body_d)):
-                new = raw[: len(raw.rstrip()) - len(dots.group(0).rstrip())].rstrip() + "…"
+            good_end = val.rstrip().endswith(ELLIPSIS) and not val.rstrip().endswith("  …")
+            if dots and body_d and not good_end and _norm(q.stem).startswith(_norm(body_d)):
+                new = raw[: len(raw.rstrip()) - len(dots.group(0).rstrip())].rstrip() + ELLIPSIS
                 if tr.replace_text(tp, new):
-                    fixes.append(Fix(filename, q.number, "T1", f"replaced '{dots.group(0).strip()}' with the ellipsis '…' in the Title", raw, new))
+                    ending = dots.group(0).strip()
+                    what = "added a space before the ellipsis" if ending == "…" else f"replaced '{ending}' with ' …'"
+                    fixes.append(Fix(filename, q.number, "T1", f"{what} in the Title", raw, new))
             elif has_error and not title_looks_like_typo(q.stem, val):
                 new_title = make_title(q.stem)
                 runs = _title_runs(tp, P(q.idx), new_title)
