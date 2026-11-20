@@ -1352,8 +1352,17 @@ def validate_utf8_and_entities(file_details, rule_config=None):
             }]}
 
     # 3. Check for disallowed entities: decimal, hexadecimal, named entities
+    from ._common import get_book_language
+    detected_lang = get_book_language(file_details)
+    is_french = (detected_lang == "fr" or detected_lang.startswith("fr_") or detected_lang.startswith("fr-"))
+
     cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
-    allowed_list = cfg.get("allowed_entities") or ["&amp;", "&lt;", "&gt;", "&#8617;"]
+    allowed_list = list(cfg.get("allowed_entities") or ["&amp;", "&lt;", "&gt;", "&#8617;"])
+    
+    # In French texts, &nbsp; is allowed
+    if is_french and "&nbsp;" not in allowed_list:
+        allowed_list.append("&nbsp;")
+
     allowed_entities = {e.lower() for e in allowed_list}
 
     entity_pattern = re.compile(r'&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z0-9]+);')
