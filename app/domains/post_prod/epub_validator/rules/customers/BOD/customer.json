@@ -559,6 +559,45 @@
       "category": "Copyright Check"
     },
     {
+      "id": "BOD-PRICE-001",
+      "name": "Price symbol check (Euro / Dollar / Pound)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": [
+        "*impressum*.xhtml",
+        "*copyright*.xhtml",
+        "*kolofon*.xhtml",
+        "*colophon*.xhtml",
+        "*valmistusmerkinnat*.xhtml",
+        "*valmistusmerkinnät*.xhtml",
+        "*valmistus*merkinn*.xhtml",
+        "*pie*de*imprenta*.xhtml",
+        "*imprenta*.xhtml",
+        "*pe*de*imprensa*.xhtml",
+        "*pé*de*imprensa*.xhtml",
+        "*imprensa*.xhtml",
+        "*kolofonside*.xhtml",
+        "*page*de*copyright*.xhtml",
+        "*drets*autor*.xhtml",
+        "*drets*d*autor*.xhtml",
+        "*about*author*.xhtml",
+        "*About*Author*.xhtml",
+        "*uber*die*autor*.xhtml",
+        "*ber*die*autor*.xhtml",
+        "*ber*den*autor*.xhtml",
+        "*Die*Autoren*.xhtml",
+        "*die*autoren*.xhtml",
+        "*author*.xhtml",
+        "*Author*.xhtml",
+        "*autor*.xhtml",
+        "*Autor*.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "price_regex": "(?:[€$£]|&euro;|&pound;|&dollar;|\\b(?:EUR|USD|GBP)\\b)\\s*\\d+(?:[.,]\\d+)?|\\d+(?:[.,]\\d+)?\\s*(?:[€$£]|&euro;|&pound;|&dollar;|\\b(?:EUR|USD|GBP)\\b)|[€$£]"
+      },
+      "category": "Copyright Check"
+    },
+    {
       "id": "XHTML001",
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
@@ -582,6 +621,19 @@
       "enabled": true,
       "rule_config": {
         "max_file_size_mb": 30
+      },
+      "category": "XHTML Check"
+    },
+    {
+      "id": "BOD-TAB-001",
+      "name": "Table row length, cell length, and column count check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "max_row_chars": 40,
+        "max_cell_chars": 30,
+        "max_columns": 4
       },
       "category": "XHTML Check"
     },
