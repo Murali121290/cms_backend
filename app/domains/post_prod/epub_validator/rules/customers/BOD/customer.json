@@ -638,6 +638,14 @@
       "category": "XHTML Check"
     },
     {
+      "id": "BOD-PUNCT-001",
+      "name": "No space characters in front of question or exclamation marks check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
       "id": "BOD-ENC-001",
       "name": "Files must be UTF-8 encoded and use direct Unicode characters instead of entities (only &amp;, &lt;, &gt;, &#8617; allowed)",
       "target_path": "OEBPS",
