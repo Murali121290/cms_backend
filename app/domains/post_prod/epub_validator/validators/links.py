@@ -1224,3 +1224,184 @@ def validate_1_to_1_backlinks(book_details, rule_config=None):
                 })
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-PAGE-001")
+def validate_page_reference_arrow_substitution(file_details, rule_config=None):
+    """
+    BOD-PAGE-001: Internal page references to another page must be linked leading to
+    the position where the old print page started. The referenced page number has to be
+    substituted by an arrow '→' (e.g. 'see page 59' becomes 'see →', linking to the text
+    position of old print page 59 within the ePub file).
+
+    Validates:
+    1. Unsubstituted page references in text (e.g. 'see page 59', 'siehe Seite 59') are flagged as errors.
+       The referenced page number must be substituted by an arrow '→'.
+    2. References containing an arrow '→' that point to a page reference must be wrapped in a link (<a href="...">).
+    3. The link wrapping the arrow '→' must target an existing page identifier (#page_N or pagebreak).
+    """
+    full_path = file_details.get("full_path") or ""
+    rel_path = file_details.get("relative_path") or file_details.get("file_path") or full_path
+    file_name = file_details.get("file_name") or os.path.basename(full_path)
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            raw_content = f.read()
+        soup = BeautifulSoup(raw_content, "html.parser")
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "file_read_error",
+            "message": f"Could not read '{file_name}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    epub = file_details.get("epub_root", "")
+    if not epub:
+        p = full_path
+        for _ in range(6):
+            p = os.path.dirname(p)
+            if os.path.basename(p).lower() == "oebps":
+                epub = os.path.dirname(p)
+                break
+
+    page_ids = _epub_page_ids(epub) if epub else set()
+    rule_name = (rule_config.get("name") if rule_config and isinstance(rule_config, dict) else None) or "Page Reference Arrow Substitution Check"
+
+    body = soup.find("body") or soup
+    lines = raw_content.splitlines()
+
+    def _get_line_number(el, snippet):
+        line = getattr(el, "sourceline", None)
+        if not line and snippet:
+            for idx, l in enumerate(lines, 1):
+                if snippet in l:
+                    return idx
+        return line or 1
+
+    issues = []
+
+    # Unwrap inline formatting tags (e.g. <span>, <em>, <b>, <small>) for smooth text matching
+    for tag in body.find_all(['span', 'strong', 'b', 'i', 'em', 'sup', 'sub', 'u', 'small', 'big', 'font', 'strike', 'del', 'ins', 'mark']):
+        tag.unwrap()
+    if hasattr(body, 'smooth'):
+        body.smooth()
+
+    # 1. Regex to detect unsubstituted page citations (e.g. "see page 59", "siehe Seite 59", "p. 59", etc.)
+    # Multilingual: English, German, French, Spanish, Italian, Danish, Swedish, Finnish, Portuguese, Dutch
+    page_ref_pattern = re.compile(
+        r"\b(?:(?:see|siehe|voir|vea|véase|vedi|se|katso|zie)\s+)?"
+        r"(?:pages?|pp?\.?|seiten?|s\.?|páginas?|págs?\.?|pag\.?|sivut?|blz\.?)"
+        r"[ \t\-]*(\d{1,4})(?:[ \t]*[\-–][ \t]*\d{1,4})?\b",
+        re.IGNORECASE
+    )
+
+    # Scan for unsubstituted page references in text nodes (excluding headings, title, figures)
+    for text_node in body.find_all(string=True):
+        parent = text_node.parent
+        if parent is None or text_node.find_parent(["h1", "h2", "h3", "h4", "h5", "h6", "figure", "figcaption", "header", "title", "script", "style"]):
+            continue
+
+        text_val = str(text_node)
+        for m in page_ref_pattern.finditer(text_val):
+            matched = m.group(0).strip()
+            page_num = m.group(1).lstrip("0") or "0"
+
+            # If the book has page IDs, check whether this page number exists in the book
+            if page_ids and _page_id_for_number(page_num, page_ids) is None:
+                continue
+
+            line_num = _get_line_number(parent, matched)
+            start_idx = max(0, m.start() - 25)
+            end_idx = min(len(text_val), m.end() + 25)
+            snippet = text_val[start_idx:end_idx].strip()
+
+            issues.append({
+                "rule_name": rule_name,
+                "type": "unsubstituted_page_reference",
+                "message": (
+                    f"Internal page reference '{matched}' has not been substituted by an arrow '→'. "
+                    f"Page numbers must be replaced with '→' and linked to the corresponding page position (e.g. 'see →')."
+                ),
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "snippet": snippet,
+                "extract": str(parent)[:150],
+            })
+
+    # 2. Check all arrow '→' occurrences in the document
+    arrow_pattern = re.compile(r"(?:(?:see|siehe|voir|vea|véase|vedi|se|katso|zie)\s+)?→|→")
+    for text_node in body.find_all(string=True):
+        parent = text_node.parent
+        if parent is None or text_node.find_parent(["script", "style"]):
+            continue
+
+        text_val = str(text_node)
+        if "→" not in text_val:
+            continue
+
+        parent_a = text_node.find_parent("a")
+        line_num = _get_line_number(parent, "→")
+
+        if not parent_a:
+            # Arrow is NOT wrapped in a link
+            start_idx = max(0, text_val.find("→") - 20)
+            end_idx = min(len(text_val), text_val.find("→") + 20)
+            snippet = text_val[start_idx:end_idx].strip()
+
+            issues.append({
+                "rule_name": rule_name,
+                "type": "page_arrow_not_linked",
+                "message": (
+                    f"Page reference arrow '→' in '{snippet}' is not wrapped in a link. "
+                    f"It must be a hyperlink leading to the position where the old print page started."
+                ),
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "snippet": snippet,
+                "extract": str(parent)[:150],
+            })
+        else:
+            # Arrow IS wrapped in a link: verify it links to a valid page position
+            href = (parent_a.get("href") or "").strip()
+            anchor = href.split("#")[1] if "#" in href else ""
+
+            if not anchor:
+                issues.append({
+                    "rule_name": rule_name,
+                    "type": "page_arrow_link_missing_target_anchor",
+                    "message": (
+                        f"Page reference arrow '→' links to '{href}' without a target anchor (#page_N). "
+                        f"It must lead directly to the position where the print page started."
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_num,
+                    "snippet": str(parent_a)[:100],
+                    "extract": href,
+                })
+            elif page_ids:
+                # Check whether anchor looks like a page ID or exists in page_ids
+                is_page_anchor = bool(re.match(r"^page[_-]?[ivxlcdm0-9]+$", anchor, re.IGNORECASE))
+                if is_page_anchor and anchor not in page_ids:
+                    issues.append({
+                        "rule_name": rule_name,
+                        "type": "page_arrow_link_target_not_found",
+                        "message": (
+                            f"Page reference arrow '→' links to target anchor '#{anchor}', "
+                            f"which was not found in the EPUB page identifiers."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_num,
+                        "snippet": str(parent_a)[:100],
+                        "extract": href,
+                    })
+
+    return {"issues_count": len(issues), "issues": issues}
+

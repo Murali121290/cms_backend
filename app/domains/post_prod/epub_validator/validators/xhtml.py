@@ -1321,3 +1321,195 @@ def validate_utf8_and_entities(file_details, rule_config=None):
 
     return {"issues_count": len(issues), "issues": issues}
 
+
+@rule("BOD-PUNCT-001")
+def validate_punctuation_spaces(file_details, rule_config=None):
+    """
+    BOD-PUNCT-001: Punctuation space check for question marks and exclamation marks.
+    Rule requirements:
+    1. There should be no space characters in front of question (?) or exclamation (!) marks.
+    2. Exception for French texts:
+       - In French, non-breaking space (nbsp / \u00A0 / \u202F) is required before ? and !.
+       - Normal space (' ') is NOT allowed before ? or ! in French.
+       - In French titles (document <title>, <h1>-<h6>, or elements with title classes),
+         &nbsp; is allowed ONLY before question (?) or exclamation (!) marks;
+         it must not be used elsewhere in French titles, and normal space is strictly forbidden before ? or !.
+    """
+    import re
+    from bs4 import BeautifulSoup
+    from app.domains.post_prod.epub_validator.validators.nav import get_book_language
+
+    full_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(full_path)
+    rel_path = file_details.get("relative_path") or file_name
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            raw_content = f.read()
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "type": "file_read_error",
+            "message": f"Could not read '{file_name}': {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    soup = BeautifulSoup(raw_content, "html.parser")
+    rule_name = (rule_config.get("name") if rule_config and isinstance(rule_config, dict) else None) or "Punctuation Space Check"
+
+    # Detect language using common helper
+    lang_code = get_book_language(file_details, soup=soup)
+    is_french = (lang_code == "fr")
+
+    # Unwrap inline styling tags to prevent text fragmentation while preserving structure
+    body = soup.find("body") or soup
+    for tag in body.find_all(["span", "em", "strong", "b", "i", "u", "small", "big", "font", "strike", "del", "ins", "mark", "cite", "abbr", "time", "code"]):
+        tag.unwrap()
+    if hasattr(body, "smooth"):
+        body.smooth()
+
+    lines = raw_content.splitlines()
+
+    def _get_line_number(el, snippet):
+        line = getattr(el, "sourceline", None)
+        if not line and snippet:
+            for idx, l in enumerate(lines, 1):
+                if snippet in l:
+                    return idx
+        return line or 1
+
+    issues = []
+
+    # Collect elements to check: (element, is_title_or_heading)
+    elements_to_check = []
+
+    # Document <title>
+    doc_title = soup.find("title")
+    if doc_title:
+        elements_to_check.append((doc_title, True))
+
+    # Headings
+    for h in body.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
+        elements_to_check.append((h, True))
+
+    # Leaf text-holding block elements
+    for el in body.find_all(["p", "li", "td", "th", "caption", "div", "blockquote"]):
+        # Check if it has no nested block containers
+        if not el.find(["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "blockquote"]):
+            # Check if this element is styled as a title/heading via class
+            el_classes = el.get("class", [])
+            if isinstance(el_classes, str):
+                el_classes = el_classes.split()
+            is_title_class = any("title" in c.lower() or "heading" in c.lower() for c in el_classes)
+            elements_to_check.append((el, is_title_class))
+
+    for el, is_title in elements_to_check:
+        text = el.get_text()
+        if not ("?" in text or "!" in text or "\u00A0" in text or "\u202F" in text):
+            continue
+
+        if not is_french:
+            # Non-French texts: There should be NO space characters in front of question or exclamation marks
+            for m in re.finditer(r"([ \t\u00A0\u202F\r\n]+)([?!])", text):
+                matched = m.group(0)
+                punct = m.group(2)
+                sp_chars = m.group(1)
+                is_nbsp = any(c in sp_chars for c in "\u00A0\u202F")
+                sp_desc = "non-breaking space (&nbsp;)" if is_nbsp else "space"
+
+                start_idx = max(0, m.start() - 25)
+                end_idx = min(len(text), m.end() + 25)
+                snippet = text[start_idx:end_idx].strip()
+                line_num = _get_line_number(el, snippet[:20] if snippet else matched)
+
+                issues.append({
+                    "rule_name": rule_name,
+                    "type": "unexpected_space_before_punctuation",
+                    "message": (
+                        f"Found {sp_desc} before '{punct}'. "
+                        f"There should be no space characters in front of question or exclamation marks."
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_num,
+                    "snippet": snippet,
+                    "extract": str(el)[:150],
+                })
+        else:
+            # French texts:
+            # 1. Normal space is NEVER allowed before ? or ! (must be non-breaking space &nbsp;)
+            for m in re.finditer(r"([ \t\r\n]+)([?!])", text):
+                punct = m.group(2)
+                start_idx = max(0, m.start() - 25)
+                end_idx = min(len(text), m.end() + 25)
+                snippet = text[start_idx:end_idx].strip()
+                line_num = _get_line_number(el, snippet[:20] if snippet else punct)
+
+                issues.append({
+                    "rule_name": rule_name,
+                    "type": "normal_space_before_french_punctuation",
+                    "message": (
+                        f"Found normal space before '{punct}' in French text. "
+                        f"Normal space is not allowed before question or exclamation marks in French; "
+                        f"a non-breaking space (&nbsp;) must be used instead."
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_num,
+                    "snippet": snippet,
+                    "extract": str(el)[:150],
+                })
+
+            # 2. In French titles / headings:
+            if is_title:
+                # &nbsp; is allowed ONLY before Question or exclamation Marks in French Titles
+                for m in re.finditer(r"[\u00A0\u202F]", text):
+                    after = text[m.end():]
+                    if not (after.startswith("?") or after.startswith("!")):
+                        start_idx = max(0, m.start() - 25)
+                        end_idx = min(len(text), m.end() + 25)
+                        snippet = text[start_idx:end_idx].strip()
+                        line_num = _get_line_number(el, snippet[:20] if snippet else "nbsp")
+
+                        issues.append({
+                            "rule_name": rule_name,
+                            "type": "disallowed_nbsp_in_french_title",
+                            "message": (
+                                f"Non-breaking space (&nbsp;) found not preceding a question or exclamation mark in French title. "
+                                f"In French titles, &nbsp; is allowed only before question or exclamation marks."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_num,
+                            "snippet": snippet,
+                            "extract": str(el)[:150],
+                        })
+
+                # Missing &nbsp; before ? or ! (i.e. punctuation directly attached without &nbsp;)
+                for m in re.finditer(r"([^ \t\r\n\u00A0\u202F?!])([?!])", text):
+                    punct = m.group(2)
+                    start_idx = max(0, m.start() - 25)
+                    end_idx = min(len(text), m.end() + 25)
+                    snippet = text[start_idx:end_idx].strip()
+                    line_num = _get_line_number(el, snippet[:20] if snippet else punct)
+
+                    issues.append({
+                        "rule_name": rule_name,
+                        "type": "missing_nbsp_before_french_punctuation",
+                        "message": (
+                            f"Missing non-breaking space (&nbsp;) before '{punct}' in French title. "
+                            f"In French titles, &nbsp; must be used before question or exclamation marks."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_num,
+                        "snippet": snippet,
+                        "extract": str(el)[:150],
+                    })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
