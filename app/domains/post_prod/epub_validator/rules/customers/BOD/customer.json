@@ -606,6 +606,14 @@
       "category": "XHTML Check"
     },
     {
+      "id": "XHTML003",
+      "name": "Declare language on all content pages (matching OPF language)",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "category": "XHTML Check"
+    },
+    {
       "id": "XHTML006",
       "name": "Single <h1> per page and no adjacent headings",
       "target_path": "OEBPS/xhtml",

@@ -255,35 +255,91 @@ def validate_epub_type_semantics(file_details, rule_config=None):
 
 @rule("XHTML003")
 def validate_html_language_declaration(file_details, rule_config=None):
-    """Ensure HTML tag declares language (lang and xml:lang)."""
-    file_path = file_details["full_path"]
+    """Ensure HTML tag declares language (lang and xml:lang) matching OPF metadata language."""
+    file_path = file_details.get("full_path") or ""
     issues = []
-    
+
     try:
         from bs4 import BeautifulSoup
         with open(file_path, "r", encoding="utf-8") as f:
             html_text = f.read()
             soup = BeautifulSoup(html_text, "xml")
-    except Exception as e:
+    except Exception:
         return {"issues_count": 0, "issues": []}
 
     html_tag = soup.find("html")
     if not html_tag:
         return {"issues_count": 0, "issues": []}
-        
-    config = rule_config.get("rule_config") if rule_config else None
-    expected_lang = "en"
-    if config and "expected_lang" in config:
-        expected_lang = config["expected_lang"]
 
-    lang = html_tag.get("lang")
-    xml_lang = html_tag.get("xml:lang")
-    
+    # Detect expected language from OPF (fallback to DB / file_details / config)
+    expected_lang = ""
+
+    # 1. Search OPF dc:language first
+    epub_root = file_details.get("epub_root") or file_details.get("epub_path")
+    if not epub_root and file_path:
+        curr = os.path.dirname(os.path.abspath(file_path))
+        while curr and curr != "/":
+            if glob.glob(os.path.join(curr, "*.opf")) or os.path.exists(os.path.join(curr, "mimetype")):
+                epub_root = curr
+                break
+            curr = os.path.dirname(curr)
+
+    if epub_root:
+        from ._common import find_opf
+        opf_file = find_opf(epub_root)
+        if opf_file and os.path.exists(opf_file):
+            try:
+                with open(opf_file, "r", encoding="utf-8") as opf_f:
+                    opf_soup = BeautifulSoup(opf_f.read(), "xml")
+                    lang_tag = opf_soup.find(["dc:language", "language"])
+                    if lang_tag and lang_tag.get_text(strip=True):
+                        expected_lang = lang_tag.get_text(strip=True).strip().lower()
+            except Exception:
+                pass
+
+    # 2. Fallback to file_details.get("language") / DB
+    if not expected_lang:
+        expected_lang = (file_details.get("language") or "").strip().lower()
+
+    folder_name = file_details.get("folder_name")
+    if not expected_lang and folder_name:
+        try:
+            from app.core.database import SessionLocal
+            from app.domains.post_prod.epub_validator.models import EvProject
+            db = SessionLocal()
+            try:
+                proj = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+                if proj and proj.language:
+                    expected_lang = proj.language.strip().lower()
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    # 3. Fallback to rule_config if provided
+    config = rule_config.get("rule_config") if rule_config else None
+    if not expected_lang and config and "expected_lang" in config:
+        expected_lang = config["expected_lang"].strip().lower()
+
+    # Default to "en" if nothing found
+    if not expected_lang:
+        expected_lang = "en"
+
+    # Normalize expected lang (e.g. 'de-DE' -> 'de')
+    norm_expected = expected_lang
+    if "-" in norm_expected:
+        norm_expected = norm_expected.split("-")[0]
+    if "_" in norm_expected:
+        norm_expected = norm_expected.split("_")[0]
+
+    lang = (html_tag.get("lang") or "").strip()
+    xml_lang = (html_tag.get("xml:lang") or "").strip()
+
     def get_element_info(el):
         s = str(el)
         end = s.find('>')
         extract = s[:end+1] if end != -1 else s
-        
+
         idx = html_text.find(extract)
         if idx != -1:
             line = html_text.count('\n', 0, idx) + 1
@@ -303,30 +359,62 @@ def validate_html_language_declaration(file_details, rule_config=None):
         return line, extract
 
     line, extract = get_element_info(html_tag)
-    
+
+    # Check if either lang or xml:lang attribute is missing
     if not lang or not xml_lang:
+        missing_attrs = []
+        if not lang:
+            missing_attrs.append(f'lang="{expected_lang}"')
+        if not xml_lang:
+            missing_attrs.append(f'xml:lang="{expected_lang}"')
+
         issue = {
             "type": "missing_language_declaration",
-            "message": f"<html> must declare both lang=\"{expected_lang}\" and xml:lang=\"{expected_lang}\".",
+            "message": (
+                f"<html> element must declare both lang=\"{expected_lang}\" and xml:lang=\"{expected_lang}\" "
+                f"matching OPF package language. Missing: {', '.join(missing_attrs)}."
+            ),
             "category": "Error",
-            "file_path": file_details.get("relative_path"),
+            "file_path": file_details.get("relative_path") or file_details.get("file_name"),
             "extract": extract
         }
-        if line: issue["line_number"] = line
+        if line:
+            issue["line_number"] = line
         issues.append(issue)
     else:
-        if lang != expected_lang or xml_lang != expected_lang:
+        # Check if values match OPF language (exact match or normalized code match)
+        lang_norm = lang.lower()
+        if "-" in lang_norm:
+            lang_norm = lang_norm.split("-")[0]
+        if "_" in lang_norm:
+            lang_norm = lang_norm.split("_")[0]
+
+        xml_lang_norm = xml_lang.lower()
+        if "-" in xml_lang_norm:
+            xml_lang_norm = xml_lang_norm.split("-")[0]
+        if "_" in xml_lang_norm:
+            xml_lang_norm = xml_lang_norm.split("_")[0]
+
+        lang_mismatch = (lang.lower() != expected_lang.lower() and lang_norm != norm_expected)
+        xml_lang_mismatch = (xml_lang.lower() != expected_lang.lower() and xml_lang_norm != norm_expected)
+
+        if lang_mismatch or xml_lang_mismatch:
             issue = {
                 "type": "invalid_language_declaration",
-                "message": f"<html> language must be \"{expected_lang}\". Found lang=\"{lang}\" and xml:lang=\"{xml_lang}\".",
+                "message": (
+                    f"<html> language must match OPF package language \"{expected_lang}\". "
+                    f"Found lang=\"{lang}\" and xml:lang=\"{xml_lang}\"."
+                ),
                 "category": "Error",
-                "file_path": file_details.get("relative_path"),
+                "file_path": file_details.get("relative_path") or file_details.get("file_name"),
                 "extract": extract
             }
-            if line: issue["line_number"] = line
+            if line:
+                issue["line_number"] = line
             issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}
+
 
 @rule("XHTML004")
 def validate_title_element(book_details, rule_config=None):
