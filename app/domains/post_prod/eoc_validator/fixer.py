@@ -65,13 +65,16 @@ def _norm(s: str) -> str:
 
 
 def make_title(stem: str) -> str:
-    """Title rule: full question if it fits, else cut at a full word ≈50–60 chars + ' …'."""
+    """Title rule: full question if it fits in 60 characters; otherwise the
+    longest start of the question ending at a full word such that the whole
+    title, including the ending ' …', is at most 60 characters."""
     s = stem.strip()
     if len(s) <= TITLE_MAX:
         return s
-    cut = s[:TITLE_MAX + 1]
+    limit = TITLE_MAX - len(ELLIPSIS)  # room for the text before ' …'
+    cut = s[:limit + 1]
     sp = cut.rfind(" ")
-    body = (cut[:sp] if sp > 0 else s[:TITLE_MAX]).rstrip(" ,;:—–-")
+    body = (cut[:sp] if sp > 0 else s[:limit]).rstrip(" ,;:—–-")
     return body + ELLIPSIS
 
 
@@ -186,12 +189,16 @@ def fix_docx(
             has_error = any(sev == ERROR for sev, _ in check_title(q, val))
             tp = P(q.title_line.idx)
             # Shortened title ending in '...', '..' or '…' without a space →
-            # space + ellipsis ' …' (only the ending changes, when the rest of
-            # the title matches the question).
+            # space + ellipsis ' …'. Only the ending changes — and only when the
+            # title is then fully correct (right text, right length); otherwise
+            # the whole title is rebuilt from the question below.
             dots = re.search(r"(\.{2,3}|…)\s*$", val)
             body_d = val[:dots.start()].rstrip() if dots else ""
             good_end = val.rstrip().endswith(ELLIPSIS) and not val.rstrip().endswith("  …")
-            if dots and body_d and not good_end and _norm(q.stem).startswith(_norm(body_d)):
+            ending_fix_ok = bool(dots and body_d and not good_end
+                                 and _norm(q.stem).startswith(_norm(body_d))
+                                 and not any(sev == ERROR for sev, _ in check_title(q, body_d + ELLIPSIS)))
+            if ending_fix_ok:
                 new = raw[: len(raw.rstrip()) - len(dots.group(0).rstrip())].rstrip() + ELLIPSIS
                 if tr.replace_text(tp, new):
                     ending = dots.group(0).strip()

@@ -283,7 +283,7 @@ def test_fixer_title_regenerated_but_typo_left_for_human():
     wrong = q_block(1, long_q, GOOD_OPTS, title="Something else entirely")
     out, fixes, _ = fix_and_lines(wrong)
     assert "Title: " + make_title(long_q) in out
-    assert make_title(long_q).endswith(" …") and len(make_title(long_q)) <= 62
+    assert make_title(long_q).endswith(" …") and len(make_title(long_q)) <= 60
     typo_q = "What type of workholding de2vices are most likely to be used on a lathe?"
     typo = q_block(1, typo_q, GOOD_OPTS, title="What type of workholding devices are most likely to be …")
     out, fixes, _ = fix_and_lines(typo)
@@ -412,6 +412,58 @@ def test_title_of_60_chars_or_fewer_gets_no_warning_or_info():
     wrong = q_block(1, "Cast iron plates are affected by temperature changes.", ["*True", "False"],
                     shuffle=False, title="Cast iron plates are affected by temperature.")
     assert "T1" in rules(run(wrong), "error")
+
+
+def test_title_length_counts_the_ellipsis_ending():
+    from app.domains.post_prod.eoc_validator.rules import title_text_length
+    body = "The Industrial Revolution could not have taken place without"  # 60 characters
+    assert len(body) == 60
+    # whatever the current ending, it is counted as the required ' …' (2 chars)
+    for ending in (" …", "…", "...", ".."):
+        assert title_text_length(body + ending) == 62
+    assert title_text_length("First.") == 6  # full (not shortened) title: counted as is
+
+
+def test_title_over_60_including_ellipsis_is_error_and_rebuilt():
+    q = "The Industrial Revolution could not have taken place without the cheap, convenient power of the _____."
+    lines = q_block(1, q, GOOD_OPTS, title="The Industrial Revolution could not have taken place without …")  # 62
+    assert any(i.rule == "T1" and "60 characters or fewer" in i.message for i in run(lines) if i.severity == "error")
+    out, _, fixed = fix_and_lines(lines)
+    new = "The Industrial Revolution could not have taken place …"
+    assert "Title: " + new in out and len(new) <= 60
+    assert not any(i.rule == "T1" for i in check_run([parse_docx(fixed, "machfun2028_tx_ch05.docx")], PREFIX))
+
+
+def test_short_question_title_must_be_whole_question_and_is_fixed():
+    q = "Almost all machine tools have evolved from the steam engine."  # 60 chars
+    lines = q_block(1, q, ["*True", "False"], shuffle=False, title="Almost all machine tools have evolved…")
+    assert any(i.rule == "T1" and "whole question" in i.message for i in run(lines) if i.severity == "error")
+    out, _, fixed = fix_and_lines(lines)
+    assert "Title: " + q in out
+    assert not any(i.rule == "T1" for i in check_run([parse_docx(fixed, "machfun2028_tx_ch05.docx")], PREFIX))
+
+
+@pytest.mark.parametrize("title,expected", [
+    ("Machinists can attain professional…", "Machinists can attain professional _____ through …"),
+    ("The introduction of the microchip in the…", "The introduction of the microchip in the mid-1970s led to …"),
+])
+def test_too_short_title_is_error_and_rebuilt(title, expected):
+    stems = {
+        "Machinists": "Machinists can attain professional _____ through performance testing and accredited training programs that meet industry standards.",
+        "The introduction": "The introduction of the microchip in the mid-1970s led to the introduction of _____ machine tools.",
+    }
+    stem = next(v for k, v in stems.items() if title.startswith(k))
+    lines = q_block(1, stem, GOOD_OPTS, title=title)
+    assert any(i.rule == "T1" and "too short" in i.message for i in run(lines) if i.severity == "error")
+    out, _, fixed = fix_and_lines(lines)
+    assert "Title: " + expected in out
+    assert not any(i.rule == "T1" for i in check_run([parse_docx(fixed, "machfun2028_tx_ch05.docx")], PREFIX))
+
+
+def test_short_title_ok_when_next_word_does_not_fit():
+    stem = "Which of the following is not a useful industrial application of robots?"
+    lines = q_block(1, stem, GOOD_OPTS, title="Which of the following is not a useful industrial …")  # 49 + 'application' > 60
+    assert not any(i.rule == "T1" for i in run(lines))
 
 
 def test_title_dropping_only_a_blank_is_fine():

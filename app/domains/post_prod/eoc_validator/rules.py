@@ -165,9 +165,25 @@ def check_title(q: Question, title: str) -> list[tuple[str, str]]:
     A title of 60 characters or fewer gets no warnings or info notes — only
     real errors (wrong text, wrong ending) are reported for it."""
     results = _check_title(q, title)
-    if len(title.strip()) <= SHORT_TITLE_MAX:
+    if title_text_length(title) <= SHORT_TITLE_MAX:
         results = [(sev, msg) for sev, msg in results if sev == ERROR]
     return results
+
+
+_TITLE_ENDING_RE = re.compile(r"\s*(…|\.{2,3})\s*$")
+ELLIPSIS_END = " …"
+
+
+def title_text_length(title: str) -> int:
+    """Length of the title as it will be once its ending is correct.
+
+    A shortened title is counted with the required ending ' …' (2 characters),
+    whatever ending it has now ('...', '..', '…'), so the count never changes
+    when the fixer corrects the ending. The 60-character limit applies to the
+    whole title, ' …' included."""
+    t = title.strip()
+    body = _TITLE_ENDING_RE.sub("", t)
+    return len(body) + len(ELLIPSIS_END) if body != t else len(t)
 
 
 def _check_title(q: Question, title: str) -> list[tuple[str, str]]:
@@ -213,18 +229,22 @@ def _check_title(q: Question, title: str) -> list[tuple[str, str]]:
         return out
     omitted = ns[len(body):]
     if len(ns) <= 60 and re.search(r"[A-Za-z0-9]", omitted.replace("_", "")):
-        out.append((WARNING, f"Question is only {len(ns)} characters — title should be the full question without an ellipsis"))
+        out.append((ERROR, f"The question is only {len(ns)} characters — the Title must be the whole question, without an ellipsis"))
     nxt = ns[len(body):len(body) + 1]
     if nxt and nxt.isalnum() and body and body[-1].isalnum():
         out.append((ERROR, "Title is cut in the middle of a word"))
-    if len(body) > 65:
-        out.append((WARNING, f"Title is {len(body)} characters — cut it to about 50–60 at a full word"))
-    else:
-        # Too short only if at least one more full word would still fit in 60.
+    # Lengths include the required ending ' …' (the whole title must be ≤ 60).
+    full_len = len(body) + len(ELLIPSIS_END)
+    if full_len > 60:
+        out.append((ERROR, f"Title is {full_len} characters including ' …' — the whole title must be 60 characters or fewer"))
+    elif len(ns) > 60:
+        # "First approximately 50–60 characters, end at a full word": a title
+        # under 50 is too short only if at least one more full word still fits in 60.
         rest = ns[len(body):].lstrip()
         next_word = rest.split(" ", 1)[0] if rest else ""
-        if len(body) < 45 and next_word and len(body) + 1 + len(next_word) <= 60:
-            out.append((WARNING, f"Title is only {len(body)} characters — more of the question fits (about 50–60)"))
+        if full_len < 50 and next_word and len(body) + 1 + len(next_word) + len(ELLIPSIS_END) <= 60:
+            out.append((ERROR, f"Title is too short ({full_len} characters including ' …') — more of the question fits; "
+                               "use about 50–60 characters ending at a full word"))
     return out
 
 
