@@ -403,7 +403,7 @@ def validate_cover_file_size(target, rule_config=None):
             actual_mb = size_bytes / (1024 * 1024)
             issues.append({
                 "type": "cover_file_size_exceeded",
-                "message": f"Image size is {actual_mb:.2f} MB, which exceeds the maximum allowed limit of {max_file_size_mb} MB.",
+                "message": f"cover image size is {actual_mb:.2f} MB, which exceeds the maximum allowed limit of {max_file_size_mb} MB.",
                 "category": "Error",
                 "file_path": rel_path,
             })

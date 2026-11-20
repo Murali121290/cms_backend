@@ -778,17 +778,6 @@
       "category": "Image Check"
     },
     {
-      "id": "BOD-COV-006",
-      "name": "Image must not exceed 5 MB file size",
-      "target_path": "OEBPS/images",
-      "file_name_pattern": "*.jpg",
-      "enabled": true,
-      "rule_config": {
-        "max_file_size_mb": 5
-      },
-      "category": "Image Check"
-    },
-    {
       "id": "BOD-COV-007",
       "name": "Cover image must have a default alt attribute",
       "target_path": "OEBPS/xhtml",
