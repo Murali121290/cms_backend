@@ -39,6 +39,7 @@ class StageMasterBase(BaseModel):
     stage_name: str
     description: Optional[str] = None
     owner_designation: Optional[str] = None
+    group_email: Optional[str] = None
     sla_level1: Optional[int] = None
     sla_level2: Optional[int] = None
     sla_level3: Optional[int] = None
@@ -58,6 +59,7 @@ class StageMasterUpdate(BaseModel):
     stage_name: Optional[str] = None
     description: Optional[str] = None
     owner_designation: Optional[str] = None
+    group_email: Optional[str] = None
     sla_level1: Optional[int] = None
     sla_level2: Optional[int] = None
     sla_level3: Optional[int] = None

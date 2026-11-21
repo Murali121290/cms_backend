@@ -19,7 +19,7 @@ NOT_CHECKED_NOTE = (
 )
 
 
-def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix: str) -> dict:
+def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix: str, mode: str = "validate") -> dict:
     by_file: dict[str, Counter] = {}
     for i in issues:
         by_file.setdefault(i.file, Counter())[i.severity] += 1
@@ -28,6 +28,8 @@ def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix
     for cf in sorted(files, key=lambda f: (f.chapter_no is None, f.chapter_no or 0, f.filename)):
         c = by_file.get(cf.filename, Counter())
         kinds = Counter(q.kind for q in cf.questions)
+        has_alt = sum(1 for img in cf.images if (img.alt_text or img.title or img.is_decorative))
+        missing_alt = sum(1 for img in cf.images if not (img.alt_text or img.title or img.is_decorative))
         summary.append({
             "file": cf.filename,
             "chapter": cf.chapter_no,
@@ -36,6 +38,8 @@ def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix
             "tf": kinds.get("TF", 0),
             "shuffle_lines": sum(1 for q in cf.questions if q.shuffle_line is not None),
             "images": cf.image_count,
+            "has_alt": has_alt,
+            "missing_alt": missing_alt,
             "errors": c.get(ERROR, 0),
             "warnings": c.get(WARNING, 0),
             "info": c.get(INFO, 0),
@@ -49,17 +53,21 @@ def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix
     totals = Counter(i.severity for i in issues)
     by_rule = Counter(i.rule for i in issues)
     return {
+        "mode": mode,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "reference_prefix": reference_prefix,
         "totals": {
             "files": len(files),
             "questions": sum(len(f.questions) for f in files),
+            "images": sum(f.image_count for f in files),
+            "has_alt": sum(sum(1 for img in f.images if (img.alt_text or img.title or img.is_decorative)) for f in files),
+            "missing_alt": sum(sum(1 for img in f.images if not (img.alt_text or img.title or img.is_decorative)) for f in files),
             "errors": totals.get(ERROR, 0),
             "warnings": totals.get(WARNING, 0),
             "info": totals.get(INFO, 0),
         },
         "rules": [{"rule": r, "title": RULE_TITLES.get(r, r), "count": n} for r, n in sorted(by_rule.items())],
-        "not_checked": [NOT_CHECKED_NOTE],
+        "not_checked": [NOT_CHECKED_NOTE] if mode != "alt_text" else [],
         "files": summary,
         "issues": [i.to_dict() for i in sorted_issues],
     }
@@ -100,29 +108,51 @@ def to_xlsx(report: dict, fixes: list[dict] | None = None) -> bytes:
     ws = wb.active
     ws.title = "Summary"
     t = report["totals"]
-    ws.append(["EOC/EOL Question Validation Report"])
-    ws["A1"].font = Font(bold=True, size=13)
-    ws.append(["Generated", report["generated_at"]])
-    ws.append(["Reference prefix", report["reference_prefix"]])
-    ws.append(["Files", t["files"], "Questions", t["questions"]])
-    ws.append(["Errors", t["errors"], "Warnings", t["warnings"], "Info", t["info"]])
-    ws.append(["Not checked", NOT_CHECKED_NOTE])
-    ws.cell(ws.max_row, 1).font = bold
-    ws.append([])
-    cols = ["File", "Chapter", "Questions", "MC", "T/F", "Shuffle lines", "Images", "Errors", "Warnings", "Info", "Status"]
-    ws.append(cols)
-    hdr = ws.max_row
-    for c in ws[hdr]:
-        c.font, c.fill = bold, head_fill
-    for f in report["files"]:
-        ws.append([f["file"], f["chapter"], f["questions"], f["mc"], f["tf"], f["shuffle_lines"], f["images"], f["errors"], f["warnings"], f["info"], f["status"].upper()])
-        ws.cell(ws.max_row, len(cols)).fill = fills[f["status"]]
-    ws.auto_filter.ref = f"A{hdr}:{get_column_letter(len(cols))}{ws.max_row}"
-    ws.freeze_panes = f"A{hdr + 1}"
-    for i, w in enumerate([34, 9, 11, 7, 7, 13, 9, 9, 10, 7, 10], 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+    is_alt_text_mode = report.get("mode") == "alt_text"
 
-    ws2 = wb.create_sheet("Issues")
+    if is_alt_text_mode:
+        ws.append(["Document Image & Alt Text Audit Report"])
+        ws["A1"].font = Font(bold=True, size=13)
+        ws.append(["Generated", report["generated_at"]])
+        ws.append(["Files", t["files"], "Total Images", t.get("images", 0)])
+        ws.append(["With Alt Text", t.get("has_alt", 0), "Missing Alt Text", t.get("missing_alt", 0), "Warnings", t["warnings"]])
+        ws.append([])
+        cols = ["File", "Total Images", "With Alt Text", "Missing Alt Text", "Warnings", "Status"]
+        ws.append(cols)
+        hdr = ws.max_row
+        for c in ws[hdr]:
+            c.font, c.fill = bold, head_fill
+        for f in report["files"]:
+            ws.append([f["file"], f["images"], f.get("has_alt", 0), f.get("missing_alt", 0), f["warnings"], f["status"].upper()])
+            ws.cell(ws.max_row, len(cols)).fill = fills[f["status"]]
+        ws.auto_filter.ref = f"A{hdr}:{get_column_letter(len(cols))}{ws.max_row}"
+        ws.freeze_panes = f"A{hdr + 1}"
+        for i, w in enumerate([36, 14, 14, 16, 12, 12], 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+    else:
+        ws.append(["EOC/EOL Question Validation Report"])
+        ws["A1"].font = Font(bold=True, size=13)
+        ws.append(["Generated", report["generated_at"]])
+        ws.append(["Reference prefix", report["reference_prefix"]])
+        ws.append(["Files", t["files"], "Questions", t["questions"]])
+        ws.append(["Errors", t["errors"], "Warnings", t["warnings"], "Info", t["info"]])
+        ws.append(["Not checked", NOT_CHECKED_NOTE])
+        ws.cell(ws.max_row, 1).font = bold
+        ws.append([])
+        cols = ["File", "Chapter", "Questions", "MC", "T/F", "Shuffle lines", "Images", "Errors", "Warnings", "Info", "Status"]
+        ws.append(cols)
+        hdr = ws.max_row
+        for c in ws[hdr]:
+            c.font, c.fill = bold, head_fill
+        for f in report["files"]:
+            ws.append([f["file"], f["chapter"], f["questions"], f["mc"], f["tf"], f["shuffle_lines"], f["images"], f["errors"], f["warnings"], f["info"], f["status"].upper()])
+            ws.cell(ws.max_row, len(cols)).fill = fills[f["status"]]
+        ws.auto_filter.ref = f"A{hdr}:{get_column_letter(len(cols))}{ws.max_row}"
+        ws.freeze_panes = f"A{hdr + 1}"
+        for i, w in enumerate([34, 9, 11, 7, 7, 13, 9, 9, 10, 7, 10], 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+    ws2 = wb.create_sheet("Alt Text Details" if is_alt_text_mode else "Issues")
     ws2.append([h for _, h in ISSUE_COLUMNS])
     for c in ws2[1]:
         c.font, c.fill = bold, head_fill

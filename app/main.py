@@ -37,6 +37,8 @@ app.include_router(language_edit.router)
 from app.routers import term_lists
 app.include_router(term_lists.router)
 app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])
+from app.routers import workspace_v2
+app.include_router(workspace_v2.router)  # /api/v2/workspace — stage custody lifecycle + schedule
 
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["Users"])
 app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["Projects"])
@@ -200,6 +202,36 @@ def init_data():
             db.commit()
         except Exception:
             db.rollback()
+
+        # Workspace redesign (alembic 0072 + 0073). Kept here too so the app works before the
+        # migrations run. The unique (project, chapters, stage_name) index is migration-only because
+        # it needs the duplicate pre-check.
+        if db.bind.dialect.name == "postgresql":
+            for stmt in [
+                "ALTER TABLE stage_master ADD COLUMN IF NOT EXISTS group_email VARCHAR(255)",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS custody_status VARCHAR(30)",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS assigned_by VARCHAR(150)",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS assignment_notes TEXT",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS handback_notes TEXT",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS handback_at TIMESTAMPTZ",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS qa_approved_by VARCHAR(150)",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS qa_approved_at TIMESTAMPTZ",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS rework_notes TEXT",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS rework_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE stages_details ADD COLUMN IF NOT EXISTS priority VARCHAR(10) NOT NULL DEFAULT 'Normal'",
+                "UPDATE stages_details SET custody_status = CASE WHEN stage_status = 'Completed' THEN 'transitioned' "
+                "WHEN COALESCE(assignee_name, '') <> '' THEN 'in_progress' ELSE 'unassigned' END WHERE custody_status IS NULL",
+                "CREATE INDEX IF NOT EXISTS ix_stages_details_assignee ON stages_details (assignee_name)",
+                "CREATE INDEX IF NOT EXISTS ix_stages_details_stage_status ON stages_details (stage_name, stage_status)",
+                "CREATE INDEX IF NOT EXISTS ix_stages_details_project_chapter ON stages_details (project, chapters)",
+                "CREATE INDEX IF NOT EXISTS ix_stages_details_stage_end ON stages_details (stage_name, actual_end_date)",
+                "CREATE INDEX IF NOT EXISTS ix_stages_details_stage_custody ON stages_details (stage_name, custody_status)",
+            ]:
+                try:
+                    db.execute(text(stmt))
+                    db.commit()
+                except Exception:
+                    db.rollback()
 
         try:
             Base.metadata.create_all(bind=engine)

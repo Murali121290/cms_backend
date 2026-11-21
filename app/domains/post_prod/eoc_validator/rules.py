@@ -21,6 +21,7 @@ RULE_TITLES = {
     "F2": "Plain-text formatting",
     "F3": "Images / equations need manual review",
     "F4": "Garbled characters",
+    "IMG1": "Image Alt text",
     "Q1": "Question numbering",
     "Q2": "Question text",
     "O1": "Option letters",
@@ -285,7 +286,52 @@ def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
             parts.append(f"{cf.image_count} image(s)")
         if cf.equation_count:
             parts.append(f"{cf.equation_count} equation(s)")
-        add("F3", WARNING, f"Document contains {' and '.join(parts)} — that content can't be checked automatically; review manually")
+        add("F3", WARNING, f"Document contains {' and '.join(parts)} — review image rendering and layout manually")
+
+    # IMG1 Alt text checks
+    def _find_q(line_idx: int) -> Optional[Question]:
+        for q in cf.questions:
+            if q.idx == line_idx:
+                return q
+            for _, bl in q.body:
+                if bl.idx == line_idx:
+                    return q
+            if any(o.idx == line_idx for o in q.options):
+                return q
+            for attr in ("shuffle_line", "title_line", "lo_line", "ref_line"):
+                ln_attr = getattr(q, attr, None)
+                if ln_attr is not None and ln_attr.idx == line_idx:
+                    return q
+        cand = [q for q in cf.questions if q.idx <= line_idx]
+        return cand[-1] if cand else None
+
+    for img in cf.images:
+        q_target = _find_q(img.line_idx)
+        alt = (img.alt_text or "").strip()
+        title = (img.title or "").strip()
+        has_alt = bool(alt or title) or img.is_decorative
+        if not has_alt:
+            add("IMG1", ERROR, f"Image '{img.name}' is missing Alt text — all assessment images require descriptive Alt text for accessibility", q_target, line_idx=img.line_idx)
+        else:
+            alt_display = alt or title or ("(Marked as decorative)" if img.is_decorative else "")
+            short_alt = (alt_display[:77] + "…") if len(alt_display) > 80 else alt_display
+            add("IMG1", INFO, f"Image '{img.name}' Alt text: “{short_alt}”", q_target, text=alt_display, line_idx=img.line_idx)
+
+    # Check if identical Alt text is reused across multiple questions in the same file
+    alt_to_qs: dict[str, list[tuple[int, int]]] = {}
+    for img in cf.images:
+        q_t = _find_q(img.line_idx)
+        alt = (img.alt_text or img.title or "").strip()
+        if alt and not img.is_decorative and q_t is not None:
+            alt_to_qs.setdefault(alt, []).append((q_t.number, img.line_idx))
+
+    for alt, occurrences in alt_to_qs.items():
+        unique_qs = sorted({qn for qn, _ in occurrences})
+        if len(unique_qs) > 1:
+            qs_list = ", ".join(f"Q{n}" for n in unique_qs)
+            for q_num, l_idx in occurrences:
+                q_obj = next((x for x in cf.questions if x.number == q_num), None)
+                add("IMG1", WARNING, f"Identical Alt text is reused across multiple questions ({qs_list}) — confirm this image has specific Alt text", q_obj, line_idx=l_idx)
 
     # F4 mojibake
     for l in cf.lines:
@@ -440,7 +486,7 @@ def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
         for role, l in q.extra_lines:
             where = "after the Reference line" if q.ref_line is not None and l.idx > q.ref_line.idx else "in this question"
             add("R2", ERROR, f"Extra {label.get(role, role)} line {where} (stray/duplicate line)", q, l.text, l.idx)
-        order = [r for r, _ in q.body if r != "other"]
+        order = [r for r, _ in q.body if r not in ("other", "image")]
         expected_order = [r for r in order if r in ("option", "tf", "order")]
         if q.shuffle_line is not None:
             expected_order.append("shuffle")
@@ -522,4 +568,54 @@ def check_run(files: list[ChapterFile], reference_prefix: str) -> list[Issue]:
                 issues.append(Issue(cf.filename, cf.chapter_no, q.number, "R1", ERROR, f"Reference '{val}' is not unique (also used in {seen[val]})", q.ref_line.text, q.ref_line.idx + 1))
             else:
                 seen[val] = where
+    return issues
+
+
+def check_alt_text_file(cf: ChapterFile) -> list[Issue]:
+    """Check only image Alt text for any Word document (no EOC rules required)."""
+    issues: list[Issue] = []
+    fn, ch = cf.filename, cf.chapter_no
+
+    def add(rule, sev, msg, text="", line_idx: Optional[int] = None):
+        issues.append(Issue(fn, ch, None, rule, sev, msg, text, (line_idx + 1) if line_idx is not None else None))
+
+    if not cf.images:
+        add("IMG1", INFO, "No images found in this document")
+        return issues
+
+    for img in cf.images:
+        alt = (img.alt_text or "").strip()
+        title = (img.title or "").strip()
+        has_alt = bool(alt or title) or img.is_decorative
+        lbl = img.line_label or f"¶{img.line_idx + 1}"
+        if not has_alt:
+            ctx_hint = f" (near: “{img.context[:40]}…”)" if img.context else ""
+            add("IMG1", ERROR, f"Image '{img.name}' ({lbl}){ctx_hint} is missing Alt text — all images require descriptive Alt text for accessibility", text=img.context, line_idx=img.line_idx)
+        else:
+            alt_display = alt or title or ("(Marked as decorative)" if img.is_decorative else "")
+            short_alt = (alt_display[:77] + "…") if len(alt_display) > 80 else alt_display
+            ctx_hint = f" (near: “{img.context[:30]}…”)" if img.context else ""
+            add("IMG1", INFO, f"Image '{img.name}' ({lbl}){ctx_hint} Alt text: “{short_alt}”", text=alt_display, line_idx=img.line_idx)
+
+    # Check duplicate alt text across images in this document
+    alt_counts: dict[str, list[ImageMeta]] = {}
+    for img in cf.images:
+        alt = (img.alt_text or img.title or "").strip()
+        if alt and not img.is_decorative:
+            alt_counts.setdefault(alt, []).append(img)
+
+    for alt, imgs in alt_counts.items():
+        if len(imgs) > 1:
+            lbls = ", ".join(im.line_label or f"¶{im.line_idx+1}" for im in imgs)
+            for im in imgs:
+                add("IMG1", WARNING, f"Identical Alt text is reused across multiple images ({lbls}) — confirm this image has specific Alt text", text=alt, line_idx=im.line_idx)
+
+    return issues
+
+
+def check_alt_text_run(files: list[ChapterFile]) -> list[Issue]:
+    """Check image Alt text across all uploaded documents."""
+    issues: list[Issue] = []
+    for cf in files:
+        issues.extend(check_alt_text_file(cf))
     return issues

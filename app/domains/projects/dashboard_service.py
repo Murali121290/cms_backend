@@ -1,9 +1,12 @@
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select
+from typing import Iterable, Optional
+
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.domains.auth.models import User
-from app.domains.workflow.models import StageDetail, StageMaster
+from app.domains.workflow import access, custody, stage_service
+from app.domains.workflow.models import ChapterInfo, StageDetail, StageMaster, WorkflowMaster
 from app.services import project_service
 
 
@@ -24,72 +27,89 @@ def get_dashboard_page_data(db: Session, *, skip: int = 0, limit: int = 100):
     }
 
 
-def get_workspace_dashboard_data(db: Session, user: User):
-    role_to_use = user.role or user.designation
-    role_lower = role_to_use.lower() if role_to_use else ""
-    
-    # 1. Determine user classification
-    is_manager = role_lower in ["admin", "editorial manager", "project manager", "senior project manager", "asst general manager"]
-    is_teamlead = role_lower in ["team lead - editorial", "team lead - prediting", "team lead - language editing"]
-    
-    if is_manager:
-        role_type = "manager"
-    elif is_teamlead:
-        role_type = "teamlead"
-    else:
-        role_type = "user"
-        
-    now_utc = datetime.now(timezone.utc)
-    today = now_utc.date()
-    yesterday = today - timedelta(days=1)
+DEFAULT_COMPLETED_DAYS = 30
+MAX_COMPLETED_DAYS = 90
 
-    # Cache lookup map for chapter details: (project, chapter) -> {manuscript_pages, ce_pages, project_manager_name}
-    from app.domains.workflow.models import ChapterInfo
-    all_chapters = db.query(ChapterInfo).all()
-    chapter_info_map = {}
-    for ch in all_chapters:
-        wc = ch.word_count or 0
-        ce_pages = (wc // 250) + 1 if wc > 0 else 0
-        chapter_info_map[(ch.project, ch.chapters)] = {
-            "manuscript_pages": ch.manuscript_pages or 0,
-            "ce_pages": ce_pages,
-            "project_manager_name": ch.project_manager_name or "-"
-        }
-    
-    def get_date(dt):
-        if not dt:
-            return None
-        if dt.tzinfo is not None:
-            return dt.astimezone(timezone.utc).date()
-        return dt.date()
-        
-    def get_tz_aware(dt):
-        if not dt:
-            return None
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-        
-    def build_workspace_item(sd: StageDetail):
-        is_comp = sd.stage_status == "Completed"
-        planned_tz = get_tz_aware(sd.planned_end_date)
-        is_delayed = bool(sd.delayed or (not is_comp and planned_tz and planned_tz < now_utc))
-        
+
+class WorkspaceContext:
+    """Batched lookups shared by every row the dashboard serialises (replaces per-row/per-member queries)."""
+
+    def __init__(self, db: Session):
+        self.db = db
+        self.today = stage_service.today_local()
+        self.now_utc = datetime.now(timezone.utc)
+        self._chapter_meta: dict[tuple[str, str], dict] = {}
+        self._next_stage: dict[tuple[str, str], Optional[str]] = {}
+        self._loaded_projects: set[str] = set()
+        self._loaded_workflows: set[str] = set()
+        self._project_client: dict[str, str] = {}      # project code -> client company name
+        self._project_pm: dict[str, str] = {}          # project code -> PM username (Project.project_manager)
+        self._client_by_code: dict[str, str] = {}      # client division code -> company name
+        self._pm_names: dict[str, str] = {}            # username -> first name
+
+    def preload(self, rows: Iterable[StageDetail]) -> None:
+        rows = list(rows)
+        projects = {r.project for r in rows} - self._loaded_projects
+        if projects:
+            for ch in self.db.query(ChapterInfo).filter(ChapterInfo.project.in_(projects)).all():
+                wc = ch.word_count or 0
+                self._chapter_meta[(ch.project, ch.chapters)] = {
+                    "manuscript_pages": ch.manuscript_pages or 0,
+                    "ce_pages": (wc // 250) + 1 if wc > 0 else 0,
+                    "project_manager_name": ch.project_manager_name or "-",
+                }
+            from app.domains.clients.models import Client
+            from app.domains.projects.models import Project
+            projs = self.db.query(Project).filter(Project.project_code.in_(projects)).all()
+            client_ids = {p.client_id for p in projs if p.client_id}
+            companies = {c.id: c.company for c in self.db.query(Client).filter(Client.id.in_(client_ids)).all()} if client_ids else {}
+            for p in projs:
+                name = companies.get(p.client_id) or p.client_name
+                if name:
+                    self._project_client[p.project_code] = name
+                if p.project_manager:
+                    self._project_pm[p.project_code] = p.project_manager
+            self._loaded_projects |= projects
+        codes = {r.client for r in rows if r.client} - set(self._client_by_code)
+        if codes:
+            from app.domains.clients.models import Client
+            for c in self.db.query(Client).filter(Client.division.in_(codes)).all():
+                self._client_by_code[c.division] = c.company
+            for code in codes:
+                self._client_by_code.setdefault(code, "")
+        pms = {self._pm_username(r) for r in rows} - set(self._pm_names) - {None}
+        if pms:
+            for u in self.db.query(User).filter(User.username.in_(pms)).all():
+                self._pm_names[u.username] = (u.first_name or "").strip() or u.username
+        workflows = {r.workflow for r in rows if r.workflow} - self._loaded_workflows
+        if workflows:
+            for wf in self.db.query(WorkflowMaster).filter(WorkflowMaster.workflow_name.in_(workflows)).all():
+                self._next_stage[(wf.workflow_name, wf.stage_name)] = wf.next_stage
+            self._loaded_workflows |= workflows
+
+    def _pm_username(self, sd: StageDetail) -> Optional[str]:
+        meta_pm = self.meta(sd)["project_manager_name"]
+        return sd.project_manager_name or (meta_pm if meta_pm and meta_pm != "-" else None) or self._project_pm.get(sd.project)
+
+    def client_name(self, sd: StageDetail) -> str:
+        return self._project_client.get(sd.project) or self._client_by_code.get(sd.client or "") or sd.client
+
+    def pm_display(self, sd: StageDetail) -> Optional[str]:
+        u = self._pm_username(sd)
+        return self._pm_names.get(u, u) if u else None
+
+    def meta(self, sd: StageDetail) -> dict:
+        return self._chapter_meta.get((sd.project, sd.chapters), {"manuscript_pages": 0, "ce_pages": 0, "project_manager_name": "-"})
+
+    def item(self, sd: StageDetail) -> dict:
+        meta = self.meta(sd)
+        delayed = bool(sd.delayed) if sd.stage_status == "Completed" else stage_service.is_past_due(sd, self.today)
         delay_days = 0
-        if is_delayed:
-            if sd.delay_days:
-                delay_days = sd.delay_days
-            elif planned_tz:
-                delay_days = (now_utc - planned_tz).days
-                if delay_days < 0:
-                    delay_days = 0
-                
-        ch_meta = chapter_info_map.get((sd.project, sd.chapters), {
-            "manuscript_pages": 0,
-            "ce_pages": 0,
-            "project_manager_name": "-"
-        })
-
+        if delayed:
+            if sd.stage_status == "Completed":
+                delay_days = sd.delay_days or 0
+            else:
+                delay_days = (self.today - stage_service.local_date(sd.planned_end_date)).days
         return {
             "id": sd.id,
             "client": sd.client,
@@ -101,58 +121,214 @@ def get_workspace_dashboard_data(db: Session, user: User):
             "actual_start_date": sd.actual_start_date,
             "actual_end_date": sd.actual_end_date,
             "stage_status": sd.stage_status,
-            "delayed": is_delayed,
+            "delayed": delayed,
             "delay_days": delay_days,
             "remarks": sd.remarks,
-            "manuscript_pages": ch_meta["manuscript_pages"],
-            "ce_pages": ch_meta["ce_pages"],
-            "project_manager_name": ch_meta["project_manager_name"]
+            "manuscript_pages": meta["manuscript_pages"],
+            "ce_pages": meta["ce_pages"],
+            "project_manager_name": sd.project_manager_name or meta["project_manager_name"],
+            "chapter_label": stage_service.chapter_label(sd.chapters),
+            "client_name": self.client_name(sd),
+            "project_manager_display": self.pm_display(sd),
+            "assignee_name": sd.assignee_name,
+            "workflow": sd.workflow,
+            "next_stage": self._next_stage.get((sd.workflow, sd.stage_name)),
+            "custody_status": custody.effective_custody(sd),
+            "priority": sd.priority or "Normal",
+            "assigned_by": sd.assigned_by,
+            "assignment_notes": sd.assignment_notes,
+            "handback_notes": sd.handback_notes,
+            "handback_at": sd.handback_at,
+            "qa_approved_by": sd.qa_approved_by,
+            "qa_approved_at": sd.qa_approved_at,
+            "rework_notes": sd.rework_notes,
+            "rework_count": sd.rework_count or 0,
+            "completion_delay_days": stage_service.completion_delay_days(sd),
         }
-        
-    def calculate_stats(details: list[StageDetail]):
-        today_cnt = 0
-        yesterday_cnt = 0
-        delayed_cnt = 0
-        completed_cnt = 0
-        kra_met_cnt = 0
-        total_valid = 0
-        
+
+    def stats(self, details: list[StageDetail]) -> dict:
+        yesterday = self.today - timedelta(days=1)
+        today_cnt = yesterday_cnt = delayed_cnt = completed_cnt = kra_met = total_valid = 0
         for sd in details:
-            start_date = get_date(sd.actual_start_date)
-            if start_date == today:
+            start = stage_service.local_date(sd.actual_start_date)
+            if start == self.today:
                 today_cnt += 1
-            elif start_date == yesterday:
+            elif start == yesterday:
                 yesterday_cnt += 1
-                
             is_comp = sd.stage_status == "Completed"
             if is_comp:
                 completed_cnt += 1
-                
-            planned_tz = get_tz_aware(sd.planned_end_date)
-            is_delayed = bool(sd.delayed or (not is_comp and planned_tz and planned_tz < now_utc))
-            if is_delayed:
+            if (sd.delayed and is_comp) or stage_service.is_past_due(sd, self.today):
                 delayed_cnt += 1
-                
-            if planned_tz:
+            # KRA formula is unchanged here on purpose; it is replaced by role-based KRA in Phase 6.
+            planned = stage_service.as_utc(sd.planned_end_date)
+            if planned:
                 total_valid += 1
                 if is_comp:
-                    end_tz = get_tz_aware(sd.actual_end_date) or get_tz_aware(sd.updated_at)
-                    if end_tz and end_tz <= planned_tz:
-                        kra_met_cnt += 1
-                else:
-                    if planned_tz >= now_utc:
-                        kra_met_cnt += 1
-                        
-        kra_rate = (kra_met_cnt / total_valid) * 100.0 if total_valid > 0 else 100.0
+                    end = stage_service.as_utc(sd.actual_end_date) or stage_service.as_utc(sd.updated_at)
+                    if end and end <= planned:
+                        kra_met += 1
+                elif planned >= self.now_utc:
+                    kra_met += 1
         return {
             "today_assigned": today_cnt,
             "yesterday_assigned": yesterday_cnt,
             "delayed_count": delayed_cnt,
             "completed_count": completed_cnt,
-            "kra_meet_rate": round(kra_rate, 1)
+            "kra_meet_rate": round((kra_met / total_valid) * 100.0 if total_valid else 100.0, 1),
         }
 
-    # Initialize responses
+
+def _display_name(u: Optional[User]) -> str:
+    if not u:
+        return "Unassigned"
+    full = f"{u.first_name or ''} {u.last_name or ''}".strip()
+    return full or u.username
+
+
+def _window_filter(cutoff: datetime):
+    """Open rows, plus rows completed inside the window. Keeps payloads bounded as history grows."""
+    return or_(
+        StageDetail.stage_status != "Completed",
+        StageDetail.actual_end_date >= cutoff,
+        and_(StageDetail.actual_end_date.is_(None), StageDetail.updated_at >= cutoff),
+    )
+
+
+def _rows(db: Session, cutoff: datetime, *conditions) -> list[StageDetail]:
+    return db.query(StageDetail).filter(_window_filter(cutoff), *conditions).order_by(StageDetail.id).all()
+
+
+def _is_open_work(sd: StageDetail) -> bool:
+    return custody.effective_custody(sd) in (custody.IN_PROGRESS, custody.RETURNED)
+
+
+def _member_payload(ctx: WorkspaceContext, member: User, rows: list[StageDetail]) -> dict:
+    open_rows = [r for r in rows if _is_open_work(r)]
+    return {
+        "username": member.username,
+        "role": member.role or member.designation,
+        "email": member.email,
+        "display_name": _display_name(member),
+        "open_count": len(open_rows),
+        "open_pages": sum(ctx.meta(r)["manuscript_pages"] for r in open_rows),
+        "stats": ctx.stats(rows),
+        "assignments": [ctx.item(r) for r in rows],
+    }
+
+
+def _unassigned_payload(ctx: WorkspaceContext, rows: list[StageDetail]) -> dict:
+    return {
+        "username": "Unassigned",
+        "role": "None",
+        "email": None,
+        "display_name": "Unassigned",
+        "stats": ctx.stats(rows),
+        "assignments": [ctx.item(r) for r in rows],
+    }
+
+
+def _stage_infos(db: Session, stages: list[StageMaster], stage_names: set[str], manage_scope) -> list[dict]:
+    from collections import Counter
+    nexts: dict[str, Counter] = {}
+    prevs: dict[str, Counter] = {}
+    if stage_names:
+        for wf in db.query(WorkflowMaster).filter(WorkflowMaster.stage_name.in_(stage_names)).all():
+            if wf.next_stage:
+                nexts.setdefault(wf.stage_name, Counter())[wf.next_stage] += 1
+            if wf.previous_stage:
+                prevs.setdefault(wf.stage_name, Counter())[wf.previous_stage] += 1
+    out = []
+    owner_cache: dict[str, Optional[User]] = {}
+    for st in sorted((s for s in stages if s.stage_name in stage_names), key=lambda s: s.id or 0):
+        owner = owner_cache.setdefault(st.stage_name, stage_service.resolve_stage_owner_by_designation(db, st.stage_name))
+        out.append({
+            "stage_name": st.stage_name,
+            "owner_username": owner.username if owner else None,
+            "owner_name": _display_name(owner) if owner else None,
+            "group_email": st.group_email,
+            "sla_days": st.sla_level1,
+            "can_manage": manage_scope.covers(st.stage_name),
+            "next_stage": nexts[st.stage_name].most_common(1)[0][0] if st.stage_name in nexts else None,
+            "previous_stage": prevs[st.stage_name].most_common(1)[0][0] if st.stage_name in prevs else None,
+        })
+    return out
+
+
+def _workflows(db: Session, stage_names: set[str]) -> list[dict]:
+    """Each process (workflow) with its stages in flow order, following previous/next links."""
+    rows = (db.query(WorkflowMaster).filter(WorkflowMaster.active_status == True)  # noqa: E712
+            .order_by(WorkflowMaster.workflow_name, WorkflowMaster.id).all())
+    by_wf: dict[str, list[WorkflowMaster]] = {}
+    for r in rows:
+        by_wf.setdefault(r.workflow_name, []).append(r)
+    out = []
+    for name, wf_rows in by_wf.items():
+        by_stage = {r.stage_name: r for r in wf_rows}
+        starts = [r for r in wf_rows if not r.previous_stage or r.previous_stage not in by_stage] or wf_rows[:1]
+        order: list[str] = []
+        seen: set[str] = set()
+        for start in starts:
+            cur = start
+            while cur and cur.stage_name not in seen:
+                seen.add(cur.stage_name)
+                order.append(cur.stage_name)
+                cur = by_stage.get(cur.next_stage) if cur.next_stage else None
+        order += [r.stage_name for r in wf_rows if r.stage_name not in seen]
+        order = [st for st in order if st in stage_names]
+        if order:
+            out.append({"workflow_name": name, "stages": order})
+    return out
+
+
+def _pipeline(db: Session, ctx: WorkspaceContext, viewer: User, stages: list[StageMaster], scope, cutoff: datetime,
+              completed_days: int, extra_people: Iterable[User] = ()) -> dict:
+    stage_names = {s.stage_name for s in stages} if scope.all_stages else set(scope.stage_names)
+    rows = _rows(db, cutoff, StageDetail.stage_name.in_(stage_names)) if stage_names else []
+    ctx.preload(rows)
+    manage = access.managed_scope(db, viewer, stages)
+
+    roles_by_stage = {s.stage_name: {r.lower() for r in access.parse_stage_roles(s.roles)} for s in stages if s.stage_name in stage_names}
+    wanted_roles = set().union(*roles_by_stage.values()) if roles_by_stage else set()
+    holders = {r.assignee_name for r in rows if r.assignee_name}
+    candidates = {u.username: u for u in extra_people}
+    q = db.query(User).filter(or_(User.username.in_(holders or {""}), User.active_status == True))  # noqa: E712
+    for u in q.all():
+        role = (u.role or u.designation or "").strip().lower()
+        if u.username in holders or (role and role in wanted_roles):
+            candidates.setdefault(u.username, u)
+
+    people = []
+    for u in candidates.values():
+        role = (u.role or u.designation or "").strip().lower()
+        mine = [r for r in rows if r.assignee_name == u.username]
+        open_rows = [r for r in mine if _is_open_work(r)]
+        people.append({
+            "username": u.username,
+            "display_name": _display_name(u),
+            "role": u.role or u.designation,
+            "stage_names": sorted(n for n, roles in roles_by_stage.items() if role in roles),
+            "open_count": len(open_rows),
+            "open_pages": sum(ctx.meta(r)["manuscript_pages"] for r in open_rows),
+            "completed_count": sum(1 for r in mine if r.stage_status == "Completed"),
+        })
+    people.sort(key=lambda p: p["display_name"].lower())
+    return {
+        "stages": _stage_infos(db, stages, stage_names, manage),
+        "items": [ctx.item(r) for r in rows],
+        "people": people,
+        "completed_window_days": completed_days,
+        "workflows": _workflows(db, stage_names),
+    }
+
+
+def get_workspace_dashboard_data(db: Session, user: User, completed_days: int = DEFAULT_COMPLETED_DAYS):
+    completed_days = max(1, min(int(completed_days or DEFAULT_COMPLETED_DAYS), MAX_COMPLETED_DAYS))
+    ctx = WorkspaceContext(db)
+    cutoff = ctx.now_utc - timedelta(days=completed_days)
+    role_type = access.dashboard_role_type(user)
+    stages = access.active_stages(db)
+
     response = {
         "role": role_type,
         "viewer": {
@@ -162,211 +338,90 @@ def get_workspace_dashboard_data(db: Session, user: User):
             "first_name": user.first_name,
             "last_name": user.last_name,
             "roles": [r.name for r in user.roles],
+            "role": user.role,
+            "team": user.team,
+            "designation": user.designation,
             "is_active": user.is_active,
         },
         "user_workspace": None,
         "teamlead_workspace": None,
-        "manager_workspace": None
+        "manager_workspace": None,
+        "pipeline": None,
+        "generated_at": ctx.now_utc,
     }
-    
-    if role_type == "user":
-        # Personal workspace
-        q = db.query(StageDetail).filter(StageDetail.assignee_name == user.username)
-        sds = q.all()
-        response["user_workspace"] = {
-            "stats": calculate_stats(sds),
-            "assignments": [build_workspace_item(sd) for sd in sds]
-        }
-        
-    elif role_type == "teamlead":
-        # Team Lead workspace
-        # 1. Determine stages dynamically associated with this Team Lead's role
-        role_to_use = user.role or user.designation
-        user_role_lower = (role_to_use or "").lower().strip()
-        team_stages = set()
-        allowed_member_roles = set()
-        
-        stages_in_db = db.query(StageMaster).filter(StageMaster.active_status == True).all()
-        for stage in stages_in_db:
-            stage_roles = stage.roles or []
-            if isinstance(stage_roles, list) and len(stage_roles) >= 2 and stage_roles[0] == '[' and stage_roles[-1] == ']':
-                import json
-                try:
-                    stage_roles = json.loads("".join(stage_roles))
-                except Exception:
-                    pass
-            elif isinstance(stage_roles, str):
-                import json
-                try:
-                    stage_roles = json.loads(stage_roles)
-                except Exception:
-                    stage_roles = [stage_roles]
-                    
-            stage_roles_lower = [r.lower().strip() for r in stage_roles if r]
-            if user_role_lower in stage_roles_lower:
-                team_stages.add(stage.stage_name)
-                for r in stage_roles:
-                    if r:
-                        allowed_member_roles.add(r.lower().strip())
-                        
-        # Exclude the team lead's own role from member mapping
-        allowed_member_roles.discard(user_role_lower)
-        
-        # 2. Query and filter team members
-        if team_stages:
-            all_members_in_team = db.query(User).filter(User.team == user.team).all()
-            team_members = [
-                m for m in all_members_in_team 
-                if (m.role or m.designation) and (m.role or m.designation).lower().strip() in allowed_member_roles
-            ]
-        else:
-            # Fallback to default if role is not configured in any stage
-            team_members = db.query(User).filter(User.team == user.team).all()
-            member_roles = {m.role or m.designation for m in team_members if m.role or m.designation}
-            for stage in stages_in_db:
-                stage_roles = stage.roles or []
-                if isinstance(stage_roles, list) and len(stage_roles) >= 2 and stage_roles[0] == '[' and stage_roles[-1] == ']':
-                    import json
-                    try:
-                        stage_roles = json.loads("".join(stage_roles))
-                    except Exception:
-                        pass
-                elif isinstance(stage_roles, str):
-                    import json
-                    try:
-                        stage_roles = json.loads(stage_roles)
-                    except Exception:
-                        stage_roles = [stage_roles]
-                if any(r in member_roles for r in stage_roles):
-                    team_stages.add(stage.stage_name)
 
-        # 3. Retrieve members' details and filter their assignments strictly to team_stages
-        member_datas = []
-        all_team_details = []
-        
-        for member in team_members:
-            m_sds_q = db.query(StageDetail).filter(StageDetail.assignee_name == member.username)
-            if team_stages:
-                m_sds_q = m_sds_q.filter(StageDetail.stage_name.in_(list(team_stages)))
-            m_sds = m_sds_q.all()
-            all_team_details.extend(m_sds)
-            
-            member_datas.append({
-                "username": member.username,
-                "role": member.role or member.designation,
-                "email": member.email,
-                "stats": calculate_stats(m_sds),
-                "assignments": [build_workspace_item(sd) for sd in m_sds]
-            })
-                
-        unassigned_sds = []
-        if team_stages:
-            unassigned_sds = db.query(StageDetail).filter(
-                (StageDetail.assignee_name == None) | (StageDetail.assignee_name == ""),
-                StageDetail.stage_name.in_(list(team_stages))
-            ).all()
-            
-        if unassigned_sds:
-            all_team_details.extend(unassigned_sds)
-            member_datas.append({
-                "username": "Unassigned",
-                "role": "None",
-                "email": None,
-                "stats": calculate_stats(unassigned_sds),
-                "assignments": [build_workspace_item(sd) for sd in unassigned_sds]
-            })
-            
-        response["teamlead_workspace"] = {
-            "stats": calculate_stats(all_team_details),
-            "members": member_datas
-        }
-        
-    elif role_type == "manager":
-        # Manager Workspace
-        # Determine jurisdiction scope
-        is_editorial_mgr = "editorial manager" in role_lower or user.team == "Editorial Team"
-        
-        if is_editorial_mgr:
-            # Query Editorial team members and matching stages
-            users_in_scope = db.query(User).filter(User.team == "Editorial Team").all()
+    if role_type == "user":
+        sds = _rows(db, cutoff, StageDetail.assignee_name == user.username)
+        ctx.preload(sds)
+        response["user_workspace"] = {"stats": ctx.stats(sds), "assignments": [ctx.item(sd) for sd in sds]}
+        # Employees who are configured stage owners still get the board for the stages they own.
+        own_scope = access.managed_scope(db, user, stages)
+        if own_scope.stage_names:
+            response["pipeline"] = _pipeline(db, ctx, user, stages, own_scope, cutoff, completed_days)
+        return response
+
+    if role_type == "teamlead":
+        scope = access.teamlead_scope(db, user, stages)
+        team = db.query(User).filter(User.team == user.team).all()
+        if scope.stage_names:
+            members = [m for m in team if (m.role or m.designation) and (m.role or m.designation).strip().lower() in scope.member_role_names]
         else:
-            # Query all users
-            users_in_scope = db.query(User).all()
-            
-        usernames = [u.username for u in users_in_scope]
-        
-        # Get active/historical stage assignments for those users
-        sds = db.query(StageDetail).filter(StageDetail.assignee_name.in_(usernames)).all()
-        
-        # Get unassigned chapters matching the users' roles
-        scope_roles = {u.role or u.designation for u in users_in_scope if u.role or u.designation}
-        manager_stages = set()
-        for stage in db.query(StageMaster).filter(StageMaster.active_status == True).all():
-            stage_roles = stage.roles or []
-            if isinstance(stage_roles, list) and len(stage_roles) >= 2 and stage_roles[0] == '[' and stage_roles[-1] == ']':
-                import json
-                try:
-                    stage_roles = json.loads("".join(stage_roles))
-                except Exception:
-                    pass
-            elif isinstance(stage_roles, str):
-                import json
-                try:
-                    stage_roles = json.loads(stage_roles)
-                except Exception:
-                    stage_roles = [stage_roles]
-            if any(r in scope_roles for r in stage_roles):
-                manager_stages.add(stage.stage_name)
-                
-        unassigned_sds = []
-        if manager_stages:
-            unassigned_sds = db.query(StageDetail).filter(
-                (StageDetail.assignee_name == None) | (StageDetail.assignee_name == ""),
-                StageDetail.stage_name.in_(list(manager_stages))
-            ).all()
-            
-        # Calculate stats for stage metrics (dynamic aggregation)
-        stages_in_db = db.query(StageMaster).filter(StageMaster.active_status == True).all()
-        stage_metrics = []
-        all_sds_for_stats = list(sds) + list(unassigned_sds)
-        
-        for stage in stages_in_db:
-            stage_sds = [sd for sd in all_sds_for_stats if sd.stage_name == stage.stage_name]
-            if stage_sds:
-                stage_metrics.append({
-                    "stage_name": stage.stage_name,
-                    "active_count": sum(1 for sd in stage_sds if sd.stage_status != "Completed"),
-                    "delayed_count": sum(1 for sd in stage_sds if bool(sd.delayed or (sd.stage_status != "Completed" and get_tz_aware(sd.planned_end_date) and get_tz_aware(sd.planned_end_date) < now_utc))),
-                    "today_assigned": sum(1 for sd in stage_sds if get_date(sd.actual_start_date) == today),
-                    "yesterday_assigned": sum(1 for sd in stage_sds if get_date(sd.actual_start_date) == yesterday),
-                    "kra_meet_rate": calculate_stats(stage_sds)["kra_meet_rate"]
-                })
-        
-        # Calculate individual member stats
-        member_datas = []
-        for member in users_in_scope:
-            m_sds = [sd for sd in sds if sd.assignee_name == member.username]
-            member_datas.append({
-                "username": member.username,
-                "role": member.role or member.designation,
-                "email": member.email,
-                "stats": calculate_stats(m_sds),
-                "assignments": [build_workspace_item(sd) for sd in m_sds]
-            })
-            
-        if unassigned_sds:
-            member_datas.append({
-                "username": "Unassigned",
-                "role": "None",
-                "email": None,
-                "stats": calculate_stats(unassigned_sds),
-                "assignments": [build_workspace_item(sd) for sd in unassigned_sds]
-            })
-            
-        response["manager_workspace"] = {
-            "stats": calculate_stats(all_sds_for_stats),
-            "stages": stage_metrics,
-            "members": member_datas
-        }
-        
+            members = team
+        member_names = [m.username for m in members]
+        conds = [StageDetail.assignee_name.in_(member_names or [""])]
+        if scope.stage_names:
+            conds.append(StageDetail.stage_name.in_(scope.stage_names))
+        member_rows = _rows(db, cutoff, *conds)
+        unassigned = _rows(db, cutoff, or_(StageDetail.assignee_name.is_(None), StageDetail.assignee_name == ""),
+                           StageDetail.stage_name.in_(scope.stage_names)) if scope.stage_names else []
+        ctx.preload(member_rows + unassigned)
+        by_member: dict[str, list[StageDetail]] = {}
+        for r in member_rows:
+            by_member.setdefault(r.assignee_name, []).append(r)
+        member_datas = [_member_payload(ctx, m, by_member.get(m.username, [])) for m in members]
+        if unassigned:
+            member_datas.append(_unassigned_payload(ctx, unassigned))
+        response["teamlead_workspace"] = {"stats": ctx.stats(member_rows + unassigned), "members": member_datas}
+        response["pipeline"] = _pipeline(db, ctx, user, stages, scope, cutoff, completed_days, extra_people=members)
+        return response
+
+    # manager
+    is_editorial = not access.is_admin(user) and ("editorial manager" in access.primary_role(user) or user.team == "Editorial Team")
+    users_in_scope = db.query(User).filter(User.team == "Editorial Team").all() if is_editorial else db.query(User).all()
+    usernames = [u.username for u in users_in_scope]
+    sds = _rows(db, cutoff, StageDetail.assignee_name.in_(usernames or [""]))
+    scope_roles = {(u.role or u.designation) for u in users_in_scope if u.role or u.designation}
+    manager_stages = {s.stage_name for s in stages if any(r in scope_roles for r in access.parse_stage_roles(s.roles))}
+    unassigned = _rows(db, cutoff, or_(StageDetail.assignee_name.is_(None), StageDetail.assignee_name == ""),
+                       StageDetail.stage_name.in_(manager_stages)) if manager_stages else []
+    ctx.preload(sds + unassigned)
+
+    all_rows = list(sds) + list(unassigned)
+    by_stage: dict[str, list[StageDetail]] = {}
+    for r in all_rows:
+        by_stage.setdefault(r.stage_name, []).append(r)
+    stage_metrics = []
+    yesterday = ctx.today - timedelta(days=1)
+    for st in stages:
+        rows = by_stage.get(st.stage_name)
+        if not rows:
+            continue
+        stats = ctx.stats(rows)
+        stage_metrics.append({
+            "stage_name": st.stage_name,
+            "active_count": sum(1 for r in rows if r.stage_status != "Completed"),
+            "delayed_count": stats["delayed_count"],
+            "today_assigned": sum(1 for r in rows if stage_service.local_date(r.actual_start_date) == ctx.today),
+            "yesterday_assigned": sum(1 for r in rows if stage_service.local_date(r.actual_start_date) == yesterday),
+            "kra_meet_rate": stats["kra_meet_rate"],
+        })
+
+    by_member: dict[str, list[StageDetail]] = {}
+    for r in sds:
+        by_member.setdefault(r.assignee_name, []).append(r)
+    member_datas = [_member_payload(ctx, m, by_member.get(m.username, [])) for m in users_in_scope]
+    if unassigned:
+        member_datas.append(_unassigned_payload(ctx, unassigned))
+    response["manager_workspace"] = {"stats": ctx.stats(all_rows), "stages": stage_metrics, "members": member_datas}
+    response["pipeline"] = _pipeline(db, ctx, user, stages, access.managed_scope(db, user, stages), cutoff, completed_days)
     return response

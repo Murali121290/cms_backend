@@ -1017,6 +1017,7 @@ def api_v2_dashboard(
 
 @router.get("/dashboard/workspaces", response_model=schemas_v2.WorkspaceDashboardResponse)
 def api_v2_dashboard_workspaces(
+    completed_days: int = Query(30, ge=1, le=90, description="Include chapters completed in the last N days"),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -1027,8 +1028,15 @@ def api_v2_dashboard_workspaces(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
-        
-    return dashboard_service.get_workspace_dashboard_data(db, viewer)
+    from app.domains.auth.rbac_config import get_user_permissions
+    if "view_workspace" not in get_user_permissions(viewer):
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            message="You don't have access to the workspace.",
+        )
+
+    return dashboard_service.get_workspace_dashboard_data(db, viewer, completed_days=completed_days)
 
 
 @router.get("/projects", response_model=schemas_v2.ProjectsListResponse)
@@ -10427,7 +10435,7 @@ def api_v2_chapter_transition_email(
     from sqlalchemy import select
     from app.domains.workflow.models import ChapterInfo, WorkflowMaster
     from app.domains.projects.models import Project
-    from app.domains.workflow.api_v1 import stage_transition as internal_stage_transition, TransitionPayload
+    from app.domains.workflow import stage_service
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
@@ -10447,13 +10455,11 @@ def api_v2_chapter_transition_email(
         client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
         
     # Execute stage transition
-    transition_payload = TransitionPayload(
-        from_stage=payload.from_stage,
-        to_stage=payload.to_stage,
-        dt=payload.dt
+    # Transition stage details table (lenient: chapters without a planned row still move)
+    stage_service.transition_stage(
+        db, project=project_code, chapters=chapter.chapters, from_stage=payload.from_stage,
+        to_stage=payload.to_stage, dt=payload.dt, actor=getattr(user, "username", None), strict=False,
     )
-    # Transition stage details table
-    internal_stage_transition(project_code, chapter.chapters, transition_payload, db=db)
     
     # Update ChapterInfo table
     chapter.stage_name = payload.to_stage
@@ -10905,7 +10911,7 @@ def api_v2_bulk_transition_execute(
     from sqlalchemy import select
     from app.domains.workflow.models import ChapterInfo, WorkflowMaster
     from app.domains.projects.models import Project
-    from app.domains.workflow.api_v1 import stage_transition as internal_stage_transition, TransitionPayload
+    from app.domains.workflow import stage_service
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
@@ -10958,12 +10964,11 @@ def api_v2_bulk_transition_execute(
         if not next_stage_name:
             continue
 
-        t_payload = TransitionPayload(
-            from_stage=current_stage,
-            to_stage=next_stage_name,
-        )
         try:
-            internal_stage_transition(project_code, ch.chapters, t_payload, db=db)
+            stage_service.transition_stage(
+                db, project=project_code, chapters=ch.chapters, from_stage=current_stage,
+                to_stage=next_stage_name, actor=getattr(user, "username", None), strict=False,
+            )
         except Exception as err:
             logging.error("Failed internal stage transition for chapter %s: %s", ch.chapters, err)
 

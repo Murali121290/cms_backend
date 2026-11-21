@@ -107,6 +107,7 @@ interface StageModalProps {
 interface StageForm {
   stage_name: string
   owner_designation: string
+  group_email: string
   sla_level1: string
   sla_level2: string
   sla_level3: string
@@ -120,7 +121,7 @@ interface StageForm {
 }
 
 const EMPTY_FORM: StageForm = {
-  stage_name: '', owner_designation: '', sla_level1: '', sla_level2: '', sla_level3: '',
+  stage_name: '', owner_designation: '', group_email: '', sla_level1: '', sla_level2: '', sla_level3: '',
   pages_level1: '', pages_level2: '', pages_level3: '',
   description: '', active_status: true, role_names: [], processing_actions: [],
 }
@@ -158,6 +159,7 @@ function StageModal({
       setForm({
         stage_name:   initial.stage_name,
         owner_designation: initial.owner_designation ?? '',
+        group_email:  initial.group_email ?? '',
         sla_level1:   initial.sla_level1 != null ? String(initial.sla_level1) : '',
         sla_level2:   initial.sla_level2 != null ? String(initial.sla_level2) : '',
         sla_level3:   initial.sla_level3 != null ? String(initial.sla_level3) : '',
@@ -193,6 +195,7 @@ function StageModal({
   const validate = () => {
     const e: typeof errors = {}
     if (!form.stage_name.trim()) e.stage_name = 'Stage name is required'
+    if (form.group_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.group_email.trim())) e.group_email = 'Enter a valid email address'
     if (form.sla_level1 && Number(form.sla_level1) < 0) e.sla_level1 = 'Cannot be negative'
     if (form.sla_level2 && Number(form.sla_level2) < 0) e.sla_level2 = 'Cannot be negative'
     if (form.sla_level3 && Number(form.sla_level3) < 0) e.sla_level3 = 'Cannot be negative'
@@ -211,6 +214,7 @@ function StageModal({
       const payload: StagePayload = {
         stage_name:   form.stage_name.trim(),
         owner_designation: form.owner_designation.trim() || undefined,
+        group_email:  form.group_email.trim() || (initial ? null : undefined),
         sla_level1:   form.sla_level1 ? Number(form.sla_level1) : (initial ? null : undefined),
         sla_level2:   form.sla_level2 ? Number(form.sla_level2) : (initial ? null : undefined),
         sla_level3:   form.sla_level3 ? Number(form.sla_level3) : (initial ? null : undefined),
@@ -451,6 +455,23 @@ function StageModal({
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Team group email (distribution list) */}
+            <div>
+              <label htmlFor="stage-group-email" className="block text-xs font-semibold text-text mb-1 uppercase tracking-wider">
+                Team group email
+              </label>
+              <p className="text-[11px] text-muted mb-2">Copied on assignment emails and used for hand-offs into this stage (e.g. copyediting-team@s4carlisle.com)</p>
+              <input
+                id="stage-group-email"
+                type="email"
+                value={form.group_email}
+                onChange={e => setForm(f => ({ ...f, group_email: e.target.value }))}
+                placeholder="team-list@s4carlisle.com"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+              />
+              {errors.group_email && <p className="mt-1 text-xs text-red-600">{errors.group_email}</p>}
             </div>
 
             {/* SLA by Level */}

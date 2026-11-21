@@ -1,7 +1,7 @@
 import enum
 from sqlalchemy import (
     BigInteger, Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey,
-    Integer, JSON, String, Text, UniqueConstraint
+    Index, Integer, JSON, String, Text, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.compiler import compiles
@@ -83,6 +83,7 @@ class StageMaster(Base):
     stage_name       = Column(String(100), unique=True, nullable=False, index=True)
     description      = Column(Text, nullable=True)
     owner_designation = Column(String(100), nullable=True)                          # e.g., "Team Lead - LE"
+    group_email      = Column(String(255), nullable=True)                           # team distribution list for hand-off emails
     sla_level1       = Column(Integer,           nullable=True)                        # SLA in days for Level 1
     sla_level2       = Column(Integer,           nullable=True)                        # SLA in days for Level 2
     sla_level3       = Column(Integer,           nullable=True)                        # SLA in days for Level 3
@@ -103,6 +104,12 @@ class StageDetail(Base):
         CheckConstraint("actual_end_date IS NULL OR actual_start_date IS NULL OR actual_end_date >= actual_start_date",     name="ck_stage_detail_actual_end_after_start"),
         CheckConstraint("sla >= 0",         name="ck_stage_detail_sla_non_negative"),
         CheckConstraint("stage_level >= 0", name="ck_stage_detail_level_non_negative"),
+        # Created on existing databases by alembic 0072 / the startup DDL in app.main
+        Index("ix_stages_details_assignee", "assignee_name"),
+        Index("ix_stages_details_stage_status", "stage_name", "stage_status"),
+        Index("ix_stages_details_project_chapter", "project", "chapters"),
+        Index("ix_stages_details_stage_end", "stage_name", "actual_end_date"),
+        Index("ix_stages_details_stage_custody", "stage_name", "custody_status"),
     )
 
     id                    = Column(BigInteger,  primary_key=True, autoincrement=True)
@@ -126,6 +133,18 @@ class StageDetail(Base):
     delay_days            = Column(Integer,     nullable=True)
     remarks               = Column(Text,        nullable=True)
     history               = Column(JSON,        nullable=True, default=list)
+    # Stage custody lifecycle (alembic 0073). custody_status may be NULL on rows written before the
+    # migration; app.domains.workflow.custody.effective_custody() derives it from the legacy fields.
+    custody_status        = Column(String(30),  nullable=True, default="unassigned")
+    assigned_by           = Column(String(150), nullable=True)
+    assignment_notes      = Column(Text,        nullable=True)
+    handback_notes        = Column(Text,        nullable=True)
+    handback_at           = Column(DateTime(timezone=True), nullable=True)
+    qa_approved_by        = Column(String(150), nullable=True)
+    qa_approved_at        = Column(DateTime(timezone=True), nullable=True)
+    rework_notes          = Column(Text,        nullable=True)
+    rework_count          = Column(Integer,     nullable=False, default=0, server_default="0")
+    priority              = Column(String(10),  nullable=False, default="Normal", server_default="Normal")
     created_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

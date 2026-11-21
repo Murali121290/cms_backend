@@ -1322,6 +1322,9 @@ class ChapterZipUploadResponse(BaseModel):
     skipped: list[ChapterZipSkippedItem]
 
 
+CustodyStatus = Literal["unassigned", "in_progress", "returned_for_review", "qa_approved", "transitioned"]
+
+
 class WorkspaceItem(BaseModel):
     id: int
     client: str
@@ -1339,6 +1342,24 @@ class WorkspaceItem(BaseModel):
     manuscript_pages: int | None = 0
     ce_pages: int | None = 0
     project_manager_name: str | None = "-"
+    chapter_label: str | None = None            # "Chapter 01" for numbered chapters, otherwise the stored name
+    client_name: str | None = None              # client company name (client holds the code, e.g. KLUPA02)
+    project_manager_display: str | None = None  # PM first name (falls back to username)
+    # Added for the workspace redesign (all optional so older clients keep working)
+    assignee_name: str | None = None
+    workflow: str | None = None
+    next_stage: str | None = None
+    custody_status: CustodyStatus = "unassigned"
+    priority: str = "Normal"
+    assigned_by: str | None = None
+    assignment_notes: str | None = None
+    handback_notes: str | None = None
+    handback_at: datetime | None = None
+    qa_approved_by: str | None = None
+    qa_approved_at: datetime | None = None
+    rework_notes: str | None = None
+    rework_count: int = 0
+    completion_delay_days: int | None = None  # set when completed: days finished after the planned end (0 = on time)
 
 
 class WorkspaceStats(BaseModel):
@@ -1356,8 +1377,11 @@ class UserWorkspaceData(BaseModel):
 
 class TeamMemberWorkspaceData(BaseModel):
     username: str
-    role: str
+    role: str | None = None
     email: str | None = None
+    display_name: str | None = None
+    open_count: int = 0
+    open_pages: int = 0
     stats: WorkspaceStats
     assignments: list[WorkspaceItem]
 
@@ -1382,12 +1406,135 @@ class ManagerWorkspaceData(BaseModel):
     members: list[TeamMemberWorkspaceData]
 
 
+class WorkspaceStageInfo(BaseModel):
+    stage_name: str
+    owner_username: str | None = None
+    owner_name: str | None = None
+    group_email: str | None = None
+    sla_days: int | None = None
+    can_manage: bool = False
+    next_stage: str | None = None      # most common next stage across workflows (items carry their own)
+    previous_stage: str | None = None
+
+
+class WorkspacePerson(BaseModel):
+    username: str
+    display_name: str
+    role: str | None = None
+    stage_names: list[str] = []
+    open_count: int = 0
+    open_pages: int = 0
+    completed_count: int = 0
+
+
+class WorkspaceWorkflow(BaseModel):
+    """A process (WorkflowMaster.workflow_name) with its stages in order, limited to the viewer's stages."""
+    workflow_name: str
+    stages: list[str]
+
+
+class WorkspacePipeline(BaseModel):
+    """Everything the stage-owner board, queue, schedule and team tabs need, scoped to the viewer."""
+    stages: list[WorkspaceStageInfo]
+    items: list[WorkspaceItem]          # open rows in scope + rows completed inside the completed window
+    people: list[WorkspacePerson]
+    completed_window_days: int
+    workflows: list[WorkspaceWorkflow] = []
+
+
 class WorkspaceDashboardResponse(BaseModel):
     role: str
     viewer: Viewer
     user_workspace: UserWorkspaceData | None = None
     teamlead_workspace: TeamLeadWorkspaceData | None = None
     manager_workspace: ManagerWorkspaceData | None = None
+    pipeline: WorkspacePipeline | None = None
+    generated_at: datetime | None = None
+
+
+# ── Workspace task actions (custody lifecycle) ────────────────────────────────
+
+class WorkspaceAssignRequest(BaseModel):
+    assignee: str | None = None
+    priority: Literal["Normal", "High", "Urgent"] | None = None
+    planned_end_date: datetime | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    notify: bool = True
+    expected_custody_status: CustodyStatus | None = None
+
+
+class WorkspaceHandbackRequest(BaseModel):
+    notes: str = Field(min_length=5, max_length=4000)
+    checklist_confirmed: bool
+    expected_custody_status: CustodyStatus | None = None
+
+
+class WorkspaceReviewRequest(BaseModel):
+    decision: Literal["approve", "rework"]
+    notes: str | None = Field(default=None, max_length=4000)
+    expected_custody_status: CustodyStatus | None = None
+
+
+class WorkspaceMoveNextRequest(BaseModel):
+    notify: bool = True
+    expected_custody_status: CustodyStatus | None = None
+
+
+class WorkspaceBulkRequest(BaseModel):
+    action: Literal["assign", "approve", "move_next"]
+    task_ids: list[int] = Field(min_length=1, max_length=500)
+    assignee: str | None = None
+    notify: bool = True
+
+
+class WorkspaceBulkResultItem(BaseModel):
+    task_id: int
+    status: Literal["ok", "skipped", "conflict", "forbidden", "error"]
+    message: str | None = None
+    item: WorkspaceItem | None = None
+
+
+class WorkspaceBulkResponse(BaseModel):
+    results: list[WorkspaceBulkResultItem]
+
+
+class WorkspaceActivityEvent(BaseModel):
+    at: datetime | None = None
+    actor: str | None = None
+    kind: str               # custody | planning | other
+    action: str | None = None
+    text: str
+
+
+class WorkspaceActivityResponse(BaseModel):
+    task: WorkspaceItem
+    events: list[WorkspaceActivityEvent]
+
+
+class WorkspaceRecipient(BaseModel):
+    username: str | None = None
+    name: str | None = None
+    email: str
+
+
+class WorkspaceMoveNextPreview(BaseModel):
+    task_id: int
+    from_stage: str
+    next_stage: str | None = None      # None = final stage, the chapter will be marked complete
+    next_owner_username: str | None = None
+    next_owner_name: str | None = None
+    to: list[WorkspaceRecipient]
+    cc: list[WorkspaceRecipient]
+    subject: str
+    late_days: int = 0                 # later planned dates shift by this many days
+
+
+class WorkspaceScheduleResponse(BaseModel):
+    stage_name: str
+    date_from: datetime
+    date_to: datetime
+    items: list[WorkspaceItem]
+    truncated: bool = False
 
 
 class BulkDownloadFileItem(BaseModel):

@@ -57,10 +57,13 @@ def _collect_docx(uploads: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
     return out
 
 
-async def _read_request(files: list[UploadFile], reference_prefix: str) -> tuple[str, list[tuple[str, bytes]]]:
+async def _read_request(files: list[UploadFile], reference_prefix: str, require_prefix: bool = True) -> tuple[str, list[tuple[str, bytes]]]:
     prefix = reference_prefix.strip()
-    if not prefix or not PREFIX_RE.match(prefix):
-        raise HTTPException(status_code=400, detail="Reference prefix is required (letters, digits, '_' or '-' only), e.g. machfund2028_eoc.")
+    if require_prefix:
+        if not prefix or not PREFIX_RE.match(prefix):
+            raise HTTPException(status_code=400, detail="Reference prefix is required (letters, digits, '_' or '-' only), e.g. machfund2028_eoc.")
+    elif not prefix or not PREFIX_RE.match(prefix):
+        prefix = "alt_text"
 
     uploads: list[tuple[str, bytes]] = []
     total = 0
@@ -146,12 +149,14 @@ async def fix(
 @router.post("/analyze")
 async def analyze(
     files: list[UploadFile] = File(...),
-    reference_prefix: str = Form(...),
+    reference_prefix: str = Form(""),
+    mode: str = Form("validate"),
     user=Depends(check_post_prod_access),
 ):
-    from .rules import check_run
+    from .rules import check_run, check_alt_text_run
 
-    prefix, docs = await _read_request(files, reference_prefix)
+    is_alt_text = (mode == "alt_text")
+    prefix, docs = await _read_request(files, reference_prefix, require_prefix=not is_alt_text)
 
     parsed = []
     unreadable: list[Issue] = []
@@ -160,15 +165,34 @@ async def analyze(
             parsed.append(parse_docx(data, name))
         except Exception as exc:  # corrupt / not really a docx
             logger.warning("EOC validator could not read %s: %s", name, exc)
-            unreadable.append(Issue(name, None, None, "F1", ERROR, f"File could not be read as a Word document: {exc}"))
+            unreadable.append(Issue(name, None, None, "IMG1" if is_alt_text else "F1", ERROR, f"File could not be read as a Word document: {exc}"))
 
-    issues = check_run(parsed, prefix) + unreadable
-    report = build_report(parsed, issues, prefix)
+    if is_alt_text:
+        issues = check_alt_text_run(parsed) + unreadable
+        report = build_report(parsed, issues, prefix, mode="alt_text")
+    else:
+        issues = check_run(parsed, prefix) + unreadable
+        report = build_report(parsed, issues, prefix, mode="validate")
+
     for i in unreadable:
-        report["files"].append({"file": i.file, "chapter": None, "questions": 0, "mc": 0, "tf": 0, "shuffle_lines": 0,
-                                "images": 0, "errors": 1, "warnings": 0, "info": 0, "status": "fail"})
+        report["files"].append({
+            "file": i.file,
+            "chapter": None,
+            "questions": 0,
+            "mc": 0,
+            "tf": 0,
+            "shuffle_lines": 0,
+            "images": 0,
+            "has_alt": 0,
+            "missing_alt": 0,
+            "errors": 1,
+            "warnings": 0,
+            "info": 0,
+            "status": "fail",
+        })
 
     return JSONResponse({
+        "mode": mode,
         "report": report,
         "artifacts": {
             "csv": to_csv(report),

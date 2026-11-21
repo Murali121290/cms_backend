@@ -1,8 +1,18 @@
 import pytest
 from datetime import datetime, timedelta, timezone
 from app.domains.workflow.models import StageMaster, StageDetail, WorkflowMaster, ChapterInfo
+from app import models
 
-def test_workflow_delay_calculation_on_transition(db_session, client):
+
+def _admin_client(db_session, auth_cookie_client):
+    # These endpoints now require a signed-in user with rights on the stage (they were open before).
+    admin = models.User(username="delay_admin", email="delay_admin@example.com", password_hash="x", role="Admin", access_level="Admin")
+    db_session.add(admin)
+    db_session.commit()
+    return auth_cookie_client(admin)
+
+def test_workflow_delay_calculation_on_transition(db_session, auth_cookie_client):
+    client = _admin_client(db_session, auth_cookie_client)
     # Setup workflow stage masters
     stage1 = StageMaster(stage_name="Stage 1", active_status=True)
     stage2 = StageMaster(stage_name="Stage 2", active_status=True)
@@ -80,7 +90,8 @@ def test_workflow_delay_calculation_on_transition(db_session, client):
     assert delays.get("Stage 1") >= 2
 
 
-def test_cascade_shift_endpoint(db_session, client):
+def test_cascade_shift_endpoint(db_session, auth_cookie_client):
+    client = _admin_client(db_session, auth_cookie_client)
     # Setup workflow stage masters
     stage1 = StageMaster(stage_name="Stage 1", active_status=True)
     stage2 = StageMaster(stage_name="Stage 2", active_status=True)

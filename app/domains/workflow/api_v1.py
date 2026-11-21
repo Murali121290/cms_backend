@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class StatusPayload(BaseModel):
     active_status: bool
@@ -9,8 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.domains.workflow import crud
+from app.domains.workflow import crud, stage_service
+from app.domains.workflow.access import require_admin_actor, require_workflow_actor
 from app.domains.workflow.models import StageDetail, StageMaster
+# Re-exported: api_v2 and older code import this from here.
+from app.domains.workflow.stage_service import resolve_stage_owner_by_designation  # noqa: F401
 from app.domains.workflow.schemas import (
     RolesMasterCreate, RolesMasterResponse, RolesMasterUpdate,
     StageMasterCreate, StageMasterResponse, StageMasterUpdate,
@@ -322,8 +325,19 @@ def set_stage_status(stage_id_or_name: str, payload: StatusPayload, db: Session 
 
 # ── StageDetail Endpoints ─────────────────────────────────────────────────────
 
+def _ensure_stage_edit_rights(db: Session, user, stage_names) -> None:
+    """Legacy v1 rule: anyone with the edit_assignee permission (team leads, managers, PMs, admins —
+    the same check the UI already applied client-side), otherwise only managers of those stages."""
+    from app.domains.auth.rbac_config import has_permission
+    from app.domains.workflow.access import ensure_can_manage
+    if has_permission(user, "edit_assignee"):
+        return
+    ensure_can_manage(db, user, stage_names)
+
+
 @router.post("/stage-details", response_model=StageDetailResponse, status_code=status.HTTP_201_CREATED)
-def create_stage_detail(data: StageDetailCreate, db: Session = Depends(get_db)):
+def create_stage_detail(data: StageDetailCreate, db: Session = Depends(get_db), actor=Depends(require_workflow_actor)):
+    _ensure_stage_edit_rights(db, actor, [data.stage_name])
     return crud.create_stage_detail(db, data)
 
 
@@ -341,7 +355,11 @@ def get_stage_detail(detail_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/stage-details/{detail_id}", response_model=StageDetailResponse)
-def update_stage_detail(detail_id: int, data: StageDetailUpdate, db: Session = Depends(get_db)):
+def update_stage_detail(detail_id: int, data: StageDetailUpdate, db: Session = Depends(get_db), actor=Depends(require_workflow_actor)):
+    existing = crud.get_stage_detail(db, detail_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Stage detail not found")
+    _ensure_stage_edit_rights(db, actor, {existing.stage_name, data.stage_name or existing.stage_name})
     updated = crud.update_stage_detail(db, detail_id, data)
     if not updated:
         raise HTTPException(status_code=404, detail="Stage detail not found")
@@ -349,7 +367,7 @@ def update_stage_detail(detail_id: int, data: StageDetailUpdate, db: Session = D
 
 
 @router.delete("/stage-details/{detail_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_stage_detail(detail_id: int, db: Session = Depends(get_db)):
+def delete_stage_detail(detail_id: int, db: Session = Depends(get_db), actor=Depends(require_admin_actor)):
     if not crud.delete_stage_detail(db, detail_id):
         raise HTTPException(status_code=404, detail="Stage detail not found")
 
@@ -1005,44 +1023,11 @@ class AssignPayload(BaseModel):
 
 
 @router.post("/stage-details/project/{project}/chapter/{chapters}/stage/{stage_name}/assign", response_model=Optional[StageDetailResponse])
-def assign_stage(project: str, chapters: str, stage_name: str, payload: AssignPayload, db: Session = Depends(get_db)):
-    from sqlalchemy import select
-    from datetime import datetime
-    db_detail = db.execute(
-        select(StageDetail)
-        .where(
-            StageDetail.project == project,
-            StageDetail.chapters == chapters,
-            StageDetail.stage_name == stage_name
-        )
-    ).scalars().first()
-    
-    if not db_detail:
-        db_detail = StageDetail(
-            client=project,
-            project=project,
-            chapters=chapters,
-            stage_name=stage_name,
-            workflow="Workflow1",
-        )
-        db.add(db_detail)
-    
-    db_detail.assignee_name = payload.assignee_name
-    if not db_detail.actual_start_date and not db_detail.actual_end_date:
-        if payload.dt:
-            try:
-                dt_val = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
-                if dt_val.tzinfo is not None:
-                    dt_val = dt_val.replace(tzinfo=None)
-                db_detail.actual_start_date = dt_val
-            except ValueError:
-                db_detail.actual_start_date = datetime.now(timezone.utc)
-        else:
-            db_detail.actual_start_date = datetime.now(timezone.utc)
-        
-    db.commit()
-    db.refresh(db_detail)
-    return db_detail
+def assign_stage(project: str, chapters: str, stage_name: str, payload: AssignPayload,
+                 db: Session = Depends(get_db), actor=Depends(require_workflow_actor)):
+    _ensure_stage_edit_rights(db, actor, [stage_name])
+    return stage_service.assign_stage(db, project=project, chapters=chapters, stage_name=stage_name,
+                                      assignee=payload.assignee_name, dt=payload.dt, actor=actor.username)
 
 
 class AssignmentTarget(BaseModel):
@@ -1053,148 +1038,15 @@ class AssignmentTarget(BaseModel):
 
 class BulkAssignPayload(BaseModel):
     assignee_name: Optional[str]
-    targets: List[AssignmentTarget]
+    targets: List[AssignmentTarget] = Field(max_length=stage_service.MAX_BULK_TARGETS)
     dt: Optional[str] = None
 
 
 @router.post("/stage-details/bulk-assign", response_model=List[StageDetailResponse])
-def bulk_assign_stages(payload: BulkAssignPayload, db: Session = Depends(get_db)):
-    from sqlalchemy import select
-    from datetime import datetime
-    
-    updated_details = []
-    
-    assign_time = datetime.now(timezone.utc)
-    if payload.dt:
-        try:
-            assign_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
-            if assign_time.tzinfo is not None:
-                assign_time = assign_time.replace(tzinfo=None)
-        except ValueError:
-            pass
-            
-    for target in payload.targets:
-        db_detail = db.execute(
-            select(StageDetail)
-            .where(
-                StageDetail.project == target.project,
-                StageDetail.chapters == target.chapters,
-                StageDetail.stage_name == target.stage_name
-            )
-        ).scalars().first()
-        
-        if not db_detail:
-            db_detail = StageDetail(
-                client=target.project,
-                project=target.project,
-                chapters=target.chapters,
-                stage_name=target.stage_name,
-                workflow="Workflow1",
-            )
-            db.add(db_detail)
-            
-        db_detail.assignee_name = payload.assignee_name
-        if not db_detail.actual_start_date and not db_detail.actual_end_date:
-            db_detail.actual_start_date = assign_time
-        updated_details.append(db_detail)
-        
-    db.commit()
-    for d in updated_details:
-        db.refresh(d)
-        
-    return updated_details
-
-
-def resolve_stage_owner_by_designation(
-    db: Session,
-    stage_name: str,
-    project_code: Optional[str] = None,
-    client_identifier: Optional[str] = None
-):
-    """
-    Finds the active user configured as the owner for the given stage name based on StageMaster.owner_designation.
-    1. Looks up StageMaster.owner_designation for stage_name.
-    2. If no owner_designation is configured, returns None.
-    3. Searches active users where User.designation or User.role matches owner_designation.
-    4. If multiple users match, prioritizes:
-       a. User whose customer_access includes client_identifier or project_code.
-       b. User who is in the project's assigned team (if project_code provided).
-       c. First active user matching designation.
-    5. Returns User model or None.
-    """
-    if not stage_name:
-        return None
-    from app.domains.workflow.models import StageMaster
-    from app.domains.auth.models import User
-    from sqlalchemy import select, func, or_
-    import json
-
-    stage_rec = db.execute(
-        select(StageMaster).where(StageMaster.stage_name == stage_name)
-    ).scalars().first()
-
-    if not stage_rec or not stage_rec.owner_designation:
-        return None
-
-    target_desig = stage_rec.owner_designation.strip()
-    if not target_desig:
-        return None
-
-    # Query active users matching designation or role
-    users = db.execute(
-        select(User).where(
-            User.active_status == True,
-            or_(
-                func.lower(func.trim(User.designation)) == target_desig.lower(),
-                func.lower(func.trim(User.role)) == target_desig.lower()
-            )
-        )
-    ).scalars().all()
-
-    if not users:
-        desig_norm = target_desig.lower().replace("-", " ").replace("_", " ").strip()
-        all_active = db.execute(select(User).where(User.active_status == True)).scalars().all()
-        for u in all_active:
-            u_d = (u.designation or "").lower().replace("-", " ").replace("_", " ").strip()
-            u_r = (u.role or "").lower().replace("-", " ").replace("_", " ").strip()
-            if u_d == desig_norm or u_r == desig_norm:
-                users.append(u)
-                continue
-            if u.additional_roles and isinstance(u.additional_roles, list):
-                if any(desig_norm == str(ar).lower().replace("-", " ").replace("_", " ").strip() for ar in u.additional_roles):
-                    users.append(u)
-
-    if not users:
-        return None
-
-    if len(users) == 1:
-        return users[0]
-
-    # Prioritize user with customer_access matching client_identifier or project_code
-    if client_identifier or project_code:
-        for u in users:
-            acc = u.customer_access or []
-            if isinstance(acc, str):
-                try:
-                    acc = json.loads(acc)
-                except Exception:
-                    acc = [acc]
-            if isinstance(acc, list):
-                if client_identifier and client_identifier in acc:
-                    return u
-                if project_code and project_code in acc:
-                    return u
-
-    # Prioritize user associated with project team if available
-    if project_code:
-        from app.domains.projects.models import Project
-        proj = db.execute(select(Project).where(Project.project_code == project_code)).scalars().first()
-        if proj and proj.team:
-            for u in users:
-                if u.team and u.team.lower() == proj.team.lower():
-                    return u
-
-    return users[0]
+def bulk_assign_stages(payload: BulkAssignPayload, db: Session = Depends(get_db), actor=Depends(require_workflow_actor)):
+    _ensure_stage_edit_rights(db, actor, {t.stage_name for t in payload.targets})
+    targets = [stage_service.AssignTarget(t.project, t.chapters, t.stage_name) for t in payload.targets]
+    return stage_service.bulk_assign(db, targets=targets, assignee=payload.assignee_name, dt=payload.dt, actor=actor.username)
 
 
 class TransitionPayload(BaseModel):
@@ -1204,191 +1056,32 @@ class TransitionPayload(BaseModel):
 
 
 @router.post("/stage-details/project/{project}/chapter/{chapters}/stage-transition", response_model=Optional[StageDetailResponse])
-def stage_transition(project: str, chapters: str, payload: TransitionPayload, db: Session = Depends(get_db)):
-    from sqlalchemy import select
-    from datetime import datetime
-    
-    from_detail = db.execute(
-        select(StageDetail)
-        .where(
-            StageDetail.project == project,
-            StageDetail.chapters == chapters,
-            StageDetail.stage_name == payload.from_stage
-        )
-    ).scalars().first()
-    
-    transition_time = datetime.now(timezone.utc)
-    if payload.dt:
-        try:
-            transition_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
-            if transition_time.tzinfo is not None:
-                transition_time = transition_time.replace(tzinfo=None)
-        except ValueError:
-            pass
-            
-    if from_detail:
-        from_detail.stage_status = "Completed"
-        from_detail.actual_end_date = transition_time
-        if from_detail.actual_start_date:
-            t_naive = transition_time.replace(tzinfo=None) if transition_time.tzinfo is not None else transition_time
-            s_naive = from_detail.actual_start_date.replace(tzinfo=None) if from_detail.actual_start_date.tzinfo is not None else from_detail.actual_start_date
-            delta = t_naive - s_naive
-            from_detail.total_time_taken = delta.total_seconds() / 3600.0
-        
-        # Calculate completion delay
-        if from_detail.planned_end_date and transition_time.date() > from_detail.planned_end_date.date():
-            from_detail.delayed = True
-            from_detail.delay_days = (transition_time.date() - from_detail.planned_end_date.date()).days
-        else:
-            from_detail.delayed = False
-            from_detail.delay_days = 0
-
-        # Cascade delay propagation (shifting subsequent stages)
-        if from_detail.delay_days and from_detail.delay_days > 0:
-            from app.domains.workflow.models import WorkflowMaster
-            wf_stages = db.execute(
-                select(WorkflowMaster)
-                .where(WorkflowMaster.workflow_name == from_detail.workflow)
-            ).scalars().all()
-            
-            stage_by_name = {s.stage_name: s for s in wf_stages}
-            subsequent_stages = []
-            visited = set()
-            curr = stage_by_name.get(payload.to_stage)
-            while curr and curr.stage_name not in visited:
-                subsequent_stages.append(curr.stage_name)
-                visited.add(curr.stage_name)
-                curr = stage_by_name.get(curr.next_stage) if curr.next_stage else None
-                
-            if subsequent_stages:
-                from datetime import timedelta
-                shift_delta = timedelta(days=from_detail.delay_days)
-                subsequent_details = db.execute(
-                    select(StageDetail)
-                    .where(
-                        StageDetail.project == project,
-                        StageDetail.chapters == chapters,
-                        StageDetail.stage_name.in_(subsequent_stages)
-                    )
-                ).scalars().all()
-                for sd in subsequent_details:
-                    if sd.planned_start_date:
-                        sd.planned_start_date += shift_delta
-                    if sd.planned_end_date:
-                        sd.planned_end_date += shift_delta
-
-        # Sync ChapterInfo delayed_stages
-        from app.domains.workflow.models import ChapterInfo
-        import json
-        chapter_info = db.execute(
-            select(ChapterInfo)
-            .where(
-                ChapterInfo.project == project,
-                ChapterInfo.chapters == chapters
-            )
-        ).scalars().first()
-        if chapter_info:
-            current_delays = {}
-            if chapter_info.delayed_stages:
-                try:
-                    current_delays = json.loads(chapter_info.delayed_stages)
-                    if not isinstance(current_delays, dict):
-                        current_delays = {}
-                except Exception:
-                    current_delays = {}
-            if from_detail.delayed:
-                current_delays[from_detail.stage_name] = from_detail.delay_days
-            else:
-                current_delays.pop(from_detail.stage_name, None)
-            chapter_info.delayed_stages = json.dumps(current_delays)
-
-    
-    to_detail = db.execute(
-        select(StageDetail)
-        .where(
-            StageDetail.project == project,
-            StageDetail.chapters == chapters,
-            StageDetail.stage_name == payload.to_stage
-        )
-    ).scalars().first()
-    
-    if not to_detail:
-        to_detail = StageDetail(
-            client=from_detail.client if from_detail else project,
-            project=project,
-            chapters=chapters,
-            stage_name=payload.to_stage,
-            workflow=from_detail.workflow if from_detail else "Workflow1",
-        )
-        db.add(to_detail)
-    
-    from app.domains.workflow.models import WorkflowMaster
-    wf_name = to_detail.workflow
-    wf_stage = db.execute(
-        select(WorkflowMaster)
-        .where(
-            WorkflowMaster.workflow_name == wf_name,
-            WorkflowMaster.stage_name == payload.to_stage
-        )
-    ).scalars().first()
-
-    if wf_stage and not wf_stage.next_stage:
-        to_detail.stage_status = "Completed"
-        to_detail.actual_end_date = transition_time
-    else:
-        to_detail.stage_status = "In-progress"
-        to_detail.actual_end_date = None
-
-    # Auto-assign stage owner based on StageMaster.owner_designation
-    client_ident = from_detail.client if from_detail else None
-    owner_user = resolve_stage_owner_by_designation(
-        db, payload.to_stage, project_code=project, client_identifier=client_ident
-    )
-    if owner_user:
-        to_detail.assignee_name = owner_user.username
-        from app.domains.workflow.models import ChapterInfo
-        ch_info = db.execute(
-            select(ChapterInfo).where(
-                ChapterInfo.project == project,
-                ChapterInfo.chapters == chapters
-            )
-        ).scalars().first()
-        if ch_info:
-            ch_info.current_assignee_name = owner_user.username
-
-    to_detail.actual_start_date = transition_time
-    
-    db.commit()
-    db.refresh(to_detail)
-    return to_detail
+def stage_transition(project: str, chapters: str, payload: TransitionPayload,
+                     db: Session = Depends(get_db), actor=Depends(require_workflow_actor)):
+    from app.domains.auth.rbac_config import has_permission
+    from app.domains.workflow.access import can_manage_stage
+    if not has_permission(actor, "edit_assignee") and not can_manage_stage(db, actor, payload.from_stage):
+        # The person working on the chapter may still "proceed" it to the next stage (Chapter detail page).
+        current = stage_service.get_detail(db, project, chapters, payload.from_stage)
+        if not current or current.assignee_name != actor.username:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail=f"You can't move chapters out of {payload.from_stage}.")
+    return stage_service.transition_stage(db, project=project, chapters=chapters, from_stage=payload.from_stage,
+                                          to_stage=payload.to_stage, dt=payload.dt, actor=actor.username, strict=True)
 
 
 class ShiftDatesPayload(BaseModel):
     chapters: str
     stage_names: List[str]
-    days: int
+    days: int = Field(ge=-stage_service.MAX_SHIFT_DAYS, le=stage_service.MAX_SHIFT_DAYS)
 
 
 @router.post("/stage-details/project/{project}/shift-planned-dates")
-def shift_planned_dates(project: str, payload: ShiftDatesPayload, db: Session = Depends(get_db)):
-    from sqlalchemy import select
-    from datetime import timedelta
-    details = db.execute(
-        select(StageDetail)
-        .where(
-            StageDetail.project == project,
-            StageDetail.chapters == payload.chapters,
-            StageDetail.stage_name.in_(payload.stage_names)
-        )
-    ).scalars().all()
-    
-    for d in details:
-        if d.planned_start_date:
-            d.planned_start_date += timedelta(days=payload.days)
-        if d.planned_end_date:
-            d.planned_end_date += timedelta(days=payload.days)
-            
-    db.commit()
+def shift_planned_dates(project: str, payload: ShiftDatesPayload, db: Session = Depends(get_db),
+                        actor=Depends(require_workflow_actor)):
+    _ensure_stage_edit_rights(db, actor, payload.stage_names)
+    stage_service.shift_planned_dates(db, project=project, chapters=payload.chapters,
+                                      stage_names=payload.stage_names, days=payload.days)
     return {"ok": True}
 
 

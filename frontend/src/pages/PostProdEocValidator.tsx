@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ListChecks, Upload, Play, X, Download, FileText, AlertCircle,
   AlertTriangle, CheckCircle2, Info, ChevronDown, ChevronRight, RefreshCw, Wrench,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { toast } from '@/store/useToastStore'
@@ -29,6 +30,8 @@ interface EocFileSummary {
   tf: number
   shuffle_lines: number
   images: number
+  has_alt?: number
+  missing_alt?: number
   errors: number
   warnings: number
   info: number
@@ -37,9 +40,19 @@ interface EocFileSummary {
 }
 
 interface EocReport {
+  mode?: string
   generated_at: string
   reference_prefix: string
-  totals: { files: number; questions: number; errors: number; warnings: number; info: number }
+  totals: {
+    files: number
+    questions: number
+    images?: number
+    has_alt?: number
+    missing_alt?: number
+    errors: number
+    warnings: number
+    info: number
+  }
   rules: { rule: string; title: string; count: number }[]
   files: EocFileSummary[]
   issues: EocIssue[]
@@ -55,7 +68,7 @@ interface EocFix {
 }
 
 interface AnalyzeResponse {
-  mode?: 'fix'
+  mode?: 'validate' | 'fix' | 'alt_text'
   report: EocReport
   before_totals?: EocReport['totals']
   fixes?: EocFix[]
@@ -63,7 +76,7 @@ interface AnalyzeResponse {
   artifacts: { csv: string; xlsx_base64: string; zip_base64?: string; zip_name?: string }
 }
 
-type RunMode = 'validate' | 'fix'
+type RunMode = 'validate' | 'fix' | 'alt_text'
 
 const PREFIX_KEY = 'eocValidator.referencePrefix'
 const MODE_KEY = 'eocValidator.mode'
@@ -104,7 +117,9 @@ function savePrefix(v: string) {
 
 function readMode(): RunMode {
   try {
-    return localStorage.getItem(MODE_KEY) === 'fix' ? 'fix' : 'validate'
+    const m = localStorage.getItem(MODE_KEY)
+    if (m === 'fix' || m === 'alt_text') return m
+    return 'validate'
   } catch {
     return 'validate'
   }
@@ -166,12 +181,12 @@ export function PostProdEocValidator() {
   const handleRun = async (e: React.FormEvent) => {
     e.preventDefault()
     const p = prefix.trim()
-    if (!p) {
+    if (mode !== 'alt_text' && !p) {
       toast.error('Enter the reference prefix for this project (e.g. machfund2028_eoc).')
       return
     }
     if (files.length === 0) {
-      toast.error('Add the chapter Word files (or a ZIP of them).')
+      toast.error('Add the Word files (or a ZIP of them).')
       return
     }
     savePrefix(p)
@@ -180,7 +195,8 @@ export function PostProdEocValidator() {
     setErrorMsg(null)
     setResult(null)
     const fd = new FormData()
-    fd.append('reference_prefix', p)
+    fd.append('reference_prefix', p || 'alt_text')
+    fd.append('mode', mode)
     files.forEach((f) => fd.append('files', f))
     try {
       const endpoint = mode === 'fix' ? '/api/v2/eoc-validator/fix' : '/api/v2/eoc-validator/analyze'
@@ -201,7 +217,9 @@ export function PostProdEocValidator() {
       setExpanded(failing)
       setRuleFilter('all')
       const t = data.report.totals
-      if (data.mode === 'fix') {
+      if (data.mode === 'alt_text' || mode === 'alt_text') {
+        toast.success(`Checked images in ${t.files} file(s): ${t.has_alt ?? 0} with Alt text, ${t.missing_alt ?? t.errors} missing Alt text.`)
+      } else if (data.mode === 'fix') {
         toast.success(`Applied ${data.fixes?.length ?? 0} correction(s) as tracked changes. ${t.errors} error(s) still need manual review.`)
       } else {
         toast.success(`Checked ${t.questions} questions in ${t.files} file(s): ${t.errors} error(s), ${t.warnings} warning(s).`)
@@ -215,6 +233,7 @@ export function PostProdEocValidator() {
   }
 
   const report = result?.report
+  const isAltText = mode === 'alt_text' || result?.mode === 'alt_text'
 
   const issuesByFile = useMemo(() => {
     const map: Record<string, EocIssue[]> = {}
@@ -240,7 +259,8 @@ export function PostProdEocValidator() {
 
   const downloadXlsx = () => {
     if (!result) return
-    downloadBlob(`EOC_${isFix ? 'Correction' : 'Validation'}_${report?.reference_prefix || 'report'}.xlsx`,
+    const prefixName = isAltText ? 'AltText_Audit' : (isFix ? 'EOC_Correction' : 'EOC_Validation')
+    downloadBlob(`${prefixName}_${report?.reference_prefix || 'report'}.xlsx`,
       base64ToBlob(result.artifacts.xlsx_base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))
   }
 
@@ -282,23 +302,25 @@ export function PostProdEocValidator() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div>
             <label htmlFor="eoc-prefix" className="block text-xs font-semibold text-muted mb-2 uppercase tracking-wider">
-              Reference prefix <span className="text-red-500">*</span>
+              Reference prefix {mode === 'alt_text' ? <span className="text-muted text-[11px] font-normal lowercase">(optional)</span> : <span className="text-red-500">*</span>}
             </label>
             <input
               id="eoc-prefix"
               value={prefix}
               onChange={(e) => setPrefix(e.target.value)}
-              placeholder="machfund2028_eoc"
+              placeholder={mode === 'alt_text' ? 'Optional (e.g. ev2028_sm)' : 'machfund2028_eoc'}
               className="w-full px-3 py-2 text-sm rounded-lg bg-surface border border-border focus:outline-none focus:border-primary"
             />
             <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
-              Expected IDs: <code>{(prefix.trim() || 'prefix') + '01_001'}</code> — 2-digit chapter from the filename (<code>_ch01</code>), 3-digit question number.
+              {mode === 'alt_text'
+                ? 'Optional for Alt text check. Upload any Word document (manuals, job sheets, chapters).'
+                : <>Expected IDs: <code>{(prefix.trim() || 'prefix') + '01_001'}</code> — 2-digit chapter from the filename (<code>_ch01</code>), 3-digit question number.</>}
             </p>
           </div>
 
           <div className="md:col-span-2">
             <label className="block text-xs font-semibold text-muted mb-2 uppercase tracking-wider">
-              Chapter files (.docx or .zip)
+              {mode === 'alt_text' ? 'Word files (.docx or .zip)' : 'Chapter files (.docx or .zip)'}
             </label>
             <div
               onClick={() => inputRef.current?.click()}
@@ -317,7 +339,11 @@ export function PostProdEocValidator() {
               />
               <Upload size={22} className="text-muted mb-2" />
               <p className="text-sm text-text m-0">Drop Word files here or click to choose</p>
-              <p className="text-xs text-muted mt-1">One file per chapter, e.g. machfun2028_tx_ch01.docx</p>
+              <p className="text-xs text-muted mt-1">
+                {mode === 'alt_text'
+                  ? 'Any Word files or ZIP (e.g. manuals, job sheets, chapters)'
+                  : 'One file per chapter, e.g. machfun2028_tx_ch01.docx'}
+              </p>
             </div>
             {files.length > 0 && (
               <div className="mt-3">
@@ -350,19 +376,25 @@ export function PostProdEocValidator() {
 
         <fieldset>
           <legend className="block text-xs font-semibold text-muted mb-2 uppercase tracking-wider">Mode</legend>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {([
               {
                 value: 'validate' as RunMode,
-                title: 'Validation only',
-                desc: 'Report every issue. The Word files are not changed.',
+                title: 'Validation only (EOC)',
+                desc: 'Full EOC assessment checks (numbering, options, shuffle, titles, LOs). Files are not changed.',
                 icon: <ListChecks size={16} />,
               },
               {
                 value: 'fix' as RunMode,
-                title: 'Validation + fixes (tracked changes)',
-                desc: 'Also download corrected copies. Safe fixes — Shuffle lines, Reference IDs, Learning Outcome spacing, mismatched titles, blank lines — are made as Word tracked changes to Accept/Reject. Originals are never modified.',
+                title: 'Validation + fixes',
+                desc: 'Safe EOC fixes made as Word tracked changes to Accept/Reject. Download corrected copies.',
                 icon: <Wrench size={16} />,
+              },
+              {
+                value: 'alt_text' as RunMode,
+                title: 'Check Alt text only',
+                desc: 'Audits images for Alt text across any Word file (chapters, manuals, job sheets). EOC structure not required.',
+                icon: <ImageIcon size={16} />,
               },
             ]).map((opt) => (
               <label
@@ -394,10 +426,10 @@ export function PostProdEocValidator() {
             disabled={running}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50"
           >
-            {running ? <RefreshCw size={15} className="animate-spin" /> : mode === 'fix' ? <Wrench size={15} /> : <Play size={15} />}
+            {running ? <RefreshCw size={15} className="animate-spin" /> : mode === 'fix' ? <Wrench size={15} /> : mode === 'alt_text' ? <ImageIcon size={15} /> : <Play size={15} />}
             {running
-              ? (mode === 'fix' ? 'Validating and correcting…' : 'Validating…')
-              : (mode === 'fix' ? 'Validate and fix' : 'Run validation')}
+              ? (mode === 'fix' ? 'Validating and correcting…' : mode === 'alt_text' ? 'Checking Alt text…' : 'Validating…')
+              : (mode === 'fix' ? 'Validate and fix' : mode === 'alt_text' ? 'Check Alt text' : 'Run validation')}
           </button>
         </div>
       </form>
@@ -425,13 +457,24 @@ export function PostProdEocValidator() {
 
           {/* Totals */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {[
+            {isAltText ? ([
+              { label: 'Files', value: report.totals.files, cls: 'text-text' },
+              { label: 'Total Images', value: report.totals.images ?? 0, cls: 'text-text' },
+              { label: 'With Alt Text', value: report.totals.has_alt ?? 0, cls: 'text-emerald-600' },
+              { label: 'Missing Alt Text', value: report.totals.missing_alt ?? report.totals.errors, cls: (report.totals.missing_alt ?? report.totals.errors) ? 'text-red-600' : 'text-emerald-600' },
+              { label: 'Warnings', value: report.totals.warnings, cls: 'text-amber-600' },
+            ]).map((t) => (
+              <div key={t.label} className="bg-card border border-border rounded-xl p-4">
+                <div className="text-[11px] uppercase tracking-wider text-muted font-semibold">{t.label}</div>
+                <div className={`text-2xl font-bold mt-1 ${t.cls}`}>{t.value}</div>
+              </div>
+            )) : ([
               { label: 'Files', value: report.totals.files, cls: 'text-text' },
               { label: 'Questions', value: report.totals.questions, cls: 'text-text' },
               { label: isFix ? 'Errors left' : 'Errors', value: report.totals.errors, cls: 'text-red-600' },
               { label: isFix ? 'Warnings left' : 'Warnings', value: report.totals.warnings, cls: 'text-amber-600' },
               { label: 'Info', value: report.totals.info, cls: 'text-blue-600' },
-            ].map((t) => (
+            ]).map((t) => (
               <div key={t.label} className="bg-card border border-border rounded-xl p-4">
                 <div className="text-[11px] uppercase tracking-wider text-muted font-semibold">{t.label}</div>
                 <div className={`text-2xl font-bold mt-1 ${t.cls}`}>{t.value}</div>
@@ -502,13 +545,25 @@ export function PostProdEocValidator() {
                 <thead className="bg-surface text-[11px] uppercase tracking-wider text-muted">
                   <tr>
                     <th className="text-left px-4 py-2.5 font-semibold">File</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">Ch.</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">Questions</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">MC / TF</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">Shuffle</th>
-                    {isFix && <th className="text-right px-3 py-2.5 font-semibold">Fixes</th>}
-                    <th className="text-right px-3 py-2.5 font-semibold">Errors</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">Warnings</th>
+                    {isAltText ? (
+                      <>
+                        <th className="text-right px-3 py-2.5 font-semibold">Total Images</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">With Alt Text</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">Missing Alt Text</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">Warnings</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="text-right px-3 py-2.5 font-semibold">Ch.</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">Questions</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">MC / TF</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">Shuffle</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">Images</th>
+                        {isFix && <th className="text-right px-3 py-2.5 font-semibold">Fixes</th>}
+                        <th className="text-right px-3 py-2.5 font-semibold">Errors</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">Warnings</th>
+                      </>
+                    )}
                     <th className="text-center px-3 py-2.5 font-semibold">Status</th>
                   </tr>
                 </thead>
@@ -529,15 +584,27 @@ export function PostProdEocValidator() {
                               {f.file}
                             </span>
                           </td>
-                          <td className="text-right px-3">{f.chapter ?? '—'}</td>
-                          <td className="text-right px-3">{f.questions}</td>
-                          <td className="text-right px-3 text-muted">{f.mc} / {f.tf}</td>
-                          <td className="text-right px-3 text-muted">{f.shuffle_lines}</td>
-                          {isFix && (
-                            <td className={`text-right px-3 ${f.fixes ? 'text-emerald-600 font-semibold' : 'text-muted'}`}>{f.fixes ?? 0}</td>
+                          {isAltText ? (
+                            <>
+                              <td className="text-right px-3 font-semibold">{f.images}</td>
+                              <td className="text-right px-3 text-emerald-600 font-semibold">{f.has_alt ?? (f.images - (f.missing_alt ?? f.errors))}</td>
+                              <td className={`text-right px-3 ${(f.missing_alt ?? f.errors) ? 'text-red-600 font-semibold' : 'text-muted'}`}>{f.missing_alt ?? f.errors}</td>
+                              <td className={`text-right px-3 ${f.warnings ? 'text-amber-600 font-semibold' : 'text-muted'}`}>{f.warnings}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="text-right px-3">{f.chapter ?? '—'}</td>
+                              <td className="text-right px-3">{f.questions}</td>
+                              <td className="text-right px-3 text-muted">{f.mc} / {f.tf}</td>
+                              <td className="text-right px-3 text-muted">{f.shuffle_lines}</td>
+                              <td className="text-right px-3 text-muted">{f.images}</td>
+                              {isFix && (
+                                <td className={`text-right px-3 ${f.fixes ? 'text-emerald-600 font-semibold' : 'text-muted'}`}>{f.fixes ?? 0}</td>
+                              )}
+                              <td className={`text-right px-3 ${f.errors ? 'text-red-600 font-semibold' : 'text-muted'}`}>{f.errors}</td>
+                              <td className={`text-right px-3 ${f.warnings ? 'text-amber-600 font-semibold' : 'text-muted'}`}>{f.warnings}</td>
+                            </>
                           )}
-                          <td className={`text-right px-3 ${f.errors ? 'text-red-600 font-semibold' : 'text-muted'}`}>{f.errors}</td>
-                          <td className={`text-right px-3 ${f.warnings ? 'text-amber-600 font-semibold' : 'text-muted'}`}>{f.warnings}</td>
                           <td className="text-center px-3">
                             <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md ${STATUS_STYLE[f.status]}`}>
                               {f.status === 'pass' ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={10} /> pass</span> : f.status}
@@ -546,7 +613,7 @@ export function PostProdEocValidator() {
                         </tr>
                         {open && (
                           <tr className="bg-surface/40">
-                            <td colSpan={isFix ? 9 : 8} className="px-4 py-3 space-y-3">
+                            <td colSpan={isAltText ? 6 : (isFix ? 10 : 9)} className="px-4 py-3 space-y-3">
                               {isFix && fileFixes.length > 0 && (
                                 <div>
                                   <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-1">
@@ -584,25 +651,29 @@ export function PostProdEocValidator() {
                                 <table className="w-full text-xs">
                                   <thead className="text-muted">
                                     <tr>
-                                      <th className="text-left py-1 pr-3 font-semibold w-12">Q</th>
-                                      <th className="text-left py-1 pr-3 font-semibold w-20">Severity</th>
-                                      <th className="text-left py-1 pr-3 font-semibold w-40">Rule</th>
-                                      <th className="text-left py-1 pr-3 font-semibold">Issue</th>
-                                      <th className="text-left py-1 font-semibold">Line</th>
+                                      <th className="text-left py-1 pr-3 font-semibold w-16">{isAltText ? 'Location' : 'Q'}</th>
+                                      <th className="text-left py-1 pr-3 font-semibold w-20">Status</th>
+                                      {!isAltText && <th className="text-left py-1 pr-3 font-semibold w-40">Rule</th>}
+                                      <th className="text-left py-1 pr-3 font-semibold">{isAltText ? 'Image & Alt Text' : 'Issue'}</th>
+                                      <th className="text-left py-1 font-semibold">{isAltText ? 'Nearby Text / Context' : 'Line'}</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {list.map((i, k) => (
                                       <tr key={k} className="border-t border-border/40 align-top">
-                                        <td className="py-1.5 pr-3">{i.question ?? '—'}</td>
-                                        <td className="py-1.5 pr-3">
-                                          <span className={`px-1.5 py-0.5 rounded ${SEVERITY_STYLE[i.severity]}`}>{i.severity}</span>
+                                        <td className="py-1.5 pr-3 font-mono text-[11px]">
+                                          {isAltText ? (i.line ? `¶${i.line}` : '—') : (i.question ?? '—')}
                                         </td>
-                                        <td className="py-1.5 pr-3 text-muted">{i.rule} · {i.rule_title}</td>
-                                        <td className="py-1.5 pr-3">{i.message}</td>
+                                        <td className="py-1.5 pr-3">
+                                          <span className={`px-1.5 py-0.5 rounded ${SEVERITY_STYLE[i.severity]}`}>
+                                            {isAltText && i.severity === 'info' ? 'pass' : i.severity}
+                                          </span>
+                                        </td>
+                                        {!isAltText && <td className="py-1.5 pr-3 text-muted">{i.rule} · {i.rule_title}</td>}
+                                        <td className="py-1.5 pr-3 font-medium">{i.message}</td>
                                         <td className="py-1.5 font-mono text-[11px] text-muted break-all">
                                           {i.text ? i.text.replace(/\t/g, ' ⇥ ') : ''}
-                                          {i.line ? <span className="ml-1 opacity-60">(¶{i.line})</span> : null}
+                                          {!isAltText && i.line ? <span className="ml-1 opacity-60">(¶{i.line})</span> : null}
                                         </td>
                                       </tr>
                                     ))}

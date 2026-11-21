@@ -508,6 +508,88 @@ def test_fixer_refuses_file_with_existing_tracked_changes():
     assert [i for i in check_run([parse_docx(once, "x_ch05.docx")], PREFIX) if i.severity == "error"] == []
 
 
+def test_image_alt_text_rules():
+    from docx.oxml import OxmlElement
+    # Image with alt text
+    d = docx.Document()
+    d.add_paragraph("1.\tIn the figure below, what is shown?")
+    p_img = d.add_paragraph()
+    drw = OxmlElement("w:drawing")
+    inl = OxmlElement("wp:inline")
+    dp = OxmlElement("wp:docPr")
+    dp.set("id", "1")
+    dp.set("name", "Picture 1")
+    dp.set("descr", "A lathe workpiece diagram")
+    inl.append(dp)
+    drw.append(inl)
+    p_img._p.append(drw)
+    for line in GOOD_OPTS:
+        d.add_paragraph(line)
+    d.add_paragraph("Shuffle: True")
+    d.add_paragraph("Title: In the figure below, what is shown?")
+    d.add_paragraph("Learning Outcome: 5.1")
+    d.add_paragraph(f"Reference: {PREFIX}05_001")
+    buf = io.BytesIO()
+    d.save(buf)
+    cf = parse_docx(buf.getvalue(), "machfun2028_tx_ch05.docx")
+    issues = check_run([cf], PREFIX)
+    assert not any(i.rule == "F2" for i in issues)  # No blank line error on image
+    assert not any(i.rule == "IMG1" and i.severity == "error" for i in issues)
+    assert any(i.rule == "IMG1" and i.severity == "info" for i in issues)
+
+    # Image missing alt text
+    d2 = docx.Document()
+    d2.add_paragraph("1.\tIn the figure below, what is shown?")
+    p_img2 = d2.add_paragraph()
+    drw2 = OxmlElement("w:drawing")
+    inl2 = OxmlElement("wp:inline")
+    dp2 = OxmlElement("wp:docPr")
+    dp2.set("id", "2")
+    dp2.set("name", "Picture 2")  # No descr
+    inl2.append(dp2)
+    drw2.append(inl2)
+    p_img2._p.append(drw2)
+    for line in GOOD_OPTS:
+        d2.add_paragraph(line)
+    d2.add_paragraph("Shuffle: True")
+    d2.add_paragraph("Title: In the figure below, what is shown?")
+    d2.add_paragraph("Learning Outcome: 5.1")
+    d2.add_paragraph(f"Reference: {PREFIX}05_001")
+    buf2 = io.BytesIO()
+    d2.save(buf2)
+    cf2 = parse_docx(buf2.getvalue(), "machfun2028_tx_ch05.docx")
+    issues2 = check_run([cf2], PREFIX)
+    assert any(i.rule == "IMG1" and i.severity == "error" and "missing Alt text" in i.message for i in issues2)
+
+
+def test_check_alt_text_mode():
+    from app.domains.post_prod.eoc_validator import check_alt_text_run, build_report
+    from docx.oxml import OxmlElement
+    d = docx.Document()
+    d.add_paragraph("Manual Job Sheet 1")
+    p = d.add_paragraph()
+    drw = OxmlElement("w:drawing")
+    inl = OxmlElement("wp:inline")
+    dp = OxmlElement("wp:docPr")
+    dp.set("id", "1")
+    dp.set("name", "Picture 1")
+    dp.set("descr", "Electric motor assembly")
+    inl.append(dp)
+    drw.append(inl)
+    p._p.append(drw)
+    buf = io.BytesIO()
+    d.save(buf)
+
+    cf = parse_docx(buf.getvalue(), "ev2028_sm_job41.docx")
+    issues = check_alt_text_run([cf])
+    rep = build_report([cf], issues, "alt_text", mode="alt_text")
+    assert rep["totals"]["images"] == 1
+    assert rep["totals"]["has_alt"] == 1
+    assert rep["totals"]["missing_alt"] == 0
+    assert rep["totals"]["errors"] == 0
+    assert rep["files"][0]["status"] == "pass"
+
+
 # ── Endpoint ────────────────────────────────────────────────────────────────
 
 @pytest.fixture

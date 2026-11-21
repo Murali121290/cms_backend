@@ -44,6 +44,18 @@ HEADER_RE = re.compile(r"^(Chapter|Lesson)\s+\d+(\.\d+)?\s*$", re.I)
 
 
 @dataclass
+class ImageMeta:
+    line_idx: int
+    name: str = "Image"
+    alt_text: str = ""
+    title: str = ""
+    is_decorative: bool = False
+    raw_tag: str = "drawing"
+    context: str = ""
+    line_label: str = ""
+
+
+@dataclass
 class Line:
     idx: int  # paragraph index (0-based) in the document
     text: str
@@ -52,6 +64,8 @@ class Line:
     has_indent: bool = False
     has_color: bool = False
     has_highlight: bool = False
+    has_image: bool = False
+    images: list[ImageMeta] = field(default_factory=list)
 
 
 @dataclass
@@ -72,12 +86,13 @@ class Question:
     kind: str = "MC"  # MC | TF | ORDER | EMPTY
     order_positions: list[int] = field(default_factory=list)  # ORDER: the leading 1, 2, 3…
     options: list[Option] = field(default_factory=list)
+    images: list[ImageMeta] = field(default_factory=list)
     shuffle_line: Optional[Line] = None
     title_line: Optional[Line] = None
     lo_line: Optional[Line] = None
     ref_line: Optional[Line] = None
     # Ordered list of (role, Line) for every line in the block after the stem.
-    # role ∈ option | tf | shuffle | title | lo | ref | other
+    # role ∈ option | tf | shuffle | title | lo | ref | image | other
     body: list[tuple[str, Line]] = field(default_factory=list)
     group_instruction: Optional[str] = None  # "Match the following ..." etc.
     duplicate_tags: list[str] = field(default_factory=list)
@@ -97,6 +112,7 @@ class ChapterFile:
     table_count: int = 0
     image_count: int = 0
     equation_count: int = 0
+    images: list[ImageMeta] = field(default_factory=list)
     stray_lines: list[Line] = field(default_factory=list)  # before Q1 / unattached
     header_line: Optional[Line] = None
     had_revisions: bool = False  # file contained tracked changes (read as accepted)
@@ -145,6 +161,71 @@ def _para_flags(p) -> dict:
     return dict(has_numbering=has_numbering, has_indent=has_indent, has_color=has_color, has_highlight=has_highlight)
 
 
+def _extract_images(p, line_idx: int, context: str = "", label: str = "") -> list[ImageMeta]:
+    imgs: list[ImageMeta] = []
+    lbl = label or f"¶{line_idx + 1}"
+    # 1. DrawingML (<w:drawing>)
+    for d in p._p.iter(qn("w:drawing")):
+        doc_prs = [e for e in d.iter() if e.tag.endswith("docPr")]
+        decorative = any("decorative" in e.tag for e in d.iter())
+        if doc_prs:
+            for dp in doc_prs:
+                descr = (dp.get("descr") or "").strip()
+                title = (dp.get("title") or "").strip()
+                name = dp.get("name") or "Image"
+                imgs.append(ImageMeta(
+                    line_idx=line_idx,
+                    name=name,
+                    alt_text=descr,
+                    title=title,
+                    is_decorative=decorative,
+                    raw_tag="drawing",
+                    context=context,
+                    line_label=lbl,
+                ))
+        else:
+            imgs.append(ImageMeta(
+                line_idx=line_idx,
+                name="Drawing",
+                alt_text="",
+                title="",
+                is_decorative=decorative,
+                raw_tag="drawing",
+                context=context,
+                line_label=lbl,
+            ))
+    # 2. Legacy VML (<w:pict>)
+    for pt in p._p.iter(qn("w:pict")):
+        alt = ""
+        title = ""
+        name = ""
+        found = False
+        for elem in pt.iter():
+            for k, v in elem.attrib.items():
+                k_low = k.lower()
+                if k_low.endswith("alt") or k_low == "alt":
+                    alt = v
+                elif k_low.endswith("title") or k_low == "title":
+                    title = v
+                elif k_low.endswith("id") or k_low == "id" or k_low.endswith("name") or k_low == "name":
+                    if not name:
+                        name = v
+            if elem.tag.endswith("shape") or elem.tag.endswith("imagedata"):
+                found = True
+        if found:
+            imgs.append(ImageMeta(
+                line_idx=line_idx,
+                name=name or "Picture",
+                alt_text=(alt or title).strip(),
+                title=title.strip(),
+                is_decorative=False,
+                raw_tag="pict",
+                context=context,
+                line_label=lbl,
+            ))
+    return imgs
+
+
 def parse_docx(data: bytes, filename: str) -> ChapterFile:
     d = docx.Document(io.BytesIO(data))
     body = d.element.body
@@ -157,9 +238,39 @@ def parse_docx(data: bytes, filename: str) -> ChapterFile:
         accept_all(body)
 
     lines: list[Line] = []
+    cf_images: list[ImageMeta] = []
     for i, p in enumerate(d.paragraphs):
         text = p.text
-        lines.append(Line(idx=i, text=text, is_blank=not text.strip(), **_para_flags(p)))
+        # find nearby context snippet
+        ctx = ""
+        for prev_idx in range(i - 1, max(-1, i - 6), -1):
+            t = d.paragraphs[prev_idx].text.strip()
+            if t:
+                ctx = t
+                break
+        if not ctx:
+            for next_idx in range(i + 1, min(len(d.paragraphs), i + 6)):
+                t = d.paragraphs[next_idx].text.strip()
+                if t:
+                    ctx = t
+                    break
+        p_images = _extract_images(p, i, context=ctx[:100], label=f"¶{i + 1}")
+        has_image = bool(p_images)
+        if has_image:
+            cf_images.extend(p_images)
+        is_blank = not text.strip() and not has_image
+        lines.append(Line(idx=i, text=text, is_blank=is_blank, has_image=has_image, images=p_images, **_para_flags(p)))
+
+    # Also extract images from tables (if any)
+    for t_idx, tbl in enumerate(d.tables):
+        for r_idx, row in enumerate(tbl.rows):
+            for c_idx, cell in enumerate(row.cells):
+                for p_idx, tp in enumerate(cell.paragraphs):
+                    t_label = f"Table {t_idx + 1} R{r_idx + 1}C{c_idx + 1}"
+                    t_ctx = tp.text.strip() or f"Table {t_idx + 1}"
+                    t_images = _extract_images(tp, len(lines) + t_idx, context=t_ctx[:100], label=t_label)
+                    if t_images:
+                        cf_images.extend(t_images)
 
     m_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
     cf = ChapterFile(
@@ -168,8 +279,9 @@ def parse_docx(data: bytes, filename: str) -> ChapterFile:
         lines=lines,
         questions=[],
         table_count=len(body.findall(qn("w:tbl"))),
-        image_count=sum(1 for _ in body.iter(qn("w:drawing"))) + sum(1 for _ in body.iter(qn("w:pict"))),
+        image_count=len(cf_images) or (sum(1 for _ in body.iter(qn("w:drawing"))) + sum(1 for _ in body.iter(qn("w:pict")))),
         equation_count=sum(1 for _ in body.iter(m_ns + "oMath")),
+        images=cf_images,
         had_revisions=had_revisions,
     )
 
@@ -218,6 +330,8 @@ def parse_docx(data: bytes, filename: str) -> ChapterFile:
         if current is None:
             if cf.header_line is None and HEADER_RE.match(stripped):
                 cf.header_line = ln
+            elif ln.has_image:
+                cf.stray_lines.append(ln)
             elif not ln.is_blank:
                 # Text before the first question (header, instruction for Q1…)
                 if re.match(r"^(match|for questions|use the following|refer to)", stripped, re.I):
@@ -235,6 +349,12 @@ def parse_docx(data: bytes, filename: str) -> ChapterFile:
                     current.extra_lines.append((role, ln))
                 else:
                     setattr(current, attr, ln)
+
+        if ln.has_image:
+            current.images.extend(ln.images)
+            if not stripped:
+                tag("image")
+                continue
 
         om = OPTION_RE.match(text)
         tf = TF_RE.match(stripped)
