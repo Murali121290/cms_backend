@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import * as XLSX from 'xlsx'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell } from 'recharts'
 import { formatDateTime as fmtUtcDateTime, formatDate, parseUtcDate } from '@/utils/dateUtils'
 
 export function BodCustomerReportPage() {
@@ -583,6 +583,22 @@ export function BodCustomerReportPage() {
   })
 
   const chartData = Array.from(chartDataMap.values()).sort((a, b) => a.date.localeCompare(b.date))
+
+  // Status Distribution for Donut Chart (Easy Customer Understanding)
+  const statusPieData = [
+    { name: 'Completed', value: completedJobs, color: '#10b981' },
+    { name: 'In-Progress', value: inProgressJobs, color: '#a855f7' },
+    { name: 'Hold (Query)', value: holdJobs, color: '#ec4899' },
+    { name: 'Revise', value: reopenJobs, color: '#f43f5e' },
+    { name: 'Overdue', value: overdueJobs, color: '#ef4444' },
+  ].filter(d => d.value > 0)
+
+  // Delivery Timeliness (Ahead, On-time, Delay)
+  const deliveryTimingData = [
+    { name: 'Completed (Ahead)', count: completedAhead, fill: '#10b981' },
+    { name: 'Completed (On-time)', count: completedOnTime, fill: '#3b82f6' },
+    { name: 'Completed (Delay)', count: completedDelay, fill: '#f59e0b' },
+  ]
 
   const uniqueTypes = Array.from(
     new Set(report.map(j => (j.pdf_type || '').trim()).filter(Boolean))
@@ -1215,18 +1231,67 @@ export function BodCustomerReportPage() {
           </div>
         </div>
 
-        {/* Split Views: Chart vs Table */}
+        {/* Split Views: Analytics (Charts) vs Records (Table) */}
         {activeTab === 'chart' && (
-          <>
+          <div className="space-y-6 mt-6">
+            {/* Quick KPI Highlights for Customers */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Completion Rate</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{completionPercentage}%</span>
+                  <span className="text-xs text-muted">({completedJobs}/{totalJobs})</span>
+                </div>
+                <div className="w-full bg-muted/30 h-1.5 rounded-full overflow-hidden mt-2">
+                  <div className="bg-emerald-500 h-full rounded-full transition-all" style={{ width: `${completionPercentage}%` }} />
+                </div>
+              </div>
+
+              <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">On-Time / Ahead Ratio</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {completedJobs > 0 ? Math.round(((completedAhead + completedOnTime) / completedJobs) * 100) : 0}%
+                  </span>
+                  <span className="text-xs text-muted">({completedAhead + completedOnTime}/{completedJobs || 0})</span>
+                </div>
+                <div className="w-full bg-muted/30 h-1.5 rounded-full overflow-hidden mt-2">
+                  <div
+                    className="bg-blue-500 h-full rounded-full transition-all"
+                    style={{ width: `${completedJobs > 0 ? Math.round(((completedAhead + completedOnTime) / completedJobs) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Active Pipeline</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-purple-600 dark:text-purple-400">{inProgressJobs}</span>
+                  <span className="text-xs text-muted">books in production</span>
+                </div>
+                <p className="text-[10px] text-muted m-0 mt-2">Active production stages</p>
+              </div>
+
+              <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Customer Queries (Hold)</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-fuchsia-600 dark:text-fuchsia-400">{holdJobs}</span>
+                  <span className="text-xs text-muted">awaiting answer</span>
+                </div>
+                <p className="text-[10px] text-fuchsia-600/80 dark:text-fuchsia-400/80 m-0 mt-2">Requires customer clarification</p>
+              </div>
+            </div>
+
+            {/* Row 1: Time Series Charts */}
             {chartData.length > 0 ? (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 {/* Chart 1: Inflow vs Completed (Area) */}
                 <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="mb-6">
-                    <h3 className="text-lg font-bold font-serif text-text">Production Flow</h3>
-                    <p className="text-xs text-muted mt-1">Comparison of new jobs arriving vs jobs being completed.</p>
+                  <div className="mb-4">
+                    <h3 className="text-base font-bold font-serif text-text">Production Inflow vs Deliveries</h3>
+                    <p className="text-xs text-muted mt-0.5">Timeline of incoming customer jobs compared to delivered books.</p>
                   </div>
-                  <div className="h-[320px] w-full">
+                  <div className="h-[280px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <defs>
@@ -1246,9 +1311,9 @@ export function BodCustomerReportPage() {
                           contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
                           itemStyle={{ fontWeight: 600 }}
                         />
-                        <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
-                        <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
-                        <Area type="monotone" dataKey="completed" name="Delivered" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
+                        <Legend wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }} iconType="circle" />
+                        <Area type="monotone" dataKey="inflow" name="Incoming Books" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
+                        <Area type="monotone" dataKey="completed" name="Delivered Books" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -1256,11 +1321,11 @@ export function BodCustomerReportPage() {
 
                 {/* Chart 2: Due vs Delays (Bar) */}
                 <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="mb-6">
-                    <h3 className="text-lg font-bold font-serif text-text">Deadlines & Delays</h3>
-                    <p className="text-xs text-muted mt-1">Jobs due on a given date vs jobs that were delayed.</p>
+                  <div className="mb-4">
+                    <h3 className="text-base font-bold font-serif text-text">Deadlines & Schedule Adherence</h3>
+                    <p className="text-xs text-muted mt-0.5">Scheduled due dates versus jobs pending delivery past due.</p>
                   </div>
-                  <div className="h-[320px] w-full">
+                  <div className="h-[280px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
@@ -1271,22 +1336,86 @@ export function BodCustomerReportPage() {
                           contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
                           itemStyle={{ fontWeight: 600 }}
                         />
-                        <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
+                        <Legend wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }} iconType="circle" />
                         <Bar dataKey="due" name="Total Due" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
-                        <Bar dataKey="delay" name="Due but not delivered" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
+                        <Bar dataKey="delay" name="Past Due / Delayed" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="bg-card border border-border/70 rounded-2xl p-12 text-center mt-6">
-                <BarChart2 className="w-12 h-12 text-muted mx-auto mb-3 opacity-40" />
-                <h3 className="text-base font-bold text-text">No Chart Data Available</h3>
-                <p className="text-xs text-muted mt-1">There are no jobs matching the selected date filters to display.</p>
+            ) : null}
+
+            {/* Row 2: Status Breakdown & Delivery Performance */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {/* Donut Chart: Current Work Distribution */}
+              <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                <div className="mb-2">
+                  <h3 className="text-base font-bold font-serif text-text">Current Work Status Breakdown</h3>
+                  <p className="text-xs text-muted mt-0.5">Overall distribution of all books by operational status.</p>
+                </div>
+                {statusPieData.length > 0 ? (
+                  <div className="h-[260px] w-full flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={statusPieData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={65}
+                          outerRadius={95}
+                          paddingAngle={3}
+                        >
+                          {statusPieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-[220px] flex items-center justify-center text-xs text-muted">
+                    No active job distribution data
+                  </div>
+                )}
               </div>
-            )}
-          </>
+
+              {/* Delivery Performance Breakdown */}
+              <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                <div className="mb-2">
+                  <h3 className="text-base font-bold font-serif text-text">Delivery Speed Performance</h3>
+                  <p className="text-xs text-muted mt-0.5">Analysis of completed deliveries: ahead of time, on-time, or delayed.</p>
+                </div>
+                <div className="h-[260px] w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      layout="vertical"
+                      data={deliveryTimingData}
+                      margin={{ top: 10, right: 30, left: 40, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="currentColor" className="text-border/40" />
+                      <XAxis type="number" stroke="currentColor" className="text-muted text-xs" allowDecimals={false} />
+                      <YAxis type="category" dataKey="name" stroke="currentColor" className="text-muted text-[11px]" tickLine={false} axisLine={false} width={130} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                      />
+                      <Bar dataKey="count" name="Jobs" radius={[0, 6, 6, 0]} barSize={22}>
+                        {deliveryTimingData.map((entry, index) => (
+                          <Cell key={`timing-cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Data Table */}
