@@ -587,9 +587,9 @@ export function BodCustomerReportPage() {
   // Status Distribution for Donut Chart (Easy Customer Understanding)
   const statusPieData = [
     { name: 'Completed', value: completedJobs, color: '#10b981' },
-    { name: 'In-Progress', value: inProgressJobs, color: '#a855f7' },
-    { name: 'Hold (Query)', value: holdJobs, color: '#ec4899' },
-    { name: 'Revise', value: reopenJobs, color: '#f43f5e' },
+    { name: 'Production', value: inProgressJobs, color: '#a855f7' },
+    { name: 'Hold (Query)', value: holdJobs, color: '#38bdf8' },
+    { name: 'Revise', value: reopenJobs, color: '#fb923c' },
     { name: 'Overdue', value: overdueJobs, color: '#ef4444' },
   ].filter(d => d.value > 0)
 
@@ -1078,7 +1078,7 @@ export function BodCustomerReportPage() {
             </div>
           </div>
 
-          {/* 2. In-Progress */}
+          {/* 2. Production (In-Progress) */}
           <div
             onClick={() => setCardFilter(cardFilter === 'in_progress' ? 'all' : 'in_progress')}
             className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'in_progress' ? 'border-purple-500/60 ring-2 ring-purple-500/20' : 'border-border/80 hover:border-purple-500/40'}`}
@@ -1088,7 +1088,7 @@ export function BodCustomerReportPage() {
                 <div className="p-1 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-md">
                   <RefreshCw size={13} />
                 </div>
-                <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase tracking-wider">In-Progress</span>
+                <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase tracking-wider">Production</span>
               </div>
               <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-400">Active</span>
             </div>
