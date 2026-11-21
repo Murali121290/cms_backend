@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap, PauseCircle, RotateCcw, MessageSquare, Paperclip, File, CheckCircle, ExternalLink } from 'lucide-react'
+import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap, PauseCircle, RotateCcw, MessageSquare, Paperclip, File, CheckCircle, ExternalLink, Table } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import { toast } from '@/store/useToastStore'
@@ -26,6 +26,9 @@ export function BodCustomerReportPage() {
   const [holdAnswerText, setHoldAnswerText] = useState('')
   const [holdAnswerFiles, setHoldAnswerFiles] = useState<File[]>([])
   const [submittingHoldAnswer, setSubmittingHoldAnswer] = useState(false)
+
+  // Active view: 'chart' | 'table' (Split view toggle)
+  const [activeTab, setActiveTab] = useState<'chart' | 'table'>('chart')
 
   // Filters
   const [search, setSearch] = useState('')
@@ -163,6 +166,16 @@ export function BodCustomerReportPage() {
   }
 
   const handleFastrackClick = (e: React.MouseEvent, job: any) => {
+    e.stopPropagation()
+    setFastrackModalJob(job)
+    setFastrackReason('')
+    if (job.is_fastrack && job.fastrack_requested_date) {
+      const raw = String(job.fastrack_requested_date).split('T')[0]
+      setFastrackExpectedDate(raw)
+    } else {
+      const now = new Date()
+      setFastrackExpectedDate(now.toISOString().slice(0, 10))
+    }
   }
 
   const handleTurnOffFastrack = async () => {
@@ -831,13 +844,41 @@ export function BodCustomerReportPage() {
             </div>
             <div>
               <h1 className="text-3xl font-bold font-serif text-text tracking-tight">
-                Books on Demand process Report
+                Books on Demand
               </h1>
               <p className="text-muted text-sm mt-1">Real-time status and historical timeline of all books.</p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* View Switcher: Analytics vs Records */}
+            <div className="flex items-center bg-card border border-border rounded-lg p-0.5 shrink-0 shadow-xs">
+              <button
+                type="button"
+                onClick={() => setActiveTab('chart')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'chart'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-muted hover:text-text hover:bg-muted/40'
+                  }`}
+                title="View Production Analytics & Trends"
+              >
+                <BarChart2 size={14} className={activeTab === 'chart' ? 'text-white' : 'text-primary'} />
+                <span>Analytics</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('table')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'table'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-muted hover:text-text hover:bg-muted/40'
+                  }`}
+                title="View Detailed Job Records"
+              >
+                <Table size={14} className={activeTab === 'table' ? 'text-white' : 'text-primary'} />
+                <span>Records</span>
+              </button>
+            </div>
+
             <button
               onClick={() => navigate('/bod/internal')}
               className="flex items-center gap-2 px-4 py-2.5 bg-card border border-border hover:bg-muted/30 text-text font-medium rounded-lg transition-colors shadow-sm text-sm"
@@ -919,7 +960,7 @@ export function BodCustomerReportPage() {
                   type="button"
                   onClick={() => setDatePreset(p.id as any)}
                   className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all border ${datePreset === p.id
-                    ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                    ? 'bg-primary text-white border-primary shadow-xs'
                     : 'bg-transparent border-transparent text-muted hover:text-text hover:bg-accent/50'
                     }`}
                 >
@@ -984,7 +1025,7 @@ export function BodCustomerReportPage() {
               <button
                 type="button"
                 onClick={() => setCardFilter(cardFilter === 'total_all' ? 'all' : 'total_all')}
-                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${cardFilter === 'total_all' ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
+                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${cardFilter === 'total_all' ? 'bg-primary text-white' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
               >
                 Total {totalJobs}
               </button>
@@ -1174,446 +1215,457 @@ export function BodCustomerReportPage() {
           </div>
         </div>
 
-        {/* Chart Section */}
-        {chartData.length > 0 && (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
-            {/* Chart 1: Inflow vs Completed (Area) */}
-            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-              <div className="mb-6">
-                <h3 className="text-lg font-bold font-serif text-text">Production Flow</h3>
-                <p className="text-xs text-muted mt-1">Comparison of new jobs arriving vs jobs being completed.</p>
-              </div>
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
-                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
-                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
-                      itemStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
-                    <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
-                    <Area type="monotone" dataKey="completed" name="Delivered" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+        {/* Split Views: Chart vs Table */}
+        {activeTab === 'chart' && (
+          <>
+            {chartData.length > 0 ? (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+                {/* Chart 1: Inflow vs Completed (Area) */}
+                <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="mb-6">
+                    <h3 className="text-lg font-bold font-serif text-text">Production Flow</h3>
+                    <p className="text-xs text-muted mt-1">Comparison of new jobs arriving vs jobs being completed.</p>
+                  </div>
+                  <div className="h-[320px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
+                        <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
+                        <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                          itemStyle={{ fontWeight: 600 }}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
+                        <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
+                        <Area type="monotone" dataKey="completed" name="Delivered" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
 
-            {/* Chart 2: Due vs Delays (Bar) */}
-            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-              <div className="mb-6">
-                <h3 className="text-lg font-bold font-serif text-text">Deadlines & Delays</h3>
-                <p className="text-xs text-muted mt-1">Jobs due on a given date vs jobs that were delayed.</p>
+                {/* Chart 2: Due vs Delays (Bar) */}
+                <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="mb-6">
+                    <h3 className="text-lg font-bold font-serif text-text">Deadlines & Delays</h3>
+                    <p className="text-xs text-muted mt-1">Jobs due on a given date vs jobs that were delayed.</p>
+                  </div>
+                  <div className="h-[320px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
+                        <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
+                        <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
+                        <Tooltip
+                          cursor={{ fill: 'hsl(var(--accent))', opacity: 0.4 }}
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                          itemStyle={{ fontWeight: 600 }}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
+                        <Bar dataKey="due" name="Total Due" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
+                        <Bar dataKey="delay" name="Due but not delivered" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               </div>
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
-                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
-                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip
-                      cursor={{ fill: 'hsl(var(--accent))', opacity: 0.4 }}
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
-                      itemStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
-                    <Bar dataKey="due" name="Total Due" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
-                    <Bar dataKey="delay" name="Due but not delivered" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
-                  </BarChart>
-                </ResponsiveContainer>
+            ) : (
+              <div className="bg-card border border-border/70 rounded-2xl p-12 text-center mt-6">
+                <BarChart2 className="w-12 h-12 text-muted mx-auto mb-3 opacity-40" />
+                <h3 className="text-base font-bold text-text">No Chart Data Available</h3>
+                <p className="text-xs text-muted mt-1">There are no jobs matching the selected date filters to display.</p>
               </div>
-            </div>
-          </div>
+            )}
+          </>
         )}
 
-
         {/* Data Table */}
-        <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl">
-          <div className="flex items-center justify-between px-3.5 py-2 border-b border-border/50 bg-muted/15 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="text-muted font-medium">
-                Showing <strong className="text-text">{tableJobs.length}</strong> of {filteredReport.length} jobs
-              </span>
-              {hasActiveColFilters && (
-                <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-semibold">
-                  Filtered
+        {activeTab === 'table' && (
+          <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl mt-4">
+            <div className="flex items-center justify-between px-3.5 py-2 border-b border-border/50 bg-muted/15 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-muted font-medium">
+                  Showing <strong className="text-text">{tableJobs.length}</strong> of {filteredReport.length} jobs
                 </span>
+                {hasActiveColFilters && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-semibold">
+                    Filtered
+                  </span>
+                )}
+              </div>
+              {(hasActiveColFilters || sortField !== null) && (
+                <button
+                  onClick={resetColFilters}
+                  className="flex items-center gap-1 text-[11px] text-primary hover:underline font-semibold"
+                >
+                  <X size={12} /> Reset sort & table filters
+                </button>
               )}
             </div>
-            {(hasActiveColFilters || sortField !== null) && (
-              <button
-                onClick={resetColFilters}
-                className="flex items-center gap-1 text-[11px] text-primary hover:underline font-semibold"
-              >
-                <X size={12} /> Reset sort & table filters
-              </button>
-            )}
-          </div>
 
-          <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
-            <table className="w-full min-w-[1150px] text-left border-collapse">
-              <thead className="sticky top-0 z-10 shadow-sm bg-card">
-                {/* Header Row with Sort */}
-                <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
-                  <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[16%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">File Name</span>
-                      {renderSortIcon('job')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('fastrack')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[9%]">
-                    <div className="flex items-center justify-center gap-0.5">
-                      <Zap size={10} className="text-amber-500 fill-amber-500" />
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Fastrack</span>
-                      {renderSortIcon('fastrack')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('pages')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[6%]">
-                    <div className="flex items-center justify-center gap-0.5">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</span>
-                      {renderSortIcon('pages')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('type')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Type</span>
-                      {renderSortIcon('type')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('language')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Language</span>
-                      {renderSortIcon('language')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('created')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Received On</span>
-                      {renderSortIcon('created')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('dueDate')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</span>
-                      {renderSortIcon('dueDate')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('finalStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[15%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Status</span>
-                      {renderSortIcon('finalStatus')}
-                    </div>
-                  </th>
-                </tr>
-
-                {/* Filter Row */}
-                <tr className="border-b border-border/50 bg-muted/20 font-normal normal-case tracking-normal">
-                  {/* Job */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={colFilters.job}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, job: e.target.value }))}
-                        placeholder="Filter..."
-                        className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
-                      />
-                      {colFilters.job && (
-                        <button
-                          onClick={() => setColFilters(prev => ({ ...prev, job: '' }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-                          title="Clear"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Fastrack filter */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <select
-                      value={colFilters.fastrack}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, fastrack: e.target.value }))}
-                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                    >
-                      <option value="all">All</option>
-                      <option value="fastrack">⚡ Fastrack</option>
-                      <option value="normal">Normal</option>
-                    </select>
-                  </th>
-
-                  {/* Pages */}
-                  <th className="px-1 py-1.5 font-normal">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={colFilters.pages}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
-                        placeholder="e.g. >250"
-                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
-                      />
-                      {colFilters.pages && (
-                        <button
-                          onClick={() => setColFilters(prev => ({ ...prev, pages: '' }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-                          title="Clear"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Type */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <select
-                      value={colFilters.type}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
-                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                    >
-                      <option value="all">All Types</option>
-                      {uniqueTypes.map(t => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </th>
-
-                  {/* Language */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <select
-                      value={colFilters.language}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
-                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                    >
-                      <option value="all">All Langs</option>
-                      {uniqueLanguages.map(l => (
-                        <option key={l} value={l}>{l}</option>
-                      ))}
-                    </select>
-                  </th>
-
-                  {/* Created At */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <div className="relative">
-                      <input
-                        type="date"
-                        value={colFilters.created}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
-                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
-                        style={{ colorScheme: 'light dark' }}
-                      />
-                      {colFilters.created && (
-                        <button
-                          onClick={() => setColFilters(prev => ({ ...prev, created: '' }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
-                          title="Clear"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Due Date */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <div className="relative">
-                      <input
-                        type="date"
-                        value={colFilters.dueDate}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
-                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
-                        style={{ colorScheme: 'light dark' }}
-                      />
-                      {colFilters.dueDate && (
-                        <button
-                          onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
-                          title="Clear"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Final Status */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <select
-                      value={colFilters.finalStatus}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, finalStatus: e.target.value }))}
-                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                    >
-                      <option value="all">All</option>
-                      <option value="Completed">Completed (All)</option>
-                      <option value="Ahead">Completed (Ahead)</option>
-                      <option value="On-time">Completed (On-time)</option>
-                      <option value="Delay">Completed (Delay)</option>
-                      <option value="In-progress">In-progress</option>
-                      <option value="Hold">Hold</option>
-                      <option value="Overdue">Overdue</option>
-                      <option value="YTS">YTS</option>
-                    </select>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50">
-                {loading ? (
-                  <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center justify-center text-muted">
-                        <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary" />
-                        <p>Loading report data...</p>
+            <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
+              <table className="w-full min-w-[1150px] text-left border-collapse">
+                <thead className="sticky top-0 z-10 shadow-sm bg-card">
+                  {/* Header Row with Sort */}
+                  <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
+                    <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[16%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">File Name</span>
+                        {renderSortIcon('job')}
                       </div>
-                    </td>
+                    </th>
+                    <th onClick={() => handleSort('fastrack')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[9%]">
+                      <div className="flex items-center justify-center gap-0.5">
+                        <Zap size={10} className="text-amber-500 fill-amber-500" />
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Fastrack</span>
+                        {renderSortIcon('fastrack')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('pages')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[6%]">
+                      <div className="flex items-center justify-center gap-0.5">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</span>
+                        {renderSortIcon('pages')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('type')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Type</span>
+                        {renderSortIcon('type')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('language')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Language</span>
+                        {renderSortIcon('language')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('created')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Received On</span>
+                        {renderSortIcon('created')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('dueDate')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</span>
+                        {renderSortIcon('dueDate')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('finalStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[15%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Status</span>
+                        {renderSortIcon('finalStatus')}
+                      </div>
+                    </th>
                   </tr>
-                ) : tableJobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-muted">
-                      No matching records found.
-                    </td>
+
+                  {/* Filter Row */}
+                  <tr className="border-b border-border/50 bg-muted/20 font-normal normal-case tracking-normal">
+                    {/* Job */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={colFilters.job}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, job: e.target.value }))}
+                          placeholder="Filter..."
+                          className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                        />
+                        {colFilters.job && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, job: '' }))}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                            title="Clear"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Fastrack filter */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <select
+                        value={colFilters.fastrack}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, fastrack: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                      >
+                        <option value="all">All</option>
+                        <option value="fastrack">⚡ Fastrack</option>
+                        <option value="normal">Normal</option>
+                      </select>
+                    </th>
+
+                    {/* Pages */}
+                    <th className="px-1 py-1.5 font-normal">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={colFilters.pages}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
+                          placeholder="e.g. >250"
+                          className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                        />
+                        {colFilters.pages && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, pages: '' }))}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                            title="Clear"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Type */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <select
+                        value={colFilters.type}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                      >
+                        <option value="all">All Types</option>
+                        {uniqueTypes.map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </th>
+
+                    {/* Language */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <select
+                        value={colFilters.language}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                      >
+                        <option value="all">All Langs</option>
+                        {uniqueLanguages.map(l => (
+                          <option key={l} value={l}>{l}</option>
+                        ))}
+                      </select>
+                    </th>
+
+                    {/* Created At */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <div className="relative">
+                        <input
+                          type="date"
+                          value={colFilters.created}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
+                          className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
+                          style={{ colorScheme: 'light dark' }}
+                        />
+                        {colFilters.created && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, created: '' }))}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
+                            title="Clear"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Due Date */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <div className="relative">
+                        <input
+                          type="date"
+                          value={colFilters.dueDate}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
+                          className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
+                          style={{ colorScheme: 'light dark' }}
+                        />
+                        {colFilters.dueDate && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
+                            title="Clear"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Final Status */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <select
+                        value={colFilters.finalStatus}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, finalStatus: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                      >
+                        <option value="all">All</option>
+                        <option value="Completed">Completed (All)</option>
+                        <option value="Ahead">Completed (Ahead)</option>
+                        <option value="On-time">Completed (On-time)</option>
+                        <option value="Delay">Completed (Delay)</option>
+                        <option value="In-progress">In-progress</option>
+                        <option value="Hold">Hold</option>
+                        <option value="Overdue">Overdue</option>
+                        <option value="YTS">YTS</option>
+                      </select>
+                    </th>
                   </tr>
-                ) : (
-                  tableJobs.map((job) => {
-                    const { finalStatus } = getJobStatuses(job)
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-12 text-center">
+                        <div className="flex flex-col items-center justify-center text-muted">
+                          <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary" />
+                          <p>Loading report data...</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : tableJobs.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-12 text-center text-muted">
+                        No matching records found.
+                      </td>
+                    </tr>
+                  ) : (
+                    tableJobs.map((job) => {
+                      const { finalStatus } = getJobStatuses(job)
 
-                    const getStatusColor = (s: string) => {
-                      if (s === 'Completed (Ahead)' || s === 'Ahead') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 font-bold'
-                      if (s === 'Completed (On-time)' || s === 'On-time') return 'bg-blue-500/10 text-blue-600 border-blue-500/30 font-bold'
-                      if (s === 'Completed (Delay)' || s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30 font-bold'
-                      if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-bold'
-                      if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
-                      if (s === 'Hold') return 'bg-fuchsia-500/10 text-fuchsia-600 border-fuchsia-500/30 font-bold'
-                      if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
-                      return 'bg-muted/10 text-muted-foreground border-border/50'
-                    }
+                      const getStatusColor = (s: string) => {
+                        if (s === 'Completed (Ahead)' || s === 'Ahead') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 font-bold'
+                        if (s === 'Completed (On-time)' || s === 'On-time') return 'bg-blue-500/10 text-blue-600 border-blue-500/30 font-bold'
+                        if (s === 'Completed (Delay)' || s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30 font-bold'
+                        if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-bold'
+                        if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                        if (s === 'Hold') return 'bg-fuchsia-500/10 text-fuchsia-600 border-fuchsia-500/30 font-bold'
+                        if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
+                        return 'bg-muted/10 text-muted-foreground border-border/50'
+                      }
 
-                    return (
-                      <tr key={job.id} className="hover:bg-muted/5 transition-colors group">
-                        <td className="px-2 py-3">
-                          <div className="font-medium text-text break-all whitespace-normal max-w-[260px]" title={job.pdf_filename}>
-                            {job.pdf_filename}
-                          </div>
+                      return (
+                        <tr key={job.id} className="hover:bg-muted/5 transition-colors group">
+                          <td className="px-2 py-3">
+                            <div className="font-medium text-text break-all whitespace-normal max-w-[260px]" title={job.pdf_filename}>
+                              {job.pdf_filename}
+                            </div>
 
-                        </td>
-                        <td className="px-2 py-3 text-center">
-                          {(() => {
-                            const completed = isJobCompleted(job)
-                            return (
-                              <div className="flex flex-col items-center gap-1">
+                          </td>
+                          <td className="px-2 py-3 text-center">
+                            {(() => {
+                              const completed = isJobCompleted(job)
+                              return (
+                                <div className="flex flex-col items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      if (completed) return
+                                      handleFastrackClick(e, job)
+                                    }}
+                                    disabled={completed || togglingFastrackId === job.id}
+                                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-all shadow-xs select-none ${completed
+                                      ? job.is_fastrack
+                                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                        : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                                      : job.is_fastrack
+                                        ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                        : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                                      }`}
+                                    title={
+                                      completed
+                                        ? "Job completed — Fastrack status is locked"
+                                        : job.is_fastrack
+                                          ? "Fastrack Enabled — Click to disable"
+                                          : "Normal — Click to enable Fastrack and set target date"
+                                    }
+                                  >
+                                    {togglingFastrackId === job.id ? (
+                                      <Loader2 size={11} className="animate-spin text-amber-500" />
+                                    ) : (
+                                      <Zap size={11} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                                    )}
+                                    <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
+                                  </button>
+                                </div>
+                              )
+                            })()}
+                          </td>
+                          <td className="px-2 py-3 text-[10px] text-muted text-center">
+                            {job.pdf_page_count || '-'}
+                          </td>
+                          <td className="px-2 py-3 text-[10px] font-medium text-muted">
+                            {job.pdf_type || '-'}
+                          </td>
+                          <td className="px-2 py-3 text-[10px] font-medium text-muted">
+                            {job.pdf_language || '-'}
+                          </td>
+                          <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              <Calendar size={10} className="text-muted-foreground/60" />
+                              {job.created_at ? formatDateTime(job.created_at) : '-'}
+                            </div>
+                          </td>
+                          <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <Calendar size={10} className="text-amber-500/80" />
+                                <span>{job.due_date ? formatDate(job.due_date) : '-'}</span>
+                              </div>
+                              {job.is_fastrack && job.fastrack_requested_date && (
+                                <div
+                                  className="flex items-center gap-1 mt-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400"
+                                  title={`Requested completion date: ${formatDate(job.fastrack_requested_date)}`}
+                                >
+                                  <Clock size={8} className="shrink-0 text-amber-500" />
+                                  <span>Fastrack: {formatDate(job.fastrack_requested_date)}</span>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-2 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
+                                {(finalStatus === 'Completed (Ahead)' || finalStatus === 'Ahead') && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
+                                {(finalStatus === 'Completed (On-time)' || finalStatus === 'On-time') && <CheckCircle2 size={10} className="mr-1 text-blue-500" />}
+                                {(finalStatus === 'Completed (Delay)' || finalStatus === 'Delay') && <AlertCircle size={10} className="mr-1 text-rose-500" />}
+                                {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
+                                {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
+                                {finalStatus === 'Hold' && <PauseCircle size={10} className="mr-1 text-fuchsia-500" />}
+                                {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
+                                {finalStatus}
+                              </span>
+
+                              {/* Customer Query Answer Button for Hold jobs */}
+                              {job.status === 'Hold' && (
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    if (completed) return
-                                    handleFastrackClick(e, job)
-                                  }}
-                                  disabled={completed || togglingFastrackId === job.id}
-                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-all shadow-xs select-none ${completed
-                                    ? job.is_fastrack
-                                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
-                                      : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
-                                    : job.is_fastrack
-                                      ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
-                                      : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
-                                    }`}
-                                  title={
-                                    completed
-                                      ? "Job completed — Fastrack status is locked"
-                                      : job.is_fastrack
-                                        ? "Fastrack Enabled — Click to disable"
-                                        : "Normal — Click to enable Fastrack and set target date"
-                                  }
+                                  onClick={(e) => handleOpenHoldAnswerModal(e, job)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-fuchsia-600 hover:bg-fuchsia-700 text-white shadow-xs transition-all animate-pulse hover:animate-none"
+                                  title="Click to review query and provide customer answer to resume job"
                                 >
-                                  {togglingFastrackId === job.id ? (
-                                    <Loader2 size={11} className="animate-spin text-amber-500" />
-                                  ) : (
-                                    <Zap size={11} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
-                                  )}
-                                  <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
+                                  <MessageSquare size={11} />
+                                  <span>Answer Query</span>
                                 </button>
-                              </div>
-                            )
-                          })()}
-                        </td>
-                        <td className="px-2 py-3 text-[10px] text-muted text-center">
-                          {job.pdf_page_count || '-'}
-                        </td>
-                        <td className="px-2 py-3 text-[10px] font-medium text-muted">
-                          {job.pdf_type || '-'}
-                        </td>
-                        <td className="px-2 py-3 text-[10px] font-medium text-muted">
-                          {job.pdf_language || '-'}
-                        </td>
-                        <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <Calendar size={10} className="text-muted-foreground/60" />
-                            {job.created_at ? formatDateTime(job.created_at) : '-'}
-                          </div>
-                        </td>
-                        <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <Calendar size={10} className="text-amber-500/80" />
-                              <span>{job.due_date ? formatDate(job.due_date) : '-'}</span>
+                              )}
                             </div>
-                            {job.is_fastrack && job.fastrack_requested_date && (
-                              <div
-                                className="flex items-center gap-1 mt-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400"
-                                title={`Requested completion date: ${formatDate(job.fastrack_requested_date)}`}
-                              >
-                                <Clock size={8} className="shrink-0 text-amber-500" />
-                                <span>Fastrack: {formatDate(job.fastrack_requested_date)}</span>
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-2 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
-                              {(finalStatus === 'Completed (Ahead)' || finalStatus === 'Ahead') && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
-                              {(finalStatus === 'Completed (On-time)' || finalStatus === 'On-time') && <CheckCircle2 size={10} className="mr-1 text-blue-500" />}
-                              {(finalStatus === 'Completed (Delay)' || finalStatus === 'Delay') && <AlertCircle size={10} className="mr-1 text-rose-500" />}
-                              {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
-                              {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
-                              {finalStatus === 'Hold' && <PauseCircle size={10} className="mr-1 text-fuchsia-500" />}
-                              {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
-                              {finalStatus}
-                            </span>
-
-                            {/* Customer Query Answer Button for Hold jobs */}
-                            {job.status === 'Hold' && (
-                              <button
-                                type="button"
-                                onClick={(e) => handleOpenHoldAnswerModal(e, job)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-fuchsia-600 hover:bg-fuchsia-700 text-white shadow-xs transition-all animate-pulse hover:animate-none"
-                                title="Click to review query and provide customer answer to resume job"
-                              >
-                                <MessageSquare size={11} />
-                                <span>Answer Query</span>
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
       </div>
 
       {/* Fastrack Management Modal */}
