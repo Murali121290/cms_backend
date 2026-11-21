@@ -2010,8 +2010,8 @@ export function BodInternalPage() {
                   <RotateCcw size={16} className="text-rose-500" />
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block">Reopen</span>
-                  <span className="text-[9px] text-muted">Reopen Cycle</span>
+                  <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block">Revise</span>
+                  <span className="text-[9px] text-muted">Revise Cycle</span>
                 </div>
               </div>
               <div className="text-right">

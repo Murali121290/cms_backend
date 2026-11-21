@@ -1165,11 +1165,11 @@ export function BodCustomerReportPage() {
                 </div>
                 <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold uppercase tracking-wider">Revise</span>
               </div>
-              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400">Reopen</span>
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400">Revise</span>
             </div>
             <div className="flex items-baseline justify-between mt-2">
               <span className="text-xl font-bold text-rose-600 dark:text-rose-400 leading-none">{reopenJobs}</span>
-              <span className="text-[9px] text-rose-600/80 dark:text-rose-400/80 truncate">Correction Cycle</span>
+              <span className="text-[9px] text-rose-600/80 dark:text-rose-400/80 truncate">Revise Cycle</span>
             </div>
           </div>
         </div>
