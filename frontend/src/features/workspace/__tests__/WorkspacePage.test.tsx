@@ -179,6 +179,26 @@ describe("WorkspacePage", () => {
     expect(await screen.findByText("Chapter 01")).toBeInTheDocument();
   });
 
+  it("lists stages A-Z in a searchable picker", async () => {
+    api.getDashboard.mockResolvedValue(
+      leadDashboard([makeItem({ stage_name: "Typesetting", chapters: "Ch09 Layout" })], {
+        role: "manager",
+        stages: [stage("Typesetting"), stage("Copyediting"), stage("AQ Resolution")],
+      }),
+    );
+    renderAt();
+    await screen.findByText("Production overview");
+    const trigger = document.getElementById("workspace-stage");
+    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+    await userEvent.click(trigger as HTMLElement);
+    const list = await screen.findByRole("listbox", { name: "Stages" });
+    expect(within(list).getAllByRole("option").map((o) => o.textContent?.replace(/\d+$/, ""))).toEqual(["AQ Resolution", "Copyediting", "Typesetting"]);
+    await userEvent.type(screen.getByRole("combobox", { name: "Search stages" }), "type");
+    expect(within(list).getAllByRole("option")).toHaveLength(1);
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("article", { name: "Ch09 Layout" })).toBeInTheDocument();
+  });
+
   it("asks for confirmation before a bulk approve and shows per-item results", async () => {
     const a = makeItem({ chapters: "Ch05 Eigenvalues", custody_status: "returned_for_review", assignee_name: "priya.nair" });
     const b = makeItem({ chapters: "Ch01 Introduction" });

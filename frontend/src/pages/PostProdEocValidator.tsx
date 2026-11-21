@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ListChecks, Upload, Play, X, Download, FileText, AlertCircle,
@@ -99,20 +99,134 @@ function SeverityIcon({ s }: { s: Severity }) {
   return <Info size={13} className="text-blue-500 shrink-0" />
 }
 
-function readPrefix(): string {
+const RECENT_PREFIXES_KEY = 'eocValidator.recentPrefixes'
+const RECENT_PREFIXES_MAX = 10
+
+function readRecentPrefixes(): string[] {
   try {
-    return localStorage.getItem(PREFIX_KEY) || ''
+    const raw = localStorage.getItem(RECENT_PREFIXES_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    const list = Array.isArray(arr) ? arr.filter((v): v is string => typeof v === 'string' && v.trim() !== '') : []
+    // Carry over the single prefix remembered by earlier versions of this page.
+    const legacy = localStorage.getItem(PREFIX_KEY)
+    if (legacy && !list.includes(legacy)) list.push(legacy)
+    return list.slice(0, RECENT_PREFIXES_MAX)
   } catch {
-    return ''
+    return []
   }
 }
 
-function savePrefix(v: string) {
+function writeRecentPrefixes(list: string[]) {
   try {
-    localStorage.setItem(PREFIX_KEY, v)
+    localStorage.setItem(RECENT_PREFIXES_KEY, JSON.stringify(list.slice(0, RECENT_PREFIXES_MAX)))
+    localStorage.removeItem(PREFIX_KEY)
   } catch {
-    /* ignore */
+    /* storage unavailable — recent list just won't persist */
   }
+}
+
+/** Text box with a dropdown of recently used reference prefixes. */
+function PrefixCombobox({
+  value,
+  onChange,
+  recent,
+  onRemove,
+  placeholder,
+}: {
+  value: string
+  onChange: (v: string) => void
+  recent: string[]
+  onRemove: (v: string) => void
+  placeholder: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(-1)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const q = value.trim().toLowerCase()
+  const items = q ? recent.filter((r) => r.toLowerCase().includes(q) && r !== value.trim()) : recent
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  useEffect(() => setActive(-1), [value, open])
+
+  const pick = (v: string) => {
+    onChange(v)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="flex">
+        <input
+          id="eoc-prefix"
+          value={value}
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls="eoc-prefix-list"
+          onChange={(e) => { onChange(e.target.value); setOpen(true) }}
+          onFocus={() => recent.length > 0 && setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive((i) => Math.min(i + 1, items.length - 1)) }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)) }
+            else if (e.key === 'Enter' && open && active >= 0 && items[active]) { e.preventDefault(); pick(items[active]) }
+            else if (e.key === 'Escape') setOpen(false)
+          }}
+          placeholder={placeholder}
+          className="w-full px-3 py-2 text-sm rounded-l-lg bg-surface border border-border focus:outline-none focus:border-primary"
+        />
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          disabled={recent.length === 0}
+          title={recent.length ? 'Recent prefixes' : 'No recent prefixes yet'}
+          aria-label="Show recent prefixes"
+          className="px-2 rounded-r-lg border border-l-0 border-border bg-surface text-muted hover:text-text disabled:opacity-40"
+        >
+          <ChevronDown size={15} />
+        </button>
+      </div>
+      {open && items.length > 0 && (
+        <ul
+          id="eoc-prefix-list"
+          role="listbox"
+          className="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-card shadow-lg py-1"
+        >
+          <li className="px-3 pt-1 pb-1.5 text-[10px] uppercase tracking-wider text-muted font-semibold">Recent</li>
+          {items.map((r, i) => (
+            <li
+              key={r}
+              role="option"
+              aria-selected={i === active}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pick(r)}
+              className={`flex items-center justify-between gap-2 px-3 py-1.5 text-sm cursor-pointer ${i === active ? 'bg-primary/10 text-primary' : 'hover:bg-surface'}`}
+            >
+              <span className="font-mono text-xs truncate">{r}</span>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => { e.stopPropagation(); onRemove(r) }}
+                className="text-muted hover:text-red-500 shrink-0"
+                aria-label={`Remove ${r} from recent`}
+                title="Remove from recent"
+              >
+                <X size={12} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function readMode(): RunMode {
@@ -155,7 +269,22 @@ export function PostProdEocValidator() {
   useDocumentTitle('EOC Question Validator — S4Carlisle CMS')
   const navigate = useNavigate()
 
-  const [prefix, setPrefix] = useState(readPrefix)
+  const [prefix, setPrefix] = useState('')
+  const [recentPrefixes, setRecentPrefixes] = useState<string[]>(readRecentPrefixes)
+  const rememberPrefix = (p: string) => {
+    setRecentPrefixes((prev) => {
+      const next = [p, ...prev.filter((x) => x !== p)].slice(0, RECENT_PREFIXES_MAX)
+      writeRecentPrefixes(next)
+      return next
+    })
+  }
+  const forgetPrefix = (p: string) => {
+    setRecentPrefixes((prev) => {
+      const next = prev.filter((x) => x !== p)
+      writeRecentPrefixes(next)
+      return next
+    })
+  }
   const [mode, setMode] = useState<RunMode>(readMode)
   const [files, setFiles] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -189,7 +318,6 @@ export function PostProdEocValidator() {
       toast.error('Add the Word files (or a ZIP of them).')
       return
     }
-    savePrefix(p)
     saveMode(mode)
     setRunning(true)
     setErrorMsg(null)
@@ -213,6 +341,12 @@ export function PostProdEocValidator() {
       }
       const data: AnalyzeResponse = await res.json()
       setResult(data)
+      // Run succeeded: remember the prefix, then clear the inputs for the next
+      // run (results and their downloads stay on screen; a failed run keeps them).
+      if (p) rememberPrefix(p)
+      setFiles([])
+      setPrefix('')
+      if (inputRef.current) inputRef.current.value = ''
       const failing = Object.fromEntries(data.report.files.filter((f) => f.status === 'fail').map((f) => [f.file, true]))
       setExpanded(failing)
       setRuleFilter('all')
@@ -304,12 +438,12 @@ export function PostProdEocValidator() {
             <label htmlFor="eoc-prefix" className="block text-xs font-semibold text-muted mb-2 uppercase tracking-wider">
               Reference prefix {mode === 'alt_text' ? <span className="text-muted text-[11px] font-normal lowercase">(optional)</span> : <span className="text-red-500">*</span>}
             </label>
-            <input
-              id="eoc-prefix"
+            <PrefixCombobox
               value={prefix}
-              onChange={(e) => setPrefix(e.target.value)}
+              onChange={setPrefix}
+              recent={recentPrefixes}
+              onRemove={forgetPrefix}
               placeholder={mode === 'alt_text' ? 'Optional (e.g. ev2028_sm)' : 'machfund2028_eoc'}
-              className="w-full px-3 py-2 text-sm rounded-lg bg-surface border border-border focus:outline-none focus:border-primary"
             />
             <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
               {mode === 'alt_text'
