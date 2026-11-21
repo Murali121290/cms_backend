@@ -511,6 +511,10 @@ def send_bod_daily_receipt_summary(target_date_str: str | None = None):
                 ref_date = now_local.date()
         else:
             ref_date = now_local.date()
+            # If scheduled automatically (no target_date_str provided) and today is Sunday, skip
+            if ref_date.weekday() == 6:  # 6 = Sunday
+                logger.info(f"Today is {ref_date.strftime('%A')}. Skipping BOD daily receipt summary.")
+                return {"status": "skipped", "reason": "sunday", "date": ref_date.isoformat()}
 
         display_date = ref_date.strftime("%m/%d/%Y")
 

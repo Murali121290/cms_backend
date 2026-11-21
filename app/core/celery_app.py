@@ -42,7 +42,7 @@ if summary_time_str and str(summary_time_str).strip():
         summary_hour, summary_minute = [int(p) for p in clean_time.split(":", 1)]
         celery_app.conf.beat_schedule["send_bod_daily_receipt_summary"] = {
             "task": "app.domains.books_on_demand.tasks.send_bod_daily_receipt_summary",
-            "schedule": crontab(hour=summary_hour, minute=summary_minute),
+            "schedule": crontab(hour=summary_hour, minute=summary_minute, day_of_week="mon-sat"),
         }
     except Exception as err:
         import logging
