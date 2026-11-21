@@ -691,7 +691,7 @@ export function BodInternalJobPage() {
             <span className="truncate">{job.pdf_filename}</span>
             {job.revision && (
               <span
-                className="font-bold font-mono px-2 py-0.5 rounded-md text-[10px] bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider shrink-0"
+                className="font-bold font-mono px-2 py-0.5 rounded-md text-[10px] bg-[#FCE4D6] border border-[#F8B88B] text-[#9A3412] dark:bg-[#7C2D12]/40 dark:border-[#9A3412] dark:text-[#FED7AA] tracking-wider shrink-0"
                 title={`Revision: ${job.revision}`}
               >
                 {job.revision}
@@ -700,9 +700,9 @@ export function BodInternalJobPage() {
             <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider shrink-0 ${job.status === 'Completed'
               ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
               : job.status === 'Hold'
-                ? 'bg-fuchsia-500/15 border-fuchsia-500/40 text-fuchsia-600 dark:text-fuchsia-400'
+                ? 'bg-[#E0F2FE] border-sky-300 text-sky-900 dark:bg-sky-950/60 dark:border-sky-800 dark:text-sky-200'
                 : job.status === 'Support'
-                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-400'
+                  ? 'bg-[#BFDBFE] border-blue-300 text-blue-900 dark:bg-blue-950/60 dark:border-blue-800 dark:text-blue-200'
                   : 'bg-primary/10 border-primary/20 text-primary'
               }`}>
               {job.status}
@@ -751,11 +751,10 @@ export function BodInternalJobPage() {
               variant="outline"
               size="sm"
               onClick={openHoldSupportModal}
-              className={`h-9 px-3.5 font-semibold ${
-                job.status === 'Hold' || job.status === 'Support'
-                  ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
-                  : "border-border text-text hover:bg-accent"
-              }`}
+              className={`h-9 px-3.5 font-semibold ${job.status === 'Hold' || job.status === 'Support'
+                ? "border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
+                : "border-border text-text hover:bg-accent"
+                }`}
               leftIcon={
                 job.status === 'Hold' || job.status === 'Support'
                   ? <CheckCircle size={14} className="text-emerald-500" />
@@ -1631,8 +1630,8 @@ export function BodInternalJobPage() {
                           type="button"
                           onClick={() => setHoldSupportFilter(holdSupportFilter === 'Hold' ? 'all' : 'Hold')}
                           className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${holdSupportFilter === 'Hold'
-                            ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-xs ring-1 ring-fuchsia-400'
-                            : 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400 hover:bg-fuchsia-500/20'
+                            ? 'bg-sky-600 text-white border-sky-600 shadow-xs ring-1 ring-sky-400'
+                            : 'bg-[#E0F2FE] border-sky-300 text-sky-900 dark:bg-sky-950/60 dark:border-sky-800 dark:text-sky-200 hover:bg-sky-100'
                             }`}
                           title={holdSupportFilter === 'Hold' ? 'Click to show both Hold and Support' : 'Click to filter Hold only'}
                         >
@@ -1642,8 +1641,8 @@ export function BodInternalJobPage() {
                           type="button"
                           onClick={() => setHoldSupportFilter(holdSupportFilter === 'Support' ? 'all' : 'Support')}
                           className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${holdSupportFilter === 'Support'
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
-                            : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20'
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-1 ring-blue-400'
+                            : 'bg-[#BFDBFE] border-blue-300 text-blue-900 dark:bg-blue-950/60 dark:border-blue-800 dark:text-blue-200 hover:bg-blue-200'
                             }`}
                           title={holdSupportFilter === 'Support' ? 'Click to show both Hold and Support' : 'Click to filter Support only'}
                         >
@@ -1664,8 +1663,8 @@ export function BodInternalJobPage() {
                             key={record.id || idx}
                             className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
                               ? isHold
-                                ? 'border-fuchsia-500/50 ring-1 ring-fuchsia-500/20'
-                                : 'border-indigo-500/50 ring-1 ring-indigo-500/20'
+                                ? 'border-sky-400 ring-1 ring-sky-300/40'
+                                : 'border-blue-400 ring-1 ring-blue-300/40'
                               : 'border-border'
                               }`}
                           >
@@ -1673,9 +1672,9 @@ export function BodInternalJobPage() {
                             <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
                               <div className="flex items-center gap-2">
                                 <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
-                                  ? 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400'
+                                  ? 'bg-[#E0F2FE] border-sky-300 text-sky-900 dark:bg-sky-950/60 dark:border-sky-800 dark:text-sky-200'
                                   : isSupport
-                                    ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400'
+                                    ? 'bg-[#BFDBFE] border-blue-300 text-blue-900 dark:bg-blue-950/60 dark:border-blue-800 dark:text-blue-200'
                                     : 'bg-accent border-border text-text'
                                   }`}>
                                   {record.type}
@@ -1714,7 +1713,9 @@ export function BodInternalJobPage() {
                                   {record.attachments.map((att: any, aIdx: number) => {
                                     const downloadUrl = `/api/v2/bod/jobs/${job.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
                                     const ext = (att.filename || '').split('.').pop()?.toLowerCase()
-                                    const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                    const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)
+                                    const isPdf = ext === 'pdf'
+                                    const isViewable = isImg || isPdf || ext === 'txt'
                                     const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
 
                                     return (
@@ -1723,7 +1724,7 @@ export function BodInternalJobPage() {
                                         href={downloadUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        download={att.filename}
+                                        {...(!isViewable ? { download: att.filename } : {})}
                                         className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group/att"
                                       >
                                         <div className="flex items-center gap-2 min-w-0">
@@ -1767,13 +1768,15 @@ export function BodInternalJobPage() {
                                     <div className="space-y-1">
                                       {record.resolution_attachments.map((att: any, aIdx: number) => {
                                         const downloadUrl = `/api/v2/bod/jobs/${job.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                        const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                        const isViewable = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'pdf', 'txt'].includes(ext)
                                         return (
                                           <a
                                             key={aIdx}
                                             href={downloadUrl}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            download={att.filename}
+                                            {...(!isViewable ? { download: att.filename } : {})}
                                             className="flex items-center justify-between gap-2 p-1.5 rounded bg-background border border-emerald-500/20 hover:border-emerald-500/40 text-xs transition-all"
                                           >
                                             <span className="truncate text-[11px] font-medium text-text">{att.filename}</span>
@@ -1918,7 +1921,9 @@ export function BodInternalJobPage() {
                                 const rev = record.revision
                                 const downloadUrl = `/api/v2/bod/jobs/${job.id}/reopen-attachments/${rev}/${encodeURIComponent(att.saved_filename || att.filename)}`
                                 const ext = (att.filename || '').split('.').pop()?.toLowerCase()
-                                const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)
+                                const isPdf = ext === 'pdf'
+                                const isViewable = isImg || isPdf || ext === 'txt'
                                 const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
 
                                 return (
@@ -1927,7 +1932,7 @@ export function BodInternalJobPage() {
                                     href={downloadUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    download={att.filename}
+                                    {...(!isViewable ? { download: att.filename } : {})}
                                     className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-rose-500/40 hover:bg-rose-500/5 transition-all group/att"
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
@@ -2200,16 +2205,27 @@ export function BodInternalJobPage() {
                   <Dropdown
                     value={holdSupportType}
                     onChange={(val) => setHoldSupportType(val as any)}
-                    options={[
-                      { value: 'Hold', label: 'Hold (Customer Support Query / External Hold)' },
-                      { value: 'Support', label: 'Support (Internal Help / Technical Support)' },
-                      { value: 'Active', label: 'Active (Resolve Query & Resume Work)' }
-                    ]}
+                    options={
+                      job.status === 'Hold'
+                        ? [
+                          { value: 'Active', label: 'Active (Resolve Query & Resume Work)' },
+                          { value: 'Support', label: 'Support (Internal Help / Technical Support)' }
+                        ]
+                        : job.status === 'Support'
+                          ? [
+                            { value: 'Active', label: 'Active (Resolve Query & Resume Work)' },
+                            { value: 'Hold', label: 'Hold (Customer Support Query / External Hold)' }
+                          ]
+                          : [
+                            { value: 'Support', label: 'Support (Internal Help / Technical Support)' },
+                            { value: 'Hold', label: 'Hold (Customer Support Query / External Hold)' }
+                          ]
+                    }
                     className="w-full"
                   />
                   <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
-                    {holdSupportType === 'Hold' && 'Puts job on Hold due to query with customer support or waiting for customer clarification.'}
                     {holdSupportType === 'Support' && 'Marks job as needing internal technical assistance or team support.'}
+                    {holdSupportType === 'Hold' && 'Puts job on Hold due to query with customer support or waiting for customer clarification.'}
                     {holdSupportType === 'Active' && 'Resolves any pending query and returns job to normal active workflow.'}
                   </p>
                 </div>

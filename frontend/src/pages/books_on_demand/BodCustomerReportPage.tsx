@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
-import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap, PauseCircle, RotateCcw, MessageSquare, Paperclip, File, CheckCircle, ExternalLink, Table } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import * as XLSX from 'xlsx'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell } from 'recharts'
 import { formatDateTime as fmtUtcDateTime, formatDate, parseUtcDate } from '@/utils/dateUtils'
 
 export function BodCustomerReportPage() {
@@ -20,9 +21,18 @@ export function BodCustomerReportPage() {
   const [fastrackReason, setFastrackReason] = useState('')
   const [savingFastrack, setSavingFastrack] = useState(false)
 
+  // Customer Hold Response Modal state
+  const [holdAnswerJob, setHoldAnswerJob] = useState<any | null>(null)
+  const [holdAnswerText, setHoldAnswerText] = useState('')
+  const [holdAnswerFiles, setHoldAnswerFiles] = useState<File[]>([])
+  const [submittingHoldAnswer, setSubmittingHoldAnswer] = useState(false)
+
+  // Active view: 'chart' | 'table' (Split view toggle)
+  const [activeTab, setActiveTab] = useState<'chart' | 'table'>('chart')
+
   // Filters
   const [search, setSearch] = useState('')
-  type QuickFilter = 'all' | 'total_all' | 'total_intake' | 'total_backlog' | 'yts' | 'yts_fresh' | 'yts_other' | 'in_progress' | 'completed' | 'completed_ahead' | 'completed_ontime' | 'completed_delay' | 'overdue'
+  type QuickFilter = 'all' | 'total_all' | 'total_intake' | 'total_backlog' | 'yts' | 'yts_fresh' | 'yts_other' | 'in_progress' | 'hold' | 'reopen' | 'completed' | 'completed_ahead' | 'completed_ontime' | 'completed_delay' | 'overdue'
   const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
 
   // Date Filter states (identical to internal page)
@@ -111,16 +121,58 @@ export function BodCustomerReportPage() {
     }
   }
 
+  const handleOpenHoldAnswerModal = (e: React.MouseEvent, job: any) => {
+    e.stopPropagation()
+    setHoldAnswerJob(job)
+    setHoldAnswerText('')
+    setHoldAnswerFiles([])
+  }
+
+  const submitHoldAnswer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!holdAnswerJob || !holdAnswerText.trim()) return
+
+    setSubmittingHoldAnswer(true)
+    try {
+      const formData = new FormData()
+      formData.append('status', 'Active')
+      formData.append('description', holdAnswerText.trim())
+
+      if (holdAnswerFiles && holdAnswerFiles.length > 0) {
+        holdAnswerFiles.forEach((file) => {
+          formData.append('files', file)
+        })
+      }
+
+      const { data } = await api.put(`/bod/jobs/${holdAnswerJob.id}/hold-support`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      setReport(prev => prev.map(j => j.id === holdAnswerJob.id ? {
+        ...j,
+        status: data.new_status || 'Active',
+        hold_support_history: data.hold_support_history || j.hold_support_history,
+        due_date_history: data.due_date_history || j.due_date_history
+      } : j))
+
+      toast.success("Query answer submitted! Work has been resumed.")
+      setHoldAnswerJob(null)
+    } catch (err: any) {
+      console.error(err)
+      toast.error(err.response?.data?.detail || "Failed to submit answer")
+    } finally {
+      setSubmittingHoldAnswer(false)
+    }
+  }
+
   const handleFastrackClick = (e: React.MouseEvent, job: any) => {
     e.stopPropagation()
     setFastrackModalJob(job)
     setFastrackReason('')
     if (job.is_fastrack && job.fastrack_requested_date) {
-      // Set to existing fastrack requested date
       const raw = String(job.fastrack_requested_date).split('T')[0]
       setFastrackExpectedDate(raw)
     } else {
-      // Default to today
       const now = new Date()
       setFastrackExpectedDate(now.toISOString().slice(0, 10))
     }
@@ -383,7 +435,9 @@ export function BodCustomerReportPage() {
 
     if (isJobCompleted(job)) {
       completionTiming = getCompletionTiming(getCompletedDate(job), job.due_date)
-      finalStatus = completionTiming
+      finalStatus = completionTiming ? `Completed (${completionTiming})` : 'Completed'
+    } else if (job.status === 'Hold') {
+      finalStatus = 'Hold'
     } else {
       if (overdueRefDate && isOverdue(job.due_date, overdueRefDate)) {
         finalStatus = 'Overdue'
@@ -433,6 +487,12 @@ export function BodCustomerReportPage() {
     if (cardFilter === 'in_progress') {
       return !completed && (job.current_stage === 'Add job' || job.current_stage === 'Production' || job.current_stage === 'QC' || job.current_stage === 'Ready to Dispatch')
     }
+    if (cardFilter === 'hold') {
+      return !completed && job.status === 'Hold'
+    }
+    if (cardFilter === 'reopen') {
+      return !completed && (Boolean(job.revision) || (job.reopen_history && job.reopen_history.length > 0))
+    }
     if (cardFilter === 'overdue') {
       return !completed && Boolean(overdueRefDate && isOverdue(job.due_date, overdueRefDate))
     }
@@ -461,6 +521,12 @@ export function BodCustomerReportPage() {
 
   // In-Progress: Add job, Production, QC, Ready to Dispatch
   const inProgressJobs = baseJobs.filter(j => !isJobCompleted(j) && (j.current_stage === 'Add job' || j.current_stage === 'Production' || j.current_stage === 'QC' || j.current_stage === 'Ready to Dispatch')).length
+
+  // Hold: Active jobs on Hold (Customer Query)
+  const holdJobs = baseJobs.filter(j => !isJobCompleted(j) && j.status === 'Hold').length
+
+  // Reopen / Revise: Active jobs with revision or reopen history
+  const reopenJobs = baseJobs.filter(j => !isJobCompleted(j) && (Boolean(j.revision) || (j.reopen_history && j.reopen_history.length > 0))).length
 
   // Overdue
   const overdueJobs = baseJobs.filter(j => !isJobCompleted(j) && Boolean(overdueRefDate && isOverdue(j.due_date, overdueRefDate))).length
@@ -517,6 +583,22 @@ export function BodCustomerReportPage() {
   })
 
   const chartData = Array.from(chartDataMap.values()).sort((a, b) => a.date.localeCompare(b.date))
+
+  // Status Distribution for Donut Chart (Easy Customer Understanding)
+  const statusPieData = [
+    { name: 'Completed', value: completedJobs, color: '#10b981' },
+    { name: 'Production', value: inProgressJobs, color: '#a855f7' },
+    { name: 'Hold (Query)', value: holdJobs, color: '#38bdf8' },
+    { name: 'Revise', value: reopenJobs, color: '#fb923c' },
+    { name: 'Overdue', value: overdueJobs, color: '#ef4444' },
+  ].filter(d => d.value > 0)
+
+  // Delivery Timeliness (Ahead, On-time, Delay)
+  const deliveryTimingData = [
+    { name: 'Completed (Ahead)', count: completedAhead, fill: '#10b981' },
+    { name: 'Completed (On-time)', count: completedOnTime, fill: '#3b82f6' },
+    { name: 'Completed (Delay)', count: completedDelay, fill: '#f59e0b' },
+  ]
 
   const uniqueTypes = Array.from(
     new Set(report.map(j => (j.pdf_type || '').trim()).filter(Boolean))
@@ -608,7 +690,13 @@ export function BodCustomerReportPage() {
     // 11. Final Status
     if (colFilters.finalStatus !== 'all') {
       if (colFilters.finalStatus === 'Completed') {
-        if (!['Ahead', 'On-time', 'Delay', 'Completed'].includes(finalStatus)) return false
+        if (!finalStatus.startsWith('Completed')) return false
+      } else if (colFilters.finalStatus === 'Ahead') {
+        if (finalStatus !== 'Completed (Ahead)') return false
+      } else if (colFilters.finalStatus === 'On-time') {
+        if (finalStatus !== 'Completed (On-time)') return false
+      } else if (colFilters.finalStatus === 'Delay') {
+        if (finalStatus !== 'Completed (Delay)') return false
       } else if (finalStatus !== colFilters.finalStatus) {
         return false
       }
@@ -691,7 +779,7 @@ export function BodCustomerReportPage() {
       'QC Status',
       'QC Start Time',
       'QC End Time',
-      'Final Status'
+      'Status'
     ]
     const data = [headers]
     const dataToExport = tableJobs.length > 0 ? tableJobs : filteredReport
@@ -772,13 +860,41 @@ export function BodCustomerReportPage() {
             </div>
             <div>
               <h1 className="text-3xl font-bold font-serif text-text tracking-tight">
-                Books on Demand process Report
+                Books on Demand
               </h1>
               <p className="text-muted text-sm mt-1">Real-time status and historical timeline of all books.</p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* View Switcher: Analytics vs Records */}
+            <div className="flex items-center bg-card border border-border rounded-lg p-0.5 shrink-0 shadow-xs">
+              <button
+                type="button"
+                onClick={() => setActiveTab('chart')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'chart'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-muted hover:text-text hover:bg-muted/40'
+                  }`}
+                title="View Production Analytics & Trends"
+              >
+                <BarChart2 size={14} className={activeTab === 'chart' ? 'text-white' : 'text-primary'} />
+                <span>Analytics</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('table')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'table'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-muted hover:text-text hover:bg-muted/40'
+                  }`}
+                title="View Detailed Job Records"
+              >
+                <Table size={14} className={activeTab === 'table' ? 'text-white' : 'text-primary'} />
+                <span>Records</span>
+              </button>
+            </div>
+
             <button
               onClick={() => navigate('/bod/internal')}
               className="flex items-center gap-2 px-4 py-2.5 bg-card border border-border hover:bg-muted/30 text-text font-medium rounded-lg transition-colors shadow-sm text-sm"
@@ -860,7 +976,7 @@ export function BodCustomerReportPage() {
                   type="button"
                   onClick={() => setDatePreset(p.id as any)}
                   className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all border ${datePreset === p.id
-                    ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                    ? 'bg-primary text-white border-primary shadow-xs'
                     : 'bg-transparent border-transparent text-muted hover:text-text hover:bg-accent/50'
                     }`}
                 >
@@ -905,11 +1021,11 @@ export function BodCustomerReportPage() {
           </div>
         </div>
 
-        {/* Metrics Row: Total (intake & backlogs), In-Progress, Completed (3 split: Ahead, On-time, Delay), Overdue */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Metrics Row: Total Books (7), In-Progress (5), Completed (10), Overdue (5), Hold (5), Revise (5) = Total 37 cols */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-[7fr_5fr_10fr_5fr_5fr_5fr] gap-3">
           {/* 1. Total (Intake + Backlogs) */}
           <div
-            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'all' || cardFilter === 'total_all' || cardFilter === 'total_intake' || cardFilter === 'total_backlog') && cardFilter !== 'all' ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.02]' : 'border-border/80 hover:border-primary/40'}`}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'all' || cardFilter === 'total_all' || cardFilter === 'total_intake' || cardFilter === 'total_backlog') && cardFilter !== 'all' ? 'border-primary/60 ring-2 ring-primary/20' : 'border-border/80 hover:border-primary/40'}`}
           >
             <div className="flex items-center justify-between pb-1 border-b border-border/50">
               <div
@@ -925,7 +1041,7 @@ export function BodCustomerReportPage() {
               <button
                 type="button"
                 onClick={() => setCardFilter(cardFilter === 'total_all' ? 'all' : 'total_all')}
-                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${cardFilter === 'total_all' ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
+                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${cardFilter === 'total_all' ? 'bg-primary text-white' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
               >
                 Total {totalJobs}
               </button>
@@ -942,7 +1058,7 @@ export function BodCustomerReportPage() {
                     <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0"></span>
                     {datePreset === 'yesterday' ? 'Yest Intake' : datePreset === 'tomorrow' ? 'Tmrw Intake' : datePreset === 'today' ? 'Today Intake' : 'Intake'}
                   </span>
-                  <span className="text-xs font-bold text-text ml-1">{totalIntakeJobs}</span>
+                  <span className="text-xs font-bold text-text ml-1 shrink-0">{totalIntakeJobs}</span>
                 </div>
               </button>
 
@@ -956,23 +1072,23 @@ export function BodCustomerReportPage() {
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 shrink-0"></span>
                     Backlogs
                   </span>
-                  <span className="text-xs font-bold text-text ml-1">{totalBacklogJobs}</span>
+                  <span className="text-xs font-bold text-text ml-1 shrink-0">{totalBacklogJobs}</span>
                 </div>
               </button>
             </div>
           </div>
 
-          {/* 2. In-Progress */}
+          {/* 2. Production (In-Progress) */}
           <div
             onClick={() => setCardFilter(cardFilter === 'in_progress' ? 'all' : 'in_progress')}
-            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'in_progress' ? 'border-purple-500/60 ring-2 ring-purple-500/20 bg-purple-500/[0.04]' : 'border-border/80 hover:border-purple-500/40'}`}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'in_progress' ? 'border-purple-500/60 ring-2 ring-purple-500/20' : 'border-border/80 hover:border-purple-500/40'}`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <div className="p-1 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-md">
                   <RefreshCw size={13} />
                 </div>
-                <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase tracking-wider">In-Progress</span>
+                <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase tracking-wider">Production</span>
               </div>
               <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-400">Active</span>
             </div>
@@ -982,7 +1098,7 @@ export function BodCustomerReportPage() {
             </div>
           </div>
 
-          {/* 4. Completed: 3 split (Ahead, On-time, Delay) */}
+          {/* 3. Completed: 3 split (Ahead, On-time, Delay) */}
           <div
             className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'completed' || cardFilter.startsWith('completed_')) ? 'border-emerald-500/60 ring-2 ring-emerald-500/20' : 'border-border/80 hover:border-emerald-500/30'}`}
           >
@@ -1010,54 +1126,54 @@ export function BodCustomerReportPage() {
               <button
                 type="button"
                 onClick={() => setCardFilter(cardFilter === 'completed_ahead' ? 'all' : 'completed_ahead')}
-                className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'completed_ahead' ? 'bg-emerald-500/10 border-emerald-500/40 ring-1 ring-emerald-500/30' : 'bg-background/60 border-border/60 hover:border-emerald-500/30 hover:bg-accent/40'}`}
+                className={`px-1 py-1 rounded text-left transition-all border ${cardFilter === 'completed_ahead' ? 'bg-emerald-500/10 border-emerald-500/40 ring-1 ring-emerald-500/30' : 'bg-background/60 border-border/60 hover:border-emerald-500/30 hover:bg-accent/40'}`}
                 title="Completed ahead of schedule"
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 truncate">
+                <div className="flex items-center justify-between gap-0.5">
+                  <span className="text-[7.5px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 truncate">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                     Ahead
                   </span>
-                  <span className="text-xs font-bold text-text">{completedAhead}</span>
+                  <span className="text-[11px] font-bold text-text shrink-0">{completedAhead}</span>
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setCardFilter(cardFilter === 'completed_ontime' ? 'all' : 'completed_ontime')}
-                className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'completed_ontime' ? 'bg-blue-500/10 border-blue-500/40 ring-1 ring-blue-500/30' : 'bg-background/60 border-border/60 hover:border-blue-500/30 hover:bg-accent/40'}`}
+                className={`px-1 py-1 rounded text-left transition-all border ${cardFilter === 'completed_ontime' ? 'bg-blue-500/10 border-blue-500/40 ring-1 ring-blue-500/30' : 'bg-background/60 border-border/60 hover:border-blue-500/30 hover:bg-accent/40'}`}
                 title="Completed on time"
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-0.5 truncate">
+                <div className="flex items-center justify-between gap-0.5">
+                  <span className="text-[7.5px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-0.5 truncate">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
                     On-time
                   </span>
-                  <span className="text-xs font-bold text-text">{completedOnTime}</span>
+                  <span className="text-[11px] font-bold text-text shrink-0">{completedOnTime}</span>
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setCardFilter(cardFilter === 'completed_delay' ? 'all' : 'completed_delay')}
-                className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'completed_delay' ? 'bg-rose-500/10 border-rose-500/40 ring-1 ring-rose-500/30' : 'bg-background/60 border-border/60 hover:border-rose-500/30 hover:bg-accent/40'}`}
+                className={`px-1 py-1 rounded text-left transition-all border ${cardFilter === 'completed_delay' ? 'bg-rose-500/10 border-rose-500/40 ring-1 ring-rose-500/30' : 'bg-background/60 border-border/60 hover:border-rose-500/30 hover:bg-accent/40'}`}
                 title="Completed with delay"
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-0.5 truncate">
+                <div className="flex items-center justify-between gap-0.5">
+                  <span className="text-[7.5px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-0.5 truncate">
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span>
                     Delay
                   </span>
-                  <span className="text-xs font-bold text-text">{completedDelay}</span>
+                  <span className="text-[11px] font-bold text-text shrink-0">{completedDelay}</span>
                 </div>
               </button>
             </div>
           </div>
 
-          {/* 5. Overdue */}
+          {/* 4. Overdue */}
           <div
             onClick={() => setCardFilter(cardFilter === 'overdue' ? 'all' : 'overdue')}
-            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'overdue' ? 'border-red-500/60 ring-2 ring-red-500/20 bg-red-500/[0.04]' : 'border-border/80 hover:border-red-500/40'}`}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'overdue' ? 'border-red-500/60 ring-2 ring-red-500/20' : 'border-border/80 hover:border-red-500/40'}`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
@@ -1073,447 +1189,612 @@ export function BodCustomerReportPage() {
               <span className="text-[9px] text-red-500/80 truncate">Past customer due</span>
             </div>
           </div>
+
+          {/* 5. Hold */}
+          <div
+            onClick={() => setCardFilter(cardFilter === 'hold' ? 'all' : 'hold')}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'hold' ? 'border-sky-400 ring-2 ring-sky-300/40 dark:bg-sky-950/30' : 'border-border/80 hover:border-sky-300'}`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 bg-[#E0F2FE] text-sky-800 dark:bg-sky-950/50 dark:text-sky-300 rounded-md">
+                  <PauseCircle size={13} />
+                </div>
+                <span className="text-[10px] text-sky-800 dark:text-sky-300 font-bold uppercase tracking-wider">Hold</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-[#E0F2FE] text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">Query</span>
+            </div>
+            <div className="flex items-baseline justify-between mt-2">
+              <span className="text-xl font-bold text-sky-900 dark:text-sky-200 leading-none">{holdJobs}</span>
+              <span className="text-[9px] text-sky-700/80 dark:text-sky-400/80 truncate">Customer Hold</span>
+            </div>
+          </div>
+
+          {/* 6. Revise (Reopen) */}
+          <div
+            onClick={() => setCardFilter(cardFilter === 'reopen' ? 'all' : 'reopen')}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'reopen' ? 'border-[#F8B88B] ring-2 ring-[#FCE4D6]/60 bg-[#FCE4D6] dark:bg-[#7C2D12]/30' : 'border-border/80 hover:border-[#F8B88B]'}`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 bg-[#FCE4D6] text-[#C2410C] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA] rounded-md">
+                  <RotateCcw size={13} className="text-[#EA580C] dark:text-[#FDBA74]" />
+                </div>
+                <span className="text-[10px] text-[#9A3412] dark:text-[#FED7AA] font-bold uppercase tracking-wider">Revise</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-[#FCE4D6] text-[#9A3412] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA]">Revise</span>
+            </div>
+            <div className="flex items-baseline justify-between mt-2">
+              <span className="text-xl font-bold text-[#7C2D12] dark:text-[#FFEDD5] leading-none">{reopenJobs}</span>
+              <span className="text-[9px] text-[#C2410C]/80 dark:text-[#FDBA74]/80 truncate">Revise Cycle</span>
+            </div>
+          </div>
         </div>
 
-        {/* Chart Section */}
-        {chartData.length > 0 && (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
-            {/* Chart 1: Inflow vs Completed (Area) */}
-            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-              <div className="mb-6">
-                <h3 className="text-lg font-bold font-serif text-text">Production Flow</h3>
-                <p className="text-xs text-muted mt-1">Comparison of new jobs arriving vs jobs being completed.</p>
+        {/* Split Views: Analytics (Charts) vs Records (Table) */}
+        {activeTab === 'chart' && (
+          <div className="space-y-6 mt-6">
+            {/* Quick KPI Highlights for Customers */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Completion Rate</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{completionPercentage}%</span>
+                  <span className="text-xs text-muted">({completedJobs}/{totalJobs})</span>
+                </div>
+                <div className="w-full bg-muted/30 h-1.5 rounded-full overflow-hidden mt-2">
+                  <div className="bg-emerald-500 h-full rounded-full transition-all" style={{ width: `${completionPercentage}%` }} />
+                </div>
               </div>
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
-                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
-                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
-                      itemStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
-                    <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
-                    <Area type="monotone" dataKey="completed" name="Delivered" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
-                  </AreaChart>
-                </ResponsiveContainer>
+
+              <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">On-Time / Ahead Ratio</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {completedJobs > 0 ? Math.round(((completedAhead + completedOnTime) / completedJobs) * 100) : 0}%
+                  </span>
+                  <span className="text-xs text-muted">({completedAhead + completedOnTime}/{completedJobs || 0})</span>
+                </div>
+                <div className="w-full bg-muted/30 h-1.5 rounded-full overflow-hidden mt-2">
+                  <div
+                    className="bg-blue-500 h-full rounded-full transition-all"
+                    style={{ width: `${completedJobs > 0 ? Math.round(((completedAhead + completedOnTime) / completedJobs) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Active Pipeline</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-purple-600 dark:text-purple-400">{inProgressJobs}</span>
+                  <span className="text-xs text-muted">books in production</span>
+                </div>
+                <p className="text-[10px] text-muted m-0 mt-2">Active production stages</p>
+              </div>
+
+              <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Customer Queries (Hold)</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-sky-900 dark:text-sky-200">{holdJobs}</span>
+                  <span className="text-xs text-muted">awaiting answer</span>
+                </div>
+                <p className="text-[10px] text-sky-700/80 dark:text-sky-400/80 m-0 mt-2">Requires customer clarification</p>
               </div>
             </div>
 
-            {/* Chart 2: Due vs Delays (Bar) */}
-            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-              <div className="mb-6">
-                <h3 className="text-lg font-bold font-serif text-text">Deadlines & Delays</h3>
-                <p className="text-xs text-muted mt-1">Jobs due on a given date vs jobs that were delayed.</p>
+            {/* Row 1: Time Series Charts */}
+            {chartData.length > 0 ? (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                {/* Chart 1: Inflow vs Completed (Area) */}
+                <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="mb-4">
+                    <h3 className="text-base font-bold font-serif text-text">Production Inflow vs Deliveries</h3>
+                    <p className="text-xs text-muted mt-0.5">Timeline of incoming customer jobs compared to delivered books.</p>
+                  </div>
+                  <div className="h-[280px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
+                        <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
+                        <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                          itemStyle={{ fontWeight: 600 }}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }} iconType="circle" />
+                        <Area type="monotone" dataKey="inflow" name="Incoming Books" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
+                        <Area type="monotone" dataKey="completed" name="Delivered Books" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Chart 2: Due vs Delays (Bar) */}
+                <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="mb-4">
+                    <h3 className="text-base font-bold font-serif text-text">Deadlines & Schedule Adherence</h3>
+                    <p className="text-xs text-muted mt-0.5">Scheduled due dates versus jobs pending delivery past due.</p>
+                  </div>
+                  <div className="h-[280px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
+                        <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
+                        <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
+                        <Tooltip
+                          cursor={{ fill: 'hsl(var(--accent))', opacity: 0.4 }}
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                          itemStyle={{ fontWeight: 600 }}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }} iconType="circle" />
+                        <Bar dataKey="due" name="Total Due" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
+                        <Bar dataKey="delay" name="Past Due / Delayed" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               </div>
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
-                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
-                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip
-                      cursor={{ fill: 'hsl(var(--accent))', opacity: 0.4 }}
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
-                      itemStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
-                    <Bar dataKey="due" name="Total Due" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
-                    <Bar dataKey="delay" name="Due but not delivered" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
-                  </BarChart>
-                </ResponsiveContainer>
+            ) : null}
+
+            {/* Row 2: Status Breakdown & Delivery Performance */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {/* Donut Chart: Current Work Distribution */}
+              <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                <div className="mb-2">
+                  <h3 className="text-base font-bold font-serif text-text">Current Work Status Breakdown</h3>
+                  <p className="text-xs text-muted mt-0.5">Overall distribution of all books by operational status.</p>
+                </div>
+                {statusPieData.length > 0 ? (
+                  <div className="h-[260px] w-full flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={statusPieData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={65}
+                          outerRadius={95}
+                          paddingAngle={3}
+                        >
+                          {statusPieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-[220px] flex items-center justify-center text-xs text-muted">
+                    No active job distribution data
+                  </div>
+                )}
+              </div>
+
+              {/* Delivery Performance Breakdown */}
+              <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                <div className="mb-2">
+                  <h3 className="text-base font-bold font-serif text-text">Delivery Speed Performance</h3>
+                  <p className="text-xs text-muted mt-0.5">Analysis of completed deliveries: ahead of time, on-time, or delayed.</p>
+                </div>
+                <div className="h-[260px] w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      layout="vertical"
+                      data={deliveryTimingData}
+                      margin={{ top: 10, right: 30, left: 40, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="currentColor" className="text-border/40" />
+                      <XAxis type="number" stroke="currentColor" className="text-muted text-xs" allowDecimals={false} />
+                      <YAxis type="category" dataKey="name" stroke="currentColor" className="text-muted text-[11px]" tickLine={false} axisLine={false} width={130} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                      />
+                      <Bar dataKey="count" name="Jobs" radius={[0, 6, 6, 0]} barSize={22}>
+                        {deliveryTimingData.map((entry, index) => (
+                          <Cell key={`timing-cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-
         {/* Data Table */}
-        <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl">
-          <div className="flex items-center justify-between px-3.5 py-2 border-b border-border/50 bg-muted/15 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="text-muted font-medium">
-                Showing <strong className="text-text">{tableJobs.length}</strong> of {filteredReport.length} jobs
-              </span>
-              {hasActiveColFilters && (
-                <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-semibold">
-                  Filtered
+        {activeTab === 'table' && (
+          <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl mt-4">
+            <div className="flex items-center justify-between px-3.5 py-2 border-b border-border/50 bg-muted/15 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-muted font-medium">
+                  Showing <strong className="text-text">{tableJobs.length}</strong> of {filteredReport.length} jobs
                 </span>
+                {hasActiveColFilters && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-semibold">
+                    Filtered
+                  </span>
+                )}
+              </div>
+              {(hasActiveColFilters || sortField !== null) && (
+                <button
+                  onClick={resetColFilters}
+                  className="flex items-center gap-1 text-[11px] text-primary hover:underline font-semibold"
+                >
+                  <X size={12} /> Reset sort & table filters
+                </button>
               )}
             </div>
-            {(hasActiveColFilters || sortField !== null) && (
-              <button
-                onClick={resetColFilters}
-                className="flex items-center gap-1 text-[11px] text-primary hover:underline font-semibold"
-              >
-                <X size={12} /> Reset sort & table filters
-              </button>
-            )}
-          </div>
 
-          <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
-            <table className="w-full min-w-[1150px] text-left border-collapse">
-              <thead className="sticky top-0 z-10 shadow-sm bg-card">
-                {/* Header Row with Sort */}
-                <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
-                  <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[16%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Job</span>
-                      {renderSortIcon('job')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('fastrack')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[9%]">
-                    <div className="flex items-center justify-center gap-0.5">
-                      <Zap size={10} className="text-amber-500 fill-amber-500" />
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Fastrack</span>
-                      {renderSortIcon('fastrack')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('pages')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[6%]">
-                    <div className="flex items-center justify-center gap-0.5">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</span>
-                      {renderSortIcon('pages')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('type')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Type</span>
-                      {renderSortIcon('type')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('language')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Language</span>
-                      {renderSortIcon('language')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('created')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Received On</span>
-                      {renderSortIcon('created')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('dueDate')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</span>
-                      {renderSortIcon('dueDate')}
-                    </div>
-                  </th>
-                  <th onClick={() => handleSort('finalStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[15%]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Final Status</span>
-                      {renderSortIcon('finalStatus')}
-                    </div>
-                  </th>
-                </tr>
-
-                {/* Filter Row */}
-                <tr className="border-b border-border/50 bg-muted/20 font-normal normal-case tracking-normal">
-                  {/* Job */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={colFilters.job}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, job: e.target.value }))}
-                        placeholder="Filter..."
-                        className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
-                      />
-                      {colFilters.job && (
-                        <button
-                          onClick={() => setColFilters(prev => ({ ...prev, job: '' }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-                          title="Clear"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Fastrack filter */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <select
-                      value={colFilters.fastrack}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, fastrack: e.target.value }))}
-                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                    >
-                      <option value="all">All</option>
-                      <option value="fastrack">⚡ Fastrack</option>
-                      <option value="normal">Normal</option>
-                    </select>
-                  </th>
-
-                  {/* Pages */}
-                  <th className="px-1 py-1.5 font-normal">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={colFilters.pages}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
-                        placeholder="e.g. >250"
-                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
-                      />
-                      {colFilters.pages && (
-                        <button
-                          onClick={() => setColFilters(prev => ({ ...prev, pages: '' }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-                          title="Clear"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Type */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <select
-                      value={colFilters.type}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
-                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                    >
-                      <option value="all">All Types</option>
-                      {uniqueTypes.map(t => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </th>
-
-                  {/* Language */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <select
-                      value={colFilters.language}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
-                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                    >
-                      <option value="all">All Langs</option>
-                      {uniqueLanguages.map(l => (
-                        <option key={l} value={l}>{l}</option>
-                      ))}
-                    </select>
-                  </th>
-
-                  {/* Created At */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <div className="relative">
-                      <input
-                        type="date"
-                        value={colFilters.created}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
-                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
-                        style={{ colorScheme: 'light dark' }}
-                      />
-                      {colFilters.created && (
-                        <button
-                          onClick={() => setColFilters(prev => ({ ...prev, created: '' }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
-                          title="Clear"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Due Date */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <div className="relative">
-                      <input
-                        type="date"
-                        value={colFilters.dueDate}
-                        onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
-                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
-                        style={{ colorScheme: 'light dark' }}
-                      />
-                      {colFilters.dueDate && (
-                        <button
-                          onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
-                          title="Clear"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </th>
-
-                  {/* Final Status */}
-                  <th className="px-1.5 py-1.5 font-normal">
-                    <select
-                      value={colFilters.finalStatus}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, finalStatus: e.target.value }))}
-                      className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
-                    >
-                      <option value="all">All</option>
-                      <option value="Completed">Completed (All)</option>
-                      <option value="Ahead">Ahead</option>
-                      <option value="On-time">On-time</option>
-                      <option value="Delay">Delay</option>
-                      <option value="In-progress">In-progress</option>
-                      <option value="Overdue">Overdue</option>
-                      <option value="YTS">YTS</option>
-                    </select>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50">
-                {loading ? (
-                  <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center justify-center text-muted">
-                        <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary" />
-                        <p>Loading report data...</p>
+            <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
+              <table className="w-full min-w-[1150px] text-left border-collapse">
+                <thead className="sticky top-0 z-10 shadow-sm bg-card">
+                  {/* Header Row with Sort */}
+                  <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
+                    <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[16%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">File Name</span>
+                        {renderSortIcon('job')}
                       </div>
-                    </td>
+                    </th>
+                    <th onClick={() => handleSort('fastrack')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[9%]">
+                      <div className="flex items-center justify-center gap-0.5">
+                        <Zap size={10} className="text-amber-500 fill-amber-500" />
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Fastrack</span>
+                        {renderSortIcon('fastrack')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('pages')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none text-center w-[6%]">
+                      <div className="flex items-center justify-center gap-0.5">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</span>
+                        {renderSortIcon('pages')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('type')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Type</span>
+                        {renderSortIcon('type')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('language')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[8%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Language</span>
+                        {renderSortIcon('language')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('created')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Received On</span>
+                        {renderSortIcon('created')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('dueDate')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[9%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</span>
+                        {renderSortIcon('dueDate')}
+                      </div>
+                    </th>
+                    <th onClick={() => handleSort('finalStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[15%]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Status</span>
+                        {renderSortIcon('finalStatus')}
+                      </div>
+                    </th>
                   </tr>
-                ) : tableJobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-muted">
-                      No matching records found.
-                    </td>
+
+                  {/* Filter Row */}
+                  <tr className="border-b border-border/50 bg-muted/20 font-normal normal-case tracking-normal">
+                    {/* Job */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={colFilters.job}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, job: e.target.value }))}
+                          placeholder="Filter..."
+                          className="w-full bg-background border border-border/60 rounded px-1.5 py-0.5 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                        />
+                        {colFilters.job && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, job: '' }))}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                            title="Clear"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Fastrack filter */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <select
+                        value={colFilters.fastrack}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, fastrack: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                      >
+                        <option value="all">All</option>
+                        <option value="fastrack">⚡ Fastrack</option>
+                        <option value="normal">Normal</option>
+                      </select>
+                    </th>
+
+                    {/* Pages */}
+                    <th className="px-1 py-1.5 font-normal">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={colFilters.pages}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, pages: e.target.value }))}
+                          placeholder="e.g. >250"
+                          className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-center text-text placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors font-sans font-normal"
+                        />
+                        {colFilters.pages && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, pages: '' }))}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                            title="Clear"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Type */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <select
+                        value={colFilters.type}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, type: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                      >
+                        <option value="all">All Types</option>
+                        {uniqueTypes.map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </th>
+
+                    {/* Language */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <select
+                        value={colFilters.language}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, language: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                      >
+                        <option value="all">All Langs</option>
+                        {uniqueLanguages.map(l => (
+                          <option key={l} value={l}>{l}</option>
+                        ))}
+                      </select>
+                    </th>
+
+                    {/* Created At */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <div className="relative">
+                        <input
+                          type="date"
+                          value={colFilters.created}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, created: e.target.value }))}
+                          className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
+                          style={{ colorScheme: 'light dark' }}
+                        />
+                        {colFilters.created && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, created: '' }))}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
+                            title="Clear"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Due Date */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <div className="relative">
+                        <input
+                          type="date"
+                          value={colFilters.dueDate}
+                          onChange={(e) => setColFilters(prev => ({ ...prev, dueDate: e.target.value }))}
+                          className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[10px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer"
+                          style={{ colorScheme: 'light dark' }}
+                        />
+                        {colFilters.dueDate && (
+                          <button
+                            onClick={() => setColFilters(prev => ({ ...prev, dueDate: '' }))}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-text bg-background"
+                            title="Clear"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Final Status */}
+                    <th className="px-1.5 py-1.5 font-normal">
+                      <select
+                        value={colFilters.finalStatus}
+                        onChange={(e) => setColFilters(prev => ({ ...prev, finalStatus: e.target.value }))}
+                        className="w-full bg-background border border-border/60 rounded px-1 py-0.5 text-[11px] text-text focus:outline-none focus:border-primary transition-colors font-sans font-normal cursor-pointer truncate"
+                      >
+                        <option value="all">All</option>
+                        <option value="Completed">Completed (All)</option>
+                        <option value="Ahead">Completed (Ahead)</option>
+                        <option value="On-time">Completed (On-time)</option>
+                        <option value="Delay">Completed (Delay)</option>
+                        <option value="In-progress">In-progress</option>
+                        <option value="Hold">Hold</option>
+                        <option value="Overdue">Overdue</option>
+                        <option value="YTS">YTS</option>
+                      </select>
+                    </th>
                   </tr>
-                ) : (
-                  tableJobs.map((job) => {
-                    const { finalStatus } = getJobStatuses(job)
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-12 text-center">
+                        <div className="flex flex-col items-center justify-center text-muted">
+                          <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary" />
+                          <p>Loading report data...</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : tableJobs.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-12 text-center text-muted">
+                        No matching records found.
+                      </td>
+                    </tr>
+                  ) : (
+                    tableJobs.map((job) => {
+                      const { finalStatus } = getJobStatuses(job)
 
-                    const getStatusColor = (s: string) => {
-                      if (s === 'Ahead') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
-                      if (s === 'On-time') return 'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                      if (s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30'
-                      if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
-                      if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
-                      if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
-                      return 'bg-muted/10 text-muted-foreground border-border/50'
-                    }
+                      const getStatusColor = (s: string) => {
+                        if (s === 'Completed (Ahead)' || s === 'Ahead') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 font-bold'
+                        if (s === 'Completed (On-time)' || s === 'On-time') return 'bg-blue-500/10 text-blue-600 border-blue-500/30 font-bold'
+                        if (s === 'Completed (Delay)' || s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30 font-bold'
+                        if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-bold'
+                        if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                        if (s === 'Hold') return 'bg-[#E0F2FE] text-sky-900 border-sky-300 dark:bg-sky-950/60 dark:text-sky-200 dark:border-sky-800 font-bold'
+                        if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
+                        return 'bg-muted/10 text-muted-foreground border-border/50'
+                      }
 
-                    return (
-                      <tr key={job.id} className="hover:bg-muted/5 transition-colors group">
-                        <td className="px-2 py-3">
-                          <div className="font-medium text-text break-all whitespace-normal max-w-[260px]" title={job.pdf_filename}>
-                            {job.pdf_filename}
-                          </div>
-                          <div className="text-[10px] text-muted mt-0.5 flex items-center gap-1.5 truncate max-w-[200px]">
-                            <div className="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
-                            {job.client_name}
-                          </div>
-                          {job.epub_filename && (
-                            <div className="flex items-start gap-1.5 mt-2 bg-emerald-500/5 py-1 px-2 rounded-md w-fit border border-emerald-500/10 max-w-[260px]">
-                              <div className="text-[10px] text-emerald-600 font-medium break-all whitespace-normal flex-1">
-                                {job.epub_filename}
-                              </div>
-                              <button
-                                onClick={(e) => handleDownloadEpub(e, job.id, job.epub_filename)}
-                                className="text-emerald-500 hover:text-emerald-600 transition-colors p-0.5 rounded-full hover:bg-emerald-500/20 shrink-0 mt-0.5"
-                                title="Download EPUB"
-                              >
-                                <Download size={12} />
-                              </button>
+                      return (
+                        <tr key={job.id} className="hover:bg-muted/5 transition-colors group">
+                          <td className="px-2 py-3">
+                            <div className="font-medium text-text break-all whitespace-normal max-w-[260px]" title={job.pdf_filename}>
+                              {job.pdf_filename}
                             </div>
-                          )}
-                        </td>
-                        <td className="px-2 py-3 text-center">
-                          {(() => {
-                            const completed = isJobCompleted(job)
-                            return (
-                              <div className="flex flex-col items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    if (completed) return
-                                    handleFastrackClick(e, job)
-                                  }}
-                                  disabled={completed || togglingFastrackId === job.id}
-                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-all shadow-xs select-none ${completed
+
+                          </td>
+                          <td className="px-2 py-3 text-center">
+                            {(() => {
+                              const completed = isJobCompleted(job)
+                              return (
+                                <div className="flex flex-col items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      if (completed) return
+                                      handleFastrackClick(e, job)
+                                    }}
+                                    disabled={completed || togglingFastrackId === job.id}
+                                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-all shadow-xs select-none ${completed
                                       ? job.is_fastrack
                                         ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
                                         : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
                                       : job.is_fastrack
                                         ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
                                         : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
-                                    }`}
-                                  title={
-                                    completed
-                                      ? "Job completed — Fastrack status is locked"
-                                      : job.is_fastrack
-                                        ? "Fastrack Enabled — Click to disable"
-                                        : "Normal — Click to enable Fastrack and set target date"
-                                  }
-                                >
-                                  {togglingFastrackId === job.id ? (
-                                    <Loader2 size={11} className="animate-spin text-amber-500" />
-                                  ) : (
-                                    <Zap size={11} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
-                                  )}
-                                  <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
-                                </button>
-                              </div>
-                            )
-                          })()}
-                        </td>
-                        <td className="px-2 py-3 text-[10px] text-muted text-center">
-                          {job.pdf_page_count || '-'}
-                        </td>
-                        <td className="px-2 py-3 text-[10px] font-medium text-muted">
-                          {job.pdf_type || '-'}
-                        </td>
-                        <td className="px-2 py-3 text-[10px] font-medium text-muted">
-                          {job.pdf_language || '-'}
-                        </td>
-                        <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <Calendar size={10} className="text-muted-foreground/60" />
-                            {job.created_at ? formatDateTime(job.created_at) : '-'}
-                          </div>
-                        </td>
-                        <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
-                          <div>
+                                      }`}
+                                    title={
+                                      completed
+                                        ? "Job completed — Fastrack status is locked"
+                                        : job.is_fastrack
+                                          ? "Fastrack Enabled — Click to disable"
+                                          : "Normal — Click to enable Fastrack and set target date"
+                                    }
+                                  >
+                                    {togglingFastrackId === job.id ? (
+                                      <Loader2 size={11} className="animate-spin text-amber-500" />
+                                    ) : (
+                                      <Zap size={11} className={job.is_fastrack ? "text-amber-500 fill-amber-500" : "text-muted/60"} />
+                                    )}
+                                    <span>{job.is_fastrack ? "Fastrack" : "Normal"}</span>
+                                  </button>
+                                </div>
+                              )
+                            })()}
+                          </td>
+                          <td className="px-2 py-3 text-[10px] text-muted text-center">
+                            {job.pdf_page_count || '-'}
+                          </td>
+                          <td className="px-2 py-3 text-[10px] font-medium text-muted">
+                            {job.pdf_type || '-'}
+                          </td>
+                          <td className="px-2 py-3 text-[10px] font-medium text-muted">
+                            {job.pdf_language || '-'}
+                          </td>
+                          <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
                             <div className="flex items-center gap-1.5">
-                              <Calendar size={10} className="text-amber-500/80" />
-                              <span>{job.due_date ? formatDate(job.due_date) : '-'}</span>
+                              <Calendar size={10} className="text-muted-foreground/60" />
+                              {job.created_at ? formatDateTime(job.created_at) : '-'}
                             </div>
-                            {job.is_fastrack && job.fastrack_requested_date && (
-                              <div
-                                className="flex items-center gap-1 mt-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400"
-                                title={`Requested completion date: ${formatDate(job.fastrack_requested_date)}`}
-                              >
-                                <Clock size={8} className="shrink-0 text-amber-500" />
-                                <span>Fastrack: {formatDate(job.fastrack_requested_date)}</span>
+                          </td>
+                          <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <Calendar size={10} className="text-amber-500/80" />
+                                <span>{job.due_date ? formatDate(job.due_date) : '-'}</span>
                               </div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-2 py-3 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
-                            {finalStatus === 'Ahead' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
-                            {finalStatus === 'On-time' && <CheckCircle2 size={10} className="mr-1 text-blue-500" />}
-                            {finalStatus === 'Delay' && <AlertCircle size={10} className="mr-1 text-rose-500" />}
-                            {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1" />}
-                            {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
-                            {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
-                            {finalStatus}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                              {job.is_fastrack && job.fastrack_requested_date && (
+                                <div
+                                  className="flex items-center gap-1 mt-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400"
+                                  title={`Requested completion date: ${formatDate(job.fastrack_requested_date)}`}
+                                >
+                                  <Clock size={8} className="shrink-0 text-amber-500" />
+                                  <span>Fastrack: {formatDate(job.fastrack_requested_date)}</span>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-2 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
+                                {(finalStatus === 'Completed (Ahead)' || finalStatus === 'Ahead') && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
+                                {(finalStatus === 'Completed (On-time)' || finalStatus === 'On-time') && <CheckCircle2 size={10} className="mr-1 text-blue-500" />}
+                                {(finalStatus === 'Completed (Delay)' || finalStatus === 'Delay') && <AlertCircle size={10} className="mr-1 text-rose-500" />}
+                                {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
+                                {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
+                                {finalStatus === 'Hold' && <PauseCircle size={10} className="mr-1 text-sky-600 dark:text-sky-400" />}
+                                {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
+                                {finalStatus}
+                              </span>
+
+                              {/* Customer Query Answer Button for Hold jobs */}
+                              {job.status === 'Hold' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOpenHoldAnswerModal(e, job)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-xs transition-all animate-pulse hover:animate-none"
+                                  title="Click to review query and provide customer answer to resume job"
+                                >
+                                  <MessageSquare size={11} />
+                                  <span>Answer Query</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
       </div>
 
       {/* Fastrack Management Modal */}
@@ -1548,8 +1829,8 @@ export function BodCustomerReportPage() {
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-text">Current Status:</span>
                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${fastrackModalJob.is_fastrack
-                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40'
-                      : 'bg-muted text-muted-foreground'
+                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40'
+                    : 'bg-muted text-muted-foreground'
                     }`}>
                     {fastrackModalJob.is_fastrack ? 'Fastrack Active' : 'Normal Priority'}
                   </span>
@@ -1650,6 +1931,173 @@ export function BodCustomerReportPage() {
                     {fastrackModalJob.is_fastrack ? "Update Date" : "Confirm & Enable Fastrack"}
                   </button>
                 </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Customer Hold Query Answer Modal */}
+      {holdAnswerJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-card w-full max-w-lg rounded-xl shadow-2xl border border-border flex flex-col p-5 gap-4">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-[#E0F2FE] text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
+                  <MessageSquare size={18} className="text-sky-600 dark:text-sky-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-text text-sm m-0 flex items-center gap-1.5">
+                    Answer Customer Support Query
+                  </h3>
+                  <p className="text-[11px] text-muted m-0 truncate max-w-[280px]" title={holdAnswerJob.pdf_filename}>
+                    {holdAnswerJob.pdf_filename}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHoldAnswerJob(null)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Display Open Query Details */}
+            {(() => {
+              const openQueries = (holdAnswerJob.hold_support_history || []).filter((h: any) => h.status === 'Open' && h.type === 'Hold')
+              const latestQuery = openQueries.length > 0 ? openQueries[openQueries.length - 1] : (holdAnswerJob.hold_support_history || []).slice(-1)[0]
+
+              return latestQuery ? (
+                <div className="bg-[#E0F2FE]/40 border border-sky-200 dark:bg-sky-950/20 dark:border-sky-800 rounded-lg p-3 text-xs space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-sky-900 dark:text-sky-300 uppercase tracking-wider">
+                      Current Query from S4Carlisle Team
+                    </span>
+                    <span className="text-muted text-[10px]">
+                      {latestQuery.created_at ? formatDateTime(latestQuery.created_at) : ''}
+                    </span>
+                  </div>
+                  <div className="text-text font-medium whitespace-pre-wrap bg-background/80 p-2.5 rounded border border-border/60 leading-relaxed text-xs">
+                    {latestQuery.query_reason || 'Waiting for customer clarification.'}
+                  </div>
+                  {latestQuery.attachments && latestQuery.attachments.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[10px] font-bold text-muted uppercase">Query Attachments:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {latestQuery.attachments.map((att: any, aIdx: number) => (
+                          <a
+                            key={aIdx}
+                            href={`/api/v2/bod/jobs/${holdAnswerJob.id}/hold-attachments/${latestQuery.id}/${encodeURIComponent(att.saved_filename || att.filename)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-background border border-border text-primary hover:underline shadow-xs"
+                          >
+                            <Paperclip size={10} className="text-amber-500" />
+                            <span className="truncate max-w-[160px]">{att.filename}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null
+            })()}
+
+            {/* Customer Reply Form */}
+            <form onSubmit={submitHoldAnswer} className="flex flex-col gap-3.5">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-text flex items-center justify-between">
+                  <span>Your Answer / Clarification <span className="text-rose-500">*</span></span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Submitting will resume work</span>
+                </label>
+                <textarea
+                  required
+                  rows={4}
+                  placeholder="Provide your answer or instruction to resolve this query and resume production..."
+                  value={holdAnswerText}
+                  onChange={(e) => setHoldAnswerText(e.target.value)}
+                  className="w-full p-2.5 bg-background border border-border rounded-lg text-xs text-text placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all resize-y shadow-xs"
+                />
+              </div>
+
+              {/* Attachments */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-text flex items-center gap-1">
+                  <Paperclip size={12} className="text-amber-500" />
+                  Attach Reference File / Corrected Asset <span className="text-[10px] text-muted font-normal">(optional)</span>
+                </label>
+                <div className="border border-dashed border-border hover:border-emerald-500/50 rounded-lg p-2.5 text-center bg-muted/5 transition-colors">
+                  <input
+                    type="file"
+                    id="customer-hold-answer-files"
+                    multiple
+                    accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx"
+                    onChange={(e) => {
+                      if (e.target.files) {
+                        const newFiles = Array.from(e.target.files)
+                        setHoldAnswerFiles(prev => [...prev, ...newFiles])
+                        e.target.value = ''
+                      }
+                    }}
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="customer-hold-answer-files"
+                    className="cursor-pointer flex flex-col items-center justify-center gap-1 text-[11px] text-muted hover:text-text"
+                  >
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">Click to attach file</span>
+                    <span className="text-[9.5px] text-muted">Supports images, PDF, Word, Excel</span>
+                  </label>
+                </div>
+
+                {holdAnswerFiles.length > 0 && (
+                  <div className="space-y-1 max-h-28 overflow-y-auto pr-1 mt-1">
+                    {holdAnswerFiles.map((file, fIdx) => (
+                      <div
+                        key={fIdx}
+                        className="flex items-center justify-between gap-2 p-1.5 rounded-md bg-background border border-border text-xs"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <File size={12} className="text-amber-500 shrink-0" />
+                          <span className="font-medium text-text truncate max-w-[220px] text-[11px]">{file.name}</span>
+                          <span className="text-[9px] text-muted shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setHoldAnswerFiles(prev => prev.filter((_, i) => i !== fIdx))}
+                          className="text-muted hover:text-rose-600 p-0.5 rounded transition-colors"
+                          title="Remove file"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-border/60">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setHoldAnswerJob(null)}
+                  disabled={submittingHoldAnswer}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={submittingHoldAnswer || !holdAnswerText.trim()}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                >
+                  {submittingHoldAnswer ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                  Submit Answer & Resume
+                </Button>
               </div>
             </form>
           </div>

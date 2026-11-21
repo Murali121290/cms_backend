@@ -91,7 +91,14 @@ def get_smtp_client():
     return server
 
 
-def send_email(to_email: str, subject: str, text_body: str, html_body: str = None, cc_emails: Optional[list] = None):
+def send_email(
+    to_email: str,
+    subject: str,
+    text_body: str,
+    html_body: str = None,
+    cc_emails: Optional[list] = None,
+    attachments: Optional[list[dict]] = None
+):
     settings = get_settings()
     smtp_from = getattr(settings, 'SMTP_FROM', 'noreply@example.com')
     smtp_user = getattr(settings, 'SMTP_USERNAME', None)
@@ -106,6 +113,15 @@ def send_email(to_email: str, subject: str, text_body: str, html_body: str = Non
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype='html')
+
+    if attachments:
+        for att in attachments:
+            content = att.get('content')
+            filename = att.get('filename', 'attachment')
+            maintype = att.get('maintype', 'application')
+            subtype = att.get('subtype', 'octet-stream')
+            if content:
+                msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
     to_list = [e.strip() for e in to_email.split(',') if e.strip()] if isinstance(to_email, str) else list(to_email)
     cc_list = [e.strip() for e in (cc_emails if isinstance(cc_emails, (list, tuple)) else str(cc_emails).split(','))] if cc_emails else []
@@ -475,5 +491,90 @@ def send_bod_daily_receipt_summary_email(
     </html>
     """
 
-    send_email(manager_email, subject, text_body, html_body)
+    # Generate Excel (.xlsx) file attachment from summary_rows
+    attachments = []
+    try:
+        import io
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "BOD Job Receipt Summary"
+
+        # Headers
+        headers = [
+            "S. No.", "Date", "ISBN", "Title Name", "Pages", "Input Type",
+            "Cover", "Language", "File Size (KB)", "Alt Text Available?", "Remarks"
+        ]
+        ws.append(headers)
+
+        header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        thin_border = Border(
+            left=Side(style='thin', color='E5E7EB'),
+            right=Side(style='thin', color='E5E7EB'),
+            top=Side(style='thin', color='E5E7EB'),
+            bottom=Side(style='thin', color='E5E7EB')
+        )
+
+        for col_num in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Data rows
+        for idx, r in enumerate(summary_rows, start=1):
+            row_data = [
+                idx,
+                r.get("date") or report_date_str,
+                r.get("isbn") or r.get("pisbn") or "-",
+                r.get("title") or "-",
+                r.get("pages") or "-",
+                r.get("input_type") or "-",
+                r.get("cover") or "-",
+                r.get("language") or "-",
+                r.get("file_size_kb") or "-",
+                r.get("alt_text") or "No",
+                r.get("remarks") or "-"
+            ]
+            ws.append(row_data)
+
+            current_row = idx + 1
+            for col_num in range(1, len(row_data) + 1):
+                cell = ws.cell(row=current_row, column=col_num)
+                cell.border = thin_border
+                cell.font = Font(name="Calibri", size=10)
+                if col_num in (1, 2, 5, 7, 10):
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                elif col_num == 9:
+                    cell.alignment = Alignment(horizontal="right", vertical="center")
+                else:
+                    cell.alignment = Alignment(horizontal="left", vertical="center")
+
+        # Auto-adjust column widths
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = openpyxl.utils.get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+        excel_buffer = io.BytesIO()
+        wb.save(excel_buffer)
+        excel_bytes = excel_buffer.getvalue()
+
+        # Sanitize report date for filename
+        clean_date = report_date_str.replace('/', '-')
+        excel_filename = f"BOD_Job_Receipt_Summary_{clean_date}.xlsx"
+
+        attachments.append({
+            "content": excel_bytes,
+            "filename": excel_filename,
+            "maintype": "application",
+            "subtype": "vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        })
+    except Exception as exc:
+        logger.error(f"Failed to generate Excel attachment for BOD daily receipt summary: {exc}")
+
+    send_email(manager_email, subject, text_body, html_body, attachments=attachments)
 

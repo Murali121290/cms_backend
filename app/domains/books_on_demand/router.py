@@ -7,6 +7,8 @@ import os
 import re
 import shutil
 import logging
+import mimetypes
+from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
 
 from app.database import get_db, SessionLocal
@@ -418,14 +420,7 @@ def get_customer_report(
     
     report = []
     for job in jobs:
-        customer_due = None
-        if job.due_date:
-            customer_due = job.due_date
-            # customer_due = job.due_date + timedelta(days=1)
-        elif job.created_at:
-            is_image = bool(job.pdf_type and "image" in str(job.pdf_type).lower())
-            days = 7 if is_image else 4
-            customer_due = job.created_at + timedelta(days=days)
+        customer_due = job.due_date
 
         report.append({
             "id": job.id,
@@ -452,7 +447,8 @@ def get_customer_report(
             "revision": job.revision,
             "version": job.revision,
             "reopen_history": job.reopen_history or [],
-            "due_date_history": job.due_date_history
+            "due_date_history": job.due_date_history,
+            "hold_support_history": job.hold_support_history or []
         })
     return {"jobs": report}
 
@@ -677,7 +673,13 @@ def update_job_hold_support(
 
     # 1. Update hold_support_history
     hold_history = list(job.hold_support_history) if job.hold_support_history else []
-    record_id = f"HS-{job.id}-{len(hold_history) + 1}"
+
+    # If resolving to Active, save resolution files under the open record's folder if it exists
+    open_record = next((item for item in hold_history if item.get("status") == "Open"), None)
+    if target_status == "Active" and open_record:
+        record_id = open_record.get("id") or f"HS-{job.id}-{len(hold_history)}"
+    else:
+        record_id = f"HS-{job.id}-{len(hold_history) + 1}"
 
     # Handle attachments (screenshots, images, PDFs, sheets, docs)
     saved_attachments = []
@@ -875,6 +877,24 @@ def download_hold_attachment(
         if os.path.exists(dest_path_prefixed):
             dest_path = dest_path_prefixed
 
+    # Fallback: if not found directly in record_id folder, search other hold folders for this job
+    if not os.path.exists(dest_path) or not os.path.isfile(dest_path):
+        base_hold_dir = os.path.join(upload_dir, "bod", "BOD", project_name, "hold_attachments")
+        if os.path.exists(base_hold_dir):
+            # Check all subdirectories
+            for sub_dir in os.listdir(base_hold_dir):
+                candidate_dir = os.path.join(base_hold_dir, sub_dir)
+                if os.path.isdir(candidate_dir):
+                    candidate_file = os.path.join(candidate_dir, safe_target)
+                    if os.path.exists(candidate_file) and os.path.isfile(candidate_file):
+                        dest_path = candidate_file
+                        break
+                    # Also try prefixing with sub_dir
+                    candidate_prefixed = os.path.join(candidate_dir, f"{sub_dir}_{safe_target}")
+                    if os.path.exists(candidate_prefixed) and os.path.isfile(candidate_prefixed):
+                        dest_path = candidate_prefixed
+                        break
+
     if not os.path.exists(dest_path) or not os.path.isfile(dest_path):
         raise HTTPException(status_code=404, detail="Attachment not found")
 
@@ -882,7 +902,19 @@ def download_hold_attachment(
     if display_name.startswith(f"{record_id}_"):
         display_name = display_name[len(record_id) + 1:]
 
-    return FileResponse(path=dest_path, filename=display_name)
+    content_type, _ = mimetypes.guess_type(dest_path)
+    viewable_types = {
+        'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml',
+        'application/pdf', 'text/plain'
+    }
+
+    if content_type in viewable_types:
+        ascii_name = display_name.encode('ascii', 'ignore').decode('ascii') or 'file'
+        encoded_name = quote(display_name.encode('utf-8'))
+        headers = {"Content-Disposition": f'inline; filename="{ascii_name}"; filename*=utf-8\'\'{encoded_name}'}
+        return FileResponse(path=dest_path, media_type=content_type, headers=headers)
+
+    return FileResponse(path=dest_path, filename=display_name, media_type=content_type or 'application/octet-stream')
 
 
 class BodReopenRequest(BaseModel):
@@ -1129,7 +1161,19 @@ def download_reopen_attachment(
     if display_name.startswith(f"{version}_"):
         display_name = display_name[len(version) + 1:]
 
-    return FileResponse(path=dest_path, filename=display_name)
+    content_type, _ = mimetypes.guess_type(dest_path)
+    viewable_types = {
+        'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml',
+        'application/pdf', 'text/plain'
+    }
+
+    if content_type in viewable_types:
+        ascii_name = display_name.encode('ascii', 'ignore').decode('ascii') or 'file'
+        encoded_name = quote(display_name.encode('utf-8'))
+        headers = {"Content-Disposition": f'inline; filename="{ascii_name}"; filename*=utf-8\'\'{encoded_name}'}
+        return FileResponse(path=dest_path, media_type=content_type, headers=headers)
+
+    return FileResponse(path=dest_path, filename=display_name, media_type=content_type or 'application/octet-stream')
 
 
 @router.put("/jobs/{job_id}/due-date")

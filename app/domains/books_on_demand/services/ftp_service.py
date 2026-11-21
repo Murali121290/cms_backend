@@ -172,17 +172,22 @@ class BodFtpService:
         self.ca_file = ca_file
         
         # If ssl_verify is not explicitly passed, inspect environment / settings
-        if ssl_verify is None:
-            from app.core.config import get_settings
-            try:
-                settings = get_settings()
+        from app.core.config import get_settings
+        try:
+            settings = get_settings()
+            if ssl_verify is None:
                 self.ssl_verify = getattr(settings, "BOD_FTP_SSL_VERIFY", True)
-                if not self.ca_file:
-                    self.ca_file = getattr(settings, "BOD_FTP_CA_FILE", None) or None
-            except Exception:
-                self.ssl_verify = True
-        else:
-            self.ssl_verify = ssl_verify
+            else:
+                self.ssl_verify = ssl_verify
+
+            if not self.ca_file:
+                self.ca_file = getattr(settings, "BOD_FTP_CA_FILE", None) or None
+
+            fallback_cfg = getattr(settings, "BOD_FTP_FALLBACK_HOSTS", "") or ""
+            self.fallback_hosts = [h.strip() for h in fallback_cfg.split(",") if h.strip()]
+        except Exception:
+            self.ssl_verify = True if ssl_verify is None else ssl_verify
+            self.fallback_hosts = []
 
         self.ssh_client = None
         self.sftp = None
@@ -207,88 +212,96 @@ class BodFtpService:
         return context
 
     def connect(self):
-        """Establish connection and authenticate using SFTP (if port 22) or FTP/FTPS."""
+        """Establish connection and authenticate using SFTP (if port 22) or FTP/FTPS with fallback."""
         if not self.host:
             raise ValueError("FTP host is not configured.")
 
         clean_host = self.host.strip()
 
-        # 1. SFTP Connection mode when port == 22
-        if self.port == 22:
-            if paramiko is None:
-                raise ImportError("paramiko is required for SFTP on port 22. Please install paramiko.")
-            logger.info(f"Connecting to SFTP server {clean_host}:{self.port} with user '{self.username}'...")
+        # Build candidate hosts from primary host and optional configured fallbacks (via env BOD_FTP_FALLBACK_HOSTS)
+        candidate_hosts = [clean_host]
+        for fb_host in getattr(self, "fallback_hosts", []):
+            if fb_host not in candidate_hosts:
+                candidate_hosts.append(fb_host)
+
+        last_error = None
+        for current_host in candidate_hosts:
             try:
-                self.ssh_client = paramiko.SSHClient()
-                self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                self.ssh_client.connect(
-                    clean_host,
-                    port=self.port,
-                    username=self.username,
-                    password=self.password,
-                    timeout=self.timeout
-                )
-                self.sftp = self.ssh_client.open_sftp()
-                self.ftp = SftpSessionProxy(self.sftp)
-                logger.info(f"Successfully established SFTP connection with {clean_host}:{self.port}")
-                return
-            except Exception as e:
-                logger.error(f"Failed to connect to SFTP {clean_host}:{self.port}: {str(e)}")
-                self.disconnect()
-                raise
+                # 1. SFTP Connection mode when port == 22
+                if self.port == 22:
+                    if paramiko is None:
+                        raise ImportError("paramiko is required for SFTP on port 22. Please install paramiko.")
+                    logger.info(f"Connecting to SFTP server {current_host}:{self.port} with user '{self.username}'...")
+                    self.ssh_client = paramiko.SSHClient()
+                    self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    self.ssh_client.connect(
+                        current_host,
+                        port=self.port,
+                        username=self.username,
+                        password=self.password,
+                        timeout=self.timeout
+                    )
+                    self.sftp = self.ssh_client.open_sftp()
+                    self.ftp = SftpSessionProxy(self.sftp)
+                    logger.info(f"Successfully established SFTP connection with {current_host}:{self.port}")
+                    return
 
-        # 2. Standard FTP / Explicit FTPS
-        logger.info(f"Connecting to FTP server {clean_host}:{self.port} (TLS={self.use_tls}, Passive={self.passive}, VerifySSL={self.ssl_verify})...")
+                # 2. Standard FTP / Explicit FTPS
+                logger.info(f"Connecting to FTP server {current_host}:{self.port} (TLS={self.use_tls}, Passive={self.passive}, VerifySSL={self.ssl_verify})...")
 
-        try:
-            if self.use_tls:
-                ssl_context = self._create_ssl_context()
-                self.ftp = PatchedFTP_TLS(context=ssl_context, timeout=self.timeout)
-                # 1. Connect TCP control socket on port 21
-                self.ftp.connect(clean_host, port=self.port, timeout=self.timeout)
+                if self.use_tls:
+                    ssl_context = self._create_ssl_context()
+                    self.ftp = PatchedFTP_TLS(context=ssl_context, timeout=self.timeout)
+                    # 1. Connect TCP control socket on port 21
+                    self.ftp.connect(current_host, port=self.port, timeout=self.timeout)
 
-                # 2. Upgrade control connection with Explicit FTPS (AUTH TLS)
-                try:
-                    self.ftp.auth()
-                except ssl.SSLCertVerificationError as ssl_err:
-                    logger.error(f"TLS certificate verification failed for {clean_host}:{self.port}: {ssl_err}")
-                    raise
-                except Exception as auth_err:
-                    logger.error(f"Explicit FTPS AUTH TLS negotiation failed on {clean_host}:{self.port}: {auth_err}")
-                    raise
+                    # 2. Upgrade control connection with Explicit FTPS (AUTH TLS)
+                    try:
+                        self.ftp.auth()
+                    except ssl.SSLCertVerificationError as ssl_err:
+                        logger.error(f"TLS certificate verification failed for {current_host}:{self.port}: {ssl_err}")
+                        raise
+                    except Exception as auth_err:
+                        logger.error(f"Explicit FTPS AUTH TLS negotiation failed on {current_host}:{self.port}: {auth_err}")
+                        raise
 
-                # 3. Authenticate credentials securely over TLS
-                try:
+                    # 3. Authenticate credentials securely over TLS
+                    try:
+                        self.ftp.login(self.username, self.password)
+                    except error_perm as perm_err:
+                        logger.error(f"FTP authentication failed for user '{self.username}' on {current_host}:{self.port}: {perm_err}")
+                        raise
+
+                    # 4. Switch data channel to encrypted mode (PROT P)
+                    try:
+                        self.ftp.prot_p()
+                    except Exception as prot_err:
+                        logger.error(f"Failed to enable protected data connection (PROT P) on {current_host}: {prot_err}")
+                        raise
+
+                    # 5. Set passive mode
+                    self.ftp.set_pasv(self.passive)
+
+                    logger.info(f"Successfully established Explicit FTPS connection and authenticated with {current_host}:{self.port} (PROT P enabled)")
+                    return
+                else:
+                    self.ftp = FTP(timeout=self.timeout)
+                    self.ftp.connect(current_host, port=self.port, timeout=self.timeout)
                     self.ftp.login(self.username, self.password)
-                except error_perm as perm_err:
-                    logger.error(f"FTP authentication failed for user '{self.username}' on {clean_host}:{self.port}: {perm_err}")
-                    raise
+                    self.ftp.set_pasv(self.passive)
+                    logger.info(f"Successfully connected to plain FTP server {current_host}:{self.port}")
+                    return
 
-                # 4. Switch data channel to encrypted mode (PROT P)
-                try:
-                    self.ftp.prot_p()
-                except Exception as prot_err:
-                    logger.error(f"Failed to enable protected data connection (PROT P) on {clean_host}: {prot_err}")
-                    raise
+            except (ssl.SSLCertVerificationError, error_perm) as non_retry_err:
+                self.disconnect()
+                raise non_retry_err
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Connection attempt to {current_host}:{self.port} failed ({e}). Checking next candidate if available...")
+                self.disconnect()
 
-                # 5. Set passive mode
-                self.ftp.set_pasv(self.passive)
-
-                logger.info(f"Successfully established Explicit FTPS connection and authenticated with {clean_host}:{self.port} (PROT P enabled)")
-            else:
-                self.ftp = FTP(timeout=self.timeout)
-                self.ftp.connect(clean_host, port=self.port, timeout=self.timeout)
-                self.ftp.login(self.username, self.password)
-                self.ftp.set_pasv(self.passive)
-                logger.info(f"Successfully connected to plain FTP server {clean_host}:{self.port}")
-
-        except (ssl.SSLCertVerificationError, error_perm):
-            self.disconnect()
-            raise
-        except Exception as e:
-            logger.error(f"Failed to connect or authenticate to FTP {clean_host}:{self.port}: {str(e)}")
-            self.disconnect()
-            raise
+        logger.error(f"Failed to connect or authenticate to FTP {clean_host}:{self.port}: {last_error}")
+        raise last_error
 
     def disconnect(self):
         if self.sftp:
