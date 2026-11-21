@@ -99,6 +99,7 @@ app.include_router(journals_router, prefix="/api", tags=["Journal Production Fal
 # Books on Demand Router
 from app.domains.books_on_demand.router import router as bod_router
 app.include_router(bod_router, prefix="/api/v2/bod", tags=["Books on Demand"])
+app.include_router(bod_router, prefix="/api/bod", tags=["Books on Demand Fallback"], include_in_schema=False)
 # Web PDF Processor Router
 from app.domains.post_prod.web_pdf_processor.router import router as web_pdf_processor
 app.include_router(web_pdf_processor, prefix="/api/v2", tags=["Web PDF Processor"])

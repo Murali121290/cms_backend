@@ -3851,7 +3851,9 @@ export function BodInternalPage() {
                                     {record.attachments.map((att: any, aIdx: number) => {
                                       const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
                                       const ext = (att.filename || '').split('.').pop()?.toLowerCase()
-                                      const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                      const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)
+                                      const isPdf = ext === 'pdf'
+                                      const isViewable = isImg || isPdf || ext === 'txt'
                                       const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
 
                                       return (
@@ -3860,7 +3862,7 @@ export function BodInternalPage() {
                                           href={downloadUrl}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          download={att.filename}
+                                          {...(!isViewable ? { download: att.filename } : {})}
                                           className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group/att"
                                         >
                                           <div className="flex items-center gap-2 min-w-0">
@@ -3904,13 +3906,15 @@ export function BodInternalPage() {
                                       <div className="space-y-1">
                                         {record.resolution_attachments.map((att: any, aIdx: number) => {
                                           const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/hold-attachments/${record.id}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                                          const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                                          const isViewable = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'pdf', 'txt'].includes(ext)
                                           return (
                                             <a
                                               key={aIdx}
                                               href={downloadUrl}
                                               target="_blank"
                                               rel="noopener noreferrer"
-                                              download={att.filename}
+                                              {...(!isViewable ? { download: att.filename } : {})}
                                               className="flex items-center justify-between gap-2 p-1.5 rounded bg-background border border-emerald-500/20 hover:border-emerald-500/40 text-xs transition-all"
                                             >
                                               <span className="truncate text-[11px] font-medium text-text">{att.filename}</span>
@@ -4034,7 +4038,9 @@ export function BodInternalPage() {
                                   const rev = record.revision
                                   const downloadUrl = `/api/v2/bod/jobs/${historyJob.id}/reopen-attachments/${rev}/${encodeURIComponent(att.saved_filename || att.filename)}`
                                   const ext = (att.filename || '').split('.').pop()?.toLowerCase()
-                                  const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
+                                  const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)
+                                  const isPdf = ext === 'pdf'
+                                  const isViewable = isImg || isPdf || ext === 'txt'
                                   const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
 
                                   return (
@@ -4043,7 +4049,7 @@ export function BodInternalPage() {
                                       href={downloadUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      download={att.filename}
+                                      {...(!isViewable ? { download: att.filename } : {})}
                                       className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-rose-500/40 hover:bg-rose-500/5 transition-all group/att"
                                     >
                                       <div className="flex items-center gap-2 min-w-0">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
-import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap, PauseCircle, RotateCcw, MessageSquare, Paperclip, File, CheckCircle, ExternalLink } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import { toast } from '@/store/useToastStore'
@@ -20,9 +21,15 @@ export function BodCustomerReportPage() {
   const [fastrackReason, setFastrackReason] = useState('')
   const [savingFastrack, setSavingFastrack] = useState(false)
 
+  // Customer Hold Response Modal state
+  const [holdAnswerJob, setHoldAnswerJob] = useState<any | null>(null)
+  const [holdAnswerText, setHoldAnswerText] = useState('')
+  const [holdAnswerFiles, setHoldAnswerFiles] = useState<File[]>([])
+  const [submittingHoldAnswer, setSubmittingHoldAnswer] = useState(false)
+
   // Filters
   const [search, setSearch] = useState('')
-  type QuickFilter = 'all' | 'total_all' | 'total_intake' | 'total_backlog' | 'yts' | 'yts_fresh' | 'yts_other' | 'in_progress' | 'completed' | 'completed_ahead' | 'completed_ontime' | 'completed_delay' | 'overdue'
+  type QuickFilter = 'all' | 'total_all' | 'total_intake' | 'total_backlog' | 'yts' | 'yts_fresh' | 'yts_other' | 'in_progress' | 'hold' | 'reopen' | 'completed' | 'completed_ahead' | 'completed_ontime' | 'completed_delay' | 'overdue'
   const [cardFilter, setCardFilter] = useState<QuickFilter>('all')
 
   // Date Filter states (identical to internal page)
@@ -111,19 +118,51 @@ export function BodCustomerReportPage() {
     }
   }
 
-  const handleFastrackClick = (e: React.MouseEvent, job: any) => {
+  const handleOpenHoldAnswerModal = (e: React.MouseEvent, job: any) => {
     e.stopPropagation()
-    setFastrackModalJob(job)
-    setFastrackReason('')
-    if (job.is_fastrack && job.fastrack_requested_date) {
-      // Set to existing fastrack requested date
-      const raw = String(job.fastrack_requested_date).split('T')[0]
-      setFastrackExpectedDate(raw)
-    } else {
-      // Default to today
-      const now = new Date()
-      setFastrackExpectedDate(now.toISOString().slice(0, 10))
+    setHoldAnswerJob(job)
+    setHoldAnswerText('')
+    setHoldAnswerFiles([])
+  }
+
+  const submitHoldAnswer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!holdAnswerJob || !holdAnswerText.trim()) return
+
+    setSubmittingHoldAnswer(true)
+    try {
+      const formData = new FormData()
+      formData.append('status', 'Active')
+      formData.append('description', holdAnswerText.trim())
+
+      if (holdAnswerFiles && holdAnswerFiles.length > 0) {
+        holdAnswerFiles.forEach((file) => {
+          formData.append('files', file)
+        })
+      }
+
+      const { data } = await api.put(`/bod/jobs/${holdAnswerJob.id}/hold-support`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      setReport(prev => prev.map(j => j.id === holdAnswerJob.id ? {
+        ...j,
+        status: data.new_status || 'Active',
+        hold_support_history: data.hold_support_history || j.hold_support_history,
+        due_date_history: data.due_date_history || j.due_date_history
+      } : j))
+
+      toast.success("Query answer submitted! Work has been resumed.")
+      setHoldAnswerJob(null)
+    } catch (err: any) {
+      console.error(err)
+      toast.error(err.response?.data?.detail || "Failed to submit answer")
+    } finally {
+      setSubmittingHoldAnswer(false)
     }
+  }
+
+  const handleFastrackClick = (e: React.MouseEvent, job: any) => {
   }
 
   const handleTurnOffFastrack = async () => {
@@ -383,7 +422,9 @@ export function BodCustomerReportPage() {
 
     if (isJobCompleted(job)) {
       completionTiming = getCompletionTiming(getCompletedDate(job), job.due_date)
-      finalStatus = completionTiming
+      finalStatus = completionTiming ? `Completed (${completionTiming})` : 'Completed'
+    } else if (job.status === 'Hold') {
+      finalStatus = 'Hold'
     } else {
       if (overdueRefDate && isOverdue(job.due_date, overdueRefDate)) {
         finalStatus = 'Overdue'
@@ -433,6 +474,12 @@ export function BodCustomerReportPage() {
     if (cardFilter === 'in_progress') {
       return !completed && (job.current_stage === 'Add job' || job.current_stage === 'Production' || job.current_stage === 'QC' || job.current_stage === 'Ready to Dispatch')
     }
+    if (cardFilter === 'hold') {
+      return !completed && job.status === 'Hold'
+    }
+    if (cardFilter === 'reopen') {
+      return !completed && (Boolean(job.revision) || (job.reopen_history && job.reopen_history.length > 0))
+    }
     if (cardFilter === 'overdue') {
       return !completed && Boolean(overdueRefDate && isOverdue(job.due_date, overdueRefDate))
     }
@@ -461,6 +508,12 @@ export function BodCustomerReportPage() {
 
   // In-Progress: Add job, Production, QC, Ready to Dispatch
   const inProgressJobs = baseJobs.filter(j => !isJobCompleted(j) && (j.current_stage === 'Add job' || j.current_stage === 'Production' || j.current_stage === 'QC' || j.current_stage === 'Ready to Dispatch')).length
+
+  // Hold: Active jobs on Hold (Customer Query)
+  const holdJobs = baseJobs.filter(j => !isJobCompleted(j) && j.status === 'Hold').length
+
+  // Reopen / Revise: Active jobs with revision or reopen history
+  const reopenJobs = baseJobs.filter(j => !isJobCompleted(j) && (Boolean(j.revision) || (j.reopen_history && j.reopen_history.length > 0))).length
 
   // Overdue
   const overdueJobs = baseJobs.filter(j => !isJobCompleted(j) && Boolean(overdueRefDate && isOverdue(j.due_date, overdueRefDate))).length
@@ -608,7 +661,13 @@ export function BodCustomerReportPage() {
     // 11. Final Status
     if (colFilters.finalStatus !== 'all') {
       if (colFilters.finalStatus === 'Completed') {
-        if (!['Ahead', 'On-time', 'Delay', 'Completed'].includes(finalStatus)) return false
+        if (!finalStatus.startsWith('Completed')) return false
+      } else if (colFilters.finalStatus === 'Ahead') {
+        if (finalStatus !== 'Completed (Ahead)') return false
+      } else if (colFilters.finalStatus === 'On-time') {
+        if (finalStatus !== 'Completed (On-time)') return false
+      } else if (colFilters.finalStatus === 'Delay') {
+        if (finalStatus !== 'Completed (Delay)') return false
       } else if (finalStatus !== colFilters.finalStatus) {
         return false
       }
@@ -691,7 +750,7 @@ export function BodCustomerReportPage() {
       'QC Status',
       'QC Start Time',
       'QC End Time',
-      'Final Status'
+      'Status'
     ]
     const data = [headers]
     const dataToExport = tableJobs.length > 0 ? tableJobs : filteredReport
@@ -905,8 +964,8 @@ export function BodCustomerReportPage() {
           </div>
         </div>
 
-        {/* Metrics Row: Total (intake & backlogs), In-Progress, Completed (3 split: Ahead, On-time, Delay), Overdue */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Metrics Row: Total Books (7), In-Progress (5), Completed (10), Overdue (5), Hold (5), Revise (5) = Total 37 cols */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-[7fr_5fr_10fr_5fr_5fr_5fr] gap-3">
           {/* 1. Total (Intake + Backlogs) */}
           <div
             className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'all' || cardFilter === 'total_all' || cardFilter === 'total_intake' || cardFilter === 'total_backlog') && cardFilter !== 'all' ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.02]' : 'border-border/80 hover:border-primary/40'}`}
@@ -942,7 +1001,7 @@ export function BodCustomerReportPage() {
                     <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0"></span>
                     {datePreset === 'yesterday' ? 'Yest Intake' : datePreset === 'tomorrow' ? 'Tmrw Intake' : datePreset === 'today' ? 'Today Intake' : 'Intake'}
                   </span>
-                  <span className="text-xs font-bold text-text ml-1">{totalIntakeJobs}</span>
+                  <span className="text-xs font-bold text-text ml-1 shrink-0">{totalIntakeJobs}</span>
                 </div>
               </button>
 
@@ -956,7 +1015,7 @@ export function BodCustomerReportPage() {
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 shrink-0"></span>
                     Backlogs
                   </span>
-                  <span className="text-xs font-bold text-text ml-1">{totalBacklogJobs}</span>
+                  <span className="text-xs font-bold text-text ml-1 shrink-0">{totalBacklogJobs}</span>
                 </div>
               </button>
             </div>
@@ -982,7 +1041,7 @@ export function BodCustomerReportPage() {
             </div>
           </div>
 
-          {/* 4. Completed: 3 split (Ahead, On-time, Delay) */}
+          {/* 3. Completed: 3 split (Ahead, On-time, Delay) */}
           <div
             className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'completed' || cardFilter.startsWith('completed_')) ? 'border-emerald-500/60 ring-2 ring-emerald-500/20' : 'border-border/80 hover:border-emerald-500/30'}`}
           >
@@ -1010,51 +1069,51 @@ export function BodCustomerReportPage() {
               <button
                 type="button"
                 onClick={() => setCardFilter(cardFilter === 'completed_ahead' ? 'all' : 'completed_ahead')}
-                className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'completed_ahead' ? 'bg-emerald-500/10 border-emerald-500/40 ring-1 ring-emerald-500/30' : 'bg-background/60 border-border/60 hover:border-emerald-500/30 hover:bg-accent/40'}`}
+                className={`px-1 py-1 rounded text-left transition-all border ${cardFilter === 'completed_ahead' ? 'bg-emerald-500/10 border-emerald-500/40 ring-1 ring-emerald-500/30' : 'bg-background/60 border-border/60 hover:border-emerald-500/30 hover:bg-accent/40'}`}
                 title="Completed ahead of schedule"
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 truncate">
+                <div className="flex items-center justify-between gap-0.5">
+                  <span className="text-[7.5px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 truncate">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                     Ahead
                   </span>
-                  <span className="text-xs font-bold text-text">{completedAhead}</span>
+                  <span className="text-[11px] font-bold text-text shrink-0">{completedAhead}</span>
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setCardFilter(cardFilter === 'completed_ontime' ? 'all' : 'completed_ontime')}
-                className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'completed_ontime' ? 'bg-blue-500/10 border-blue-500/40 ring-1 ring-blue-500/30' : 'bg-background/60 border-border/60 hover:border-blue-500/30 hover:bg-accent/40'}`}
+                className={`px-1 py-1 rounded text-left transition-all border ${cardFilter === 'completed_ontime' ? 'bg-blue-500/10 border-blue-500/40 ring-1 ring-blue-500/30' : 'bg-background/60 border-border/60 hover:border-blue-500/30 hover:bg-accent/40'}`}
                 title="Completed on time"
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-0.5 truncate">
+                <div className="flex items-center justify-between gap-0.5">
+                  <span className="text-[7.5px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-0.5 truncate">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
                     On-time
                   </span>
-                  <span className="text-xs font-bold text-text">{completedOnTime}</span>
+                  <span className="text-[11px] font-bold text-text shrink-0">{completedOnTime}</span>
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setCardFilter(cardFilter === 'completed_delay' ? 'all' : 'completed_delay')}
-                className={`px-1.5 py-1 rounded text-left transition-all border ${cardFilter === 'completed_delay' ? 'bg-rose-500/10 border-rose-500/40 ring-1 ring-rose-500/30' : 'bg-background/60 border-border/60 hover:border-rose-500/30 hover:bg-accent/40'}`}
+                className={`px-1 py-1 rounded text-left transition-all border ${cardFilter === 'completed_delay' ? 'bg-rose-500/10 border-rose-500/40 ring-1 ring-rose-500/30' : 'bg-background/60 border-border/60 hover:border-rose-500/30 hover:bg-accent/40'}`}
                 title="Completed with delay"
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-0.5 truncate">
+                <div className="flex items-center justify-between gap-0.5">
+                  <span className="text-[7.5px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-0.5 truncate">
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span>
                     Delay
                   </span>
-                  <span className="text-xs font-bold text-text">{completedDelay}</span>
+                  <span className="text-[11px] font-bold text-text shrink-0">{completedDelay}</span>
                 </div>
               </button>
             </div>
           </div>
 
-          {/* 5. Overdue */}
+          {/* 4. Overdue */}
           <div
             onClick={() => setCardFilter(cardFilter === 'overdue' ? 'all' : 'overdue')}
             className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'overdue' ? 'border-red-500/60 ring-2 ring-red-500/20 bg-red-500/[0.04]' : 'border-border/80 hover:border-red-500/40'}`}
@@ -1071,6 +1130,46 @@ export function BodCustomerReportPage() {
             <div className="flex items-baseline justify-between mt-2">
               <span className="text-xl font-bold text-red-600 dark:text-red-400 leading-none">{overdueJobs}</span>
               <span className="text-[9px] text-red-500/80 truncate">Past customer due</span>
+            </div>
+          </div>
+
+          {/* 5. Hold */}
+          <div
+            onClick={() => setCardFilter(cardFilter === 'hold' ? 'all' : 'hold')}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'hold' ? 'border-fuchsia-500/60 ring-2 ring-fuchsia-500/20 bg-fuchsia-500/[0.04]' : 'border-border/80 hover:border-fuchsia-500/40'}`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400 rounded-md">
+                  <PauseCircle size={13} />
+                </div>
+                <span className="text-[10px] text-fuchsia-600 dark:text-fuchsia-400 font-bold uppercase tracking-wider">Hold</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400">Query</span>
+            </div>
+            <div className="flex items-baseline justify-between mt-2">
+              <span className="text-xl font-bold text-fuchsia-600 dark:text-fuchsia-400 leading-none">{holdJobs}</span>
+              <span className="text-[9px] text-fuchsia-600/80 dark:text-fuchsia-400/80 truncate">Customer Hold</span>
+            </div>
+          </div>
+
+          {/* 6. Revise (Reopen) */}
+          <div
+            onClick={() => setCardFilter(cardFilter === 'reopen' ? 'all' : 'reopen')}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'reopen' ? 'border-rose-500/60 ring-2 ring-rose-500/20 bg-rose-500/[0.04]' : 'border-border/80 hover:border-rose-500/40'}`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md">
+                  <RotateCcw size={13} />
+                </div>
+                <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold uppercase tracking-wider">Revise</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400">Reopen</span>
+            </div>
+            <div className="flex items-baseline justify-between mt-2">
+              <span className="text-xl font-bold text-rose-600 dark:text-rose-400 leading-none">{reopenJobs}</span>
+              <span className="text-[9px] text-rose-600/80 dark:text-rose-400/80 truncate">Correction Cycle</span>
             </div>
           </div>
         </div>
@@ -1170,7 +1269,7 @@ export function BodCustomerReportPage() {
                 <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
                   <th onClick={() => handleSort('job')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[16%]">
                     <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Job</span>
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">File Name</span>
                       {renderSortIcon('job')}
                     </div>
                   </th>
@@ -1213,7 +1312,7 @@ export function BodCustomerReportPage() {
                   </th>
                   <th onClick={() => handleSort('finalStatus')} className="px-2 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors group select-none w-[15%]">
                     <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Final Status</span>
+                      <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Status</span>
                       {renderSortIcon('finalStatus')}
                     </div>
                   </th>
@@ -1359,10 +1458,11 @@ export function BodCustomerReportPage() {
                     >
                       <option value="all">All</option>
                       <option value="Completed">Completed (All)</option>
-                      <option value="Ahead">Ahead</option>
-                      <option value="On-time">On-time</option>
-                      <option value="Delay">Delay</option>
+                      <option value="Ahead">Completed (Ahead)</option>
+                      <option value="On-time">Completed (On-time)</option>
+                      <option value="Delay">Completed (Delay)</option>
                       <option value="In-progress">In-progress</option>
+                      <option value="Hold">Hold</option>
                       <option value="Overdue">Overdue</option>
                       <option value="YTS">YTS</option>
                     </select>
@@ -1390,11 +1490,12 @@ export function BodCustomerReportPage() {
                     const { finalStatus } = getJobStatuses(job)
 
                     const getStatusColor = (s: string) => {
-                      if (s === 'Ahead') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
-                      if (s === 'On-time') return 'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                      if (s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30'
-                      if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                      if (s === 'Completed (Ahead)' || s === 'Ahead') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 font-bold'
+                      if (s === 'Completed (On-time)' || s === 'On-time') return 'bg-blue-500/10 text-blue-600 border-blue-500/30 font-bold'
+                      if (s === 'Completed (Delay)' || s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30 font-bold'
+                      if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-bold'
                       if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                      if (s === 'Hold') return 'bg-fuchsia-500/10 text-fuchsia-600 border-fuchsia-500/30 font-bold'
                       if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
                       return 'bg-muted/10 text-muted-foreground border-border/50'
                     }
@@ -1405,24 +1506,7 @@ export function BodCustomerReportPage() {
                           <div className="font-medium text-text break-all whitespace-normal max-w-[260px]" title={job.pdf_filename}>
                             {job.pdf_filename}
                           </div>
-                          <div className="text-[10px] text-muted mt-0.5 flex items-center gap-1.5 truncate max-w-[200px]">
-                            <div className="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
-                            {job.client_name}
-                          </div>
-                          {job.epub_filename && (
-                            <div className="flex items-start gap-1.5 mt-2 bg-emerald-500/5 py-1 px-2 rounded-md w-fit border border-emerald-500/10 max-w-[260px]">
-                              <div className="text-[10px] text-emerald-600 font-medium break-all whitespace-normal flex-1">
-                                {job.epub_filename}
-                              </div>
-                              <button
-                                onClick={(e) => handleDownloadEpub(e, job.id, job.epub_filename)}
-                                className="text-emerald-500 hover:text-emerald-600 transition-colors p-0.5 rounded-full hover:bg-emerald-500/20 shrink-0 mt-0.5"
-                                title="Download EPUB"
-                              >
-                                <Download size={12} />
-                              </button>
-                            </div>
-                          )}
+
                         </td>
                         <td className="px-2 py-3 text-center">
                           {(() => {
@@ -1437,12 +1521,12 @@ export function BodCustomerReportPage() {
                                   }}
                                   disabled={completed || togglingFastrackId === job.id}
                                   className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-all shadow-xs select-none ${completed
-                                      ? job.is_fastrack
-                                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
-                                        : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
-                                      : job.is_fastrack
-                                        ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
-                                        : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
+                                    ? job.is_fastrack
+                                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600/60 dark:text-amber-400/60 opacity-60 cursor-not-allowed'
+                                      : 'bg-background/40 border-border/40 text-muted/50 opacity-50 cursor-not-allowed'
+                                    : job.is_fastrack
+                                      ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-500/30 cursor-pointer'
+                                      : 'bg-background/80 border-border/70 text-muted hover:text-text hover:border-border hover:bg-muted/30 cursor-pointer'
                                     }`}
                                   title={
                                     completed
@@ -1496,15 +1580,31 @@ export function BodCustomerReportPage() {
                           </div>
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
-                            {finalStatus === 'Ahead' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
-                            {finalStatus === 'On-time' && <CheckCircle2 size={10} className="mr-1 text-blue-500" />}
-                            {finalStatus === 'Delay' && <AlertCircle size={10} className="mr-1 text-rose-500" />}
-                            {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1" />}
-                            {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
-                            {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
-                            {finalStatus}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
+                              {(finalStatus === 'Completed (Ahead)' || finalStatus === 'Ahead') && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
+                              {(finalStatus === 'Completed (On-time)' || finalStatus === 'On-time') && <CheckCircle2 size={10} className="mr-1 text-blue-500" />}
+                              {(finalStatus === 'Completed (Delay)' || finalStatus === 'Delay') && <AlertCircle size={10} className="mr-1 text-rose-500" />}
+                              {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
+                              {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
+                              {finalStatus === 'Hold' && <PauseCircle size={10} className="mr-1 text-fuchsia-500" />}
+                              {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
+                              {finalStatus}
+                            </span>
+
+                            {/* Customer Query Answer Button for Hold jobs */}
+                            {job.status === 'Hold' && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenHoldAnswerModal(e, job)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-fuchsia-600 hover:bg-fuchsia-700 text-white shadow-xs transition-all animate-pulse hover:animate-none"
+                                title="Click to review query and provide customer answer to resume job"
+                              >
+                                <MessageSquare size={11} />
+                                <span>Answer Query</span>
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )
@@ -1548,8 +1648,8 @@ export function BodCustomerReportPage() {
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-text">Current Status:</span>
                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${fastrackModalJob.is_fastrack
-                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40'
-                      : 'bg-muted text-muted-foreground'
+                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40'
+                    : 'bg-muted text-muted-foreground'
                     }`}>
                     {fastrackModalJob.is_fastrack ? 'Fastrack Active' : 'Normal Priority'}
                   </span>
@@ -1650,6 +1750,173 @@ export function BodCustomerReportPage() {
                     {fastrackModalJob.is_fastrack ? "Update Date" : "Confirm & Enable Fastrack"}
                   </button>
                 </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Customer Hold Query Answer Modal */}
+      {holdAnswerJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-card w-full max-w-lg rounded-xl shadow-2xl border border-border flex flex-col p-5 gap-4">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-400">
+                  <MessageSquare size={18} className="text-fuchsia-500" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-text text-sm m-0 flex items-center gap-1.5">
+                    Answer Customer Support Query
+                  </h3>
+                  <p className="text-[11px] text-muted m-0 truncate max-w-[280px]" title={holdAnswerJob.pdf_filename}>
+                    {holdAnswerJob.pdf_filename}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHoldAnswerJob(null)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Display Open Query Details */}
+            {(() => {
+              const openQueries = (holdAnswerJob.hold_support_history || []).filter((h: any) => h.status === 'Open' && h.type === 'Hold')
+              const latestQuery = openQueries.length > 0 ? openQueries[openQueries.length - 1] : (holdAnswerJob.hold_support_history || []).slice(-1)[0]
+
+              return latestQuery ? (
+                <div className="bg-fuchsia-500/5 border border-fuchsia-500/30 rounded-lg p-3 text-xs space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-wider">
+                      Current Query from S4Carlisle Team
+                    </span>
+                    <span className="text-muted text-[10px]">
+                      {latestQuery.created_at ? formatDateTime(latestQuery.created_at) : ''}
+                    </span>
+                  </div>
+                  <div className="text-text font-medium whitespace-pre-wrap bg-background/80 p-2.5 rounded border border-border/60 leading-relaxed text-xs">
+                    {latestQuery.query_reason || 'Waiting for customer clarification.'}
+                  </div>
+                  {latestQuery.attachments && latestQuery.attachments.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[10px] font-bold text-muted uppercase">Query Attachments:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {latestQuery.attachments.map((att: any, aIdx: number) => (
+                          <a
+                            key={aIdx}
+                            href={`/api/v2/bod/jobs/${holdAnswerJob.id}/hold-attachments/${latestQuery.id}/${encodeURIComponent(att.saved_filename || att.filename)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-background border border-border text-primary hover:underline shadow-xs"
+                          >
+                            <Paperclip size={10} className="text-amber-500" />
+                            <span className="truncate max-w-[160px]">{att.filename}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null
+            })()}
+
+            {/* Customer Reply Form */}
+            <form onSubmit={submitHoldAnswer} className="flex flex-col gap-3.5">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-text flex items-center justify-between">
+                  <span>Your Answer / Clarification <span className="text-rose-500">*</span></span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Submitting will resume work</span>
+                </label>
+                <textarea
+                  required
+                  rows={4}
+                  placeholder="Provide your answer or instruction to resolve this query and resume production..."
+                  value={holdAnswerText}
+                  onChange={(e) => setHoldAnswerText(e.target.value)}
+                  className="w-full p-2.5 bg-background border border-border rounded-lg text-xs text-text placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all resize-y shadow-xs"
+                />
+              </div>
+
+              {/* Attachments */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-text flex items-center gap-1">
+                  <Paperclip size={12} className="text-amber-500" />
+                  Attach Reference File / Corrected Asset <span className="text-[10px] text-muted font-normal">(optional)</span>
+                </label>
+                <div className="border border-dashed border-border hover:border-emerald-500/50 rounded-lg p-2.5 text-center bg-muted/5 transition-colors">
+                  <input
+                    type="file"
+                    id="customer-hold-answer-files"
+                    multiple
+                    accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx"
+                    onChange={(e) => {
+                      if (e.target.files) {
+                        const newFiles = Array.from(e.target.files)
+                        setHoldAnswerFiles(prev => [...prev, ...newFiles])
+                        e.target.value = ''
+                      }
+                    }}
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="customer-hold-answer-files"
+                    className="cursor-pointer flex flex-col items-center justify-center gap-1 text-[11px] text-muted hover:text-text"
+                  >
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">Click to attach file</span>
+                    <span className="text-[9.5px] text-muted">Supports images, PDF, Word, Excel</span>
+                  </label>
+                </div>
+
+                {holdAnswerFiles.length > 0 && (
+                  <div className="space-y-1 max-h-28 overflow-y-auto pr-1 mt-1">
+                    {holdAnswerFiles.map((file, fIdx) => (
+                      <div
+                        key={fIdx}
+                        className="flex items-center justify-between gap-2 p-1.5 rounded-md bg-background border border-border text-xs"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <File size={12} className="text-amber-500 shrink-0" />
+                          <span className="font-medium text-text truncate max-w-[220px] text-[11px]">{file.name}</span>
+                          <span className="text-[9px] text-muted shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setHoldAnswerFiles(prev => prev.filter((_, i) => i !== fIdx))}
+                          className="text-muted hover:text-rose-600 p-0.5 rounded transition-colors"
+                          title="Remove file"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-border/60">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setHoldAnswerJob(null)}
+                  disabled={submittingHoldAnswer}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={submittingHoldAnswer || !holdAnswerText.trim()}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                >
+                  {submittingHoldAnswer ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                  Submit Answer & Resume
+                </Button>
               </div>
             </form>
           </div>
