@@ -102,6 +102,7 @@ class Settings(BaseSettings):
 
     # Books on Demand (BOD) FTP Settings
     BOD_FTP_HOST: str = ""
+    BOD_FTP_FALLBACK_HOSTS: str = ""
     BOD_FTP_PORT: int = 21
     BOD_FTP_TIMEOUT: int = 15
     BOD_FTP_WATCH_ENABLED: bool = True
