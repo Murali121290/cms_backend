@@ -905,7 +905,7 @@ export function BodInternalPage() {
     if (job.status === 'Hold') {
       return {
         label: 'Hold',
-        badgeClass: 'bg-fuchsia-500/15 border-fuchsia-500/40 text-fuchsia-600 dark:text-fuchsia-400 font-bold',
+        badgeClass: 'bg-[#E0F2FE] border-sky-300 text-sky-900 dark:bg-sky-950/60 dark:border-sky-800 dark:text-sky-200 font-bold',
         sublabel: 'Customer Query',
         isOverdue: isOverdueJob,
         isTomorrow: isTomorrowJob,
@@ -915,7 +915,7 @@ export function BodInternalPage() {
     if (job.status === 'Support') {
       return {
         label: 'Support',
-        badgeClass: 'bg-indigo-500/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-400 font-bold',
+        badgeClass: 'bg-[#BFDBFE] border-blue-300 text-blue-900 dark:bg-blue-950/60 dark:border-blue-800 dark:text-blue-200 font-bold',
         sublabel: 'Internal Help',
         isOverdue: isOverdueJob,
         isTomorrow: isTomorrowJob,
@@ -1427,7 +1427,7 @@ export function BodInternalPage() {
             {/* 1. Overdue */}
             <div
               onClick={() => setCardFilter(cardFilter === 'overdue' ? 'all' : 'overdue')}
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'overdue' ? 'border-red-500/60 ring-2 ring-red-500/20 bg-red-500/[0.04]' : 'border-border/80 hover:border-red-500/40'}`}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'overdue' ? 'border-red-500/60 ring-2 ring-red-500/20' : 'border-border/80 hover:border-red-500/40'}`}
             >
               <div className="flex items-center justify-between">
                 <span className="text-[9px] text-red-500 font-bold uppercase tracking-wider">Overdue</span>
@@ -1441,13 +1441,13 @@ export function BodInternalPage() {
               </div>
             </div>
 
-            {/* 2. Today / Selected Date Due */}
+            {/* 2. Today / Selected Date Due (Light Butter #FEF3C7) */}
             <div
               onClick={() => setCardFilter(cardFilter === 'today_due' ? 'all' : 'today_due')}
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'today_due' ? 'border-amber-500/60 ring-2 ring-amber-500/20 bg-amber-500/[0.04]' : 'border-border/80 hover:border-amber-500/40'}`}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'today_due' ? 'border-[#FCD34D] ring-2 ring-[#FEF3C7]/60 bg-[#FEF3C7] dark:bg-[#78350F]/30' : 'border-border/80 hover:border-[#FCD34D]'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[9px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider truncate">
+                <span className="text-[9px] text-[#B45309] dark:text-[#FDE68A] font-bold uppercase tracking-wider truncate">
                   {datePreset === 'today' || datePreset === 'all'
                     ? 'Today Due'
                     : datePreset === 'tomorrow'
@@ -1462,13 +1462,13 @@ export function BodInternalPage() {
                               ? 'Yesterday Due'
                               : 'Period Due'}
                 </span>
-                <div className="p-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded">
-                  <Calendar size={12} />
+                <div className="p-1 bg-[#FEF3C7] text-[#B45309] dark:bg-[#78350F]/50 dark:text-[#FDE68A] rounded">
+                  <Calendar size={12} className="text-[#D97706] dark:text-[#FBBF24]" />
                 </div>
               </div>
               <div className="flex items-baseline justify-between mt-1">
-                <span className="text-lg font-bold text-amber-600 dark:text-amber-400 leading-none">{todayDueJobs}</span>
-                <span className="text-[8px] text-amber-600/80 dark:text-amber-400/80 truncate">
+                <span className="text-lg font-bold text-[#92400E] dark:text-[#FEF3C7] leading-none">{todayDueJobs}</span>
+                <span className="text-[8px] text-[#B45309]/80 dark:text-[#FDE68A]/80 truncate">
                   {datePreset === 'today' || datePreset === 'all'
                     ? 'Due today'
                     : datePreset === 'tomorrow'
@@ -1489,7 +1489,7 @@ export function BodInternalPage() {
             {/* 3. Today / Selected Date Receipt */}
             <div
               onClick={() => setCardFilter(cardFilter === 'total_intake' ? 'all' : 'total_intake')}
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'total_intake' ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.04]' : 'border-border/80 hover:border-primary/40'}`}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'total_intake' ? 'border-primary/60 ring-2 ring-primary/20' : 'border-border/80 hover:border-primary/40'}`}
             >
               <div className="flex items-center justify-between">
                 <span className="text-[9px] text-primary font-bold uppercase tracking-wider truncate">
@@ -1690,7 +1690,7 @@ export function BodInternalPage() {
             {/* 1. Total Jobs (Spans 1 col, under Overdue) */}
             <div
               onClick={() => setCardFilter(cardFilter === 'total_all' || cardFilter === 'all' ? 'all' : 'total_all')}
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${(cardFilter === 'total_all' || (cardFilter === 'all' && hasActiveFilters)) ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.04]' : 'border-border/80 hover:border-primary/40'}`}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${(cardFilter === 'total_all' || (cardFilter === 'all' && hasActiveFilters)) ? 'border-primary/60 ring-2 ring-primary/20' : 'border-border/80 hover:border-primary/40'}`}
               title="Show all jobs"
             >
               <div className="flex items-center justify-between pb-1 border-b border-border/50">
@@ -1710,7 +1710,7 @@ export function BodInternalPage() {
             {/* 2. Add Job Stage (Spans 1 col, under Today Due) */}
             <div
               onClick={() => setCardFilter(cardFilter === 'add_job_all' ? 'all' : 'add_job_all')}
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'add_job_all' ? 'border-blue-500/60 ring-2 ring-blue-500/20 bg-blue-500/[0.03]' : 'border-border/80 hover:border-blue-500/40'}`}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 min-h-[62px] ${cardFilter === 'add_job_all' ? 'border-blue-400 ring-2 ring-blue-300/40 dark:bg-blue-950/40' : 'border-border/80 hover:border-blue-500/40'}`}
               title="Jobs fetched from FTP awaiting CSV match"
             >
               <div className="flex items-center justify-between pb-1 border-b border-border/50">
@@ -1903,25 +1903,25 @@ export function BodInternalPage() {
               </div>
             </div>
 
-            {/* 6. Ready to Dispatch (Aligns under Dispatched = 2 cols) */}
+            {/* 6. Ready to Dispatch (Aligns under Dispatched = 2 cols, Soft Emerald #D1FAE5) */}
             <div
               onClick={() => setCardFilter(cardFilter === 'ready_to_dispatch' ? 'all' : 'ready_to_dispatch')}
-              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter === 'ready_to_dispatch' ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-emerald-500/[0.03]' : 'border-border/80 hover:border-emerald-500/40'}`}
+              className={`bg-card border rounded-lg px-2.5 py-1.5 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-2 min-h-[62px] ${cardFilter === 'ready_to_dispatch' ? 'border-[#6EE7B7] ring-2 ring-[#D1FAE5]/60 bg-[#D1FAE5] dark:bg-[#064E3B]/30' : 'border-border/80 hover:border-[#6EE7B7]'}`}
             >
               <div className="flex items-center justify-between pb-1 border-b border-border/50">
                 <div className="flex items-center gap-1">
-                  <div className="p-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded">
-                    <Send size={11} />
+                  <div className="p-0.5 bg-[#D1FAE5] text-[#047857] dark:bg-[#064E3B]/50 dark:text-[#A7F3D0] rounded">
+                    <Send size={11} className="text-[#059669] dark:text-[#6EE7B7]" />
                   </div>
-                  <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Ready to Dispatch</span>
+                  <span className="text-[9px] font-bold text-[#065F46] dark:text-[#A7F3D0] uppercase tracking-wider">Ready to Dispatch</span>
                 </div>
-                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-[#D1FAE5] text-[#065F46] dark:bg-[#064E3B]/50 dark:text-[#A7F3D0]">
                   Total {dispatchTotal}
                 </span>
               </div>
               <div className="flex items-baseline justify-between mt-1 pt-0.5">
-                <span className="text-lg font-bold text-text leading-none">{dispatchTotal}</span>
-                <span className="text-[8px] text-muted truncate">Awaiting FTP Delivery</span>
+                <span className="text-lg font-bold text-[#064E3B] dark:text-[#ECFDF5] leading-none">{dispatchTotal}</span>
+                <span className="text-[8px] text-[#047857]/80 dark:text-[#A7F3D0]/80 truncate">Awaiting FTP Delivery</span>
               </div>
             </div>
           </div>
@@ -1957,66 +1957,66 @@ export function BodInternalPage() {
               </div>
             </div>
 
-            {/* 2. Hold (Fuchsia / Magenta theme - distinct from Overdue red, Fastrack amber, Support indigo) */}
+            {/* 2. Hold */}
             <div
               onClick={() => setCardFilter(cardFilter === 'hold' ? 'all' : 'hold')}
-              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'hold' ? 'border-fuchsia-500/60 ring-2 ring-fuchsia-500/20 bg-fuchsia-500/[0.04]' : 'border-border/80 hover:border-fuchsia-500/40'}`}
+              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'hold' ? 'border-sky-400 ring-2 ring-sky-300/40 dark:bg-sky-950/30' : 'border-border/80 hover:border-sky-300'}`}
               title="Click to view all active jobs on Hold (Customer Query)"
             >
               <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400 rounded-lg">
-                  <PauseCircle size={16} className="text-fuchsia-500" />
+                <div className="p-2 bg-[#E0F2FE] text-sky-800 dark:bg-sky-950/50 dark:text-sky-300 rounded-lg">
+                  <PauseCircle size={16} className="text-sky-600 dark:text-sky-400" />
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-wider block">Hold</span>
+                  <span className="text-[10px] font-bold text-sky-800 dark:text-sky-300 uppercase tracking-wider block">Hold</span>
                   <span className="text-[9px] text-muted">Customer Query / Clarification</span>
                 </div>
               </div>
               <div className="text-right">
-                <span className="text-xl font-bold text-fuchsia-600 dark:text-fuchsia-400 leading-none">{holdJobsCount}</span>
-                <span className="text-[9px] text-fuchsia-600/80 dark:text-fuchsia-400/80 block mt-0.5">Customer</span>
+                <span className="text-xl font-bold text-sky-900 dark:text-sky-200 leading-none">{holdJobsCount}</span>
+                <span className="text-[9px] text-sky-700/80 dark:text-sky-400/80 block mt-0.5">Customer</span>
               </div>
             </div>
 
-            {/* 3. Support */}
+            {/* 3. Support (Powder Blue #BFDBFE theme) */}
             <div
               onClick={() => setCardFilter(cardFilter === 'support' ? 'all' : 'support')}
-              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'support' ? 'border-indigo-500/60 ring-2 ring-indigo-500/20 bg-indigo-500/[0.04]' : 'border-border/80 hover:border-indigo-500/40'}`}
+              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'support' ? 'border-blue-400 ring-2 ring-blue-300/50 bg-[#BFDBFE] dark:bg-blue-950/30' : 'border-border/80 hover:border-blue-300'}`}
               title="Click to view all active jobs on Support (Internal Help)"
             >
               <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg">
-                  <HelpCircle size={16} className="text-indigo-500" />
+                <div className="p-2 bg-[#BFDBFE] text-blue-800 dark:bg-blue-950/50 dark:text-blue-300 rounded-lg">
+                  <HelpCircle size={16} className="text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">Support</span>
+                  <span className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wider block">Support</span>
                   <span className="text-[9px] text-muted">Internal Technical Help</span>
                 </div>
               </div>
               <div className="text-right">
-                <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400 leading-none">{supportJobsCount}</span>
-                <span className="text-[9px] text-indigo-600/80 dark:text-indigo-400/80 block mt-0.5">Internal</span>
+                <span className="text-xl font-bold text-blue-950 dark:text-blue-200 leading-none">{supportJobsCount}</span>
+                <span className="text-[9px] text-blue-700/80 dark:text-blue-400/80 block mt-0.5">Internal</span>
               </div>
             </div>
 
-            {/* 4. Reopen (Rose theme - correction cycles R1, R2) */}
+            {/* 4. Reopen (Pastel Apricot #FCE4D6 theme - correction cycles R1, R2) */}
             <div
               onClick={() => setCardFilter(cardFilter === 'reopen' ? 'all' : 'reopen')}
-              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'reopen' ? 'border-rose-500/60 ring-2 ring-rose-500/20 bg-rose-500/[0.04]' : 'border-border/80 hover:border-rose-500/40'}`}
+              className={`bg-card border rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[58px] ${cardFilter === 'reopen' ? 'border-[#F8B88B] ring-2 ring-[#FCE4D6]/60 bg-[#FCE4D6] dark:bg-[#7C2D12]/30' : 'border-border/80 hover:border-[#F8B88B]'}`}
               title="Click to view all reopened jobs undergoing correction"
             >
               <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg">
-                  <RotateCcw size={16} className="text-rose-500" />
+                <div className="p-2 bg-[#FCE4D6] text-[#C2410C] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA] rounded-lg">
+                  <RotateCcw size={16} className="text-[#EA580C] dark:text-[#FDBA74]" />
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block">Revise</span>
+                  <span className="text-[10px] font-bold text-[#9A3412] dark:text-[#FED7AA] uppercase tracking-wider block">Revise</span>
                   <span className="text-[9px] text-muted">Revise Cycle</span>
                 </div>
               </div>
               <div className="text-right">
-                <span className="text-xl font-bold text-rose-600 dark:text-rose-400 leading-none">{reopenJobsCount}</span>
-                <span className="text-[9px] text-rose-600/80 dark:text-rose-400/80 block mt-0.5">Active</span>
+                <span className="text-xl font-bold text-[#7C2D12] dark:text-[#FFEDD5] leading-none">{reopenJobsCount}</span>
+                <span className="text-[9px] text-[#C2410C]/80 dark:text-[#FDBA74]/80 block mt-0.5">Active</span>
               </div>
             </div>
           </div>
@@ -2473,7 +2473,7 @@ export function BodInternalPage() {
                           <td className="px-1 py-2 text-center overflow-hidden">
                             {(job.revision) ? (
                               <span
-                                className="inline-block font-mono font-bold px-2 py-0.5 rounded text-xs bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-400 tracking-wider shadow-2xs"
+                                className="inline-block font-mono font-bold px-2 py-0.5 rounded text-xs bg-[#FCE4D6] border border-[#F8B88B] text-[#9A3412] dark:bg-[#7C2D12]/40 dark:border-[#9A3412] dark:text-[#FED7AA] tracking-wider shadow-2xs"
                                 title={`Revision: ${job.revision}`}
                               >
                                 {job.revision}
@@ -3768,8 +3768,8 @@ export function BodInternalPage() {
                             type="button"
                             onClick={() => setDrawerHoldSupportFilter(drawerHoldSupportFilter === 'Hold' ? 'all' : 'Hold')}
                             className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${drawerHoldSupportFilter === 'Hold'
-                              ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-xs ring-1 ring-fuchsia-400'
-                              : 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400 hover:bg-fuchsia-500/20'
+                              ? 'bg-sky-600 text-white border-sky-600 shadow-xs ring-1 ring-sky-400'
+                              : 'bg-[#E0F2FE] border-sky-300 text-sky-900 dark:bg-sky-950/60 dark:border-sky-800 dark:text-sky-200 hover:bg-sky-100'
                               }`}
                             title={drawerHoldSupportFilter === 'Hold' ? 'Click to show both Hold and Support' : 'Click to filter Hold only'}
                           >
@@ -3779,8 +3779,8 @@ export function BodInternalPage() {
                             type="button"
                             onClick={() => setDrawerHoldSupportFilter(drawerHoldSupportFilter === 'Support' ? 'all' : 'Support')}
                             className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${drawerHoldSupportFilter === 'Support'
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-1 ring-indigo-400'
-                              : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20'
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-1 ring-blue-400'
+                              : 'bg-[#BFDBFE] border-blue-300 text-blue-900 dark:bg-blue-950/60 dark:border-blue-800 dark:text-blue-200 hover:bg-blue-200'
                               }`}
                             title={drawerHoldSupportFilter === 'Support' ? 'Click to show both Hold and Support' : 'Click to filter Support only'}
                           >
@@ -3801,8 +3801,8 @@ export function BodInternalPage() {
                               key={record.id || idx}
                               className={`bg-background border rounded-lg p-3.5 space-y-3 ${isOpen
                                 ? isHold
-                                  ? 'border-fuchsia-500/50 ring-1 ring-fuchsia-500/20'
-                                  : 'border-indigo-500/50 ring-1 ring-indigo-500/20'
+                                  ? 'border-sky-400 ring-1 ring-sky-300/40'
+                                  : 'border-blue-400 ring-1 ring-blue-300/40'
                                 : 'border-border'
                                 }`}
                             >
@@ -3810,9 +3810,9 @@ export function BodInternalPage() {
                               <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
                                 <div className="flex items-center gap-2">
                                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${isHold
-                                    ? 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-400'
+                                    ? 'bg-[#E0F2FE] border-sky-300 text-sky-900 dark:bg-sky-950/60 dark:border-sky-800 dark:text-sky-200'
                                     : isSupport
-                                      ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400'
+                                      ? 'bg-[#BFDBFE] border-blue-300 text-blue-900 dark:bg-blue-950/60 dark:border-blue-800 dark:text-blue-200'
                                       : 'bg-accent border-border text-text'
                                     }`}>
                                     {record.type}

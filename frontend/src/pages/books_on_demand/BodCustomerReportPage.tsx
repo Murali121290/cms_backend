@@ -873,8 +873,8 @@ export function BodCustomerReportPage() {
                 type="button"
                 onClick={() => setActiveTab('chart')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'chart'
-                    ? 'bg-primary text-white shadow-sm'
-                    : 'text-muted hover:text-text hover:bg-muted/40'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-muted hover:text-text hover:bg-muted/40'
                   }`}
                 title="View Production Analytics & Trends"
               >
@@ -885,8 +885,8 @@ export function BodCustomerReportPage() {
                 type="button"
                 onClick={() => setActiveTab('table')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'table'
-                    ? 'bg-primary text-white shadow-sm'
-                    : 'text-muted hover:text-text hover:bg-muted/40'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-muted hover:text-text hover:bg-muted/40'
                   }`}
                 title="View Detailed Job Records"
               >
@@ -1025,7 +1025,7 @@ export function BodCustomerReportPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-[7fr_5fr_10fr_5fr_5fr_5fr] gap-3">
           {/* 1. Total (Intake + Backlogs) */}
           <div
-            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'all' || cardFilter === 'total_all' || cardFilter === 'total_intake' || cardFilter === 'total_backlog') && cardFilter !== 'all' ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/[0.02]' : 'border-border/80 hover:border-primary/40'}`}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'all' || cardFilter === 'total_all' || cardFilter === 'total_intake' || cardFilter === 'total_backlog') && cardFilter !== 'all' ? 'border-primary/60 ring-2 ring-primary/20' : 'border-border/80 hover:border-primary/40'}`}
           >
             <div className="flex items-center justify-between pb-1 border-b border-border/50">
               <div
@@ -1081,7 +1081,7 @@ export function BodCustomerReportPage() {
           {/* 2. In-Progress */}
           <div
             onClick={() => setCardFilter(cardFilter === 'in_progress' ? 'all' : 'in_progress')}
-            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'in_progress' ? 'border-purple-500/60 ring-2 ring-purple-500/20 bg-purple-500/[0.04]' : 'border-border/80 hover:border-purple-500/40'}`}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'in_progress' ? 'border-purple-500/60 ring-2 ring-purple-500/20' : 'border-border/80 hover:border-purple-500/40'}`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
@@ -1173,7 +1173,7 @@ export function BodCustomerReportPage() {
           {/* 4. Overdue */}
           <div
             onClick={() => setCardFilter(cardFilter === 'overdue' ? 'all' : 'overdue')}
-            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'overdue' ? 'border-red-500/60 ring-2 ring-red-500/20 bg-red-500/[0.04]' : 'border-border/80 hover:border-red-500/40'}`}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'overdue' ? 'border-red-500/60 ring-2 ring-red-500/20' : 'border-border/80 hover:border-red-500/40'}`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
@@ -1193,40 +1193,40 @@ export function BodCustomerReportPage() {
           {/* 5. Hold */}
           <div
             onClick={() => setCardFilter(cardFilter === 'hold' ? 'all' : 'hold')}
-            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'hold' ? 'border-fuchsia-500/60 ring-2 ring-fuchsia-500/20 bg-fuchsia-500/[0.04]' : 'border-border/80 hover:border-fuchsia-500/40'}`}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'hold' ? 'border-sky-400 ring-2 ring-sky-300/40 dark:bg-sky-950/30' : 'border-border/80 hover:border-sky-300'}`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <div className="p-1 bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400 rounded-md">
+                <div className="p-1 bg-[#E0F2FE] text-sky-800 dark:bg-sky-950/50 dark:text-sky-300 rounded-md">
                   <PauseCircle size={13} />
                 </div>
-                <span className="text-[10px] text-fuchsia-600 dark:text-fuchsia-400 font-bold uppercase tracking-wider">Hold</span>
+                <span className="text-[10px] text-sky-800 dark:text-sky-300 font-bold uppercase tracking-wider">Hold</span>
               </div>
-              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400">Query</span>
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-[#E0F2FE] text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">Query</span>
             </div>
             <div className="flex items-baseline justify-between mt-2">
-              <span className="text-xl font-bold text-fuchsia-600 dark:text-fuchsia-400 leading-none">{holdJobs}</span>
-              <span className="text-[9px] text-fuchsia-600/80 dark:text-fuchsia-400/80 truncate">Customer Hold</span>
+              <span className="text-xl font-bold text-sky-900 dark:text-sky-200 leading-none">{holdJobs}</span>
+              <span className="text-[9px] text-sky-700/80 dark:text-sky-400/80 truncate">Customer Hold</span>
             </div>
           </div>
 
           {/* 6. Revise (Reopen) */}
           <div
             onClick={() => setCardFilter(cardFilter === 'reopen' ? 'all' : 'reopen')}
-            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'reopen' ? 'border-rose-500/60 ring-2 ring-rose-500/20 bg-rose-500/[0.04]' : 'border-border/80 hover:border-rose-500/40'}`}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'reopen' ? 'border-[#F8B88B] ring-2 ring-[#FCE4D6]/60 bg-[#FCE4D6] dark:bg-[#7C2D12]/30' : 'border-border/80 hover:border-[#F8B88B]'}`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <div className="p-1 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md">
-                  <RotateCcw size={13} />
+                <div className="p-1 bg-[#FCE4D6] text-[#C2410C] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA] rounded-md">
+                  <RotateCcw size={13} className="text-[#EA580C] dark:text-[#FDBA74]" />
                 </div>
-                <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold uppercase tracking-wider">Revise</span>
+                <span className="text-[10px] text-[#9A3412] dark:text-[#FED7AA] font-bold uppercase tracking-wider">Revise</span>
               </div>
-              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400">Revise</span>
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-[#FCE4D6] text-[#9A3412] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA]">Revise</span>
             </div>
             <div className="flex items-baseline justify-between mt-2">
-              <span className="text-xl font-bold text-rose-600 dark:text-rose-400 leading-none">{reopenJobs}</span>
-              <span className="text-[9px] text-rose-600/80 dark:text-rose-400/80 truncate">Revise Cycle</span>
+              <span className="text-xl font-bold text-[#7C2D12] dark:text-[#FFEDD5] leading-none">{reopenJobs}</span>
+              <span className="text-[9px] text-[#C2410C]/80 dark:text-[#FDBA74]/80 truncate">Revise Cycle</span>
             </div>
           </div>
         </div>
@@ -1275,10 +1275,10 @@ export function BodCustomerReportPage() {
               <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Customer Queries (Hold)</span>
                 <div className="flex items-baseline gap-2 mt-1">
-                  <span className="text-2xl font-bold text-fuchsia-600 dark:text-fuchsia-400">{holdJobs}</span>
+                  <span className="text-2xl font-bold text-sky-900 dark:text-sky-200">{holdJobs}</span>
                   <span className="text-xs text-muted">awaiting answer</span>
                 </div>
-                <p className="text-[10px] text-fuchsia-600/80 dark:text-fuchsia-400/80 m-0 mt-2">Requires customer clarification</p>
+                <p className="text-[10px] text-sky-700/80 dark:text-sky-400/80 m-0 mt-2">Requires customer clarification</p>
               </div>
             </div>
 
@@ -1675,7 +1675,7 @@ export function BodCustomerReportPage() {
                         if (s === 'Completed (Delay)' || s === 'Delay') return 'bg-rose-500/10 text-rose-600 border-rose-500/30 font-bold'
                         if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-bold'
                         if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
-                        if (s === 'Hold') return 'bg-fuchsia-500/10 text-fuchsia-600 border-fuchsia-500/30 font-bold'
+                        if (s === 'Hold') return 'bg-[#E0F2FE] text-sky-900 border-sky-300 dark:bg-sky-950/60 dark:text-sky-200 dark:border-sky-800 font-bold'
                         if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
                         return 'bg-muted/10 text-muted-foreground border-border/50'
                       }
@@ -1767,7 +1767,7 @@ export function BodCustomerReportPage() {
                                 {(finalStatus === 'Completed (Delay)' || finalStatus === 'Delay') && <AlertCircle size={10} className="mr-1 text-rose-500" />}
                                 {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
                                 {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
-                                {finalStatus === 'Hold' && <PauseCircle size={10} className="mr-1 text-fuchsia-500" />}
+                                {finalStatus === 'Hold' && <PauseCircle size={10} className="mr-1 text-sky-600 dark:text-sky-400" />}
                                 {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
                                 {finalStatus}
                               </span>
@@ -1777,7 +1777,7 @@ export function BodCustomerReportPage() {
                                 <button
                                   type="button"
                                   onClick={(e) => handleOpenHoldAnswerModal(e, job)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-fuchsia-600 hover:bg-fuchsia-700 text-white shadow-xs transition-all animate-pulse hover:animate-none"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-xs transition-all animate-pulse hover:animate-none"
                                   title="Click to review query and provide customer answer to resume job"
                                 >
                                   <MessageSquare size={11} />
@@ -1943,8 +1943,8 @@ export function BodCustomerReportPage() {
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-border/60 pb-3">
               <div className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-400">
-                  <MessageSquare size={18} className="text-fuchsia-500" />
+                <div className="p-2 rounded-lg bg-[#E0F2FE] text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
+                  <MessageSquare size={18} className="text-sky-600 dark:text-sky-400" />
                 </div>
                 <div>
                   <h3 className="font-bold text-text text-sm m-0 flex items-center gap-1.5">
@@ -1970,9 +1970,9 @@ export function BodCustomerReportPage() {
               const latestQuery = openQueries.length > 0 ? openQueries[openQueries.length - 1] : (holdAnswerJob.hold_support_history || []).slice(-1)[0]
 
               return latestQuery ? (
-                <div className="bg-fuchsia-500/5 border border-fuchsia-500/30 rounded-lg p-3 text-xs space-y-2">
+                <div className="bg-[#E0F2FE]/40 border border-sky-200 dark:bg-sky-950/20 dark:border-sky-800 rounded-lg p-3 text-xs space-y-2">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-bold text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-wider">
+                    <span className="font-bold text-sky-900 dark:text-sky-300 uppercase tracking-wider">
                       Current Query from S4Carlisle Team
                     </span>
                     <span className="text-muted text-[10px]">
