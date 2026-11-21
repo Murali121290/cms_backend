@@ -94,6 +94,7 @@ def assign_task(db: Session, actor: User, task_id: int, *, assignee: Optional[st
     custody.check_expected(sd, expected, ser)
     before = custody.ensure_allowed(sd, "assign", ser)
     person = stage_service.validate_assignee(db, assignee)
+    stage_service.ensure_role_allowed(db, person, sd.stage_name)
 
     old = sd.assignee_name
     sd.assignee_name = assignee

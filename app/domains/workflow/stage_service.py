@@ -114,6 +114,24 @@ def validate_assignee(db: Session, username: Optional[str]) -> Optional[User]:
     return user
 
 
+def ensure_role_allowed(db: Session, person: Optional[User], stage_name: str) -> None:
+    """The assignee's Role (User Management) must be one of the stage's Roles (Stage Management).
+    The Admin role may be assigned to any stage. A stage with no roles configured has no restriction."""
+    if person is None:
+        return
+    from app.domains.workflow.access import parse_stage_roles
+
+    st = db.execute(select(StageMaster).where(StageMaster.stage_name == stage_name)).scalars().first()
+    norm = lambda v: "".join((v or "").lower().split())  # noqa: E731 — same normalisation as the project page
+    allowed = {norm(r) for r in parse_stage_roles(st.roles)} if st else set()
+    if allowed and norm(person.role) not in allowed and norm(person.role) != "admin":  # Admin role: every stage
+        name = " ".join(p for p in (person.first_name, person.last_name) if p) or person.username
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name}'s role ({person.role or 'none'}) isn't one of the roles for {stage_name} in Stage Management.",
+        )
+
+
 def chapter_info(db: Session, project: str, chapters: str) -> Optional[ChapterInfo]:
     return db.execute(
         select(ChapterInfo).where(ChapterInfo.project == project, ChapterInfo.chapters == chapters)
@@ -242,7 +260,7 @@ def _sync_custody_on_assign(sd: StageDetail, old_assignee: Optional[str], new_as
 
 def assign_stage(db: Session, *, project: str, chapters: str, stage_name: str, assignee: Optional[str],
                  dt: Optional[str] = None, actor: Optional[str] = None) -> StageDetail:
-    validate_assignee(db, assignee)
+    ensure_role_allowed(db, validate_assignee(db, assignee), stage_name)
     when = parse_client_dt(dt) or utc_now()
     sd = get_detail(db, project, chapters, stage_name) or _new_detail(db, project, chapters, stage_name)
     old = sd.assignee_name
@@ -266,9 +284,11 @@ def bulk_assign(db: Session, *, targets: list[AssignTarget], assignee: Optional[
                 actor: Optional[str] = None) -> list[StageDetail]:
     if len(targets) > MAX_BULK_TARGETS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"At most {MAX_BULK_TARGETS} chapters per request.")
-    validate_assignee(db, assignee)
+    person = validate_assignee(db, assignee)
+    for stage_name in sorted({t.stage_name for t in targets}):
+        ensure_role_allowed(db, person, stage_name)
     when = parse_client_dt(dt) or utc_now()
-    keys = {(t.project, t.chapters, t.stage_name) for t in targets}
+    keys ={(t.project, t.chapters, t.stage_name) for t in targets}
     existing: dict[tuple[str, str, str], StageDetail] = {}
     if keys:
         rows = db.execute(

@@ -1,3 +1,4 @@
+import { pmCandidates } from '@/utils/pmRoles'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Upload, X, FileArchive, FileText, CheckCircle2, AlertTriangle, ExternalLink, Layers, BookOpen, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react'
@@ -553,11 +554,7 @@ export function CreateProjectPage() {
     setPoFilledValues({})
   }
 
-  const pmUsers = useMemo(() => users.filter(u => {
-    if (!u.active_status || !u.role) return false
-    const r = u.role.toLowerCase().replace(/[\s-]/g, '')
-    return r.includes('projectmanager') || r.includes('manager') || r.includes('pm') || r.includes('admin')
-  }), [users])
+  const pmUsers = useMemo(() => pmCandidates(users), [users])
 
   const salesUsers = useMemo(() => users.filter(u => {
     if (!u.active_status || !u.role) return false

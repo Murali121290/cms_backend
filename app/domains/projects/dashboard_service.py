@@ -293,21 +293,25 @@ def _pipeline(db: Session, ctx: WorkspaceContext, viewer: User, stages: list[Sta
     holders = {r.assignee_name for r in rows if r.assignee_name}
     candidates = {u.username: u for u in extra_people}
     q = db.query(User).filter(or_(User.username.in_(holders or {""}), User.active_status == True))  # noqa: E712
+    # Eligibility is by Role only (User Management "Role" vs Stage Management "Roles"), never designation.
     for u in q.all():
-        role = (u.role or u.designation or "").strip().lower()
-        if u.username in holders or (role and role in wanted_roles):
+        role = (u.role or "").strip().lower()
+        if u.username in holders or (role and (role in wanted_roles or role == "admin") and u.active_status is not False):
             candidates.setdefault(u.username, u)
 
     people = []
     for u in candidates.values():
-        role = (u.role or u.designation or "").strip().lower()
+        role = (u.role or "").strip().lower()
+        if u.active_status is False:
+            role = ""  # inactive holders still show their open work, but can't be picked for new work
         mine = [r for r in rows if r.assignee_name == u.username]
         open_rows = [r for r in mine if _is_open_work(r)]
         people.append({
             "username": u.username,
             "display_name": _display_name(u),
             "role": u.role or u.designation,
-            "stage_names": sorted(n for n, roles in roles_by_stage.items() if role in roles),
+            # Admin role is eligible for every stage; everyone else by the stage's Roles.
+            "stage_names": sorted(n for n, roles in roles_by_stage.items() if role in roles or role == "admin"),
             "open_count": len(open_rows),
             "open_pages": sum(ctx.meta(r)["manuscript_pages"] for r in open_rows),
             "completed_count": sum(1 for r in mine if r.stage_status == "Completed"),
@@ -370,7 +374,7 @@ def get_workspace_dashboard_data(db: Session, user: User, completed_days: int = 
             scope = owned
             # The people who work an owned stage can sit in any team: pick them by stage role.
             team = [u for u in db.query(User).filter(User.active_status == True).all()  # noqa: E712
-                    if u.username != user.username and access._norm(u.role or u.designation) in scope.member_role_names]
+                    if u.username != user.username and access._norm(u.role) in scope.member_role_names]
         else:
             scope = access.teamlead_scope(db, user, stages)
             team = db.query(User).filter(User.team == user.team).all()

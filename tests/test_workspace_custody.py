@@ -412,3 +412,32 @@ def test_stage_owner_with_unlisted_role_gets_board_for_every_owned_stage(world, 
     assert "ma_op" in {p["username"] for p in pipe["people"]}
     members = {m["username"] for m in data["teamlead_workspace"]["members"]}
     assert "ma_op" in members
+
+
+def test_assignee_role_must_be_one_of_the_stage_roles(world, as_user):
+    t = world["task"].id
+    lead = as_user(world["lead"])
+    # Project Manager isn't in Copyediting's roles -> refused, row untouched
+    r = lead.post(f"/api/v2/workspace/tasks/{t}/assign", json={"assignee": "pm_marcus", "expected_custody_status": "unassigned"})
+    assert r.status_code == 422, r.text
+    assert "isn't one of the roles for Copyediting" in r.json()["detail"]
+    # Bulk reports it per item instead of failing the batch
+    r = lead.post("/api/v2/workspace/tasks/bulk", json={"action": "assign", "task_ids": [t], "assignee": "pm_marcus", "notify": False})
+    assert r.json()["results"][0]["status"] == "error"
+    # Picker list: only people whose Role is in the stage's roles
+    pipe = lead.get("/api/v2/dashboard/workspaces").json()["pipeline"]
+    eligible = {p["username"] for p in pipe["people"] if "Copyediting" in p["stage_names"]}
+    assert "pm_marcus" not in eligible and {"ce_priya", "ce_david"} <= eligible and "gone" not in eligible
+    r = lead.post(f"/api/v2/workspace/tasks/{t}/assign", json={"assignee": "ce_priya", "expected_custody_status": "unassigned"})
+    assert r.status_code == 200, r.text
+
+
+def test_admin_role_can_be_assigned_to_any_stage(world, as_user):
+    # Copyediting's roles don't list Admin, but the Admin role is eligible for every stage
+    t = world["task"].id
+    lead = as_user(world["lead"])
+    pipe = lead.get("/api/v2/dashboard/workspaces").json()["pipeline"]
+    boss = next(p for p in pipe["people"] if p["username"] == "boss")
+    assert "Copyediting" in boss["stage_names"]
+    r = lead.post(f"/api/v2/workspace/tasks/{t}/assign", json={"assignee": "boss", "expected_custody_status": "unassigned"})
+    assert r.status_code == 200, r.text

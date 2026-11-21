@@ -157,12 +157,12 @@ function normalizeRole(role: string): string {
   return role.toLowerCase().replace(/\s+/g, '')
 }
 
-// True if `userRole` should be assignable/highlighted for `stageName`, given the
-// stage → role-name mapping fetched from stagesApi. Stages with no roles mapped
-// impose no restriction (fail open) so untouched stages keep working as before.
+// True if a user with `userRole` may be assigned to `stageName`: their Role (User Management)
+// must be one of the stage's Roles (Stage Management) — no exceptions, the server enforces the
+// same rule. Stages with no roles mapped impose no restriction (fail open).
 function isRoleAllowedForStage(userRole: string, stageName: string | null | undefined, stageRolesMap: Map<string, string[]>): boolean {
   if (!userRole) return false
-  if (isPrivilegedRole(userRole)) return true
+  if (normalizeRole(userRole) === 'admin') return true // Admin role: every stage
   if (!stageName) return true
   const stageRoles = stageRolesMap.get(stageName)
   if (!stageRoles || stageRoles.length === 0) return true
@@ -1342,8 +1342,8 @@ export function ProjectWorkflow() {
         }
       }
       return true
-    } catch {
-      if (!opts?.silent) toast.error('Failed to update assignee')
+    } catch (err) {
+      if (!opts?.silent) toast.error(getApiErrorMessage(err, 'Failed to update assignee'))
       return false
     }
   }

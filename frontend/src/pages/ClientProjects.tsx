@@ -1,3 +1,4 @@
+import { pmCandidates } from '@/utils/pmRoles'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -769,11 +770,7 @@ export function ClientProjects() {
       .then(([c, ps, users]) => {
         setClient(c)
         setProjects(ps)
-        setPmUsers((users || []).filter(u => {
-          if (!u.active_status || !u.role) return false
-          const r = u.role.toLowerCase().replace(/[\s-]/g, '')
-          return r.includes('projectmanager') || r.includes('manager') || r.includes('pm') || r.includes('admin')
-        }))
+        setPmUsers(pmCandidates(users || []))
       })
       .catch(() => toast.error('Failed to load projects'))
       .finally(() => setLoading(false))
