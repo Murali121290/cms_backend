@@ -380,3 +380,35 @@ def test_single_assign_email_uses_chapter_label_and_group_cc(world, as_user, mai
     assert len(mails) == 1
     assert mails[0]["subject"] == "[P1] Chapter 10 assigned to you · Copyediting"
     assert mails[0]["cc_emails"] == ["ce-leads@example.com"]
+
+
+def test_stage_owner_with_unlisted_role_gets_board_for_every_owned_stage(world, as_user):
+    """Owner designation in Stage Master (e.g. "Manuscript Analysis Manager") is enough to get the owner board,
+    for all the stages they own, with every chapter of those stages, not just the ones assigned to them."""
+    db = world["db"]
+    _stage(db, "Manuscript Analysis", '["Project Manager", "Manuscript Analysis Operator", "Manuscript Analysis Manager"]',
+           owner="Manuscript Analysis Manager")
+    _stage(db, "Job Initiation", '["Manuscript Analysis Operator"]', owner="Manuscript Analysis Manager")
+    owner = _user(db, "hema", "Manuscript Analysis Manager", team="Project Management Team")
+    _user(db, "ma_op", "Manuscript Analysis Operator", team="Ops Team")
+    db.commit()
+    now = datetime.now(timezone.utc)
+    rows = [StageDetail(client="CUP", project="P9", chapters=f"{n:02d}", stage_name="Manuscript Analysis", workflow="WF",
+                        planned_end_date=now + timedelta(days=n), stage_status="In-progress",
+                        assignee_name="hema" if n == 1 else None,
+                        custody_status="in_progress" if n == 1 else "unassigned") for n in range(1, 6)]
+    rows.append(StageDetail(client="CUP", project="P9", chapters="01", stage_name="Job Initiation", workflow="WF",
+                            planned_end_date=now, stage_status="In-progress", custody_status="unassigned"))
+    db.add_all(rows)
+    db.commit()
+
+    data = as_user(owner).get("/api/v2/dashboard/workspaces").json()
+    assert data["role"] == "teamlead"
+    pipe = data["pipeline"]
+    assert {s["stage_name"] for s in pipe["stages"]} == {"Manuscript Analysis", "Job Initiation"}
+    assert all(s["can_manage"] for s in pipe["stages"])
+    ma = [i for i in pipe["items"] if i["stage_name"] == "Manuscript Analysis"]
+    assert len(ma) == 5
+    assert "ma_op" in {p["username"] for p in pipe["people"]}
+    members = {m["username"] for m in data["teamlead_workspace"]["members"]}
+    assert "ma_op" in members

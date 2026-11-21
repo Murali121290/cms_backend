@@ -31,6 +31,7 @@ export function StagePicker({ id, stages, value, onChange, counts }: Props) {
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
 
   const sorted = useMemo(() => [...stages].sort(byName), [stages]);
@@ -39,31 +40,38 @@ export function StagePicker({ id, stages, value, onChange, counts }: Props) {
     return sorted.filter((s) => (!needle || s.stage_name.toLowerCase().includes(needle)) && (!workOnly || (counts?.get(s.stage_name) ?? 0) > 0 || s.stage_name === value));
   }, [sorted, q, workOnly, counts, value]);
 
-  useLayoutEffect(() => {
-    if (!open) return;
+  const place = () => {
     const r = btn.current?.getBoundingClientRect();
     if (!r) return;
     const width = Math.max(300, r.width);
     setPos({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), width });
+  };
+
+  useLayoutEffect(() => {
+    if (open) place();
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     setQ("");
     setActive(Math.max(0, sorted.findIndex((s) => s.stage_name === value)));
-    requestAnimationFrame(() => input.current?.focus());
+    requestAnimationFrame(() => input.current?.focus({ preventScroll: true }));
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
       if (!panel.current?.contains(t) && !btn.current?.contains(t)) setOpen(false);
     };
-    const onMove = () => setOpen(false);
+    // Scrolling inside the list must not close it; page scroll/resize just re-anchors the panel.
+    const onScroll = (e: Event) => {
+      if (panel.current && e.target instanceof Node && panel.current.contains(e.target)) return;
+      place();
+    };
     document.addEventListener("mousedown", onDown);
-    window.addEventListener("resize", onMove);
-    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("resize", onMove);
-      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [open, sorted, value]);
 
@@ -71,9 +79,15 @@ export function StagePicker({ id, stages, value, onChange, counts }: Props) {
     setActive((a) => Math.min(a, Math.max(0, shown.length - 1)));
   }, [shown.length]);
 
+  // Keep the highlighted row visible by scrolling only the list (never the page).
   useEffect(() => {
-    if (open) (panel.current?.querySelector(`[data-index="${active}"]`) as HTMLElement | null)?.scrollIntoView?.({ block: "nearest" });
-  }, [active, open]);
+    if (!open) return;
+    const list = listRef.current;
+    const row = list?.querySelector(`[data-index="${active}"]`) as HTMLElement | null;
+    if (!list || !row) return;
+    if (row.offsetTop < list.scrollTop) list.scrollTop = row.offsetTop;
+    else if (row.offsetTop + row.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = row.offsetTop + row.offsetHeight - list.clientHeight;
+  }, [active, open, shown]);
 
   const choose = (name: string) => {
     onChange(name);
@@ -149,7 +163,7 @@ export function StagePicker({ id, stages, value, onChange, counts }: Props) {
                 Only stages with open work
               </label>
             )}
-            <ul id={listId} role="listbox" aria-label="Stages" className="max-h-72 overflow-auto">
+            <ul ref={listRef} id={listId} role="listbox" aria-label="Stages" className="relative max-h-72 overflow-auto">
               {shown.length === 0 && <li className="px-2 py-3 text-center text-xs text-muted">No stage matches “{q}”</li>}
               {shown.map((s, i) => {
                 const n = counts?.get(s.stage_name) ?? 0;

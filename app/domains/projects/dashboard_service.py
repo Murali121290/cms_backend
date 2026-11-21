@@ -328,9 +328,14 @@ def get_workspace_dashboard_data(db: Session, user: User, completed_days: int = 
     cutoff = ctx.now_utc - timedelta(days=completed_days)
     role_type = access.dashboard_role_type(user)
     stages = access.active_stages(db)
+    # A stage owner (Stage Master "Owner stage" = one of their roles) gets the owner board for every stage
+    # they own, even when their role name isn't one of the fixed manager / team-lead roles.
+    owned = access.owned_scope(db, user, stages) if role_type == "user" else None
+    if owned and owned.stage_names:
+        role_type = "teamlead"
 
     response = {
-        "role": role_type,
+        "role": role_type,  # "teamlead" also covers stage owners promoted above
         "viewer": {
             "id": user.id,
             "username": user.username,
@@ -361,8 +366,14 @@ def get_workspace_dashboard_data(db: Session, user: User, completed_days: int = 
         return response
 
     if role_type == "teamlead":
-        scope = access.teamlead_scope(db, user, stages)
-        team = db.query(User).filter(User.team == user.team).all()
+        if owned and owned.stage_names:
+            scope = owned
+            # The people who work an owned stage can sit in any team: pick them by stage role.
+            team = [u for u in db.query(User).filter(User.active_status == True).all()  # noqa: E712
+                    if u.username != user.username and access._norm(u.role or u.designation) in scope.member_role_names]
+        else:
+            scope = access.teamlead_scope(db, user, stages)
+            team = db.query(User).filter(User.team == user.team).all()
         if scope.stage_names:
             members = [m for m in team if (m.role or m.designation) and (m.role or m.designation).strip().lower() in scope.member_role_names]
         else:

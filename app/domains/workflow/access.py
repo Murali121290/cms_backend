@@ -92,10 +92,22 @@ def active_stages(db: Session) -> list[StageMaster]:
 
 
 def stage_owner_matches(stage: StageMaster, user: User) -> bool:
-    desig = _norm(stage.owner_designation).replace("-", " ").replace("_", " ")
-    if not desig:
-        return False
-    return any(n.replace("-", " ").replace("_", " ") == desig for n in user_role_names(user))
+    """Stage Master "Owner stage" (owner_designation) vs the user's Role field only (not the HR designation)."""
+    owner = _norm(stage.owner_designation).replace("-", " ").replace("_", " ")
+    role = _norm(user.role).replace("-", " ").replace("_", " ")
+    return bool(owner) and owner == role
+
+
+def owned_scope(db: Session, user: User, stages: Optional[list[StageMaster]] = None) -> StageScope:
+    """Every stage whose Stage Master owner designation is one of the user's roles (an owner may hold several)."""
+    stages = stages if stages is not None else active_stages(db)
+    scope = StageScope()
+    for st in stages:
+        if stage_owner_matches(st, user):
+            scope.stage_names.add(st.stage_name)
+            scope.member_role_names.update(r.lower() for r in parse_stage_roles(st.roles))
+    scope.member_role_names.discard(_norm(user.role))
+    return scope
 
 
 def teamlead_scope(db: Session, user: User, stages: Optional[list[StageMaster]] = None) -> StageScope:
