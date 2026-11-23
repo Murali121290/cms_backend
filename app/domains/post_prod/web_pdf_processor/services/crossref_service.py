@@ -12,6 +12,35 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _rects_overlap(rect1, rect2, threshold: float = 0.5) -> bool:
+    """Check if two rectangles overlap significantly."""
+    if rect1 is None or rect2 is None:
+        return False
+    try:
+        r1 = fitz.Rect(rect1)
+        r2 = fitz.Rect(rect2)
+        intersection = r1 & r2
+        if intersection.is_empty:
+            return False
+        smaller_area = min(r1.get_area(), r2.get_area())
+        if smaller_area <= 0:
+            return False
+        return (intersection.get_area() / smaller_area) >= threshold
+    except Exception:
+        return False
+
+
+def _any_rect_overlap(r_cand, existing_r, threshold: float = 0.5) -> bool:
+    """Check if any rectangle in r_cand overlaps any rectangle in existing_r."""
+    r_cands = r_cand if isinstance(r_cand, list) else [r_cand]
+    existing_rs = existing_r if isinstance(existing_r, list) else [existing_r]
+    for rc in r_cands:
+        for er in existing_rs:
+            if _rects_overlap(rc, er, threshold):
+                return True
+    return False
+
+
 def find_crossrefs_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     """
     Scan PDF for cross-reference text and create links to targets.
@@ -66,7 +95,7 @@ def find_crossrefs_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     # Save if applying changes
     if not analyze_only and matched_count > 0:
         temp_path = pdf_path.replace('.pdf', '_temp.pdf')
-        doc.save(temp_path, incremental=False, garbage=3, deflate=True)
+        doc.save(temp_path, incremental=False, garbage=0, deflate=True)
         doc.close()
         os.replace(temp_path, pdf_path)
         logger.debug(f"Cross-reference links created and PDF saved")
@@ -122,37 +151,42 @@ def _identify_toc_section(doc) -> set:
 def _identify_bibliography_sections(doc) -> set:
     """
     Identify pages that are part of bibliography/notes/references sections.
-    Only marks pages that are clearly after a Bibliography/References/Notes header.
-    Returns set of page indices that should be excluded from cross-references.
+    Uses TOC bookmarks first to accurately target only actual reference/bibliography pages,
+    avoiding accidental exclusion of subsequent chapters!
     """
     bibliography_pages = set()
 
-    # Find the page where bibliography section clearly starts (header at top of page)
-    bibliography_start = None
+    # 1. First preference: TOC bookmark entries
+    try:
+        toc = doc.get_toc()
+        for idx, item in enumerate(toc):
+            title = item[1].strip().lower()
+            if re.search(r'\b(?:references|bibliography|works\s+cited|notes\s+and\s+references)\b', title):
+                start = max(0, item[2] - 1)
+                # Next section determines end
+                end = max(start + 1, toc[idx + 1][2] - 1) if idx + 1 < len(toc) else min(start + 15, len(doc))
+                for p in range(start, min(end, len(doc))):
+                    bibliography_pages.add(p)
+        if bibliography_pages:
+            logger.debug(f"Identified {len(bibliography_pages)} bibliography pages from TOC")
+            return bibliography_pages
+    except Exception as e:
+        logger.debug(f"TOC check error in _identify_bibliography_sections: {e}")
 
+    # 2. Text scan fallback (per-chapter aware: stops when a new chapter begins)
+    in_ref = False
     for page_idx in range(len(doc)):
         page = doc[page_idx]
         text = page.get_text()
+        first_few = ' '.join([l.strip() for l in text.split('\n')[:4] if l.strip()])
 
-        # Look for Bibliography/References/Notes header at START of page
-        # Must be on the first line/header, not just anywhere in the text
-        lines = text.split('\n')
-        first_content = '\n'.join(lines[:3]).strip()  # First 3 lines
+        if re.search(r'^(?:CHAPTER|PART|APPENDIX)\s+\d+', first_few, re.I):
+            in_ref = False
+        elif re.search(r'^(?:References|Bibliography|Works\s+Cited|Notes\s+and\s+References)\b', first_few, re.I):
+            in_ref = True
 
-        if re.match(
-            r'^.*\b(Bibliography|References|Works\s+Cited|Endnotes|Notes\s+and\s+References)\b',
-            first_content,
-            re.IGNORECASE | re.MULTILINE
-        ):
-            bibliography_start = page_idx
-            logger.debug(f"Bibliography section header found at page {page_idx + 1}")
-            break
-
-    # Mark all pages from bibliography start onward
-    if bibliography_start is not None:
-        for page_idx in range(bibliography_start, len(doc)):
+        if in_ref:
             bibliography_pages.add(page_idx)
-            logger.debug(f"Page {page_idx + 1} marked as bibliography/references section")
 
     return bibliography_pages
 
@@ -177,11 +211,11 @@ def _find_targets(doc) -> dict:
             for line in block.get("lines", []):
                 line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
 
-                # Match figure captions at line start: "Figure 3.2" or "Figure 3.2:"
-                # This avoids matching "See Figure 3.2" in the middle of text
-                fig_match = re.match(r'(?:Figure|Fig\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE)
+                # Match figure captions at line start: "Figure 3.2" or "Figure 3.2:" or "Figure 3-2"
+                fig_match = re.match(r'(?:Figure|Fig\.?)\s+(\d+(?:[\.\-–]\d+)?)', line_text, re.IGNORECASE)
                 if fig_match:
-                    fig_id = f"figure_{fig_match.group(1)}"
+                    norm_num = re.sub(r'[\-–]', '.', fig_match.group(1))
+                    fig_id = f"figure_{norm_num}"
                     if fig_id not in targets:
                         targets[fig_id] = {
                             "page_idx": page_idx,
@@ -191,10 +225,11 @@ def _find_targets(doc) -> dict:
                         }
                         logger.debug(f"Found figure target {fig_id} on page {physical_page}")
 
-                # Match table titles at line start: "Table 5.1" or "Table 5.1:"
-                table_match = re.match(r'(?:Table|Tab\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE)
+                # Match table titles at line start: "Table 5.1" or "Table 5.1:" or "Table 5-1"
+                table_match = re.match(r'(?:Table|Tab\.?)\s+(\d+(?:[\.\-–]\d+)?)', line_text, re.IGNORECASE)
                 if table_match:
-                    table_id = f"table_{table_match.group(1)}"
+                    norm_num = re.sub(r'[\-–]', '.', table_match.group(1))
+                    table_id = f"table_{norm_num}"
                     if table_id not in targets:
                         targets[table_id] = {
                             "page_idx": page_idx,
@@ -203,6 +238,20 @@ def _find_targets(doc) -> dict:
                             "identifier": table_match.group(1),
                         }
                         logger.debug(f"Found table target {table_id} on page {physical_page}")
+
+                # Match Box / Case titles at line start: "Box 11-2" or "Box 11.2:"
+                box_match = re.match(r'(?:Box|Case)\s+(\d+(?:[\.\-–]\d+)?)', line_text, re.IGNORECASE)
+                if box_match:
+                    norm_num = re.sub(r'[\-–]', '.', box_match.group(1))
+                    box_id = f"box_{norm_num}"
+                    if box_id not in targets:
+                        targets[box_id] = {
+                            "page_idx": page_idx,
+                            "page": physical_page,
+                            "type": "box",
+                            "identifier": box_match.group(1),
+                        }
+                        logger.debug(f"Found box target {box_id} on page {physical_page}")
 
                 # Detect chapter headers: "Chapter 4", "CHAPTER 4", "Ch. 4"
                 chapter_match = re.search(r'(?:Chapter|Ch\.?|CHAPTER|CH\.?)\s+(\d+)', line_text, re.IGNORECASE)
@@ -218,6 +267,62 @@ def _find_targets(doc) -> dict:
                         logger.debug(f"Found chapter target {ch_id} on page {physical_page}")
 
     return targets
+
+
+def _get_exact_match_rect(page, match_text: str, line_bbox: fitz.Rect) -> fitz.Rect:
+    """Find the exact bounding box for the match string within the visual line."""
+    pad_clip = fitz.Rect(line_bbox.x0 - 2, line_bbox.y0 - 2, line_bbox.x1 + 2, line_bbox.y1 + 2)
+    rects = page.search_for(match_text, clip=pad_clip)
+    if rects:
+        # If match spans multiple font fragments (e.g. "see" + "Box 11-2"), union them into one clickable box
+        res = fitz.Rect()
+        for r in rects:
+            res |= r
+        return res
+    rects = page.search_for(match_text)
+    if rects:
+        closest = min(rects, key=lambda r: abs((r.y0 + r.y1)/2 - (line_bbox.y0 + line_bbox.y1)/2))
+        return closest
+    return line_bbox
+
+
+def _resolve_match_rects(page, check_item: dict, matched_str: str, raw_id: str, keyword: str):
+    """
+    Returns a list of fitz.Rect covering the matched reference,
+    handling single-line matches and multi-line / hyphenated line breaks.
+    """
+    if not check_item.get("is_split"):
+        r = _get_exact_match_rect(page, matched_str, check_item["r_primary"])
+        return [r] if r else [check_item["r_primary"]]
+
+    line1_rect = check_item["r_primary"]
+    line2_rect = check_item["r_secondary"]
+    clip1 = fitz.Rect(line1_rect.x0 - 2, line1_rect.y0 - 2, line1_rect.x1 + 2, line1_rect.y1 + 2)
+    clip2 = fitz.Rect(line2_rect.x0 - 2, line2_rect.y0 - 2, line2_rect.x1 + 2, line2_rect.y1 + 2)
+
+    if check_item.get("is_hyphenated"):
+        part1 = check_item.get("part1", "")
+        r1 = page.search_for(part1 + "-", clip=clip1) or page.search_for(part1, clip=clip1)
+        next_text = check_item.get("next_text", "")
+        m_p2 = re.match(r'^([A-Za-z]+\s+' + re.escape(raw_id) + r')', next_text)
+        p2_text = m_p2.group(1) if m_p2 else raw_id
+        r2 = page.search_for(p2_text, clip=clip2) or page.search_for(raw_id, clip=clip2)
+        res = []
+        if r1:
+            res.append(r1[0])
+        if r2:
+            res.append(r2[0])
+        return res if res else [line1_rect, line2_rect]
+    else:
+        # Space split (e.g. "Table" on line 1, "1.1" on line 2)
+        r1 = page.search_for(keyword, clip=clip1)
+        r2 = page.search_for(raw_id, clip=clip2)
+        res = []
+        if r1:
+            res.append(r1[0])
+        if r2:
+            res.append(r2[0])
+        return res if res else [line1_rect, line2_rect]
 
 
 def _find_references(doc, targets: dict, skip_pages: set) -> list:
@@ -236,68 +341,147 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
         physical_page = page_idx + 1
         blocks = page.get_text("dict")["blocks"]
 
-        for block in blocks:
-            if block["type"] != 0:
-                continue
+        # Find cross-references in text (including broken multi-line references)
+        if not skip_external_refs:
+            lines = []
+            for block in blocks:
+                if block["type"] != 0:
+                    continue
+                for l in block.get("lines", []):
+                    spans = l.get("spans", [])
+                    if not spans:
+                        continue
+                    l_text = "".join(s.get("text", "") for s in spans).strip()
+                    l_rect = fitz.Rect(l["bbox"]) if "bbox" in l else fitz.Rect(spans[0]["bbox"])
+                    lines.append({
+                        "text": l_text,
+                        "rect": l_rect,
+                        "block_no": block.get("number", 0)
+                    })
 
-            for line in block.get("lines", []):
-                line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
+            for i in range(len(lines)):
+                curr_l = lines[i]
+                line_text = curr_l["text"]
+                line_rect = curr_l["rect"]
 
-                # Find figure references in text (skip in bibliography/notes sections)
-                if not skip_external_refs:
-                    for fig_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|look\s+at|Look\s+at)?\s*(?:Figure|Fig\.?|FIGURE|FIG\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE):
-                        fig_id = f"figure_{fig_match.group(1)}"
+                # Candidate texts to check: single line and stitched across consecutive lines
+                check_items = [
+                    {
+                        "text": line_text,
+                        "r_primary": line_rect,
+                        "r_secondary": None,
+                        "is_split": False,
+                        "is_hyphenated": False,
+                    }
+                ]
+                if i + 1 < len(lines):
+                    next_l = lines[i + 1]
+                    # Check A: Hyphenated across lines (e.g. "Using Ta-" \n "ble 1.1")
+                    m_hyphen = re.search(r'([A-Za-z]+)[-\u2010\u00ad\u2013]\s*$', line_text)
+                    if m_hyphen:
+                        part1 = m_hyphen.group(1)
+                        stitched_dehyphen = re.sub(r'[-\u2010\u00ad\u2013]\s*$', '', line_text) + next_l["text"]
+                        check_items.append({
+                            "text": stitched_dehyphen,
+                            "r_primary": line_rect,
+                            "r_secondary": next_l["rect"],
+                            "is_split": True,
+                            "is_hyphenated": True,
+                            "part1": part1,
+                            "next_text": next_l["text"]
+                        })
+
+                    # Check B: Split at space across lines (e.g. "see Table" \n "1.1")
+                    if re.search(r'\b(?:Figure|Fig\.?|Table|Tab\.?|Chapter|Ch\.?|Box|Case)\s*$', line_text, re.I):
+                        stitched_space = line_text + " " + next_l["text"]
+                        check_items.append({
+                            "text": stitched_space,
+                            "r_primary": line_rect,
+                            "r_secondary": next_l["rect"],
+                            "is_split": True,
+                            "is_hyphenated": False,
+                            "next_text": next_l["text"]
+                        })
+
+                for item in check_items:
+                    text_to_check = item["text"]
+                    # 1. Figure references
+                    for fig_match in re.finditer(r'\b(?:see|refer\s+to|look\s+at)?\s*(?:Figure|Fig\.?)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
+                        raw_id = fig_match.group(1)
+                        norm_id = re.sub(r'[\-–]', '.', re.sub(r'[a-z]+$', '', raw_id))
+                        fig_id = f"figure_{norm_id}"
                         if fig_id in targets:
-                            if line.get("spans"):
-                                rect = fitz.Rect(line["spans"][0]["bbox"])
+                            if targets[fig_id]["page_idx"] == page_idx and line_text.startswith(fig_match.group(0).lstrip()):
+                                continue
+                            exact_rect = _resolve_match_rects(page, item, fig_match.group(0), raw_id, "Figure")
+                            # Avoid duplicates
+                            if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
                                 references.append({
                                     "page_idx": page_idx,
                                     "page": physical_page,
-                                    "rect": rect,
+                                    "rect": exact_rect,
                                     "type": "figure",
-                                    "text": fig_match.group(0),
+                                    "text": fig_match.group(0).strip(),
                                     "target_info": targets[fig_id],
                                 })
 
-                # Find table references in text (skip in bibliography/notes sections)
-                if not skip_external_refs:
-                    for table_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|look\s+at|Look\s+at)?\s*(?:Table|Tab\.?|TABLE|TAB\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE):
-                        table_id = f"table_{table_match.group(1)}"
+                    # 2. Table references
+                    for table_match in re.finditer(r'\b(?:see|refer\s+to|look\s+at)?\s*(?:Table|Tab\.?)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
+                        raw_id = table_match.group(1)
+                        norm_id = re.sub(r'[\-–]', '.', re.sub(r'[a-z]+$', '', raw_id))
+                        table_id = f"table_{norm_id}"
                         if table_id in targets:
-                            if line.get("spans"):
-                                rect = fitz.Rect(line["spans"][0]["bbox"])
+                            if targets[table_id]["page_idx"] == page_idx and line_text.startswith(table_match.group(0).lstrip()):
+                                continue
+                            exact_rect = _resolve_match_rects(page, item, table_match.group(0), raw_id, "Table")
+                            if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
                                 references.append({
                                     "page_idx": page_idx,
                                     "page": physical_page,
-                                    "rect": rect,
+                                    "rect": exact_rect,
                                     "type": "table",
-                                    "text": table_match.group(0),
+                                    "text": table_match.group(0).strip(),
                                     "target_info": targets[table_id],
                                 })
 
-                # Find chapter references in text (skip in bibliography/notes sections, section headers, only match body text)
-                if not skip_external_refs:
-                    for ch_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|read|Read)?\s*(?:Chapter|Ch\.?|CHAPTER|CH\.?)\s+(\d+)', line_text, re.IGNORECASE):
-                        ch_id = f"chapter_{ch_match.group(1)}"
+                    # 3. Chapter references
+                    for ch_match in re.finditer(r'\b(?:see|refer\s+to|read)?\s*(?:Chapter|Ch\.?)\s+(\d+)', text_to_check, re.I):
+                        raw_id = ch_match.group(1)
+                        ch_id = f"chapter_{raw_id}"
                         if ch_id in targets:
                             target_chapter = targets[ch_id]
+                            is_chapter_header = (page_idx == target_chapter["page_idx"] and line_text.startswith(ch_match.group(0).lstrip()))
+                            is_section_header = len(line_text) < 50
+                            if not is_chapter_header and not is_section_header:
+                                exact_rect = _resolve_match_rects(page, item, ch_match.group(0), raw_id, "Chapter")
+                                if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
+                                    references.append({
+                                        "page_idx": page_idx,
+                                        "page": physical_page,
+                                        "rect": exact_rect,
+                                        "type": "chapter",
+                                        "text": ch_match.group(0).strip(),
+                                        "target_info": target_chapter,
+                                    })
 
-                            # Skip if this looks like a chapter header or section header
-                            # - Chapter header: on same page as target, starts the line
-                            # - Section header: short line (< 50 chars), typically standalone
-                            is_chapter_header = (page_idx == target_chapter["page_idx"] and
-                                               line_text.startswith(ch_match.group(0).lstrip()))
-                            is_section_header = len(line_text) < 50  # Section headers are short
-
-                            if not is_chapter_header and not is_section_header and line.get("spans"):
-                                rect = fitz.Rect(line["spans"][0]["bbox"])
+                    # 4. Box / Case references: "see Box 11-2", "Box 11-2", "in Box 2-3", "Box 11.2"
+                    for box_match in re.finditer(r'\b(?:see|refer\s+to|in|look\s+at)?\s*(?:Box|Case)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
+                        raw_id = box_match.group(1)
+                        norm_id = re.sub(r'[\-–]', '.', re.sub(r'[a-z]+$', '', raw_id))
+                        box_id = f"box_{norm_id}"
+                        if box_id in targets:
+                            # Don't create a link on the target caption itself
+                            if targets[box_id]["page_idx"] == page_idx and line_text.startswith(box_match.group(0).lstrip()):
+                                continue
+                            exact_rect = _resolve_match_rects(page, item, box_match.group(0), raw_id, "Box")
+                            if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
                                 references.append({
                                     "page_idx": page_idx,
                                     "page": physical_page,
-                                    "rect": rect,
-                                    "type": "chapter",
-                                    "text": ch_match.group(0),
-                                    "target_info": target_chapter,
+                                    "rect": exact_rect,
+                                    "type": "box",
+                                    "text": box_match.group(0).strip(),
+                                    "target_info": targets[box_id],
                                 })
 
                 # Find page references: "page 42", "p. 42", "pp. 100-105"
@@ -308,21 +492,20 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                         try:
                             target_page = int(page_ref) - 1  # Convert to 0-indexed
                             if 0 <= target_page < len(doc):
-                                if line.get("spans"):
-                                    rect = fitz.Rect(line["spans"][0]["bbox"])
-                                    references.append({
-                                        "page_idx": page_idx,
-                                        "page": physical_page,
-                                        "rect": rect,
+                                exact_rect = _get_exact_match_rect(page, page_match.group(0), line_rect)
+                                references.append({
+                                    "page_idx": page_idx,
+                                    "page": physical_page,
+                                    "rect": exact_rect,
+                                    "type": "page",
+                                    "text": page_match.group(0),
+                                    "target_info": {
+                                        "page_idx": target_page,
+                                        "page": int(page_ref),
                                         "type": "page",
-                                        "text": page_match.group(0),
-                                        "target_info": {
-                                            "page_idx": target_page,
-                                            "page": int(page_ref),
-                                            "type": "page",
-                                            "identifier": page_ref,
-                                        },
-                                    })
+                                        "identifier": page_ref,
+                                    },
+                                })
                         except (ValueError, IndexError):
                             pass
 
@@ -333,13 +516,16 @@ def _check_link_exists(doc, page_idx: int, rect) -> bool:
     """Check if a link already exists in the given area."""
     try:
         page = doc[page_idx]
-        rect = fitz.Rect(rect)
+        rect_list = rect if isinstance(rect, list) else [rect]
         for link in page.get_links():
             is_link = link.get('kind') in (fitz.LINK_URI, fitz.LINK_GOTO)
             if is_link:
                 link_rect = link.get('from')
-                if link_rect and fitz.Rect(link_rect).intersects(rect):
-                    return True
+                if link_rect:
+                    lr = fitz.Rect(link_rect)
+                    for r in rect_list:
+                        if lr.intersects(fitz.Rect(r)):
+                            return True
     except Exception:
         pass
     return False
@@ -349,11 +535,13 @@ def _create_crossref_link(doc, ref_page_idx: int, ref_rect, target_page_idx: int
     """Create a link from a cross-reference to its target."""
     try:
         page = doc[ref_page_idx]
-        page.insert_link({
-            "kind": fitz.LINK_GOTO,
-            "from": fitz.Rect(ref_rect),
-            "page": target_page_idx,
-        })
+        rect_list = ref_rect if isinstance(ref_rect, list) else [ref_rect]
+        for r in rect_list:
+            page.insert_link({
+                "kind": fitz.LINK_GOTO,
+                "from": fitz.Rect(r),
+                "page": target_page_idx,
+            })
         logger.debug(f"Created cross-reference link for '{ref_text}' to page {target_page_idx + 1}")
     except Exception as e:
         logger.error(f"Failed to create cross-reference link: {e}")

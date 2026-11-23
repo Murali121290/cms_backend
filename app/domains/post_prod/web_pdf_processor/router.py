@@ -1,6 +1,7 @@
 import os
 import shutil
-from typing import Optional, Any
+import fitz
+from typing import Optional, Any, List, Dict
 from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -25,6 +26,9 @@ from .services import url_service
 from .services import email_service
 from .services import endnote_service
 from .services import crossref_service
+from .services import index_service
+from .services import glossary_service
+from .services import validation_diff_service
 
 
 def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
@@ -39,7 +43,7 @@ def update_validation_status(project_obj: WebPdfProject):
     """Update validation_status based on workflow progress."""
     if not project_obj.status:
         project_obj.validation_status = "Yet to start"
-    elif project_obj.status == "Crossref Linked":
+    elif project_obj.status in ("Crossref Linked", "Index Linked", "Glossary Linked"):
         project_obj.validation_status = "Completed"
     else:
         project_obj.validation_status = "In-Progress"
@@ -227,6 +231,7 @@ class MergeRequest(BaseModel):
 class LinkRequest(BaseModel):
     link_type: str = "one_way"
     analyze_only: bool = False
+    preserve_existing: bool = True
 
 class ManualLinkRequest(BaseModel):
     type: str
@@ -276,6 +281,30 @@ def merge_project_files(
     ]
 
     if result['success']:
+        # Automatically trim to PDF TrimBox by default upon merge
+        trim_success, trim_msg = trim_crop_engine(
+            pdf_path=merged_output_path,
+            mode="trimbox",
+            output_path=merged_output_path
+        )
+        if trim_success:
+            project_obj.status = "Trimmed"
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="trim",
+                user_id=user.id if user else None,
+                username=_actor_name(user),
+                details={"mode": "trimbox", "message": "Auto-trimmed to TrimBox on merge", "output": trim_msg}
+            )
+        else:
+            project_obj.status = "Merged"
+
+        # Preserve baseline copy for final comparison validation (AFTER TRIM so margins & coordinates match)
+        baseline_path = os.path.join(project_obj.folder_name, "output_baseline.pdf")
+        try:
+            shutil.copy2(merged_output_path, baseline_path)
+        except Exception:
+            pass
+
         web_pdf_projects_db.record_merge_history(
             db,
             project_id=project_id,
@@ -285,12 +314,11 @@ def merge_project_files(
             merged_output_path=merged_output_path,
             total_pages=result['total_pages'],
             merge_status="success",
-            details=None,
+            details={"auto_trim": "trimbox" if trim_success else f"failed: {trim_msg}"},
         )
-        project_obj.status = "Merged"
         update_validation_status(project_obj)
         db.commit()
-        return {"message": "PDF files merged successfully", "output_path": merged_output_path}
+        return {"message": "PDF files merged and auto-trimmed successfully", "output_path": merged_output_path}
     else:
         web_pdf_projects_db.record_merge_history(
             db,
@@ -332,6 +360,21 @@ def trim_project_pdf(
     
     if not success:
         raise HTTPException(status_code=500, detail=f"Trim failed: {result_msg}")
+
+    # Keep baseline synchronized with trimmed dimensions so validation compares equivalent page boxes
+    baseline_path = os.path.join(project["folder_name"], "output_baseline.pdf")
+    if os.path.exists(baseline_path):
+        try:
+            trim_crop_engine(
+                pdf_path=baseline_path,
+                mode=body.mode,
+                margins=body.margins,
+                standardize_size=body.standardize_size,
+                remove_marks=body.remove_marks,
+                output_path=baseline_path
+            )
+        except Exception:
+            pass
         
     project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
     if project_obj:
@@ -369,7 +412,33 @@ def get_merged_pdf(
     if not os.path.exists(pdf_path):
         raise HTTPException(status_code=404, detail="PDF not found. Please merge files first.")
 
-    return FileResponse(pdf_path, media_type="application/pdf")
+    # Determine desired download filename: <project_file_name>.WebPdf.pdf
+    source_base = None
+    extract_dir = os.path.join(project["folder_name"], "extract")
+    if os.path.exists(extract_dir):
+        for root, dirs, files in os.walk(extract_dir):
+            pdf_files = [f for f in files if f.lower().endswith(".pdf")]
+            if len(pdf_files) == 1:
+                source_base = os.path.splitext(pdf_files[0])[0]
+                break
+            elif len(pdf_files) > 1:
+                # If multiple PDFs (e.g. chapters), check for main project zip name
+                pass
+
+    if not source_base and project.get("pdf_path"):
+        source_base = os.path.splitext(os.path.basename(project["pdf_path"]))[0]
+
+    if not source_base:
+        source_base = project.get("project_name") or f"project_{project_id}"
+
+    download_filename = f"{source_base}.WebPdf.pdf"
+
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=download_filename,
+        content_disposition_type="inline"
+    )
 
 
 def _serialize_history(h: Any) -> dict:
@@ -481,6 +550,52 @@ def check_fonts_status(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/projects/{project_id}/fix-fonts")
+def fix_fonts_endpoint(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Embed all missing fonts into the current PDF using Ghostscript."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    output_pdf = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
+
+    try:
+        fix_result = font_service.fix_embed_fonts(output_pdf)
+        if not fix_result.get("success"):
+            raise HTTPException(status_code=500, detail=fix_result.get("error", "Failed to embed fonts"))
+
+        font_status = fix_result["status"]
+        project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+        if project_obj:
+            project_obj.status = "Fonts Checked"
+            update_validation_status(project_obj)
+            db.commit()
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="fonts_check",
+                user_id=user.id if user else None,
+                username=_actor_name(user),
+                details=font_status
+            )
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="fonts_fixed",
+                user_id=user.id if user else None,
+                username=_actor_name(user),
+                details=font_status
+            )
+        return font_status
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/projects/{project_id}/security-status")
 def check_security_status(
     project_id: int,
@@ -520,6 +635,95 @@ def check_security_status(
 
 
 from .services import toc_service
+
+@router.get("/projects/{project_id}/bookmarks-info")
+def get_existing_bookmarks_info(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Check if the current project PDF already contains existing bookmarks."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    pdf_candidates = [
+        os.path.join(base_dir, "output.pdf"),
+        os.path.join(base_dir, "output_secured.pdf"),
+        os.path.join(base_dir, "output_bookmarked.pdf"),
+    ]
+    pdf_path = next((p for p in pdf_candidates if os.path.exists(p)), None)
+    if not pdf_path:
+        return {"has_existing_bookmarks": False, "count": 0, "sample_titles": []}
+
+    try:
+        doc = fitz.open(pdf_path)
+        toc = doc.get_toc()
+        doc.close()
+        sample_titles = [item[1] for item in toc[:5]]
+        return {
+            "has_existing_bookmarks": len(toc) > 0,
+            "count": len(toc),
+            "sample_titles": sample_titles,
+        }
+    except Exception:
+        return {"has_existing_bookmarks": False, "count": 0, "sample_titles": []}
+
+
+@router.post("/projects/{project_id}/accept-existing-bookmarks")
+def accept_existing_bookmarks(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Accept and lock in the existing bookmarks already present in the PDF as default."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    output_pdf = os.path.join(base_dir, "output.pdf")
+    bookmarked_pdf = os.path.join(base_dir, "output_bookmarked.pdf")
+
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
+
+    try:
+        doc = fitz.open(output_pdf)
+        toc = doc.get_toc()
+        doc.close()
+
+        # Preserve copy as output_bookmarked.pdf if needed
+        if not os.path.exists(bookmarked_pdf):
+            try:
+                shutil.copy2(output_pdf, bookmarked_pdf)
+            except Exception:
+                pass
+
+        result = {
+            "success": True,
+            "toc_entries_detected": len(toc),
+            "bookmarks_generated": len(toc),
+            "kept_existing": True,
+        }
+
+        project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+        if project_obj:
+            project_obj.status = "Bookmarked"
+            update_validation_status(project_obj)
+            db.commit()
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="bookmarks",
+                user_id=user.id if user else None,
+                username=_actor_name(user),
+                details=result
+            )
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/projects/{project_id}/generate-bookmarks")
 def generate_bookmarks(
@@ -609,6 +813,77 @@ def update_bookmarks(
     return {"success": True, "message": "Bookmarks updated successfully"}
 
 
+@router.get("/projects/{project_id}/toc-links-info")
+def get_existing_toc_links_info(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Check if the current project PDF already contains existing TOC links."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    output_pdf = os.path.join(base_dir, "output.pdf")
+    if not os.path.exists(output_pdf):
+        return {"has_existing_links": False, "count": 0}
+
+    try:
+        doc = fitz.open(output_pdf)
+        goto_links = 0
+        for page in doc:
+            for link in page.get_links():
+                if link.get("kind") == fitz.LINK_GOTO:
+                    goto_links += 1
+        doc.close()
+        return {"has_existing_links": goto_links > 0, "count": goto_links}
+    except Exception:
+        return {"has_existing_links": False, "count": 0}
+
+
+@router.post("/projects/{project_id}/accept-existing-toc-links")
+def accept_existing_toc_links(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Accept and keep existing TOC links."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    output_pdf = os.path.join(base_dir, "output.pdf")
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found")
+
+    try:
+        doc = fitz.open(output_pdf)
+        goto_links = 0
+        for page in doc:
+            for link in page.get_links():
+                if link.get("kind") == fitz.LINK_GOTO:
+                    goto_links += 1
+        doc.close()
+
+        project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+        if project_obj:
+            project_obj.status = "TOC Linked"
+            update_validation_status(project_obj)
+            db.commit()
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="toc_links",
+                user_id=user.id if user else None,
+                username=_actor_name(user),
+                details={"total_links": goto_links, "kept_existing": True}
+            )
+
+        return {"success": True, "total_links": goto_links, "kept_existing": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/projects/{project_id}/generate-links")
 def generate_links(
     project_id: int,
@@ -628,7 +903,12 @@ def generate_links(
         raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
             
     try:
-        result = toc_service.create_links_in_pdf(output_pdf, request.link_type, request.analyze_only)
+        result = toc_service.create_links_in_pdf(
+            output_pdf,
+            request.link_type,
+            request.analyze_only,
+            preserve_existing=request.preserve_existing
+        )
         if not request.analyze_only:
             project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
             if project_obj:
@@ -685,6 +965,12 @@ def generate_link_manual(
 
 class UrlLinkRequest(BaseModel):
     analyze_only: bool = True
+    color_urls: bool = False
+    fix_multiline: bool = True
+    fix_missing: bool = True
+    fix_malformed: bool = True
+    remove_duplicates: bool = True
+    custom_details: Optional[List[Dict[str, Any]]] = None
 
 
 @router.post("/projects/{project_id}/generate-url-links")
@@ -713,7 +999,16 @@ def generate_url_links(
             raise HTTPException(status_code=404, detail="No PDF file available.")
 
     try:
-        result = url_service.find_urls_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        result = url_service.find_urls_in_pdf(
+            bookmarked_pdf_path,
+            analyze_only=request.analyze_only,
+            color_urls=request.color_urls,
+            fix_multiline=request.fix_multiline,
+            fix_missing=request.fix_missing,
+            fix_malformed=request.fix_malformed,
+            remove_duplicates=request.remove_duplicates,
+            custom_details=request.custom_details,
+        )
 
         # Always record the analysis
         web_pdf_projects_db.record_step_completion(
@@ -739,6 +1034,7 @@ def generate_url_links(
 
 class EmailLinkRequest(BaseModel):
     analyze_only: bool = True
+    color_emails: bool = False
 
 
 @router.post("/projects/{project_id}/generate-email-links")
@@ -767,7 +1063,11 @@ def generate_email_links(
             raise HTTPException(status_code=404, detail="No PDF file available.")
 
     try:
-        result = email_service.find_emails_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        result = email_service.find_emails_in_pdf(
+            bookmarked_pdf_path,
+            analyze_only=request.analyze_only,
+            color_emails=request.color_emails
+        )
 
         # Always record the analysis
         web_pdf_projects_db.record_step_completion(
@@ -793,9 +1093,18 @@ def generate_email_links(
 
 class EndnoteRequest(BaseModel):
     analyze_only: bool = True
+    custom_details: Optional[List[Dict[str, Any]]] = None
 
 
 class CrossrefRequest(BaseModel):
+    analyze_only: bool = True
+
+
+class IndexLinkRequest(BaseModel):
+    analyze_only: bool = True
+
+
+class GlossaryLinkRequest(BaseModel):
     analyze_only: bool = True
 
 
@@ -825,7 +1134,7 @@ def generate_endnote_links(
             raise HTTPException(status_code=404, detail="No PDF file available.")
 
     try:
-        result = endnote_service.find_endnotes_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        result = endnote_service.find_endnotes_in_pdf(bookmarked_pdf_path, request.analyze_only, request.custom_details)
 
         # Always record the analysis
         web_pdf_projects_db.record_step_completion(
@@ -897,3 +1206,146 @@ def generate_crossref_links(
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/projects/{project_id}/generate-index-links")
+def generate_index_links(
+    project_id: int,
+    request: IndexLinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Scan PDF for Index page numbers and ranges and link them to target pages."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(bookmarked_pdf_path):
+        raise HTTPException(status_code=404, detail="No PDF file available.")
+
+    try:
+        result = index_service.find_index_links_in_pdf(bookmarked_pdf_path, request.analyze_only)
+
+        # Always record the analysis
+        web_pdf_projects_db.record_step_completion(
+            db, project_id=project_id, step_name="index_links",
+            user_id=user.id if user else None,
+            username=_actor_name(user),
+            details=result
+        )
+
+        # Mark as complete if: applying changes, OR analysis found nothing to fix
+        should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
+        if should_mark_complete:
+            project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+            if project_obj:
+                project_obj.status = "Index Linked"
+                update_validation_status(project_obj)
+                db.commit()
+
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/projects/{project_id}/generate-glossary-links")
+def generate_glossary_links(
+    project_id: int,
+    request: GlossaryLinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Scan PDF for body occurrences of terms defined in Glossary and link them to definition."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(bookmarked_pdf_path):
+        raise HTTPException(status_code=404, detail="No PDF file available.")
+
+    try:
+        result = glossary_service.find_glossary_terms_in_pdf(bookmarked_pdf_path, request.analyze_only)
+
+        # Always record the step completion / analysis
+        web_pdf_projects_db.record_step_completion(
+            db, project_id=project_id, step_name="glossary_links",
+            user_id=user.id if user else None,
+            username=_actor_name(user),
+            details=result
+        )
+
+        # Mark as complete if: applying changes, OR analysis found nothing to fix
+        should_mark_complete = (not request.analyze_only) or (result.get('not_linked', 0) == 0)
+        if should_mark_complete:
+            project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+            if project_obj:
+                project_obj.status = "Glossary Linked"
+                update_validation_status(project_obj)
+                db.commit()
+
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/projects/{project_id}/validation-diff")
+def get_validation_diff(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """
+    Compare the baseline merged PDF against the final processed PDF
+    to verify text, font, and alignment integrity.
+    """
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    final_pdf_path = os.path.join(base_dir, "output.pdf")
+    baseline_pdf_path = os.path.join(base_dir, "output_baseline.pdf")
+
+    if not os.path.exists(final_pdf_path):
+        raise HTTPException(status_code=404, detail="No output PDF available for validation.")
+
+    # If baseline does not exist yet (e.g. created earlier), copy final as fallback baseline
+    if not os.path.exists(baseline_pdf_path):
+        try:
+            shutil.copy2(final_pdf_path, baseline_pdf_path)
+        except Exception:
+            pass
+
+    try:
+        report = validation_diff_service.compare_pdfs(baseline_pdf_path, final_pdf_path)
+        
+        # Update project validation status
+        project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+        if project_obj and report.get("success"):
+            if report.get("status") == "passed":
+                project_obj.validation_status = "Passed"
+                project_obj.status = "Validated"
+            elif report.get("status") == "warnings":
+                project_obj.validation_status = "Passed"
+                project_obj.status = "Validated"
+            else:
+                project_obj.validation_status = "Failed"
+            db.commit()
+
+            web_pdf_projects_db.record_step_completion(
+                db, project_id=project_id, step_name="final_validation",
+                user_id=user.id if user else None,
+                username=_actor_name(user),
+                details=report
+            )
+
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
