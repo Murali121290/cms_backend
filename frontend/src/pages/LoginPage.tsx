@@ -267,9 +267,9 @@ export function LoginPage() {
               </div>
 
               {/* Forgot password */}
-              <div style={{ textAlign: 'right', fontSize: 12.5, marginBottom: 22 }}>
+              {/* <div style={{ textAlign: 'right', fontSize: 12.5, marginBottom: 22 }}>
                 <Link to="/forgot-password" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Forgot password?</Link>
-              </div>
+              </div> */}
 
               {/* Sign in */}
               <button
@@ -284,10 +284,10 @@ export function LoginPage() {
               </button>
             </form>
 
-            <div style={{ marginTop: 22, textAlign: 'center', fontSize: 13, color: 'var(--n-line)' }}>
+            {/* <div style={{ marginTop: 22, textAlign: 'center', fontSize: 13, color: 'var(--n-line)' }}>
               Don't have an account?{' '}
               <Link to={uiPaths.register} style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Register here</Link>
-            </div>
+            </div> */}
           </div>
         </div>
       </main>
