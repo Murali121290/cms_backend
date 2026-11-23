@@ -1,7 +1,9 @@
 import type { DragEvent } from "react";
-import { Clock } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Clock, FolderOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
+import { uiPaths } from "@/utils/appPaths";
 import { cn } from "@/utils/cn";
 
 import { useWorkspaceUi } from "../WorkspaceContext";
@@ -89,12 +91,22 @@ export function TaskCard({ item, showStage, onDragStart, onDragEnd }: Props) {
             {item.next_stage ? `Move to ${item.next_stage}` : "Mark complete"} →
           </Button>
         )}
+        {item.project_id && item.chapter_id ? (
+          <Link
+            to={uiPaths.chapterDetail(item.project_id, item.chapter_id)}
+            aria-label={`Open chapter folder for ${chapterOf(item)}`}
+            title="Open chapter folder"
+            className="ml-auto grid size-7 place-items-center rounded-lg border border-border text-muted hover:text-text"
+          >
+            <FolderOpen className="size-3.5" aria-hidden="true" />
+          </Link>
+        ) : null}
         <button
           type="button"
           onClick={() => ui.open.activity(item)}
           aria-label={`Activity for ${chapterOf(item)}`}
           title="Activity"
-          className="ml-auto grid size-7 place-items-center rounded-lg border border-border text-muted hover:text-text"
+          className={cn(!(item.project_id && item.chapter_id) && "ml-auto", "grid size-7 place-items-center rounded-lg border border-border text-muted hover:text-text")}
         >
           <Clock className="size-3.5" aria-hidden="true" />
         </button>

@@ -162,7 +162,7 @@ describe("WorkspacePage", () => {
     const panel = await screen.findByRole("dialog", { name: "Filter Client" });
     expect(within(panel).getByText("Springer Publishing").nextSibling?.textContent).toBe("2");
     await userEvent.click(within(panel).getByRole("checkbox", { name: /Wolters Kluwer Health/ }));
-    await userEvent.click(within(panel).getByRole("button", { name: "Done" }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Apply" }));
 
     await waitFor(() => expect(screen.queryByText("Chapter 01")).not.toBeInTheDocument());
     expect(screen.getByText("Chapter 02")).toBeInTheDocument();
@@ -197,6 +197,23 @@ describe("WorkspacePage", () => {
     expect(within(list).getAllByRole("option")).toHaveLength(1);
     await userEvent.keyboard("{Enter}");
     expect(await screen.findByRole("article", { name: "Ch09 Layout" })).toBeInTheDocument();
+  });
+
+  it("chapter list follows the selected stage; All stages shows everything", async () => {
+    api.getDashboard.mockResolvedValue(
+      leadDashboard(
+        [makeItem({ stage_name: "Typesetting", chapters: "05" }), makeItem({ stage_name: "Copyediting", chapters: "06" })],
+        { role: "manager", stages: [stage("Copyediting"), stage("Typesetting")] },
+      ),
+    );
+    renderAt("/workspace?tab=queue&stage=Typesetting");
+    expect(await screen.findByText("Chapter 05")).toBeInTheDocument();
+    expect(screen.queryByText("Chapter 06")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Chapters · Typesetting/ })).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Stage" }), "all");
+    expect(await screen.findByText("Chapter 06")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /All chapters/ })).toBeInTheDocument();
   });
 
   it("asks for confirmation before a bulk approve and shows per-item results", async () => {

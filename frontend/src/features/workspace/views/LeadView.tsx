@@ -10,7 +10,7 @@ import { ToneBadge } from "../components/Primitives";
 import { QueueTable } from "../components/QueueTable";
 import { ScheduleView } from "../components/ScheduleView";
 import { StageOverview } from "../components/StageOverview";
-import { TeamTable } from "../components/TeamTable";
+import { stagePeople, TeamTable } from "../components/TeamTable";
 import { BOARD_COLUMNS, CUSTODY, TONE_CLASSES, type StatusFilter, type WorkspaceTab } from "../constants";
 import { useWorkspaceUi } from "../WorkspaceContext";
 import type { WorkspaceDashboardResponse, WorkspaceItem, WorkspacePipeline, WorkspaceStageInfo } from "../types";
@@ -59,14 +59,22 @@ export function LeadView(p: Props) {
     return m;
   }, [pipeline.items]);
   const people = pipeline.people.filter((x) => x.stage_names.includes(stage.stage_name)).map((x) => x.username);
+  // The chapter list follows the banner stage unless "All stages" (or another stage) is picked.
+  const queueFilters = useMemo(
+    () => (p.filters.stage === "current" ? { ...p.filters, stage: stage.stage_name } : p.filters),
+    [p.filters, stage.stage_name],
+  );
+  const queueStage = queueFilters.stage;
+  const queueOpen = queueStage === "all" ? open.length : open.filter((i) => i.stage_name === queueStage).length;
+  const teamCount = useMemo(() => stagePeople(pipeline.people, pipeline.items, stage.stage_name).length, [pipeline.people, pipeline.items, stage.stage_name]);
   const day = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
   const managed = pipeline.stages.filter((s) => s.can_manage).map((s) => s.stage_name);
 
   const tabs: { key: WorkspaceTab; label: string; count?: number }[] = [
     { key: "board", label: isManager ? `Pipeline · ${stage.stage_name}` : "Pipeline board" },
-    { key: "queue", label: isManager ? "All chapters" : "Queue", count: open.length },
+    { key: "queue", label: queueStage === "all" ? "All chapters" : `Chapters · ${queueStage}`, count: queueOpen },
     { key: "schedule", label: isManager ? `Schedule · ${stage.stage_name}` : "Schedule" },
-    { key: "team", label: "Team", count: pipeline.people.length },
+    { key: "team", label: `Team · ${stage.stage_name}`, count: teamCount },
   ];
 
   return (
@@ -133,8 +141,9 @@ export function LeadView(p: Props) {
           <QueueTable
             items={pipeline.items}
             stageOptions={stageNames}
-            filters={p.filters}
-            onFilters={p.onFilters}
+            filters={queueFilters}
+            currentStage={stage.stage_name}
+            onFilters={(f) => p.onFilters(f.stage !== undefined && f.stage === stage.stage_name ? { ...f, stage: "current" } : f)}
             onClear={p.onClearFilters}
             selected={p.selected}
             onSelected={p.onSelected}
@@ -142,7 +151,7 @@ export function LeadView(p: Props) {
           />
         )}
         {p.tab === "schedule" && <ScheduleView stage={stage.stage_name} people={people} />}
-        {p.tab === "team" && <TeamTable people={pipeline.people} legacyMembers={legacy?.members ?? []} />}
+        {p.tab === "team" && <TeamTable key={stage.stage_name} stage={stage.stage_name} people={pipeline.people} legacyMembers={legacy?.members ?? []} />}
       </div>
     </>
   );

@@ -1360,6 +1360,29 @@ class WorkspaceItem(BaseModel):
     rework_notes: str | None = None
     rework_count: int = 0
     completion_delay_days: int | None = None  # set when completed: days finished after the planned end (0 = on time)
+    live: bool = True                  # chapter is in this stage now; False = planned row for a later stage
+    project_id: int | None = None      # Project.id / ChapterInfo.id: link to the chapter folder page
+    chapter_id: int | None = None
+    upcoming_from: str | None = None   # when not live: the stage the chapter is in now
+
+
+class ChapterTaskPerson(BaseModel):
+    username: str
+    display_name: str
+    open: int = 0
+    pages: int = 0
+
+
+class ChapterTaskResponse(BaseModel):
+    """The chapter's task in the stage it is in now, for the workflow bar on the chapter page."""
+    chapter_id: int
+    stage_name: str | None = None
+    item: WorkspaceItem | None = None     # None when the stage has no stages_details row yet
+    can_manage: bool = False              # stage owner / lead / Admin: assign, review, move
+    is_assignee: bool = False
+    can_write: bool = False               # may change the chapter's files: assignee / stage owner or lead / Admin
+    owner_name: str | None = None
+    people: list[ChapterTaskPerson] = []  # who can be assigned in this stage (roles + Admin), lightest load first
 
 
 class WorkspaceStats(BaseModel):

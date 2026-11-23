@@ -254,6 +254,19 @@ async def webdav_put(file_id: int, mode: str, token: str, filename: str, request
     if not allow:
         raise HTTPException(status_code=401, detail="Unauthorized WebDAV PUT")
 
+    # Only the chapter's assignee / stage owner / Admin may save (token names the user who opened it in Word).
+    editor = None
+    if token_payload and token_payload.get("sub"):
+        editor = db.query(models.User).filter(models.User.username == token_payload["sub"]).first()
+    elif lock_token:
+        lock = db.query(models.WebDAVLock).filter(models.WebDAVLock.lock_token == lock_token).first()
+        owner_id = getattr(lock, "owner_user_id", None) if lock else None
+        editor = db.get(models.User, owner_id) if owner_id else None
+    from app.integrations.wopi import access_token as wopi_token
+    if not wopi_token.can_write_file(db, editor, file_id):
+        logger.warning("WebDAV save refused on file %s for %s: read-only", file_id, getattr(editor, "username", None))
+        raise HTTPException(status_code=403, detail="Read-only: only the assignee, the stage owner or Admin can save this chapter.")
+
     body = await request.body()
     result = wopi_service.write_file_bytes(
         db,
@@ -261,6 +274,7 @@ async def webdav_put(file_id: int, mode: str, token: str, filename: str, request
         mode=mode,
         body=body,
         logger=logger,
+        uploaded_by_id=editor.id if editor else None,
     )
 
     # Trigger XHTML regen if structuring

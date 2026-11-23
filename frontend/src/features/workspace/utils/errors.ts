@@ -14,6 +14,8 @@ export function parseConflict(error: unknown): CustodyConflict | null {
   const data = error.response.data as { detail?: ConflictDetail | string } | undefined;
   const detail = data?.detail;
   if (detail && typeof detail === "object") {
+    // Other 409s (e.g. NOT_AT_STAGE: chapter isn't in this stage yet) are rules, not races: show them as a message.
+    if (detail.code && detail.code !== "CUSTODY_CONFLICT") return null;
     return { message: detail.message ?? "This task was changed by someone else.", current: detail.current ?? null };
   }
   return { message: typeof detail === "string" ? detail : "This task was changed by someone else.", current: null };

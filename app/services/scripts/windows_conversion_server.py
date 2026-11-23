@@ -958,6 +958,10 @@ def convert_xml_to_indesign(file: UploadFile = File(...)):
 
 @app.post("/convert-word-to-indesign")
 def convert_word_to_indesign(file: UploadFile = File(...), client: str = None, progid: str = "InDesign.Application"):
+    """
+    Part 1: Word -> InDesign (d2id word-to-indd, formerly auto)
+    Executes: python -m d2id word-to-indd --docx <docx> --template <template> --output <output> [--assets <assets>]
+    """
     start_time = time.time()
     session_id = str(uuid.uuid4())
     workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
@@ -1053,7 +1057,8 @@ def convert_word_to_indesign(file: UploadFile = File(...), client: str = None, p
             python_bin = venv_cand
             break
 
-    cmd_str = f'"{python_bin}" -m d2id auto --template "{indt_path}" --docx "{docx_path}" --output "{output_dir}"'
+    # Build command for d2id word-to-indd (formerly auto) with backwards compatibility
+    cmd_str = f'"{python_bin}" -m d2id word-to-indd --docx "{docx_path}" --template "{indt_path}" --output "{output_dir}"'
     if assets_dir:
         cmd_str += f' --assets "{assets_dir}"'
 
@@ -1082,6 +1087,21 @@ def convert_word_to_indesign(file: UploadFile = File(...), client: str = None, p
             timeout=3600,
             check=False
         )
+        # If 'word-to-indd' is not recognized on an older d2id build, retry with legacy 'auto'
+        if proc_res.returncode != 0 and any(kw in (proc_res.stderr or "").lower() for kw in ["invalid choice", "unrecognized", "unknown command"]):
+            logger.info(f"[{session_id}] 'word-to-indd' not recognized by current d2id version, retrying with legacy 'auto' command...")
+            cmd_str_fallback = f'"{python_bin}" -m d2id auto --template "{indt_path}" --docx "{docx_path}" --output "{output_dir}"'
+            if assets_dir:
+                cmd_str_fallback += f' --assets "{assets_dir}"'
+            proc_res = subprocess.run(
+                cmd_str_fallback,
+                cwd=d2id_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=3600,
+                check=False
+            )
         logger.info(f"[{session_id}] d2id stdout: {proc_res.stdout}")
         if proc_res.stderr:
             logger.warning(f"[{session_id}] d2id stderr: {proc_res.stderr}")
@@ -1284,11 +1304,17 @@ def convert_indesign_to_xhtml(file: UploadFile = File(...), client: str = None, 
 # ---------------------------------------------------------------------------
 @app.post("/convert-xhtml-to-indesign")
 @app.post("/stage/xhtml-to-indd")
-def convert_xhtml_to_indesign(file: UploadFile = File(...), client: str = None, progid: str = "InDesign.Application"):
+def convert_xhtml_to_indesign(
+    file: UploadFile = File(...),
+    client: str = None,
+    progid: str = "InDesign.Application",
+    accept_pending: bool = False,
+    rebase: bool = False
+):
     """
     Part 3: XHTML -> InDesign + PDF (d2id xhtml-to-indd)
     Accepts ZIP containing stage/ folder (<filename>.indd + revision.json), reviewed <filename>.xhtml, and artfile/ Links.
-    Executes: python -m d2id xhtml-to-indd --stage stage --xhtml <filename>_reviewed.xhtml --output output/r2 --accept-pending --rebase
+    Executes: python -m d2id xhtml-to-indd --stage stage --xhtml <filename>_reviewed.xhtml --output output/r2
     Returns ZIP containing revised <filename>.indd, <filename>.idml, <filename>.pdf, fresh <filename>.xhtml, revision.json
     """
     start_time = time.time()
@@ -1521,10 +1547,12 @@ def convert_xhtml_to_indesign(file: UploadFile = File(...), client: str = None, 
         python_bin, "-m", "d2id", "xhtml-to-indd",
         "--stage", stage_dir,
         "--xhtml", xhtml_path,
-        "--output", output_dir,
-        "--accept-pending",
-        "--rebase"
+        "--output", output_dir
     ]
+    if accept_pending:
+        cmd.append("--accept-pending")
+    if rebase:
+        cmd.append("--rebase")
     env = os.environ.copy()
     env["PYTHONPATH"] = d2id_dir + os.pathsep + env.get("PYTHONPATH", "")
     env["NODE_OPTIONS"] = "--use-system-ca"

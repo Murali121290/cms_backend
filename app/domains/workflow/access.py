@@ -184,6 +184,92 @@ def can_manage_stage(db: Session, user: Optional[User], stage_name: str, scope: 
     return scope.covers(stage_name)
 
 
+# ── chapter visibility ────────────────────────────────────────────────────────
+# Who can see a chapter (project page, chapter folder):
+#   * view_all_chapters permission (Admin / Manager / TeamLead access level, PM roles) -> every chapter
+#   * the stage owner / lead of the stage the chapter is in now                         -> those chapters
+#   * everyone else (employees)                                                         -> only chapters assigned to them
+
+def sees_all_chapters(user: Optional[User]) -> bool:
+    from app.domains.auth.rbac_config import has_permission
+    return bool(user) and has_permission(user, "view_all_chapters")
+
+
+def can_view_chapter(db: Session, user: Optional[User], chapter) -> bool:
+    if not user or chapter is None:
+        return False
+    if sees_all_chapters(user) or chapter.current_assignee_name == user.username:
+        return True
+    return bool(chapter.stage_name) and can_manage_stage(db, user, chapter.stage_name)
+
+
+def _is_admin_role(user: User) -> bool:
+    return "".join((user.role or "").lower().split()) == "admin" or is_admin(user)
+
+
+def can_write_chapter(db: Session, user: Optional[User], chapter) -> bool:
+    """Who may change a chapter's files while it sits in a stage: the assignee, the owner/lead of that stage,
+    or Admin. Everyone else (PMs included) is read-only. Chapters outside the stage workflow (no stage and no
+    assignee: legacy/virtual folders) keep today's behaviour."""
+    if not user:
+        return False
+    if chapter is None:
+        return True
+    if not chapter.stage_name and not chapter.current_assignee_name:
+        return True
+    if chapter.current_assignee_name == user.username or _is_admin_role(user):
+        return True
+    return bool(chapter.stage_name) and leads_stage(db, user, chapter.stage_name)
+
+
+def leads_stage(db: Session, user: User, stage_name: str) -> bool:
+    """Owner (Stage Master owner designation = user's role) or team lead of the stage. Unlike can_manage_stage this
+    does NOT include managers/PMs who oversee every stage: they keep workflow rights but files stay read-only."""
+    if owned_scope(db, user).covers(stage_name):
+        return True
+    if dashboard_role_type(user) == "teamlead" or get_user_access_level(user) == "TeamLead":
+        return teamlead_scope(db, user).covers(stage_name)
+    return False
+
+
+def write_denied_message(db: Session, chapter) -> str:
+    from app.domains.workflow.stage_service import chapter_label
+    who = chapter.current_assignee_name
+    if who:
+        u = db.query(User).filter(User.username == who).first()
+        name = (" ".join(p for p in ((u.first_name if u else None), (u.last_name if u else None)) if p)) or who
+        held = f"is assigned to {name}" + (f" in {chapter.stage_name}" if chapter.stage_name else "")
+    else:
+        held = f"isn't assigned to anyone yet in {chapter.stage_name}"
+    return (f"{chapter_label(chapter.chapters)} {held}. Only the assignee, the stage owner or Admin can change "
+            f"its files; you can still view and download them.")
+
+
+def ensure_can_write_chapter(db: Session, user: Optional[User], chapter) -> None:
+    if not can_write_chapter(db, user, chapter):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"code": "CHAPTER_READ_ONLY", "message": write_denied_message(db, chapter)})
+
+
+def ensure_can_write_file(db: Session, user: Optional[User], file_record) -> None:
+    """For endpoints that change a file: resolve its chapter and apply can_write_chapter."""
+    if file_record is None or not getattr(file_record, "chapter_id", None):
+        return
+    from app.domains.workflow.models import ChapterInfo
+    ensure_can_write_chapter(db, user, db.get(ChapterInfo, file_record.chapter_id))
+
+
+def ensure_can_write_file_id(db: Session, user: Optional[User], file_id: int) -> None:
+    from app.models import File
+    ensure_can_write_file(db, user, db.get(File, file_id))
+
+
+def visible_stage_names(db: Session, user: User) -> Optional[set[str]]:
+    """Stages whose chapters this user sees as a stage owner/lead; None = all stages."""
+    scope = managed_scope(db, user)
+    return None if scope.all_stages else set(scope.stage_names)
+
+
 # ── FastAPI dependencies / guards ─────────────────────────────────────────────
 
 def require_workflow_actor(user: Optional[User] = Depends(get_current_user_from_cookie)) -> User:

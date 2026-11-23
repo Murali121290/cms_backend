@@ -1330,6 +1330,8 @@ def start_process(
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
+    from app.domains.workflow import access as wf_access
+    wf_access.ensure_can_write_file(db, user, file_record)  # processing rewrites the file: assignee / owner / Admin
 
     file_path = resolve_physical_file_path(file_record.path, upload_dir)
 

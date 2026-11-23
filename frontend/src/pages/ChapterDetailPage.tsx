@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { chaptersApi } from '@/api/chapters'
 import { projectsApi } from '@/api/projects'
@@ -9,7 +9,8 @@ import { ChapterFilePage } from '@/pages/ChapterFilePage'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
 import { useRBAC } from '@/hooks/useRBAC'
-import apiClient from '@/api/client'
+import apiClient, { getApiErrorMessage } from '@/api/client'
+import { ChapterWorkflowBar } from '@/features/workspace/components/ChapterWorkflowBar'
 import { TransitionConfirmModal } from '@/components/TransitionConfirmModal'
 import { Modal } from '@/components/ui/Modal'
 import { AlertTriangle } from 'lucide-react'
@@ -64,6 +65,13 @@ export function ChapterDetailPage() {
   const [revertModalOpen, setRevertModalOpen] = useState(false)
   const [revertRemarks,   setRevertRemarks]   = useState('')
   const [refreshKey,     setRefreshKey]     = useState(0)
+  // True when this chapter's current stage runs the workspace flow (assign → hand back → approve → move);
+  // then moving on is only possible from the workflow bar, after approval, so the old Proceed is hidden.
+  const [hasWorkflowTask, setHasWorkflowTask] = useState(false)
+  // Assignee, stage owner/lead or Admin may change files (server rule); null until the task endpoint answers.
+  const [canWrite, setCanWrite] = useState<boolean | null>(null)
+  const [readOnlyReason, setReadOnlyReason] = useState<string | undefined>(undefined)
+  const onAccess = useCallback((w: boolean, reason: string) => { setCanWrite(w); setReadOnlyReason(reason) }, [])
   const [confirmModalOpen, setConfirmModalOpen] = useState(false)
   const [transitionConfig, setTransitionConfig] = useState<{
     custom_message?: string;
@@ -105,7 +113,7 @@ export function ChapterDetailPage() {
           )
         }
       })
-      .catch(() => setError('Failed to load chapter'))
+      .catch(err => setError(getApiErrorMessage(err, 'Failed to load chapter')))
       .finally(() => setLoading(false))
   }, [chapterId, projectId, refreshKey])
 
@@ -271,6 +279,16 @@ export function ChapterDetailPage() {
   return (
     <>
       <ChapterFilePage
+        workflowStrip={
+          <ChapterWorkflowBar
+            key={chapter.id}
+            chapterId={chapter.id}
+            onTaskLoaded={setHasWorkflowTask}
+            onAccess={onAccess}
+            onChanged={() => setRefreshKey(k => k + 1)}
+          />
+        }
+        readOnlyReason={readOnlyReason}
         chapterFolderData={chapterFolderData}
         projectId={project.id}
         chapterId={chapter.id}
@@ -280,9 +298,9 @@ export function ChapterDetailPage() {
         clientName={project.client_name ?? undefined}
         projectName={project.project_title ?? project.code ?? project.project_code ?? undefined}
         stageName={chapter.stage_name ?? ''}
-        isAssigned={chapter.current_assignee_name === viewer?.username}
+        isAssigned={canWrite ?? chapter.current_assignee_name === viewer?.username}
         onRefresh={() => setRefreshKey(k => k + 1)}
-        onProceed={proceedLoading ? undefined : handleProceed}
+        onProceed={proceedLoading || hasWorkflowTask ? undefined : handleProceed}
         onRevert={prevStage ? handleRevert : undefined}
         prevStageName={prevStage}
         isReverting={reverting}

@@ -50,6 +50,13 @@ export interface WorkspaceItem {
   rework_notes: string | null;
   rework_count: number;
   completion_delay_days: number | null;
+  /** False = a planned row for a stage the chapter hasn't reached yet (Schedule only). */
+  live?: boolean;
+  /** When not live: the stage the chapter is in now. */
+  upcoming_from?: string | null;
+  /** Ids for linking to the chapter folder page (uiPaths.chapterDetail). */
+  project_id?: number | null;
+  chapter_id?: number | null;
 }
 
 export interface WorkspaceStats {
@@ -241,6 +248,25 @@ export interface ScheduleResponse {
   date_to: string;
   items: WorkspaceItem[];
   truncated: boolean;
+}
+
+/** GET /workspace/chapters/{id}/task — the chapter's task in its current stage (chapter folder page). */
+export interface ChapterTaskPerson {
+  username: string;
+  display_name: string;
+  open: number;
+  pages: number;
+}
+export interface ChapterTask {
+  chapter_id: number;
+  stage_name: string | null;
+  item: WorkspaceItem | null;
+  can_manage: boolean;
+  is_assignee: boolean;
+  /** May change the chapter's files (assignee / stage owner or lead / Admin) — same rule the server enforces. */
+  can_write: boolean;
+  owner_name: string | null;
+  people: ChapterTaskPerson[];
 }
 
 export interface CustodyConflict {

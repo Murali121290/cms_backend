@@ -62,7 +62,9 @@ describe("board moves and actions", () => {
     const wip = makeItem({ custody_status: "in_progress", assignee_name: "priya.nair" });
     expect(availableActions(wip, { viewer: "priya.nair", canManage: false })).toEqual(["handback"]);
     expect(availableActions(wip, { viewer: "someone", canManage: false })).toEqual([]);
-    expect(availableActions(wip, { viewer: "emily", canManage: true })).toEqual(["handback", "reassign"]);
+    // Leads reassign; only the assignee hands back.
+    expect(availableActions(wip, { viewer: "emily", canManage: true })).toEqual(["reassign"]);
+    expect(availableActions(wip, { viewer: "priya.nair", canManage: true })).toEqual(["handback", "reassign"]);
     expect(availableActions(makeItem({ custody_status: "qa_approved" }), { viewer: "x", canManage: true })).toEqual(["move_next"]);
   });
 });
@@ -159,5 +161,34 @@ describe("column filters", () => {
     // The column's own filter is ignored when listing its values (so you can re-tick Wolters)
     expect(columnOptions(items, f, "client", nameOf).map((o) => [o.value, o.count])).toEqual([["Springer", 2], ["Wolters", 1]]);
     expect(applyFilters(items, { ...EMPTY_FILTERS, priorities: ["High"] }, nameOf)).toHaveLength(1);
+  });
+});
+
+describe("409 handling", () => {
+  it("opens the conflict dialog only for custody races; NOT_AT_STAGE is shown as a message", async () => {
+    const { AxiosError } = await import("axios");
+    const { parseConflict } = await import("../utils/errors");
+    const err = (detail: unknown) =>
+      new AxiosError("409", "ERR", undefined, undefined, { status: 409, data: { detail }, statusText: "", headers: {}, config: {} as never });
+    expect(parseConflict(err({ code: "CUSTODY_CONFLICT", message: "changed", current: null }))?.message).toBe("changed");
+    expect(parseConflict(err({ code: "NOT_AT_STAGE", message: "Chapter 03 is still in Manuscript Analysis." }))).toBeNull();
+  });
+});
+
+describe("team per stage", () => {
+  it("lists people mapped to the stage or holding its work; Admins only where they hold work", async () => {
+    const { stagePeople } = await import("../components/TeamTable");
+    const { makeItem } = await import("./fixtures");
+    const person = (username: string, role: string, stage_names: string[]) => ({ username, display_name: username, role, stage_names, open_count: 0, open_pages: 0, completed_count: 0 });
+    const people = [
+      person("priya", "Pre-editor", ["Pre-editing"]),
+      person("vinoth", "Copyeditor", ["Language Editing"]),
+      person("admin", "Admin", ["Pre-editing", "Language Editing"]),
+      person("admin_hema", "Admin", ["Pre-editing", "Language Editing"]),
+      person("pm", "Project Manager", []),
+    ];
+    const items = [makeItem({ stage_name: "Pre-editing", assignee_name: "admin_hema" }), makeItem({ stage_name: "Pre-editing", assignee_name: "pm" })];
+    expect(stagePeople(people, items, "Pre-editing").map((p) => p.username)).toEqual(["priya", "admin_hema", "pm"]);
+    expect(stagePeople(people, items, "Language Editing").map((p) => p.username)).toEqual(["vinoth"]);
   });
 });

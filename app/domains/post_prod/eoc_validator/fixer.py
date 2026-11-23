@@ -34,7 +34,7 @@ from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
 from .parser import QUESTION_RE, parse_docx
-from .rules import ERROR, LO_VALUE_RE, check_title, shuffle_decision, title_looks_like_typo
+from .rules import ERROR, LO_VALUE_RE, check_title, normalize_blanks, shuffle_decision, title_looks_like_typo
 from .tracked import Tracker, _run_text, has_tracked_changes, make_run
 
 TITLE_MAX = 60
@@ -60,15 +60,17 @@ class Fix:
 
 
 def _norm(s: str) -> str:
-    return (s.strip().replace("’", "'").replace("‘", "'")
-            .replace("“", '"').replace("”", '"').replace(" ", " "))
+    return normalize_blanks(
+        s.strip().replace("’", "'").replace("‘", "'")
+        .replace("“", '"').replace("”", '"').replace(" ", " ")
+    )
 
 
 def make_title(stem: str) -> str:
     """Title rule: full question if it fits in 60 characters; otherwise the
     longest start of the question ending at a full word such that the whole
     title, including the ending ' …', is at most 60 characters."""
-    s = stem.strip()
+    s = normalize_blanks(stem.strip())
     if len(s) <= TITLE_MAX:
         return s
     limit = TITLE_MAX - len(ELLIPSIS)  # room for the text before ' …'
@@ -84,7 +86,7 @@ def _title_runs(tpara: Paragraph, qpara: Paragraph, title: str) -> Optional[list
     carry over. None if the question runs can't be mapped cleanly."""
     want = title[: -len(ELLIPSIS)] if title.endswith(ELLIPSIS) else title
     full = qpara.text
-    m = QUESTION_RE.match(full)
+    m = QUESTION_RE.match(full) or re.match(r"^(\d+\.)(?:\t|\s+)(.*)$", full)
     if not m:
         return None
     stem_raw = m.group(2)
@@ -122,6 +124,7 @@ def fix_docx(
     filename: str,
     reference_prefix: str,
     author: str = DEFAULT_AUTHOR,
+    assessment_type: str = "auto",
 ) -> tuple[bytes, list[Fix]]:
     d = docx.Document(io.BytesIO(data))
     body = d.element.body
@@ -130,6 +133,15 @@ def fix_docx(
             "File already contains tracked changes — accept or reject them in Word, then run the correction again."
         )
     cf = parse_docx(data, filename)
+    if assessment_type == "sa":
+        for q in cf.questions:
+            if q.kind != "EMPTY":
+                q.kind = "SA"
+    elif assessment_type == "mc":
+        for q in cf.questions:
+            if q.kind == "SA":
+                q.kind = "MC"
+
     paras = list(d.paragraphs)  # same order/indices as the parser (no revisions present)
     tr = Tracker(body, author=author)
     fixes: list[Fix] = []
@@ -145,6 +157,16 @@ def fix_docx(
     inserts: list[tuple[int, str, Optional[int]]] = []
 
     for q in cf.questions:
+        # ── Question numbering tab fix
+        if q.has_tab_error:
+            qp = P(q.idx)
+            raw_q = q.raw
+            m_loose = re.match(r"^(\d+\.)\s+(.*)$", raw_q)
+            if m_loose:
+                new_q = f"{m_loose.group(1)}\t{m_loose.group(2)}"
+                if tr.replace_text(qp, new_q):
+                    fixes.append(Fix(filename, q.number, "Q1", "replaced space with tab after question number", raw_q, new_q))
+
         # ── Stray tag lines left after the question's Reference line
         if q.ref_line is not None:
             for role, l in q.extra_lines:
@@ -153,34 +175,39 @@ def fix_docx(
                     fixes.append(Fix(filename, q.number, "R2", "removed stray line after the Reference", l.text, ""))
 
         # ── Shuffle
-        should, reason, review = shuffle_decision(q)
-        if q.kind == "EMPTY" or review:
-            should = None  # not decidable automatically
-        sh = q.shuffle_line
-        last_opt_idx = max((o.idx for o in q.options), default=None)
-        well_placed = False
-        if sh is not None:
-            roles = [r for r, _ in q.body]
-            si = roles.index("shuffle")
-            well_placed = si > 0 and roles[si - 1] in ("option", "tf", "order") and si + 1 < len(roles) and roles[si + 1] == "title"
-        if should is True and last_opt_idx is not None:
-            if sh is None:
-                inserts.append((last_opt_idx, "Shuffle: True", q.title_line.idx if q.title_line else None))
-                fixes.append(Fix(filename, q.number, "SH3", f"added Shuffle line ({reason})", "", "Shuffle: True"))
-            elif not well_placed:
+        if q.kind == "SA":
+            if q.shuffle_line is not None:
+                removals.add(q.shuffle_line.idx)
+                fixes.append(Fix(filename, q.number, "SH3", "removed Shuffle line from short-answer question", q.shuffle_line.text, ""))
+        else:
+            should, reason, review = shuffle_decision(q)
+            if q.kind == "EMPTY" or review:
+                should = None  # not decidable automatically
+            sh = q.shuffle_line
+            last_opt_idx = max((o.idx for o in q.options), default=None)
+            well_placed = False
+            if sh is not None:
+                roles = [r for r, _ in q.body]
+                si = roles.index("shuffle")
+                well_placed = si > 0 and roles[si - 1] in ("option", "tf", "order") and si + 1 < len(roles) and roles[si + 1] == "title"
+            if should is True and last_opt_idx is not None:
+                if sh is None:
+                    inserts.append((last_opt_idx, "Shuffle: True", q.title_line.idx if q.title_line else None))
+                    fixes.append(Fix(filename, q.number, "SH3", f"added Shuffle line ({reason})", "", "Shuffle: True"))
+                elif not well_placed:
+                    removals.add(sh.idx)
+                    inserts.append((last_opt_idx, "Shuffle: True", sh.idx))
+                    fixes.append(Fix(filename, q.number, "SH2", "moved Shuffle line directly after the options", sh.text, "Shuffle: True"))
+                elif sh.text != "Shuffle: True":
+                    tr.replace_text(P(sh.idx), "Shuffle: True")
+                    fixes.append(Fix(filename, q.number, "SH1", "normalised Shuffle line", sh.text, "Shuffle: True"))
+            elif should is False and sh is not None:
                 removals.add(sh.idx)
-                inserts.append((last_opt_idx, "Shuffle: True", sh.idx))
-                fixes.append(Fix(filename, q.number, "SH2", "moved Shuffle line directly after the options", sh.text, "Shuffle: True"))
-            elif sh.text != "Shuffle: True":
+                fixes.append(Fix(filename, q.number, "SH3", f"removed Shuffle line ({reason})", sh.text, ""))
+            elif should is None and sh is not None and sh.text != "Shuffle: True" \
+                    and re.fullmatch(r"\s*shuffle\s*:\s*true\s*", sh.text, re.I):
                 tr.replace_text(P(sh.idx), "Shuffle: True")
                 fixes.append(Fix(filename, q.number, "SH1", "normalised Shuffle line", sh.text, "Shuffle: True"))
-        elif should is False and sh is not None:
-            removals.add(sh.idx)
-            fixes.append(Fix(filename, q.number, "SH3", f"removed Shuffle line ({reason})", sh.text, ""))
-        elif should is None and sh is not None and sh.text != "Shuffle: True" \
-                and re.fullmatch(r"\s*shuffle\s*:\s*true\s*", sh.text, re.I):
-            tr.replace_text(P(sh.idx), "Shuffle: True")
-            fixes.append(Fix(filename, q.number, "SH1", "normalised Shuffle line", sh.text, "Shuffle: True"))
 
         # ── Title
         if q.title_line is not None and q.kind != "EMPTY":

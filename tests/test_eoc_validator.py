@@ -563,8 +563,10 @@ def test_image_alt_text_rules():
 
 
 def test_check_alt_text_mode():
-    from app.domains.post_prod.eoc_validator import check_alt_text_run, build_report
+    from app.domains.post_prod.eoc_validator import check_alt_text_run, build_report, to_xlsx, to_csv
+    import openpyxl
     from docx.oxml import OxmlElement
+    # File 1 has an image
     d = docx.Document()
     d.add_paragraph("Manual Job Sheet 1")
     p = d.add_paragraph()
@@ -580,14 +582,39 @@ def test_check_alt_text_mode():
     buf = io.BytesIO()
     d.save(buf)
 
-    cf = parse_docx(buf.getvalue(), "ev2028_sm_job41.docx")
-    issues = check_alt_text_run([cf])
-    rep = build_report([cf], issues, "alt_text", mode="alt_text")
+    # File 2 has NO image
+    d2 = docx.Document()
+    d2.add_paragraph("Manual Job Sheet 2 without any images.")
+    buf2 = io.BytesIO()
+    d2.save(buf2)
+
+    cf1 = parse_docx(buf.getvalue(), "ev2028_sm_job41.docx")
+    cf2 = parse_docx(buf2.getvalue(), "ev2028_sm_job42.docx")
+    issues = check_alt_text_run([cf1, cf2])
+    rep = build_report([cf1, cf2], issues, "alt_text", mode="alt_text")
     assert rep["totals"]["images"] == 1
     assert rep["totals"]["has_alt"] == 1
     assert rep["totals"]["missing_alt"] == 0
     assert rep["totals"]["errors"] == 0
-    assert rep["files"][0]["status"] == "pass"
+    assert any(f["file"] == "ev2028_sm_job41.docx" and f["status"] == "pass" for f in rep["files"])
+
+    # Test Excel export in Alt text mode:
+    # Files without images must NOT be reported in Excel
+    xlsx_bytes = to_xlsx(rep)
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    ws_summary = wb["Summary"]
+    summary_files = [row[0] for row in ws_summary.iter_rows(min_row=7, values_only=True) if row[0]]
+    assert "ev2028_sm_job41.docx" in summary_files
+    assert "ev2028_sm_job42.docx" not in summary_files
+
+    ws_details = wb["Alt Text Details"]
+    details_files = [row[0] for row in ws_details.iter_rows(min_row=2, values_only=True) if row[0]]
+    assert "ev2028_sm_job41.docx" in details_files
+    assert "ev2028_sm_job42.docx" not in details_files
+
+    csv_text = to_csv(rep)
+    assert "ev2028_sm_job41.docx" in csv_text
+    assert "ev2028_sm_job42.docx" not in csv_text
 
 
 # ── Endpoint ────────────────────────────────────────────────────────────────
@@ -645,3 +672,132 @@ def test_endpoint_rejects_bad_input(client):
     res = client.post("/api/v2/eoc-validator/analyze", data={"reference_prefix": PREFIX},
                       files=[("files", ("a.txt", b"hello"))])
     assert res.status_code == 400
+
+
+def test_hyphenated_learning_outcomes_and_short_answer():
+    from app.domains.post_prod.eoc_validator import parse_docx, check_run, build_report, fix_docx
+    d = docx.Document()
+    # Q1: Short answer question with hyphenated LO
+    d.add_paragraph("1.\tExplain the difference between a good, a service, and an idea.")
+    d.add_paragraph("A good is a physical item that can be touched. A service is an action that one person performs.")
+    d.add_paragraph("Title: Explain the difference between a good, a service, and an …")
+    d.add_paragraph("Learning Outcome: 1.2-1")
+    d.add_paragraph("Reference: md6e_2028_eoc01_001")
+
+    # Q2: Short answer with comma-separated hyphenated LOs and space instead of tab
+    d.add_paragraph("2. Discuss the role of a marketing professional.")
+    d.add_paragraph("A marketing professional is a person who determines marketing needs.")
+    d.add_paragraph("Title: Discuss the role of a marketing professional.")
+    d.add_paragraph("Learning Outcome: 1.1-1, 1.1-3")
+    d.add_paragraph("Reference: md6e_2028_eoc01_002")
+
+    buf = io.BytesIO()
+    d.save(buf)
+
+    cf = parse_docx(buf.getvalue(), "md2028_tx_ch01.docx")
+    assert len(cf.questions) == 2
+    assert cf.questions[0].kind == "SA"
+    assert cf.questions[1].kind == "SA"
+    assert cf.questions[0].has_tab_error is False
+    assert cf.questions[1].has_tab_error is True
+
+    issues = check_run([cf], "md6e_2028_eoc")
+    # No false O4 (missing options), no false X1, no false L1 (hyphenated LO)
+    assert not any(i.rule == "O4" for i in issues)
+    assert not any(i.rule == "X1" for i in issues)
+    assert not any(i.rule == "L1" for i in issues)
+    assert not any(i.rule == "SH3" for i in issues)
+    # Exactly 1 issue: Q2 has space instead of tab
+    assert any(i.rule == "Q1" and "followed by a tab" in i.message for i in issues)
+
+    # Test fixer corrects space after question number
+    fixed_bytes, fixes = fix_docx(buf.getvalue(), "md2028_tx_ch01.docx", "md6e_2028_eoc")
+    assert any(f.rule == "Q1" and "replaced space with tab" in f.action for f in fixes)
+    cf_fixed = parse_docx(fixed_bytes, "md2028_tx_ch01.docx")
+    clean_issues = check_run([cf_fixed], "md6e_2028_eoc")
+    assert [i for i in clean_issues if i.severity == "error"] == []
+
+
+def test_fill_in_the_blank_title_matching():
+    """Fill-in-the-blank questions with [[answer]] in stem should match Title with '_____'."""
+    from app.domains.post_prod.eoc_validator.parser import Question
+    from app.domains.post_prod.eoc_validator.rules import check_title
+    from app.domains.post_prod.eoc_validator.fixer import make_title
+
+    # 1. Blank at beginning
+    q1 = Question(number=2, idx=0, raw="2.\t[[Physical]] development includes the changes to your body.", stem="[[Physical]] development includes the changes to your body.")
+    assert check_title(q1, "_____ development includes the changes to your body.") == []
+
+    # 2. Blank in middle
+    q2 = Question(number=4, idx=1, raw="4.\tBody language is a type of [[nonverbal]] communication.", stem="Body language is a type of [[nonverbal]] communication.")
+    assert check_title(q2, "Body language is a type of _____ communication.") == []
+
+    # 3. Blank at end
+    q3 = Question(number=10, idx=2, raw="10.\tPeople in the same age group as you are your [[peers]].", stem="People in the same age group as you are your [[peers]].")
+    assert check_title(q3, "People in the same age group as you are your _____.") == []
+
+    # 4. Truncated title with blank (50-60 chars)
+    s4 = "A(n) [[standard]] is a means to measure how well you achieve your long-term goals in life."
+    q4 = Question(number=9, idx=3, raw="9.\t" + s4, stem=s4)
+    assert check_title(q4, "A(n) _____ is a means to measure how well you achieve …") == []
+
+    # 5. Multiple blanks
+    s5 = "[[Human]] resources and [[nonhuman]] resources help people meet needs."
+    q5 = Question(number=5, idx=4, raw="5.\t" + s5, stem=s5)
+    assert check_title(q5, "_____ resources and _____ resources help people meet needs.") == []
+
+    # 6. Underscore length tolerance (3, 4, 5, 6 underscores)
+    s6 = "[[Water]] carries nutrients to every cell in your body."
+    q6 = Question(number=6, idx=5, raw="6.\t" + s6, stem=s6)
+    assert check_title(q6, "___ carries nutrients to every cell in your body.") == []
+    assert check_title(q6, "_______ carries nutrients to every cell in your body.") == []
+
+    # 7. make_title converts [[answer]] to _____
+    assert make_title("[[Physical]] development includes the changes to your body.") == "_____ development includes the changes to your body."
+    long_blank_stem = "The first step in making a decision is to [[define]] the problem and evaluate choices."
+    gen_title = make_title(long_blank_stem)
+    assert "[[" not in gen_title
+    assert "_____ " in gen_title
+    assert gen_title.endswith(" …")
+    assert len(gen_title) <= 60
+
+
+def test_fill_in_the_blank_full_docx_and_fixer():
+    """End-to-end docx parsing and validation for fill-in-the-blank questions."""
+    d = docx.Document()
+    d.add_paragraph("1.\t[[Physical]] development includes the changes to your body.")
+    d.add_paragraph("Title: _____ development includes the changes to your body.")
+    d.add_paragraph("Learning Outcome: 1.1-4")
+    d.add_paragraph("Reference: elc2028_eoc01_001")
+
+    d.add_paragraph("2.\tBody language is a type of [[nonverbal]] communication.")
+    d.add_paragraph("Title: Body language is a type of _____ communication.")
+    d.add_paragraph("Learning Outcome: 1.3-1")
+    d.add_paragraph("Reference: elc2028_eoc01_002")
+
+    # Q3 has wrong title that needs fixer regeneration
+    d.add_paragraph("3.\tResponsible decision-making means that you think about the [[consequences]] of your choices.")
+    d.add_paragraph("Title: Completely Wrong Title Here")
+    d.add_paragraph("Learning Outcome: 1.4-1")
+    d.add_paragraph("Reference: elc2028_eoc01_003")
+
+    buf = io.BytesIO()
+    d.save(buf)
+
+    cf = parse_docx(buf.getvalue(), "elc9e_2028_ch01.docx")
+    issues = check_run([cf], "elc2028_eoc")
+
+    # Q1 and Q2 should have zero errors
+    q1_q2_issues = [i for i in issues if i.question in (1, 2) and i.severity == "error"]
+    assert q1_q2_issues == []
+
+    # Q3 has wrong title
+    assert any(i.question == 3 and i.rule == "T1" for i in issues)
+
+    # Test fixer regenerates Q3 with blanks
+    fixed_bytes, fixes = fix_docx(buf.getvalue(), "elc9e_2028_ch01.docx", "elc2028_eoc")
+    assert any(f.question == 3 and f.rule == "T1" for f in fixes)
+    cf_fixed = parse_docx(fixed_bytes, "elc9e_2028_ch01.docx")
+    clean_issues = check_run([cf_fixed], "elc2028_eoc")
+    assert [i for i in clean_issues if i.severity == "error"] == []
+

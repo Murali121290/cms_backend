@@ -29,7 +29,8 @@ export function availableActions(item: WorkspaceItem, ctx: ActionContext): CardA
       if (ctx.canManage) out.push("assign");
       break;
     case "in_progress":
-      if (item.assignee_name === ctx.viewer || ctx.canManage) out.push("handback");
+      // Only the person doing the work hands it back; leads reassign instead.
+      if (item.assignee_name && item.assignee_name === ctx.viewer) out.push("handback");
       if (ctx.canManage) out.push("reassign");
       break;
     case "returned_for_review":

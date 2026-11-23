@@ -37,14 +37,17 @@ export function addDays(d: Date, n: number): Date {
 export function fmtDay(iso: string | null | undefined): string {
   const k = dayKeyOf(iso);
   if (!k) return "—";
-  return dayStart(k).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const [y, m, d] = k.split("-");
+  return `${d}/${m}/${y}`; // day/month/year, e.g. 25/11/2026
 }
 
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}, ${time}`; // 25/11/2026, 10:42 pm
 }
 
 export const isOpen = (item: WorkspaceItem) => item.custody_status !== "transitioned";

@@ -441,3 +441,194 @@ def test_admin_role_can_be_assigned_to_any_stage(world, as_user):
     assert "Copyediting" in boss["stage_names"]
     r = lead.post(f"/api/v2/workspace/tasks/{t}/assign", json={"assignee": "boss", "expected_custody_status": "unassigned"})
     assert r.status_code == 200, r.text
+
+
+# ── a chapter is workable only in the stage it is in now ─────────────────────
+
+def test_future_stage_rows_are_hidden_until_the_chapter_arrives(world, as_user):
+    """Ch01 is in Copyediting; its pre-created Typesetting row is planning data, not Typesetting's work."""
+    ts_lead, lead, emp = as_user(world["ts_lead"]), as_user(world["lead"]), as_user(world["emp"])
+    t, ts = world["task"].id, world["ts"].id
+
+    pipe = ts_lead.get("/api/v2/dashboard/workspaces").json()["pipeline"]
+    assert ts not in {i["id"] for i in pipe["items"]}
+    sched = ts_lead.get("/api/v2/workspace/stages/Typesetting/schedule").json()["items"]
+    row = next(i for i in sched if i["id"] == ts)
+    assert row["live"] is False and row["upcoming_from"] == "Copyediting"
+
+    # no assigning ahead — workspace and project-page routes
+    r = ts_lead.post(f"/api/v2/workspace/tasks/{ts}/assign", json={"assignee": "ts_lead"})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "NOT_AT_STAGE"
+    assert "still in Copyediting" in r.json()["detail"]["message"]
+    r = ts_lead.post("/api/v1/stage-details/project/P1/chapter/Ch01/stage/Typesetting/assign", json={"assignee_name": "ts_lead"})
+    assert r.status_code == 409, r.text
+    # clearing an early assignment is allowed
+    assert ts_lead.post(f"/api/v2/workspace/tasks/{ts}/assign", json={"assignee": None}).status_code == 200
+
+    # the full flow moves it: assign -> hand back -> approve -> move next
+    assert lead.post(f"/api/v2/workspace/tasks/{t}/assign", json={"assignee": "ce_priya"}).status_code == 200
+    assert lead.post(f"/api/v2/workspace/tasks/{t}/move-next", json={}).status_code == 409   # not approved yet
+    assert emp.post(f"/api/v2/workspace/tasks/{t}/handback", json={"notes": "Done, all queries raised.", "checklist_confirmed": True}).status_code == 200
+    assert lead.post(f"/api/v2/workspace/tasks/{t}/review", json={"decision": "approve"}).status_code == 200
+    assert lead.post(f"/api/v2/workspace/tasks/{t}/move-next", json={}).status_code == 200
+
+    pipe = ts_lead.get("/api/v2/dashboard/workspaces").json()["pipeline"]
+    arrived = next(i for i in pipe["items"] if i["id"] == ts)
+    assert arrived["live"] is True and arrived["custody_status"] == "unassigned"
+    # ... and it left Copyediting's open work
+    ce = lead.get("/api/v2/dashboard/workspaces").json()["pipeline"]["items"]
+    assert all(i["stage_status"] == "Completed" for i in ce if i["chapters"] == "Ch01" and i["stage_name"] == "Copyediting")
+    assert ts_lead.post(f"/api/v2/workspace/tasks/{ts}/assign", json={"assignee": "ts_lead"}).status_code == 200
+
+
+def test_employee_desk_excludes_early_assignments_and_cleanup_clears_them(world, as_user):
+    from app.domains.workflow import maintenance
+    db = world["db"]
+    ts = db.get(StageDetail, world["ts"].id)
+    ts.assignee_name, ts.custody_status = "ce_priya", "in_progress"   # assigned before the chapter got there
+    db.commit()
+
+    desk = as_user(world["emp"]).get("/api/v2/dashboard/workspaces").json()["user_workspace"]["assignments"]
+    assert ts.id not in {i["id"] for i in desk}
+
+    found = maintenance.find_early_assignments(db)
+    assert [(e.id, e.assignee, e.chapter_is_in) for e in found] == [(ts.id, "ce_priya", "Copyediting")]
+    maintenance.clear_early_assignments(db, "boss")
+    db.expire_all()
+    ts = db.get(StageDetail, ts.id)
+    assert ts.assignee_name is None and ts.custody_status == "unassigned"
+    assert "not yet at this stage" in str(ts.history)
+    assert maintenance.find_early_assignments(db) == []
+
+
+def test_employee_sees_only_chapters_assigned_to_them(world, as_user):
+    db = world["db"]
+    emp, emp2, lead = as_user(world["emp"]), as_user(world["emp2"]), as_user(world["lead"])
+    ch = db.query(ChapterInfo).filter_by(project="P1", chapters="Ch01").one()
+
+    assert emp.get("/api/v2/chapters/project/P1").json() == []
+    assert emp.get(f"/api/v2/chapters/{ch.id}").status_code == 403
+
+    assert lead.post(f"/api/v2/workspace/tasks/{world['task'].id}/assign", json={"assignee": "ce_priya"}).status_code == 200
+    assert [c["chapters"] for c in emp.get("/api/v2/chapters/project/P1").json()] == ["Ch01"]
+    assert emp.get(f"/api/v2/chapters/{ch.id}").status_code == 200
+    # a colleague in the same team still doesn't see it
+    assert emp2.get("/api/v2/chapters/project/P1").json() == []
+    assert emp2.get(f"/api/v2/chapters/{ch.id}").status_code == 403
+    # the stage lead sees the chapters in their stage
+    assert "Ch01" in [c["chapters"] for c in lead.get("/api/v2/chapters/project/P1").json()]
+
+
+def test_stage_owner_without_lead_access_level_sees_their_stage_chapters(world, as_user):
+    from app.domains.workflow import access
+    db = world["db"]
+    _stage(db, "Manuscript Analysis", '["Manuscript Analysis Operator"]', owner="Manuscript Analysis Manager")
+    owner = _user(db, "ma_owner", "Manuscript Analysis Manager", team="PM Team")
+    db.add(ChapterInfo(client="CUP", project="P1", chapters="Ch02", workflow="WF", stage_name="Manuscript Analysis", status="In-progress"))
+    db.commit()
+    ch2 = db.query(ChapterInfo).filter_by(chapters="Ch02").one()
+    ch1 = db.query(ChapterInfo).filter_by(chapters="Ch01").one()
+    assert access.can_view_chapter(db, owner, ch2)
+    if not access.sees_all_chapters(owner):
+        assert not access.can_view_chapter(db, owner, ch1)
+        assert [c["chapters"] for c in as_user(owner).get("/api/v2/chapters/project/P1").json()] == ["Ch02"]
+
+
+def test_chapter_page_task_endpoint_drives_the_same_workflow(world, as_user):
+    db = world["db"]
+    ch = db.query(ChapterInfo).filter_by(project="P1", chapters="Ch01").one()
+    lead, emp, emp2 = as_user(world["lead"]), as_user(world["emp"]), as_user(world["emp2"])
+
+    r = lead.get(f"/api/v2/workspace/chapters/{ch.id}/task").json()
+    assert r["stage_name"] == "Copyediting" and r["can_manage"] is True
+    assert r["item"]["id"] == world["task"].id and r["item"]["chapter_id"] == ch.id and r["item"]["live"] is True
+    names = [p["username"] for p in r["people"]]
+    assert {"ce_priya", "ce_david", "boss"} <= set(names) and "pm_marcus" not in names and "gone" not in names
+
+    assert emp.get(f"/api/v2/workspace/chapters/{ch.id}/task").status_code == 403   # not assigned yet
+    lead.post(f"/api/v2/workspace/tasks/{world['task'].id}/assign", json={"assignee": "ce_priya"})
+    r = emp.get(f"/api/v2/workspace/chapters/{ch.id}/task").json()
+    assert r["is_assignee"] is True and r["can_manage"] is False and r["people"] == []
+    assert r["item"]["custody_status"] == "in_progress"
+    assert emp2.get(f"/api/v2/workspace/chapters/{ch.id}/task").status_code == 403
+
+
+# ── only the assignee / stage owner / Admin change a chapter's files ─────────
+
+@pytest.fixture()
+def chapter_file(world, tmp_path):
+    from app.models import File
+    db = world["db"]
+    ch = db.query(ChapterInfo).filter_by(project="P1", chapters="Ch01").one()
+    path = tmp_path / "ch01.docx"
+    path.write_bytes(b"original")
+    f = File(chapter_id=ch.id, filename="ch01.docx", file_type="docx", category="Manuscript", path=str(path), version=1)
+    db.add(f)
+    db.commit()
+    return f
+
+
+def test_only_assignee_owner_or_admin_can_change_chapter_files(world, as_user, chapter_file):
+    lead, emp, emp2, pm, admin = (as_user(world[k]) for k in ("lead", "emp", "emp2", "pm", "admin"))
+    fid = chapter_file.id
+    assert lead.post(f"/api/v2/workspace/tasks/{world['task'].id}/assign", json={"assignee": "ce_priya"}).status_code == 200
+
+    for who in (emp2, pm):   # colleague, PM: read-only
+        r = who.post(f"/api/v2/files/{fid}/checkout")
+        assert r.status_code == 403, r.text
+        assert r.json()["detail"]["code"] == "CHAPTER_READ_ONLY"
+        assert "assigned to" in r.json()["detail"]["message"]
+    assert emp.post(f"/api/v2/files/{fid}/checkout").status_code == 200   # assignee
+    emp.delete(f"/api/v2/files/{fid}/checkout")
+    assert lead.post(f"/api/v2/files/{fid}/checkout").status_code == 200  # stage owner
+    lead.delete(f"/api/v2/files/{fid}/checkout")
+    assert admin.post(f"/api/v2/files/{fid}/checkout").status_code == 200  # Admin
+
+
+def test_word_editor_saves_need_a_token_of_someone_who_may_write(world, as_user, chapter_file, client):
+    from app.integrations.wopi import access_token as wopi_token
+    db = world["db"]
+    fid = chapter_file.id
+    as_user(world["lead"]).post(f"/api/v2/workspace/tasks/{world['task'].id}/assign", json={"assignee": "ce_priya"})
+
+    info = client.get(f"/wopi/files/{fid}").json()                       # no token: read-only session
+    assert info["UserCanWrite"] is False and info["ReadOnly"] is True
+    assert client.post(f"/wopi/files/{fid}/contents", content=b"hacked").status_code == 401
+
+    other = wopi_token.issue(db, world["emp2"], fid)
+    assert client.get(f"/wopi/files/{fid}", params={"access_token": other}).json()["UserCanWrite"] is False
+    assert client.post(f"/wopi/files/{fid}/contents", params={"access_token": other}, content=b"nope").status_code == 403
+
+    mine = wopi_token.issue(db, world["emp"], fid)
+    info = client.get(f"/wopi/files/{fid}", params={"access_token": mine}).json()
+    assert info["UserCanWrite"] is True and info["UserId"] == "ce_priya"
+    assert client.post(f"/wopi/files/{fid}/contents", params={"access_token": mine}, content=b"edited by priya").status_code == 200
+    with open(chapter_file.path, "rb") as fh:
+        assert fh.read() == b"edited by priya"
+    # a token for another file doesn't work
+    assert client.post(f"/wopi/files/{fid}/contents", params={"access_token": wopi_token.issue(db, world["emp"], fid + 999)},
+                       content=b"x").status_code == 401
+
+
+def test_hand_back_releases_the_file_lock(world, as_user, chapter_file):
+    db = world["db"]
+    lead, emp = as_user(world["lead"]), as_user(world["emp"])
+    t = world["task"].id
+    lead.post(f"/api/v2/workspace/tasks/{t}/assign", json={"assignee": "ce_priya"})
+    assert emp.post(f"/api/v2/files/{chapter_file.id}/checkout").status_code == 200
+    db.expire_all()
+    assert db.get(type(chapter_file), chapter_file.id).is_checked_out is True
+    assert emp.post(f"/api/v2/workspace/tasks/{t}/handback", json={"notes": "Done, queries raised.", "checklist_confirmed": True}).status_code == 200
+    db.expire_all()
+    f = db.get(type(chapter_file), chapter_file.id)
+    assert f.is_checked_out is False and f.checked_out_by_id is None
+
+
+def test_file_times_are_sent_in_app_time_not_read_as_utc():
+    """Naive file timestamps are app time (DB session runs in APP_TIMEZONE); the API attaches that offset."""
+    from datetime import datetime
+    from app.routers.api_v2 import _app_time
+    out = _app_time(datetime(2026, 11, 12, 10, 57))
+    assert out.isoformat() == "2026-11-12T10:57:00+05:30"
+    aware = datetime(2026, 11, 12, 5, 27, tzinfo=timezone.utc)
+    assert _app_time(aware) is aware and _app_time(None) is None

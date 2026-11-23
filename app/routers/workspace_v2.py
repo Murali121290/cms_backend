@@ -69,6 +69,12 @@ def bulk_action(payload: schemas_v2.WorkspaceBulkRequest, background: Background
     return {"results": results}
 
 
+@router.get("/chapters/{chapter_id}/task", response_model=schemas_v2.ChapterTaskResponse)
+def chapter_task(chapter_id: int, db: Session = Depends(database.get_db), actor: User = Depends(require_workflow_actor)):
+    """The chapter's task in the stage it is in now — drives the workflow bar on the chapter folder page."""
+    return workspace_tasks.chapter_task(db, actor, chapter_id)
+
+
 @router.get("/stages/{stage_name}/schedule", response_model=schemas_v2.WorkspaceScheduleResponse)
 def stage_schedule(
     stage_name: str,

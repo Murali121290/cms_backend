@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { Clock, Download, Search, X } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Clock, Download, FolderOpen, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
+import { uiPaths } from "@/utils/appPaths";
 import { cn } from "@/utils/cn";
 
 import { PRIORITIES, type StatusFilter } from "../constants";
@@ -21,6 +23,8 @@ import { CustodyBadge, DueLabel, LockedName, PriorityBadge, StatePanel, ToneBadg
 interface Props {
   items: WorkspaceItem[];
   stageOptions: string[];
+  /** The stage picked in the banner (marked in the stage dropdown). */
+  currentStage?: string;
   filters: QueueFilters;
   onFilters: (patch: Partial<QueueFilters>) => void;
   onClear: () => void;
@@ -36,7 +40,7 @@ const CHIPS: [StatusFilter, string][] = [
 
 const col = createColumnHelper<WorkspaceItem>();
 
-export function QueueTable({ items, stageOptions, filters, onFilters, onClear, selected, onSelected, onExport }: Props) {
+export function QueueTable({ items, stageOptions, currentStage, filters, onFilters, onClear, selected, onSelected, onExport }: Props) {
   const ui = useWorkspaceUi();
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "due", dir: 1 });
   const multiStage = stageOptions.length > 1;
@@ -186,6 +190,16 @@ export function QueueTable({ items, stageOptions, filters, onFilters, onClear, s
             {manage && it.custody_status === "unassigned" && <Button size="sm" variant="secondary" onClick={() => ui.open.assign(it)}>Assign</Button>}
             {manage && it.custody_status === "returned_for_review" && <Button size="sm" variant="secondary" onClick={() => ui.open.review(it)}>Review</Button>}
             {manage && it.custody_status === "qa_approved" && <Button size="sm" variant="secondary" onClick={() => ui.open.moveNext(it)}>Move →</Button>}
+            {it.project_id && it.chapter_id ? (
+              <Link
+                to={uiPaths.chapterDetail(it.project_id, it.chapter_id)}
+                aria-label={`Open chapter folder for ${chapterOf(it)}`}
+                title="Open chapter folder"
+                className="grid size-7 place-items-center rounded-lg border border-border text-muted hover:text-text"
+              >
+                <FolderOpen className="size-3.5" aria-hidden="true" />
+              </Link>
+            ) : null}
             <button type="button" onClick={() => ui.open.activity(it)} aria-label={`Activity for ${chapterOf(it)}`} className="grid size-7 place-items-center rounded-lg border border-border text-muted hover:text-text">
               <Clock className="size-3.5" aria-hidden="true" />
             </button>
@@ -228,7 +242,7 @@ export function QueueTable({ items, stageOptions, filters, onFilters, onClear, s
         {multiStage && (
           <select aria-label="Stage" value={filters.stage} onChange={(e) => onFilters({ stage: e.target.value })} className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm">
             <option value="all">All stages</option>
-            {stageOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            {stageOptions.map((s) => <option key={s} value={s}>{s}{s === currentStage ? " (selected stage)" : ""}</option>)}
           </select>
         )}
         <select aria-label="Priority" value={filters.priority} onChange={(e) => onFilters({ priority: e.target.value })} className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm">
@@ -297,7 +311,12 @@ export function QueueTable({ items, stageOptions, filters, onFilters, onClear, s
           action={active ? <Button variant="secondary" onClick={onClear}>Clear filters</Button> : undefined}
         />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div
+          // Rows scroll inside the table box (header stays visible); the page itself doesn't grow with the list.
+          tabIndex={0}
+          aria-label="Chapters list"
+          className="max-h-[calc(100vh-300px)] min-h-64 overflow-auto overscroll-contain rounded-2xl border border-border bg-card focus-visible:outline-2 focus-visible:outline-primary max-md:max-h-none"
+        >
           <table className="w-full text-sm max-md:block">
             <thead className="bg-background text-left text-[11px] tracking-wide text-muted max-md:hidden">
               {table.getHeaderGroups().map((hg) => (
@@ -307,7 +326,7 @@ export function QueueTable({ items, stageOptions, filters, onFilters, onClear, s
                       key={h.id}
                       scope="col"
                       aria-sort={SORT_OF[h.id] === sort.key ? (sort.dir > 0 ? "ascending" : "descending") : undefined}
-                      className={cn("sticky top-0 bg-background px-3 py-2 font-semibold", h.id === "select" && "w-9", h.id === "pages" && "text-right")}
+                      className={cn("sticky top-0 z-[2] bg-background px-3 py-2 font-semibold shadow-[inset_0_-1px_0_var(--color-border)]", h.id === "select" && "w-9", h.id === "pages" && "text-right")}
                     >
                       {flexRender(h.column.columnDef.header, h.getContext())}
                     </th>

@@ -178,7 +178,7 @@ export function WorkspacePage() {
   };
 
   const onJump = (status: StatusFilter, stage: string) =>
-    url.update({ tab: "queue", filters: { status, stage: stages.length > 1 ? stage : "all", q: "" } });
+    url.update({ tab: "queue", filters: { status, stage: "current", q: "" } });
 
   const renderDialog = () => {
     if (!dialog || !ui) return null;

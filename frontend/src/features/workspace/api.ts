@@ -3,6 +3,7 @@ import api from "@/api/client";
 import type {
   ActivityResponse,
   AssignRequest,
+  ChapterTask,
   BulkRequest,
   BulkResponse,
   HandbackRequest,
@@ -36,6 +37,9 @@ export const workspaceApi = {
 
   moveNext: (id: number, body: MoveNextRequest) =>
     api.post<WorkspaceItem>(`${task(id)}/move-next`, body).then((r) => r.data),
+
+  chapterTask: (chapterId: number) =>
+    api.get<ChapterTask>(`/workspace/chapters/${encodeURIComponent(String(chapterId))}/task`).then((r) => r.data),
 
   activity: (id: number) => api.get<ActivityResponse>(`${task(id)}/activity`).then((r) => r.data),
 

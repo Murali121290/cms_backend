@@ -46,6 +46,7 @@ class WorkspaceContext:
         self._project_pm: dict[str, str] = {}          # project code -> PM username (Project.project_manager)
         self._client_by_code: dict[str, str] = {}      # client division code -> company name
         self._pm_names: dict[str, str] = {}            # username -> first name
+        self._project_ids: dict[str, int] = {}         # project code -> Project.id (for links to the chapter page)
 
     def preload(self, rows: Iterable[StageDetail]) -> None:
         rows = list(rows)
@@ -57,6 +58,8 @@ class WorkspaceContext:
                     "manuscript_pages": ch.manuscript_pages or 0,
                     "ce_pages": (wc // 250) + 1 if wc > 0 else 0,
                     "project_manager_name": ch.project_manager_name or "-",
+                    "current_stage": ch.stage_name,
+                    "chapter_id": ch.id,
                 }
             from app.domains.clients.models import Client
             from app.domains.projects.models import Project
@@ -64,6 +67,7 @@ class WorkspaceContext:
             client_ids = {p.client_id for p in projs if p.client_id}
             companies = {c.id: c.company for c in self.db.query(Client).filter(Client.id.in_(client_ids)).all()} if client_ids else {}
             for p in projs:
+                self._project_ids[p.project_code] = p.id
                 name = companies.get(p.client_id) or p.client_name
                 if name:
                     self._project_client[p.project_code] = name
@@ -144,7 +148,16 @@ class WorkspaceContext:
             "rework_notes": sd.rework_notes,
             "rework_count": sd.rework_count or 0,
             "completion_delay_days": stage_service.completion_delay_days(sd),
+            # live = the chapter is in this stage now (workable); otherwise it's a planned future row
+            "project_id": self._project_ids.get(sd.project),
+            "chapter_id": meta.get("chapter_id"),
+            "live": self.is_live(sd),
+            "upcoming_from": None if self.is_live(sd) else meta.get("current_stage"),
         }
+
+    def is_live(self, sd: StageDetail) -> bool:
+        meta = self._chapter_meta.get((sd.project, sd.chapters))
+        return stage_service.is_live(sd, {(sd.project, sd.chapters): meta["current_stage"]} if meta else {})
 
     def stats(self, details: list[StageDetail]) -> dict:
         yesterday = self.today - timedelta(days=1)
@@ -196,7 +209,10 @@ def _window_filter(cutoff: datetime):
 
 
 def _rows(db: Session, cutoff: datetime, *conditions) -> list[StageDetail]:
-    return db.query(StageDetail).filter(_window_filter(cutoff), *conditions).order_by(StageDetail.id).all()
+    """Workspace rows: only stages the chapter is in now (plus completed history). Rows pre-created for later
+    stages are planning data and belong to the Schedule view only."""
+    rows = db.query(StageDetail).filter(_window_filter(cutoff), *conditions).order_by(StageDetail.id).all()
+    return stage_service.filter_live(db, rows)
 
 
 def _is_open_work(sd: StageDetail) -> bool:

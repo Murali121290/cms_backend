@@ -20,6 +20,7 @@ from app import models
 from app.database import get_db
 from app.domains.auth.security import get_current_user_from_cookie, get_user_full_name
 from app.domains.processing.language_edit_models import LanguageEditJob, LanguageEditFinding
+from app.domains.workflow import access as wf_access
 from app.domains.processing.service import check_permission
 from app.models import User
 
@@ -766,6 +767,7 @@ def start_language_edit_analysis(
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail=f"File ID {file_id} not found.")
+    wf_access.ensure_can_write_file(db, current_user, file_record)  # assignee / stage owner / Admin
 
     if not file_record.path or not os.path.exists(file_record.path):
         raise HTTPException(status_code=400, detail="Target file does not exist on disk.")
@@ -2148,6 +2150,7 @@ def decide_finding(
     finding = db.query(LanguageEditFinding).filter(LanguageEditFinding.id == finding_id).first()
     if not finding:
         raise HTTPException(status_code=404, detail=f"Finding ID {finding_id} not found.")
+    wf_access.ensure_can_write_file_id(db, current_user, finding.file_id)
 
     if body.status not in ("accepted", "edited", "rejected", "highlighted"):
         raise HTTPException(status_code=400, detail="Invalid status. Must be accepted, edited, rejected, or highlighted.")
@@ -2343,6 +2346,7 @@ def restore_finding(
     finding = db.query(LanguageEditFinding).filter(LanguageEditFinding.id == finding_id).first()
     if not finding:
         raise HTTPException(status_code=404, detail=f"Finding ID {finding_id} not found.")
+    wf_access.ensure_can_write_file_id(db, current_user, finding.file_id)
 
     if finding.status != "rejected":
         raise HTTPException(
@@ -2452,6 +2456,9 @@ def batch_decide_findings(
     re-analysis ran) so the frontend can reuse its refresh logic.
     """
     _require_language_user(current_user)
+    _job = db.query(LanguageEditJob).filter(LanguageEditJob.job_id == job_id).first()
+    if _job:
+        wf_access.ensure_can_write_file_id(db, current_user, _job.file_id)
     if body.status not in ("accepted", "edited", "rejected", "highlighted"):
         raise HTTPException(
             status_code=400,

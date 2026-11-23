@@ -45,6 +45,25 @@ def load_task(db: Session, task_id: int) -> StageDetail:
     return sd
 
 
+def release_chapter_locks(db: Session, sd: StageDetail, *, keep_user_id: Optional[int] = None) -> int:
+    """Clear editor check-outs on the chapter's files when custody changes hands (hand back, review, move,
+    reassign), so a file is never left locked by someone who no longer holds the chapter. No commit."""
+    from app.models import File
+
+    info = stage_service.chapter_info(db, sd.project, sd.chapters)
+    if not info:
+        return 0
+    n = 0
+    for f in db.query(File).filter(File.chapter_id == info.id, File.is_checked_out == True).all():  # noqa: E712
+        if keep_user_id is not None and f.checked_out_by_id == keep_user_id:
+            continue
+        f.is_checked_out = False
+        f.checked_out_by_id = None
+        f.checked_out_at = None
+        n += 1
+    return n
+
+
 def _ensure_manage(db: Session, actor: User, sd: StageDetail) -> None:
     if not access.can_manage_stage(db, actor, sd.stage_name):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"You don't manage the {sd.stage_name} stage.")
@@ -90,6 +109,8 @@ def assign_task(db: Session, actor: User, task_id: int, *, assignee: Optional[st
                 expected: Optional[str] = None, background: Optional[BackgroundTasks] = None) -> StageDetail:
     sd = load_task(db, task_id)
     _ensure_manage(db, actor, sd)
+    if assignee:  # no assigning before the chapter reaches the stage; clearing an early assignment is fine
+        stage_service.ensure_live(db, sd)
     ser = _serializer(db)
     custody.check_expected(sd, expected, ser)
     before = custody.ensure_allowed(sd, "assign", ser)
@@ -116,6 +137,8 @@ def assign_task(db: Session, actor: User, task_id: int, *, assignee: Optional[st
     info = stage_service.chapter_info(db, sd.project, sd.chapters)
     if info and info.stage_name == sd.stage_name:
         info.current_assignee_name = assignee
+    if assignee != old:
+        release_chapter_locks(db, sd, keep_user_id=person.id if person else None)
     db.commit()
     db.refresh(sd)
 
@@ -187,6 +210,7 @@ def handback_task(db: Session, actor: User, task_id: int, *, notes: str, checkli
     sd = load_task(db, task_id)
     if sd.assignee_name != actor.username and not access.can_manage_stage(db, actor, sd.stage_name):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the assigned person or the stage owner can hand this back.")
+    stage_service.ensure_live(db, sd)
     if not checklist_confirmed:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Confirm the checklist before handing back.")
     ser = _serializer(db)
@@ -197,6 +221,7 @@ def handback_task(db: Session, actor: User, task_id: int, *, notes: str, checkli
     sd.handback_at = now
     custody.set_status(sd, custody.RETURNED)
     custody.record_event(sd, "handback", actor.username, from_status=before, to_status=custody.RETURNED, notes=sd.handback_notes, at=now)
+    release_chapter_locks(db, sd)
     db.commit()
     db.refresh(sd)
 
@@ -213,6 +238,7 @@ def review_task(db: Session, actor: User, task_id: int, *, decision: str, notes:
                 expected: Optional[str] = None, background: Optional[BackgroundTasks] = None) -> StageDetail:
     sd = load_task(db, task_id)
     _ensure_manage(db, actor, sd)
+    stage_service.ensure_live(db, sd)
     ser = _serializer(db)
     custody.check_expected(sd, expected, ser)
     notes = (notes or "").strip() or None
@@ -233,6 +259,7 @@ def review_task(db: Session, actor: User, task_id: int, *, decision: str, notes:
         sd.qa_approved_at = None
         custody.set_status(sd, custody.IN_PROGRESS)
         custody.record_event(sd, "rework", actor.username, from_status=before, to_status=custody.IN_PROGRESS, notes=notes, at=now)
+    release_chapter_locks(db, sd)
     db.commit()
     db.refresh(sd)
 
@@ -334,6 +361,7 @@ def move_next(db: Session, actor: User, task_id: int, *, notify: bool = True, ex
               background: Optional[BackgroundTasks] = None) -> StageDetail:
     sd = load_task(db, task_id)
     _ensure_manage(db, actor, sd)
+    stage_service.ensure_live(db, sd)
     ser = _serializer(db)
     custody.check_expected(sd, expected, ser)
     custody.ensure_allowed(sd, "move_next", ser)
@@ -357,6 +385,7 @@ def move_next(db: Session, actor: User, task_id: int, *, notify: bool = True, ex
         custody.set_status(sd, custody.TRANSITIONED)
         custody.record_event(sd, "move_next", actor.username, from_status=before, to_status=custody.TRANSITIONED,
                              extra={"to_stage": None}, at=now)
+    release_chapter_locks(db, sd)
     db.commit()
     db.refresh(sd)
 
@@ -502,3 +531,55 @@ def schedule(db: Session, actor: User, stage_name: str, date_from: date, date_to
     ctx = WorkspaceContext(db)
     ctx.preload(rows)
     return {"stage_name": stage_name, "date_from": start, "date_to": end, "items": [ctx.item(r) for r in rows], "truncated": truncated}
+
+
+# ── chapter page: the chapter's task in its current stage ─────────────────────
+
+def chapter_task(db: Session, actor: User, chapter_id: int) -> dict:
+    """What the workflow bar on the chapter folder page needs: the live task, the viewer's rights and the
+    people who can be assigned in this stage (Stage Management roles + Admin role), lightest load first."""
+    chapter = db.get(ChapterInfo, chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chapter not found.")
+    if not access.can_view_chapter(db, actor, chapter):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This chapter isn't assigned to you.")
+
+    stage = chapter.stage_name
+    out = {"chapter_id": chapter.id, "stage_name": stage, "item": None, "can_manage": False, "is_assignee": False,
+           "can_write": access.can_write_chapter(db, actor, chapter), "owner_name": None, "people": []}
+    if not stage:
+        return out
+    sd = (db.query(StageDetail)
+          .filter(StageDetail.project == chapter.project, StageDetail.chapters == chapter.chapters, StageDetail.stage_name == stage)
+          .order_by((StageDetail.stage_status == "Completed").asc(), StageDetail.id.desc()).first())
+    can_manage = access.can_manage_stage(db, actor, stage)
+    owner = stage_service.resolve_stage_owner_by_designation(db, stage, project_code=chapter.project, client_identifier=chapter.client)
+    out.update(can_manage=can_manage, owner_name=_name(owner) if owner else None)
+    if not sd:
+        return out
+    out["item"] = serialize(db, sd)
+    out["is_assignee"] = sd.assignee_name == actor.username
+
+    if can_manage:
+        st = db.execute(select(StageMaster).where(StageMaster.stage_name == stage)).scalars().first()
+        norm = lambda v: "".join((v or "").lower().split())  # noqa: E731 (same rule as ensure_role_allowed)
+        roles = {norm(r) for r in access.parse_stage_roles(st.roles)} if st else set()
+        users = [u for u in db.query(User).filter(User.active_status == True).all()  # noqa: E712
+                 if norm(u.role) == "admin" or not roles or norm(u.role) in roles]
+        names = [u.username for u in users]
+        open_rows = stage_service.filter_live(db, db.query(StageDetail).filter(
+            StageDetail.assignee_name.in_(names or [""]), StageDetail.stage_status != "Completed").all())
+        from app.domains.projects.dashboard_service import WorkspaceContext
+        ctx = WorkspaceContext(db)
+        ctx.preload(open_rows)
+        load: dict[str, list[int]] = {}
+        for r in open_rows:
+            if custody.effective_custody(r) in (custody.IN_PROGRESS, custody.RETURNED):
+                acc = load.setdefault(r.assignee_name, [0, 0])
+                acc[0] += 1
+                acc[1] += ctx.meta(r)["manuscript_pages"]
+        people = [{"username": u.username, "display_name": _name(u),
+                   "open": load.get(u.username, [0, 0])[0], "pages": load.get(u.username, [0, 0])[1]} for u in users]
+        people.sort(key=lambda p: (p["open"], p["pages"], p["display_name"].lower()))
+        out["people"] = people
+    return out

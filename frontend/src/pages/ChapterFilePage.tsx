@@ -5,7 +5,7 @@
  * Fetches FileRecord[] from GET /projects/{id}/chapters/{id}/files.
  * All 17 action buttons are enabled when db_id is populated from the API.
  */
-import { useState, useMemo, useEffect, useRef, cloneElement } from 'react'
+import { useState, useMemo, useEffect, useRef, cloneElement, type ReactNode } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   createColumnHelper,
@@ -21,7 +21,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   ArrowDownToLine, ArrowLeft, BookCheck, ChevronRight, ChevronUp, ChevronDown,
   Code2, Download, ExternalLink, Eye, File, FileCode, FileOutput, FilePen, FileText,
-  FolderOpen, History, Image, Languages, Layers, Loader2, LogIn, LogOut,
+  FolderOpen, History, Image, Languages, Layers, Loader2, Lock, LogIn, LogOut,
   ScanLine, Search, ShieldCheck, Sparkles, Trash2,
   Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer, BookOpen, RotateCcw,
 } from 'lucide-react'
@@ -122,6 +122,10 @@ interface ChapterFilePageProps {
   onRevert?: () => void
   prevStageName?: string | null
   isReverting?: boolean
+  /** Rendered as a slim strip directly under the header (the chapter's workflow: assign → hand back → review → move). */
+  workflowStrip?: ReactNode
+  /** Why the viewer can't change files (tooltip on the "View only" chip and disabled buttons). */
+  readOnlyReason?: string
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -777,6 +781,8 @@ export function ChapterFilePage({
   onRevert,
   prevStageName,
   isReverting,
+  workflowStrip,
+  readOnlyReason,
 }: ChapterFilePageProps) {
   const navigate = useNavigate()
   const { isAdmin: isAdminUser } = useRBAC()
@@ -1564,8 +1570,11 @@ export function ChapterFilePage({
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-accent text-primary border border-primary/20 flex-shrink-0">{resolvedStageName}</span>
           )}
           {!resolvedIsAssigned && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex-shrink-0 shadow-xs">
-              <Download size={10} /> Download Only
+            <span
+              title={readOnlyReason ?? 'Only the assignee, the stage owner or Admin can change files. You can view and download them.'}
+              className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300 flex-shrink-0 cursor-help dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600"
+            >
+              <Lock size={10} aria-hidden="true" /> View only
             </span>
           )}
         </div>
@@ -1707,10 +1716,11 @@ export function ChapterFilePage({
           <button
             onClick={() => setShowBulkUpload(true)}
             disabled={!resolvedIsAssigned}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors shadow-sm
-              ${resolvedIsAssigned ? 'bg-primary hover:bg-primary/90' : 'bg-primary/30 opacity-50 cursor-not-allowed'}`}
+            title={resolvedIsAssigned ? undefined : readOnlyReason ?? 'View only'}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors shadow-sm
+              ${resolvedIsAssigned ? 'text-white bg-primary hover:bg-primary/90' : 'bg-slate-100 text-slate-500 border border-slate-300 shadow-none cursor-not-allowed dark:bg-slate-800 dark:text-slate-400 dark:border-slate-600'}`}
           >
-            <Upload size={12} /> Bulk Upload
+            {resolvedIsAssigned ? <Upload size={12} /> : <Lock size={12} aria-hidden="true" />} Bulk Upload
           </button>
         )}
 
@@ -1757,13 +1767,16 @@ export function ChapterFilePage({
           <button
             onClick={resolvedIsAssigned ? onProceed : undefined}
             disabled={!resolvedIsAssigned}
-            className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white rounded-lg transition-colors shadow-sm
-              ${resolvedIsAssigned ? 'bg-primary hover:bg-primary/90 cursor-pointer' : 'bg-primary/30 opacity-50 cursor-not-allowed'}`}
+            title={resolvedIsAssigned ? undefined : readOnlyReason ?? 'View only'}
+            className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors shadow-sm
+              ${resolvedIsAssigned ? 'text-white bg-primary hover:bg-primary/90 cursor-pointer' : 'bg-slate-100 text-slate-500 border border-slate-300 shadow-none cursor-not-allowed dark:bg-slate-800 dark:text-slate-400 dark:border-slate-600'}`}
           >
             Proceed <ChevronRight size={12} />
           </button>
         )}
       </header>
+
+      {workflowStrip}
 
       {/* ══ BODY ═════════════════════════════════════════════════════════════ */}
       <div className="flex flex-1 overflow-hidden">

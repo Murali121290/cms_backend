@@ -16,6 +16,10 @@ import { Avatar, ErrorPanel, LoadBar, Skeleton, StatePanel } from "./Primitives"
 
 type Group = "chapter" | "person";
 
+/** Planned row for a stage the chapter hasn't reached: shown for planning, never workable. */
+const isUpcoming = (i: WorkspaceItem) => i.live === false;
+const isActive = (i: WorkspaceItem) => isOpen(i) && !isUpcoming(i);
+
 function barTone(item: WorkspaceItem): Tone {
   if (!isOpen(item)) return (item.completion_delay_days ?? 0) > 0 ? "bad" : "ok";
   if (isLate(item)) return "bad";
@@ -35,7 +39,7 @@ function Bars({ item, range, nowMs }: { item: WorkspaceItem; range: ScheduleRang
   const plan = plannedWindow(item);
   const act = actualWindow(item, nowMs);
   const pg = plan ? barGeometry(range, plan[0], plan[1]) : null;
-  const ag = act ? barGeometry(range, act[0], act[1]) : null;
+  const ag = act && !isUpcoming(item) ? barGeometry(range, act[0], act[1]) : null;
   const pos = (g: { left: number; width: number }): CSSProperties => ({ left: `${g.left}%`, width: `${g.width}%` });
   if (!pg && !ag) {
     const end = act?.[1] ?? plan?.[1] ?? 0;
@@ -86,6 +90,8 @@ export function ScheduleView({ stage, people }: { stage: string; people: string[
   const cells = useMemo(() => dayCells(range, ui.todayKey), [range, ui.todayKey]);
   const todayPct = offsetPct(range, ui.nowMs);
   const done = rows.filter((r) => !isOpen(r));
+  const live = rows.filter((r) => !isUpcoming(r));
+  const upcoming = rows.length - live.length;
   const onTime = done.filter((r) => (r.completion_delay_days ?? 0) <= 0).length;
 
   const seg = <T extends string | number>(value: T, current: T, set: (v: T) => void, label: string) => (
@@ -95,13 +101,16 @@ export function ScheduleView({ stage, people }: { stage: string; people: string[
   );
 
   const renderRow = (item: WorkspaceItem) => (
-    <div key={item.id} className="relative grid min-h-[50px] grid-cols-[var(--lab)_1fr] border-b border-border">
+    <div key={item.id} className={cn("relative grid min-h-[50px] grid-cols-[var(--lab)_1fr] border-b border-border", isUpcoming(item) && "opacity-60")}>
       <div className="sticky left-0 z-[3] flex min-w-0 items-center gap-2 border-r border-border bg-card px-3 py-1.5">
         <button type="button" onClick={() => ui.open.activity(item)} title="Open activity" className="flex min-w-0 flex-1 flex-col text-left focus-visible:outline-2 focus-visible:outline-primary">
-          <b className={cn("truncate font-semibold", isOpen(item) ? "text-text" : "text-muted")}>{chapterOf(item)}</b>
-          <span className="text-xs text-muted">{item.project} · {pagesOf(item)} pp{isOpen(item) ? "" : " · completed"}</span>
+          <b className={cn("truncate font-semibold", isActive(item) ? "text-text" : "text-muted")}>{chapterOf(item)}</b>
+          <span className="text-xs text-muted">
+            {item.project} · {pagesOf(item)} pp{isUpcoming(item) ? "" : isOpen(item) ? "" : " · completed"}
+          </span>
+          {isUpcoming(item) && <span className="text-xs font-medium text-muted">Upcoming · still in {item.upcoming_from ?? "an earlier stage"}</span>}
         </button>
-        {item.custody_status === "unassigned" && manage ? (
+        {isUpcoming(item) ? null : item.custody_status === "unassigned" && manage ? (
           <Button size="sm" onClick={() => ui.open.assign(item)}>Assign</Button>
         ) : group === "chapter" ? (
           <span title={ui.nameOf(item.assignee_name)}><Avatar username={item.assignee_name} name={ui.nameOf(item.assignee_name)} /></span>
@@ -114,7 +123,7 @@ export function ScheduleView({ stage, people }: { stage: string; people: string[
   let body: JSX.Element[];
   if (group === "person") {
     body = [...people, null].flatMap((u) => {
-      const rs = rows.filter((r) => (r.assignee_name || null) === u);
+      const rs = live.filter((r) => (r.assignee_name || null) === u);
       if (u === null && !rs.length) return [];
       const load = u ? workloadOf(ui.items, u) : null;
       return [
@@ -168,9 +177,10 @@ export function ScheduleView({ stage, people }: { stage: string; people: string[
       ) : (
         <>
           <div className="mb-3 flex flex-wrap gap-1.5 text-xs">
-            <span className="rounded-full border border-border bg-card px-2.5 py-0.5">{rows.filter(isOpen).length} in flight</span>
-            <span className="rounded-full border border-border bg-card px-2.5 py-0.5">{rows.filter((r) => r.custody_status === "unassigned").length} not assigned</span>
-            <span className={cn("rounded-full border border-border bg-card px-2.5 py-0.5", rows.some(isLate) && "text-red-600 dark:text-red-400")}>{rows.filter(isLate).length} running late</span>
+            <span className="rounded-full border border-border bg-card px-2.5 py-0.5">{live.filter(isOpen).length} in flight</span>
+            <span className="rounded-full border border-border bg-card px-2.5 py-0.5">{live.filter((r) => isOpen(r) && r.custody_status === "unassigned").length} not assigned</span>
+            <span className={cn("rounded-full border border-border bg-card px-2.5 py-0.5", live.some(isLate) && "text-red-600 dark:text-red-400")}>{live.filter(isLate).length} running late</span>
+            {upcoming > 0 && <span className="rounded-full border border-dashed border-border bg-card px-2.5 py-0.5 text-muted">{upcoming} upcoming from earlier stages</span>}
             <span className="rounded-full border border-border bg-card px-2.5 py-0.5">{done.length} completed · {done.length ? Math.round((100 * onTime) / done.length) : 100}% on time</span>
             {query.data?.truncated && <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-800">Showing the first {query.data.items.length} — narrow the range</span>}
           </div>
@@ -210,6 +220,7 @@ export function ScheduleView({ stage, people }: { stage: string; people: string[
             <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-[18px] rounded bg-emerald-600" />Approved / completed on time</span>
             <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-[18px] rounded bg-red-600" />Late</span>
             <span className="inline-flex items-center gap-1.5"><i className="inline-block h-3.5 w-0.5 bg-blue-500" />Today</span>
+            <span className="opacity-60">Faded rows: upcoming — still in an earlier stage, assignable once moved here.</span>
             <span>Click a chapter for its full history.</span>
           </div>
         </>

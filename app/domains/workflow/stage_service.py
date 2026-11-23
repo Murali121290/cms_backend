@@ -132,6 +132,63 @@ def ensure_role_allowed(db: Session, person: Optional[User], stage_name: str) ->
         )
 
 
+# ── live rows: a stage row is workable only while the chapter is in that stage ─────────────────────
+# stages_details holds one row per chapter x stage, pre-created at planning time for every stage, so a row
+# existing doesn't mean the chapter is there. chapter_details.stage_name is the "where is it now" pointer.
+
+NOT_AT_STAGE = "NOT_AT_STAGE"
+
+
+def current_stages(db: Session, keys: Iterable[tuple[str, str]]) -> dict[tuple[str, str], Optional[str]]:
+    """(project, chapters) -> chapter's current stage, in one query."""
+    keys = set(keys)
+    if not keys:
+        return {}
+    rows = db.execute(
+        select(ChapterInfo.project, ChapterInfo.chapters, ChapterInfo.stage_name).where(
+            ChapterInfo.project.in_({k[0] for k in keys}), ChapterInfo.chapters.in_({k[1] for k in keys}))
+    ).all()
+    return {(p, c): s for p, c, s in rows if (p, c) in keys}
+
+
+def is_live(sd: StageDetail, current: dict[tuple[str, str], Optional[str]]) -> bool:
+    """Completed rows always count (history). Open rows only when the chapter is at that stage.
+    Chapters without a chapter_details row / stage (legacy data) are treated as live, not hidden."""
+    if sd.stage_status == "Completed":
+        return True
+    key = (sd.project, sd.chapters)
+    if key not in current or not current[key]:
+        return True
+    return current[key] == sd.stage_name
+
+
+def filter_live(db: Session, rows: list[StageDetail]) -> list[StageDetail]:
+    current = current_stages(db, ((r.project, r.chapters) for r in rows))
+    return [r for r in rows if is_live(r, current)]
+
+
+def ensure_live(db: Session, sd: StageDetail) -> None:
+    current = current_stages(db, [(sd.project, sd.chapters)])
+    if not is_live(sd, current):
+        where = current.get((sd.project, sd.chapters))
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "code": NOT_AT_STAGE,
+            "message": f"{chapter_label(sd.chapters)} is still in {where}. It can't be worked in {sd.stage_name} until it is moved there.",
+            "current_stage": where,
+        })
+
+
+def ensure_chapter_at_stage(db: Session, project: str, chapters: str, stage_name: str) -> None:
+    """Same rule for callers that address a stage by name (project page assign)."""
+    where = current_stages(db, [(project, chapters)]).get((project, chapters))
+    if where and where != stage_name:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "code": NOT_AT_STAGE,
+            "message": f"{chapter_label(chapters)} is still in {where}. Assign it in {stage_name} after it is moved there.",
+            "current_stage": where,
+        })
+
+
 def chapter_info(db: Session, project: str, chapters: str) -> Optional[ChapterInfo]:
     return db.execute(
         select(ChapterInfo).where(ChapterInfo.project == project, ChapterInfo.chapters == chapters)
@@ -261,6 +318,8 @@ def _sync_custody_on_assign(sd: StageDetail, old_assignee: Optional[str], new_as
 def assign_stage(db: Session, *, project: str, chapters: str, stage_name: str, assignee: Optional[str],
                  dt: Optional[str] = None, actor: Optional[str] = None) -> StageDetail:
     ensure_role_allowed(db, validate_assignee(db, assignee), stage_name)
+    if assignee:  # unassigning a not-yet-reached stage stays allowed (cleanup)
+        ensure_chapter_at_stage(db, project, chapters, stage_name)
     when = parse_client_dt(dt) or utc_now()
     sd = get_detail(db, project, chapters, stage_name) or _new_detail(db, project, chapters, stage_name)
     old = sd.assignee_name
@@ -287,6 +346,16 @@ def bulk_assign(db: Session, *, targets: list[AssignTarget], assignee: Optional[
     person = validate_assignee(db, assignee)
     for stage_name in sorted({t.stage_name for t in targets}):
         ensure_role_allowed(db, person, stage_name)
+    if assignee:
+        current = current_stages(db, ((t.project, t.chapters) for t in targets))
+        away = [t for t in targets if current.get((t.project, t.chapters)) not in (None, t.stage_name)]
+        if away:
+            t = away[0]
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                "code": NOT_AT_STAGE,
+                "message": f"{len(away)} chapter(s) aren't in that stage yet, e.g. {chapter_label(t.chapters)} is still in "
+                           f"{current[(t.project, t.chapters)]}. Assign them after they are moved there.",
+            })
     when = parse_client_dt(dt) or utc_now()
     keys ={(t.project, t.chapters, t.stage_name) for t in targets}
     existing: dict[tuple[str, str, str], StageDetail] = {}

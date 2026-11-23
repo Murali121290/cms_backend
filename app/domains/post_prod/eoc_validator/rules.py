@@ -139,12 +139,27 @@ def _norm_quotes(s: str) -> str:
     )
 
 
+BLANK_PATTERN = re.compile(r"\[\[.*?\]\]")
+UNDERSCORE_PATTERN = re.compile(r"_{2,}")
+
+
+def normalize_blanks(text: str) -> str:
+    """Normalize fill-in-the-blank answer markers [[...]] and underscore sequences to standard '_____'.
+
+    In assessment questions, fill-in-the-blank questions enclose answers in double
+    brackets like '[[Physical]] development...' in the stem, while Title uses '_____ development...'.
+    """
+    s = BLANK_PATTERN.sub("_____", text)
+    return UNDERSCORE_PATTERN.sub("_____", s)
+
+
 def title_looks_like_typo(stem: str, title: str) -> bool:
     """True when title and question differ by only a character or two —
     a typo in one of them, which a human must resolve (not auto-fixable)."""
     import difflib
 
-    ns, nt = _norm_quotes(stem.strip()), _norm_quotes(title.strip())
+    ns = _norm_quotes(normalize_blanks(stem.strip()))
+    nt = _norm_quotes(normalize_blanks(title.strip()))
     for tail in ("…", "..."):
         if nt.endswith(tail):
             nt = nt[: -len(tail)].rstrip()
@@ -182,7 +197,7 @@ def title_text_length(title: str) -> int:
     whatever ending it has now ('...', '..', '…'), so the count never changes
     when the fixer corrects the ending. The 60-character limit applies to the
     whole title, ' …' included."""
-    t = title.strip()
+    t = normalize_blanks(title.strip())
     body = _TITLE_ENDING_RE.sub("", t)
     return len(body) + len(ELLIPSIS_END) if body != t else len(t)
 
@@ -195,7 +210,8 @@ def _check_title(q: Question, title: str) -> list[tuple[str, str]]:
         return [(ERROR, "Title is empty")]
     if not stem:
         return out
-    ns, nt = _norm_quotes(stem), _norm_quotes(t)
+    ns = _norm_quotes(normalize_blanks(stem))
+    nt = _norm_quotes(normalize_blanks(t))
     if re.search(r"(?<!\.)\.\.$", nt):
         return [(ERROR, "Title ends with two dots '..' — a shortened title must end with a space and the ellipsis ' …'")]
     ellipsis = nt.endswith("…")
@@ -252,10 +268,20 @@ def _check_title(q: Question, title: str) -> list[tuple[str, str]]:
 # ── Main per-file check ─────────────────────────────────────────────────────
 
 MOJIBAKE_RE = re.compile("�|â€|Ã[\u0080-¿]")
-LO_VALUE_RE = re.compile(r"^\d+\.\d+(\s*,\s*\d+\.\d+)*$")
+SINGLE_LO_PATTERN = r"\d+(?:\.\d+)+(?:-\d+)?"
+LO_VALUE_RE = re.compile(rf"^{SINGLE_LO_PATTERN}(?:\s*,\s*{SINGLE_LO_PATTERN})*$")
 
 
-def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
+def check_file(cf: ChapterFile, reference_prefix: str, assessment_type: str = "auto") -> list[Issue]:
+    if assessment_type == "sa":
+        for q in cf.questions:
+            if q.kind != "EMPTY":
+                q.kind = "SA"
+    elif assessment_type == "mc":
+        for q in cf.questions:
+            if q.kind == "SA":
+                q.kind = "MC"
+
     issues: list[Issue] = []
     fn, ch = cf.filename, cf.chapter_no
 
@@ -353,6 +379,8 @@ def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
     expected = 1
     seen: set[int] = set()
     for q in cf.questions:
+        if q.has_tab_error:
+            add("Q1", ERROR, f"Question number {q.number} must be followed by a tab (found space: '{q.number}. ' — expected '{q.number}.<TAB>')", q, q.raw, q.idx)
         if q.number in seen:
             add("Q1", ERROR, f"Duplicate question number {q.number}", q, q.raw, q.idx)
         elif q.number != expected:
@@ -370,11 +398,13 @@ def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
 
         # Unrecognised lines inside the block
         for role, l in q.body:
+            if role in ("answer", "image"):
+                continue
             if role != "other":
                 continue
-            if LOOSE_OPTION_RE.match(l.text):
+            if LOOSE_OPTION_RE.match(l.text) and q.kind != "SA":
                 add("O1", ERROR, "Line looks like an option but is not in the form 'A.<TAB>text' / '*A.<TAB>text' (asterisk must be immediately before the letter)", q, l.text, l.idx)
-            else:
+            elif q.kind != "SA":
                 add("X1", WARNING, "Unrecognised line inside the question block", q, l.text, l.idx)
 
         # Options
@@ -404,6 +434,9 @@ def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
             if sorted(letters) != sorted(exp):
                 add("O1", ERROR, f"Ordering letters {', '.join(letters)} should use each of {', '.join(sorted(exp))} exactly once", q, q.raw, q.idx)
             add("SH3", WARNING, "Ordering question — confirm by hand whether 'Shuffle: True' is wanted (the rules don't cover this type)", q, q.raw, q.idx)
+        elif q.kind == "SA":
+            pass
+
         if q.kind in ("MC", "TF") and q.options:
             n = q.starred_count
             if n == 0:
@@ -413,28 +446,32 @@ def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
 
         # Shuffle
         sh = q.shuffle_line
-        if sh is not None and sh.text != "Shuffle: True":
-            add("SH1", ERROR, f"Shuffle line must be exactly 'Shuffle: True' (found '{sh.text}')", q, sh.text, sh.idx)
-        if sh is not None:
-            roles = [r for r, _ in q.body]
-            si = roles.index("shuffle")
-            prev = roles[si - 1] if si > 0 else None
-            nxt = roles[si + 1] if si + 1 < len(roles) else None
-            if prev not in ("option", "tf", "order") or nxt != "title":
-                add("SH2", ERROR, "Shuffle line must come directly after the last option and directly before the Title line", q, sh.text, sh.idx)
-        should, reason, review = shuffle_decision(q)
-        if q.kind == "EMPTY":
-            should = None  # image-only question: can't judge, already flagged by Q2
-        if should is not None:
-            if should and sh is None:
-                add("SH3", WARNING if review else ERROR, f"'Shuffle: True' is missing — {reason}", q, q.raw, q.idx)
-            elif not should and sh is not None:
-                if review:
-                    add("SH3", WARNING, f"Check 'Shuffle: True' — {reason}", q, sh.text, sh.idx)
-                else:
-                    add("SH3", ERROR, f"'Shuffle: True' must not be used — {reason}", q, sh.text, sh.idx)
-            elif should and review:
-                add("SH3", WARNING, reason, q, q.raw, q.idx)
+        if q.kind == "SA":
+            if sh is not None:
+                add("SH3", ERROR, "Short-answer / discussion questions must not have a 'Shuffle: True' line", q, sh.text, sh.idx)
+        else:
+            if sh is not None and sh.text != "Shuffle: True":
+                add("SH1", ERROR, f"Shuffle line must be exactly 'Shuffle: True' (found '{sh.text}')", q, sh.text, sh.idx)
+            if sh is not None:
+                roles = [r for r, _ in q.body]
+                si = roles.index("shuffle")
+                prev = roles[si - 1] if si > 0 else None
+                nxt = roles[si + 1] if si + 1 < len(roles) else None
+                if prev not in ("option", "tf", "order") or nxt != "title":
+                    add("SH2", ERROR, "Shuffle line must come directly after the last option and directly before the Title line", q, sh.text, sh.idx)
+            should, reason, review = shuffle_decision(q)
+            if q.kind == "EMPTY":
+                should = None  # image-only question: can't judge, already flagged by Q2
+            if should is not None:
+                if should and sh is None:
+                    add("SH3", WARNING if review else ERROR, f"'Shuffle: True' is missing — {reason}", q, q.raw, q.idx)
+                elif not should and sh is not None:
+                    if review:
+                        add("SH3", WARNING, f"Check 'Shuffle: True' — {reason}", q, sh.text, sh.idx)
+                    else:
+                        add("SH3", ERROR, f"'Shuffle: True' must not be used — {reason}", q, sh.text, sh.idx)
+                elif should and review:
+                    add("SH3", WARNING, reason, q, q.raw, q.idx)
 
         # Title
         if q.title_line is None:
@@ -461,9 +498,13 @@ def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
                     add("L1", ERROR, "Must be 'Learning Outcome: ' followed by the value (exactly one space)", q, raw, q.lo_line.idx)
                 if not LO_VALUE_RE.match(val):
                     hint = f" — did you mean '{val.replace('-', '.').replace(chr(0x2013), '.')}'?" if re.fullmatch(r"\d+\s*[-–]\s*\d+", val) else ""
-                    add("L1", ERROR, f"Learning Outcome '{val}' is not in the form N.N (or a comma-separated list){hint}", q, raw, q.lo_line.idx)
+                    add("L1", ERROR, f"Learning Outcome '{val}' is not in the form N.N or N.N-N (or a comma-separated list){hint}", q, raw, q.lo_line.idx)
                 elif ch is not None:
-                    chapters = {int(v.split(".")[0]) for v in re.split(r"\s*,\s*", val)}
+                    chapters = set()
+                    for v in re.split(r"\s*,\s*", val):
+                        m_ch = re.match(r"^(\d+)", v)
+                        if m_ch:
+                            chapters.add(int(m_ch.group(1)))
                     if chapters != {ch}:
                         add("L1", ERROR, f"Learning Outcome '{val}' does not belong to chapter {ch}", q, raw, q.lo_line.idx)
 
@@ -486,7 +527,7 @@ def check_file(cf: ChapterFile, reference_prefix: str) -> list[Issue]:
         for role, l in q.extra_lines:
             where = "after the Reference line" if q.ref_line is not None and l.idx > q.ref_line.idx else "in this question"
             add("R2", ERROR, f"Extra {label.get(role, role)} line {where} (stray/duplicate line)", q, l.text, l.idx)
-        order = [r for r, _ in q.body if r not in ("other", "image")]
+        order = [r for r, _ in q.body if r not in ("other", "image", "answer")]
         expected_order = [r for r in order if r in ("option", "tf", "order")]
         if q.shuffle_line is not None:
             expected_order.append("shuffle")
@@ -533,11 +574,32 @@ def _ref_problem(val: str, prefix: str, ch: int, qn: int) -> Optional[str]:
     return " and ".join(parts) if parts else None
 
 
-def check_run(files: list[ChapterFile], reference_prefix: str) -> list[Issue]:
+def check_run(files: list[ChapterFile], reference_prefix: str, assessment_type: str = "auto") -> list[Issue]:
     """Check every file plus cross-file rules (chapter gaps, duplicate references)."""
+    if assessment_type == "sa":
+        for cf in files:
+            for q in cf.questions:
+                if q.kind != "EMPTY":
+                    q.kind = "SA"
+    elif assessment_type == "mc":
+        for cf in files:
+            for q in cf.questions:
+                if q.kind == "SA":
+                    q.kind = "MC"
+    elif assessment_type == "auto":
+        has_any_mc = any(
+            any(o.starred for o in q.options) or q.shuffle_line is not None
+            for cf in files for q in cf.questions
+        )
+        if not has_any_mc:
+            for cf in files:
+                for q in cf.questions:
+                    if q.kind != "EMPTY":
+                        q.kind = "SA"
+
     issues: list[Issue] = []
     for cf in files:
-        issues.extend(check_file(cf, reference_prefix))
+        issues.extend(check_file(cf, reference_prefix, assessment_type=assessment_type))
 
     # Duplicate chapter numbers / gaps
     chapters = [cf.chapter_no for cf in files if cf.chapter_no is not None]
@@ -580,7 +642,6 @@ def check_alt_text_file(cf: ChapterFile) -> list[Issue]:
         issues.append(Issue(fn, ch, None, rule, sev, msg, text, (line_idx + 1) if line_idx is not None else None))
 
     if not cf.images:
-        add("IMG1", INFO, "No images found in this document")
         return issues
 
     for img in cf.images:

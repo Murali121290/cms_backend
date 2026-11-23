@@ -158,6 +158,7 @@ def build_review_page_state(
     wopi_base_url: str,
     extract_document_structure_func,
     get_rules_loader_func,
+    access_token: str | None = None,
 ):
     resolved = resolve_processed_target(db, file_id=file_id)
     processed_path = resolved["processed_path"]
@@ -234,13 +235,8 @@ def build_review_page_state(
     style_list = sorted(styles)
     char_style_list = sorted(char_styles)
 
-    wopi_src = f"{wopi_base_url}/wopi/files/{file_id}/structuring"
-    wopi_src_encoded = urllib.parse.quote(wopi_src, safe="")
-    collabora_url = (
-        f"{collabora_public_url}/browser/dist/cool.html"
-        f"?WOPISrc={wopi_src_encoded}"
-        f"&lang=en"
-    )
+    from app.integrations.wopi import access_token as wopi_token
+    collabora_url = wopi_token.collabora_url(collabora_public_url, f"{wopi_base_url}/wopi/files/{file_id}/structuring", access_token)
 
     tag_set = (
         "springer"

@@ -36,6 +36,7 @@ def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix
             "questions": len(cf.questions),
             "mc": kinds.get("MC", 0),
             "tf": kinds.get("TF", 0),
+            "sa": kinds.get("SA", 0),
             "shuffle_lines": sum(1 for q in cf.questions if q.shuffle_line is not None),
             "images": cf.image_count,
             "has_alt": has_alt,
@@ -59,6 +60,9 @@ def build_report(files: list[ChapterFile], issues: list[Issue], reference_prefix
         "totals": {
             "files": len(files),
             "questions": sum(len(f.questions) for f in files),
+            "mc": sum(sum(1 for q in f.questions if q.kind == "MC") for f in files),
+            "tf": sum(sum(1 for q in f.questions if q.kind == "TF") for f in files),
+            "sa": sum(sum(1 for q in f.questions if q.kind == "SA") for f in files),
             "images": sum(f.image_count for f in files),
             "has_alt": sum(sum(1 for img in f.images if (img.alt_text or img.title or img.is_decorative)) for f in files),
             "missing_alt": sum(sum(1 for img in f.images if not (img.alt_text or img.title or img.is_decorative)) for f in files),
@@ -83,7 +87,11 @@ def to_csv(report: dict) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([h for _, h in ISSUE_COLUMNS])
-    for i in report["issues"]:
+    issues = report["issues"]
+    if report.get("mode") == "alt_text":
+        files_with_images = {f["file"] for f in report.get("files", []) if f.get("images", 0) > 0}
+        issues = [i for i in issues if i.get("file") in files_with_images and i.get("message") != "No images found in this document"]
+    for i in issues:
         w.writerow(["" if i.get(k) is None else i.get(k) for k, _ in ISSUE_COLUMNS])
     return buf.getvalue()
 
@@ -111,21 +119,27 @@ def to_xlsx(report: dict, fixes: list[dict] | None = None) -> bytes:
     is_alt_text_mode = report.get("mode") == "alt_text"
 
     if is_alt_text_mode:
+        files_with_images = [f for f in report["files"] if f.get("images", 0) > 0]
+        files_with_images_names = {f["file"] for f in files_with_images}
+
         ws.append(["Document Image & Alt Text Audit Report"])
         ws["A1"].font = Font(bold=True, size=13)
         ws.append(["Generated", report["generated_at"]])
-        ws.append(["Files", t["files"], "Total Images", t.get("images", 0)])
-        ws.append(["With Alt Text", t.get("has_alt", 0), "Missing Alt Text", t.get("missing_alt", 0), "Warnings", t["warnings"]])
+        ws.append(["Files with Images", len(files_with_images), "Total Files Uploaded", t["files"]])
+        ws.append(["Total Images", t.get("images", 0), "With Alt Text", t.get("has_alt", 0), "Missing Alt Text", t.get("missing_alt", 0), "Warnings", t.get("warnings", 0)])
         ws.append([])
         cols = ["File", "Total Images", "With Alt Text", "Missing Alt Text", "Warnings", "Status"]
         ws.append(cols)
         hdr = ws.max_row
         for c in ws[hdr]:
             c.font, c.fill = bold, head_fill
-        for f in report["files"]:
-            ws.append([f["file"], f["images"], f.get("has_alt", 0), f.get("missing_alt", 0), f["warnings"], f["status"].upper()])
-            ws.cell(ws.max_row, len(cols)).fill = fills[f["status"]]
-        ws.auto_filter.ref = f"A{hdr}:{get_column_letter(len(cols))}{ws.max_row}"
+        if files_with_images:
+            for f in files_with_images:
+                ws.append([f["file"], f["images"], f.get("has_alt", 0), f.get("missing_alt", 0), f["warnings"], f["status"].upper()])
+                ws.cell(ws.max_row, len(cols)).fill = fills[f["status"]]
+        else:
+            ws.append(["No images found in any uploaded documents", 0, 0, 0, 0, "PASS"])
+        ws.auto_filter.ref = f"A{hdr}:{get_column_letter(len(cols))}{max(ws.max_row, hdr)}"
         ws.freeze_panes = f"A{hdr + 1}"
         for i, w in enumerate([36, 14, 14, 16, 12, 12], 1):
             ws.column_dimensions[get_column_letter(i)].width = w
@@ -139,24 +153,33 @@ def to_xlsx(report: dict, fixes: list[dict] | None = None) -> bytes:
         ws.append(["Not checked", NOT_CHECKED_NOTE])
         ws.cell(ws.max_row, 1).font = bold
         ws.append([])
-        cols = ["File", "Chapter", "Questions", "MC", "T/F", "Shuffle lines", "Images", "Errors", "Warnings", "Info", "Status"]
+        cols = ["File", "Chapter", "Questions", "MC", "T/F", "SA", "Shuffle lines", "Images", "Errors", "Warnings", "Info", "Status"]
         ws.append(cols)
         hdr = ws.max_row
         for c in ws[hdr]:
             c.font, c.fill = bold, head_fill
         for f in report["files"]:
-            ws.append([f["file"], f["chapter"], f["questions"], f["mc"], f["tf"], f["shuffle_lines"], f["images"], f["errors"], f["warnings"], f["info"], f["status"].upper()])
+            ws.append([f["file"], f["chapter"], f["questions"], f["mc"], f["tf"], f.get("sa", 0), f["shuffle_lines"], f["images"], f["errors"], f["warnings"], f["info"], f["status"].upper()])
             ws.cell(ws.max_row, len(cols)).fill = fills[f["status"]]
         ws.auto_filter.ref = f"A{hdr}:{get_column_letter(len(cols))}{ws.max_row}"
         ws.freeze_panes = f"A{hdr + 1}"
-        for i, w in enumerate([34, 9, 11, 7, 7, 13, 9, 9, 10, 7, 10], 1):
+        for i, w in enumerate([34, 9, 11, 7, 7, 7, 13, 9, 9, 10, 7, 10], 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
     ws2 = wb.create_sheet("Alt Text Details" if is_alt_text_mode else "Issues")
     ws2.append([h for _, h in ISSUE_COLUMNS])
     for c in ws2[1]:
         c.font, c.fill = bold, head_fill
-    for i in report["issues"]:
+
+    issues_to_report = report["issues"]
+    if is_alt_text_mode:
+        files_with_images_names = {f["file"] for f in report["files"] if f.get("images", 0) > 0}
+        issues_to_report = [
+            i for i in report["issues"]
+            if i.get("file") in files_with_images_names and i.get("message") != "No images found in this document"
+        ]
+
+    for i in issues_to_report:
         ws2.append(["" if i.get(k) is None else i.get(k) for k, _ in ISSUE_COLUMNS])
         ws2.cell(ws2.max_row, 4).fill = fills.get(i["severity"], head_fill)
     ws2.auto_filter.ref = f"A1:{get_column_letter(len(ISSUE_COLUMNS))}{max(ws2.max_row, 1)}"
@@ -183,8 +206,15 @@ def to_xlsx(report: dict, fixes: list[dict] | None = None) -> bytes:
     ws3.append(["Rule", "Name", "Issues"])
     for c in ws3[1]:
         c.font, c.fill = bold, head_fill
-    for r in report["rules"]:
-        ws3.append([r["rule"], r["title"], r["count"]])
+    if is_alt_text_mode:
+        rule_counts = Counter(i.get("rule") for i in issues_to_report)
+        for r in report["rules"]:
+            count = rule_counts.get(r["rule"], 0)
+            if count > 0:
+                ws3.append([r["rule"], r["title"], count])
+    else:
+        for r in report["rules"]:
+            ws3.append([r["rule"], r["title"], r["count"]])
     ws3.column_dimensions["B"].width = 40
 
     out = io.BytesIO()

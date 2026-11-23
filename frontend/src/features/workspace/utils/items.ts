@@ -9,7 +9,7 @@ export const pagesOf = (item: WorkspaceItem) => item.manuscript_pages || item.ce
 export interface QueueFilters {
   q: string;
   status: StatusFilter;
-  stage: string; // "all" or a stage name
+  stage: string; // "current" (the stage picked in the banner, default), "all", or a stage name
   priority: string; // "all" or a priority
   // Excel-style column filters: selected values per column; empty = no filter.
   chapters: string[];
@@ -40,7 +40,7 @@ export const COLUMN_TITLE: Record<ColumnKey, string> = {
 export const EMPTY_FILTERS: QueueFilters = {
   q: "",
   status: "all",
-  stage: "all",
+  stage: "current",
   priority: "all",
   chapters: [],
   projects: [],
@@ -96,7 +96,7 @@ export function activeColumnFilters(f: QueueFilters): ColumnKey[] {
 }
 
 export function hasActiveFilters(f: QueueFilters): boolean {
-  return Boolean(f.q || f.status !== "all" || f.stage !== "all" || f.priority !== "all" || activeColumnFilters(f).length);
+  return Boolean(f.q || f.status !== "all" || f.stage !== "current" || f.priority !== "all" || activeColumnFilters(f).length);
 }
 
 export function textMatch(item: WorkspaceItem, q: string, nameOf: NameOf): boolean {
@@ -113,7 +113,8 @@ export function textMatch(item: WorkspaceItem, q: string, nameOf: NameOf): boole
 export function baseMatch(item: WorkspaceItem, f: QueueFilters, nameOf: NameOf): boolean {
   if (!textMatch(item, f.q, nameOf)) return false;
   if (f.priority !== "all" && (item.priority || "Normal") !== f.priority) return false;
-  if (f.stage !== "all" && item.stage_name !== f.stage) return false;
+  // "current" is resolved to the banner stage by the caller (LeadView); unresolved it filters nothing.
+  if (f.stage !== "all" && f.stage !== "current" && item.stage_name !== f.stage) return false;
   for (const key of Object.keys(COLUMN_FIELD) as ColumnKey[]) {
     const wanted = f[COLUMN_FIELD[key]] as string[];
     if (wanted.length && !wanted.includes(columnValue(item, key))) return false;

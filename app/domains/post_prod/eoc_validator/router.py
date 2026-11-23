@@ -86,6 +86,7 @@ async def _read_request(files: list[UploadFile], reference_prefix: str, require_
 async def fix(
     files: list[UploadFile] = File(...),
     reference_prefix: str = Form(...),
+    assessment_type: str = Form("auto"),
     user=Depends(check_post_prod_access),
 ):
     """Validate, apply safe fixes as Word tracked changes, and re-validate.
@@ -110,7 +111,7 @@ async def fix(
                 skipped.append(Issue(name, None, None, "F1", ERROR, f"File could not be read as a Word document: {exc}"))
                 continue
             try:
-                fixed, file_fixes = fix_docx(data, name, prefix, author=author)
+                fixed, file_fixes = fix_docx(data, name, prefix, author=author, assessment_type=assessment_type)
             except AlreadyTrackedError as exc:
                 skipped.append(Issue(name, None, None, "F1", ERROR, f"Not corrected: {exc}"))
                 fixed, file_fixes = data, []
@@ -121,8 +122,8 @@ async def fix(
             z.writestr(f"corrected/{name}", fixed)
             fixes.extend(f.to_dict() for f in file_fixes)
             parsed.append(parse_docx(fixed, name))
-        before = build_report(before_parsed, check_run(before_parsed, prefix), prefix)
-        remaining = check_run(parsed, prefix) + skipped
+        before = build_report(before_parsed, check_run(before_parsed, prefix, assessment_type=assessment_type), prefix)
+        remaining = check_run(parsed, prefix, assessment_type=assessment_type) + skipped
         report = build_report(parsed, remaining, prefix)
         fixes_by_file: dict[str, int] = {}
         for f in fixes:
@@ -151,6 +152,7 @@ async def analyze(
     files: list[UploadFile] = File(...),
     reference_prefix: str = Form(""),
     mode: str = Form("validate"),
+    assessment_type: str = Form("auto"),
     user=Depends(check_post_prod_access),
 ):
     from .rules import check_run, check_alt_text_run
@@ -171,7 +173,7 @@ async def analyze(
         issues = check_alt_text_run(parsed) + unreadable
         report = build_report(parsed, issues, prefix, mode="alt_text")
     else:
-        issues = check_run(parsed, prefix) + unreadable
+        issues = check_run(parsed, prefix, assessment_type=assessment_type) + unreadable
         report = build_report(parsed, issues, prefix, mode="validate")
 
     for i in unreadable:
@@ -181,6 +183,7 @@ async def analyze(
             "questions": 0,
             "mc": 0,
             "tf": 0,
+            "sa": 0,
             "shuffle_lines": 0,
             "images": 0,
             "has_alt": 0,

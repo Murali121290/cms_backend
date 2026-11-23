@@ -27,6 +27,7 @@ import docx
 from docx.oxml.ns import qn
 
 QUESTION_RE = re.compile(r"^(\d+)\.\t(.*)$", re.S)
+QUESTION_SPACE_RE = re.compile(r"^(\d+)\.\s+(?!\t)(.*)$", re.S)
 # Loose question detector used to flag lines that look like a question but
 # don't use "N.<TAB>" (e.g. "1. Text" with a space).
 LOOSE_QUESTION_RE = re.compile(r"^\s*(\d+)[.)]\s+\S")
@@ -83,7 +84,8 @@ class Question:
     stem: str
     raw: str
     idx: int
-    kind: str = "MC"  # MC | TF | ORDER | EMPTY
+    kind: str = "MC"  # MC | TF | ORDER | SA | EMPTY
+    has_tab_error: bool = False
     order_positions: list[int] = field(default_factory=list)  # ORDER: the leading 1, 2, 3…
     options: list[Option] = field(default_factory=list)
     images: list[ImageMeta] = field(default_factory=list)
@@ -307,7 +309,17 @@ def parse_docx(data: bytes, filename: str) -> ChapterFile:
             continue
 
         qm = QUESTION_RE.match(text)
-        if qm:
+        qm_loose = QUESTION_SPACE_RE.match(text) if not qm else None
+        is_loose_q = False
+        if qm_loose:
+            q_cand = int(qm_loose.group(1))
+            if current is None and q_cand == 1:
+                is_loose_q = True
+            elif current is not None and current.ref_line is not None and q_cand > current.number:
+                is_loose_q = True
+
+        if qm or is_loose_q:
+            m = qm or qm_loose
             if pending_instruction is not None:
                 group_instruction = pending_instruction
                 pending_instruction = None
@@ -316,10 +328,11 @@ def parse_docx(data: bytes, filename: str) -> ChapterFile:
                 # option list; it ends when a question has different options.
                 pass
             current = Question(
-                number=int(qm.group(1)),
-                stem=qm.group(2).strip(),
+                number=int(m.group(1)),
+                stem=m.group(2).strip(),
                 raw=text,
                 idx=ln.idx,
+                has_tab_error=bool(is_loose_q),
                 group_instruction=group_instruction,
             )
             if not current.stem:
@@ -377,8 +390,23 @@ def parse_docx(data: bytes, filename: str) -> ChapterFile:
             # Text after a completed question = instruction for the next set.
             pending_instruction = stripped
             group_instruction = None
+        elif current.title_line is None and current.lo_line is None and current.ref_line is None and not current.options:
+            # Body lines before Title/LO/Ref when no options exist are the model answer / solution text
+            tag("answer")
         else:
             tag("other")
+
+    # Finalize question kind: detect Short Answer (SA) questions
+    has_any_starred_or_shuffle = any(
+        any(o.starred for o in q.options) or q.shuffle_line is not None
+        for q in cf.questions
+    )
+    for q in cf.questions:
+        if q.kind == "MC":
+            if not q.options and q.shuffle_line is None:
+                q.kind = "SA"
+            elif not has_any_starred_or_shuffle and q.shuffle_line is None:
+                q.kind = "SA"
 
     # Matching-set membership: a group instruction applies only while the
     # following questions share an identical option list.

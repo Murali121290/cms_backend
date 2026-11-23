@@ -228,7 +228,14 @@ def _get_user_assigned_project_codes(db: Session, user: models.User) -> list[str
 
     project_codes = set()
 
-    chapter_projects = db.query(ChapterInfo.project).filter(ChapterInfo.current_assignee_name == user.username).all()
+    from app.domains.workflow import access as wf_access
+    conds = [ChapterInfo.current_assignee_name == user.username]
+    owned = wf_access.visible_stage_names(db, user)
+    if owned is None:  # manages every stage -> every project with chapters
+        return [code for (code,) in db.query(ChapterInfo.project).distinct().all() if code]
+    if owned:
+        conds.append(ChapterInfo.stage_name.in_(owned))  # stage owners see projects with chapters in their stages
+    chapter_projects = db.query(ChapterInfo.project).filter(or_(*conds)).all()
     for (code,) in chapter_projects:
         if code:
             project_codes.add(code)
@@ -359,6 +366,16 @@ def _serialize_chapter_summary(chapter: models.Chapter):
     )
 
 
+def _app_time(dt):
+    """File timestamps are stored without a zone, in app time (APP_TIMEZONE, e.g. Asia/Kolkata): the DB session
+    runs in that zone and the code writes now_ist_naive(). Send them with the offset attached, so the browser doesn't
+    read them as UTC and show them 5h30 late. Aware values pass through unchanged."""
+    if dt is None or getattr(dt, "tzinfo", None) is not None:
+        return dt
+    from app.utils.timezone import get_app_timezone
+    return get_app_timezone().localize(dt)
+
+
 def _serialize_lock(file_record: models.File, db: Session | None = None):
     from datetime import timezone as _tz
     checked_out_by_username = None
@@ -395,10 +412,10 @@ def _serialize_lock(file_record: models.File, db: Session | None = None):
         is_checked_out=file_record.is_checked_out,
         checked_out_by_id=file_record.checked_out_by_id,
         checked_out_by_username=checked_out_by_username,
-        checked_out_at=file_record.checked_out_at,
+        checked_out_at=_app_time(file_record.checked_out_at),
         webdav_locked=webdav_locked,
         webdav_locked_by=webdav_locked_by,
-        webdav_locked_at=webdav_locked_at,
+        webdav_locked_at=_app_time(webdav_locked_at),
     )
 
 
@@ -497,7 +514,7 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         filename=file_record.filename,
         file_type=file_record.file_type,
         category=file_record.category,
-        uploaded_at=file_record.uploaded_at,
+        uploaded_at=_app_time(file_record.uploaded_at),
         version=file_record.version,
         lock=_serialize_lock(file_record, db=db),
         available_actions=actions,
@@ -591,7 +608,7 @@ def _serialize_version_record(version_entry: models.FileVersion):
         version_num=version_entry.version_num,
         archived_filename=version_service.get_archived_filename(version_entry),
         archived_path=version_entry.path,
-        uploaded_at=version_entry.uploaded_at,
+        uploaded_at=_app_time(version_entry.uploaded_at),
         uploaded_by_id=version_entry.uploaded_by_id,
         uploaded_by_name=name,
         uploaded_by_username=username,
@@ -1491,6 +1508,35 @@ def api_v2_project_indesign_templates(
     return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in valid_templates]
 
 
+def _editor_token(db: Session, viewer, file_id: int) -> str | None:
+    """Signed editor token for Collabora/OnlyOffice: names the user so saves can be checked (assignee/owner/Admin)."""
+    if not viewer:
+        return None
+    from app.integrations.wopi import access_token as wopi_token
+    return wopi_token.issue(db, viewer, file_id)
+
+
+def _ensure_chapter_writable(db: Session, viewer, *, file_id: int | None = None, chapter_id: int | None = None) -> None:
+    """Only the chapter's assignee, its stage owner or Admin may change its files (403 CHAPTER_READ_ONLY)."""
+    from app.domains.workflow import access as wf_access
+    if file_id is not None:
+        wf_access.ensure_can_write_file_id(db, viewer, file_id)
+    if chapter_id is not None:
+        wf_access.ensure_can_write_chapter(db, viewer, db.get(ChapterInfo, chapter_id))
+
+
+def _viewer_can_open_chapter(db: Session, viewer, chapter) -> bool:
+    """Same rules as GET /chapters/{id}: all-chapters permission, assignee, stage owner, plus the Design/Art
+    sharing rules there."""
+    try:
+        api_v2_get_chapter_by_id(chapter.id, db=db, user=viewer)
+        return True
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            return False
+        raise
+
+
 @router.get(
     "/projects/{project_id}/chapters/{chapter_id}",
     response_model=schemas_v2.ChapterDetailResponse,
@@ -1518,6 +1564,12 @@ def api_v2_chapter_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             code="CHAPTER_NOT_FOUND",
             message="Chapter not found.",
+        )
+    if not _viewer_can_open_chapter(db, viewer, chapter):
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="CHAPTER_NOT_ASSIGNED",
+            message="This chapter isn't assigned to you.",
         )
 
     return schemas_v2.ChapterDetailResponse(
@@ -3448,6 +3500,7 @@ async def api_v2_edit_save_file(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
+    _ensure_chapter_writable(db, viewer, file_id=file_id)
 
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
     if not file_record:
@@ -3873,6 +3926,7 @@ def api_v2_checkout_file(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
+    _ensure_chapter_writable(db, viewer, file_id=file_id)
 
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
     if not file_record:
@@ -3949,6 +4003,7 @@ def api_v2_upload_chapter_files(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
+    _ensure_chapter_writable(db, viewer, chapter_id=chapter_id)
 
     upload_result = file_service.upload_chapter_files(
         db,
@@ -4620,6 +4675,7 @@ def api_v2_file_editor(
             file_id=file_id,
             collabora_public_url=COLLABORA_PUBLIC_URL,
             wopi_base_url=WOPI_BASE_URL,
+            access_token=_editor_token(db, viewer, file_id),
         )
         return {"collabora_url": page_state["collabora_url"], "filename": page_state["filename"]}
     except _HTTPException:
@@ -4677,7 +4733,10 @@ def api_v2_onlyoffice_config(
     else:
         doc_url = f"{WOPI_BASE_URL}/wopi/files/{file_id}/contents"
 
-    callback_url = f"{WOPI_BASE_URL}/api/v2/onlyoffice/callback/{file_id}?mode={mode}"
+    from app.integrations.wopi import access_token as wopi_token
+    can_write = wopi_token.can_write_file(db, viewer, file_id)  # assignee / stage owner / Admin
+    callback_url = wopi_token.with_token(
+        f"{WOPI_BASE_URL}/api/v2/onlyoffice/callback/{file_id}?mode={mode}", wopi_token.issue(db, viewer, file_id))
 
     from urllib.parse import urlparse
     _origin = request.headers.get("origin")
@@ -4697,7 +4756,7 @@ def api_v2_onlyoffice_config(
         },
         "documentType": "word",
         "editorConfig": {
-            "mode": "edit",
+            "mode": "edit" if can_write else "view",
             "callbackUrl": callback_url,
             "user": {
                 "id": str(viewer.id),
@@ -4742,6 +4801,7 @@ async def api_v2_onlyoffice_callback(
     request: Request,
     background_tasks: BackgroundTasks,
     mode: str = "original",
+    access_token: str | None = None,
     db: Session = Depends(database.get_db),
 ):
     body = await request.json()
@@ -4755,7 +4815,14 @@ async def api_v2_onlyoffice_callback(
         )
         
     status_code = verified_body.get("status")
+    editor = None
     if status_code in (2, 6):
+        # Saves only for the chapter's assignee / stage owner / Admin (token issued when the editor was opened).
+        from app.integrations.wopi import access_token as wopi_token
+        editor = wopi_token.read(db, access_token, file_id)
+        if editor is None or not wopi_token.can_write_file(db, editor, file_id):
+            logger.warning("OnlyOffice save refused for file %s (user %s): read-only", file_id, getattr(editor, "username", None))
+            return {"error": 1}
         download_url = verified_body.get("url")
         if not download_url:
             raise HTTPException(
@@ -4787,6 +4854,7 @@ async def api_v2_onlyoffice_callback(
             mode=mode,
             body=docx_bytes,
             logger=logger,
+            uploaded_by_id=editor.id,
         )
         
         # Trigger background task for XHTML regeneration if in structuring mode
@@ -5952,6 +6020,7 @@ def api_v2_technical_scan(
             file_id=file_id,
             collabora_public_url=COLLABORA_PUBLIC_URL,
             wopi_base_url=WOPI_BASE_URL,
+            access_token=_editor_token(db, viewer, file_id),
         )
         collabora_url = editor_state.get("collabora_url")
     except Exception as e:
@@ -6597,6 +6666,7 @@ def api_v2_technical_apply(
             code="AUTH_REQUIRED",
             message="Not authenticated",
         )
+    _ensure_chapter_writable(db, viewer, file_id=file_id)
 
     try:
         _processing_check_permission(viewer, "technical")
@@ -6719,6 +6789,7 @@ def api_v2_save_file_xhtml(
             code="AUTH_REQUIRED",
             message="Not authenticated",
         )
+    _ensure_chapter_writable(db, viewer, file_id=file_id)
     try:
         result = structuring_review_service.save_xhtml_and_convert(
             db,
@@ -6777,6 +6848,7 @@ def api_v2_save_file_xhtml_runs(
             code="AUTH_REQUIRED",
             message="Not authenticated",
         )
+    _ensure_chapter_writable(db, viewer, file_id=file_id)
     try:
         result = structuring_review_service.save_xhtml_delta_and_convert(
             db,
@@ -7234,6 +7306,7 @@ def api_v2_structuring_review(
             file_id=file_id,
             collabora_public_url=COLLABORA_PUBLIC_URL,
             wopi_base_url=WOPI_BASE_URL,
+            access_token=_editor_token(db, viewer, file_id),
             extract_document_structure_func=extract_document_structure,
             get_rules_loader_func=get_rules_loader,
         )
@@ -8485,7 +8558,14 @@ def api_v2_list_chapters(db: Session = Depends(database.get_db), user=Depends(ge
     from sqlalchemy import select
     if has_permission(viewer, "view_all_chapters"):
         return list(db.execute(select(ChapterInfo)).scalars().all())
-    return list(db.execute(select(ChapterInfo).where(ChapterInfo.current_assignee_name == viewer.username)).scalars().all())
+    from app.domains.workflow import access as wf_access
+    owned = wf_access.visible_stage_names(db, viewer)
+    if owned is None:
+        return list(db.execute(select(ChapterInfo)).scalars().all())
+    cond = ChapterInfo.current_assignee_name == viewer.username
+    if owned:
+        cond = or_(cond, ChapterInfo.stage_name.in_(owned))
+    return list(db.execute(select(ChapterInfo).where(cond)).scalars().all())
 
 @router.get("/chapters/{chapter_id}", response_model=ChapterInfoResponse)
 def api_v2_get_chapter_by_id(chapter_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
@@ -8504,7 +8584,8 @@ def api_v2_get_chapter_by_id(chapter_id: int, db: Session = Depends(database.get
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    if has_permission(viewer, "view_all_chapters") or chapter.current_assignee_name == viewer.username:
+    from app.domains.workflow import access as wf_access
+    if wf_access.can_view_chapter(db, viewer, chapter):
         return chapter
 
     c_name = (chapter.chapters or "").strip()
@@ -8564,7 +8645,13 @@ def api_v2_get_chapters_by_project(project: str, db: Session = Depends(database.
         return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
 
     all_proj_chapters = list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
+    from app.domains.workflow import access as wf_access
+    owned = wf_access.visible_stage_names(db, viewer)
+    if owned is None:
+        return all_proj_chapters
     assigned = [c for c in all_proj_chapters if c.current_assignee_name == viewer.username]
+    # stage owners / leads also see the chapters currently in their stages
+    assigned += [c for c in all_proj_chapters if c.stage_name in owned and c.current_assignee_name != viewer.username]
     assigned_ids = {c.id for c in assigned}
 
     assigned_nums = set()

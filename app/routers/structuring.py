@@ -27,6 +27,7 @@ from app.integrations.collabora.config import (
     WOPI_BASE_URL,
 )
 from app.utils.utils.structuring_lib.styler import process_docx
+from app.integrations.wopi import access_token as wopi_token
 
 # Configure logger
 logger = logging.getLogger("app.routers.structuring")
@@ -56,6 +57,7 @@ async def review_structuring(
             file_id=file_id,
             collabora_public_url=COLLABORA_PUBLIC_URL,
             wopi_base_url=WOPI_BASE_URL,
+            access_token=wopi_token.issue(db, user, file_id),
             extract_document_structure_func=extract_document_structure,
             get_rules_loader_func=get_rules_loader,
         )
@@ -102,6 +104,8 @@ async def save_structuring_changes(
     logger.info(f"SAVE ENDPOINT HIT for file {file_id}")
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    from app.domains.workflow import access as wf_access
+    wf_access.ensure_can_write_file_id(db, user, file_id)  # assignee / stage owner / Admin only
 
 
     result = structuring_review_service.save_changes(

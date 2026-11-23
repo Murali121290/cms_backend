@@ -34,7 +34,7 @@ export function useWorkspaceUrlState() {
       filters: {
         q: params.get("q") ?? "",
         status: status && STATUSES.includes(status) ? status : "all",
-        stage: params.get("fstage") ?? "all",
+        stage: params.get("fstage") ?? "current",
         priority: params.get("prio") ?? "all",
         ...(Object.fromEntries(COLUMN_KEYS.map((k) => [COLUMN_FIELD[k], list(params.get(COLUMN_PARAM[k]))])) as Pick<
           QueueFilters, "chapters" | "projects" | "clients" | "pms" | "stages" | "statuses" | "assignees" | "priorities" | "dues" | "pages"
@@ -59,7 +59,7 @@ export function useWorkspaceUrlState() {
           if (f) {
             set("q", f.q);
             set("status", f.status, "all");
-            set("fstage", f.stage, "all");
+            set("fstage", f.stage, "current");
             set("prio", f.priority, "all");
             for (const k of COLUMN_KEYS) {
               const vals = f[COLUMN_FIELD[k]] as string[] | undefined;

@@ -60,15 +60,12 @@ def build_editor_page_state(
     file_id: int,
     collabora_public_url: str,
     wopi_base_url: str,
+    access_token: str | None = None,
 ):
+    from app.integrations.wopi import access_token as wopi_token
+
     file_record = get_file_record(db, file_id=file_id, detail="File not found")
-    wopi_src = f"{wopi_base_url}/wopi/files/{file_id}"
-    wopi_src_encoded = urllib.parse.quote(wopi_src, safe="")
-    collabora_url = (
-        f"{collabora_public_url}/browser/dist/cool.html"
-        f"?WOPISrc={wopi_src_encoded}"
-        f"&lang=en"
-    )
+    collabora_url = wopi_token.collabora_url(collabora_public_url, f"{wopi_base_url}/wopi/files/{file_id}", access_token)
     return {
         "file": file_record,
         "filename": os.path.basename(file_record.path),
@@ -91,11 +88,26 @@ def _ensure_target_exists(
     return file_path, filename
 
 
+def _user_fields(db: Session, file_id: int, user) -> dict:
+    """Who is editing and whether they may save (assignee / stage owner / Admin; no valid token = read-only)."""
+    from app.integrations.wopi import access_token as wopi_token
+
+    can_write = user is not None and wopi_token.can_write_file(db, user, file_id)
+    name = (f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username) if user else "Viewer"
+    return {
+        "UserId": user.username if user else "anonymous",
+        "UserFriendlyName": name,
+        "UserCanWrite": can_write,
+        "ReadOnly": not can_write,
+    }
+
+
 def build_check_file_info_payload(
     db: Session,
     *,
     file_id: int,
     mode: str,
+    user=None,
 ):
     if mode == "structuring":
         file_record = get_file_record(db, file_id=file_id, detail=None, bare_404=True)
@@ -117,9 +129,7 @@ def build_check_file_info_payload(
             ),
             "Version": sha[:16],
             "OwnerId": str(file_record.project_id or "cms"),
-            "UserId": "cms-user",
-            "UserFriendlyName": "CMS User",
-            "UserCanWrite": True,
+            **_user_fields(db, file_id, user),
             "SupportsUpdate": True,
             "PostMessageOrigin": "*",
             "UIMode": "compact",
@@ -143,9 +153,7 @@ def build_check_file_info_payload(
         ),
         "Version": sha[:16],
         "OwnerId": str(file_record.project_id or "cms"),
-        "UserId": "cms-user",
-        "UserFriendlyName": "CMS User",
-        "UserCanWrite": True,
+        **_user_fields(db, file_id, user),
         "UserCanNotWriteRelative": True,
         "SupportsUpdate": True,
         "SupportsLocks": False,
@@ -226,6 +234,7 @@ def write_file_bytes(
     mode: str,
     body: bytes,
     logger,
+    uploaded_by_id: int | None = None,
 ):
     if mode == "structuring":
         file_record = get_file_record(db, file_id=file_id, detail=None, bare_404=True)
@@ -249,7 +258,7 @@ def write_file_bytes(
                         db,
                         existing_file=file_record,
                         base_path=os.path.dirname(file_path),
-                        uploaded_by_id=None,
+                        uploaded_by_id=uploaded_by_id,
                         source_path=file_path,
                     )
                     file_record.version += 1
@@ -290,7 +299,7 @@ def write_file_bytes(
                     db,
                     existing_file=file_record,
                     base_path=os.path.dirname(file_path),
-                    uploaded_by_id=None,
+                    uploaded_by_id=uploaded_by_id,
                 )
                 file_record.version += 1
                 file_record.uploaded_at = now_ist_naive()

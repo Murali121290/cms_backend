@@ -28,6 +28,7 @@ interface EocFileSummary {
   questions: number
   mc: number
   tf: number
+  sa?: number
   shuffle_lines: number
   images: number
   has_alt?: number
@@ -46,6 +47,9 @@ interface EocReport {
   totals: {
     files: number
     questions: number
+    mc?: number
+    tf?: number
+    sa?: number
     images?: number
     has_alt?: number
     missing_alt?: number
@@ -77,6 +81,7 @@ interface AnalyzeResponse {
 }
 
 type RunMode = 'validate' | 'fix' | 'alt_text'
+type AssessmentType = 'auto' | 'mc' | 'sa'
 
 const PREFIX_KEY = 'eocValidator.referencePrefix'
 const MODE_KEY = 'eocValidator.mode'
@@ -286,6 +291,7 @@ export function PostProdEocValidator() {
     })
   }
   const [mode, setMode] = useState<RunMode>(readMode)
+  const [assessmentType, setAssessmentType] = useState<AssessmentType>('auto')
   const [files, setFiles] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [running, setRunning] = useState(false)
@@ -294,6 +300,7 @@ export function PostProdEocValidator() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [sevFilter, setSevFilter] = useState<Record<Severity, boolean>>({ error: true, warning: true, info: false })
   const [ruleFilter, setRuleFilter] = useState<string>('all')
+  const [hideZeroImages, setHideZeroImages] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const addFiles = (list: FileList | null) => {
@@ -325,6 +332,7 @@ export function PostProdEocValidator() {
     const fd = new FormData()
     fd.append('reference_prefix', p || 'alt_text')
     fd.append('mode', mode)
+    fd.append('assessment_type', assessmentType)
     files.forEach((f) => fd.append('files', f))
     try {
       const endpoint = mode === 'fix' ? '/api/v2/eoc-validator/fix' : '/api/v2/eoc-validator/analyze'
@@ -553,6 +561,40 @@ export function PostProdEocValidator() {
           </div>
         </fieldset>
 
+        {mode !== 'alt_text' && (
+          <div>
+            <label className="block text-xs font-semibold text-muted mb-2 uppercase tracking-wider">
+              Assessment Type
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {([
+                { value: 'auto' as AssessmentType, label: 'Auto-detect (MC & Short Answer)' },
+                { value: 'mc' as AssessmentType, label: 'Multiple Choice only' },
+                { value: 'sa' as AssessmentType, label: 'Short Answer / Discussion only' },
+              ]).map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                    assessmentType === opt.value
+                      ? 'border-primary bg-primary/10 text-primary font-semibold'
+                      : 'border-border text-muted hover:border-primary/40'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="assessment-type"
+                    value={opt.value}
+                    checked={assessmentType === opt.value}
+                    onChange={() => setAssessmentType(opt.value)}
+                    className="sr-only"
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-3">
           {errorMsg && <span className="text-sm text-red-500 mr-auto">{errorMsg}</span>}
           <button
@@ -592,11 +634,11 @@ export function PostProdEocValidator() {
           {/* Totals */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             {isAltText ? ([
-              { label: 'Files', value: report.totals.files, cls: 'text-text' },
+              { label: 'Files with Images', value: report.files.filter((f) => f.images > 0).length, cls: 'text-text' },
+              { label: 'Total Files', value: report.totals.files, cls: 'text-text' },
               { label: 'Total Images', value: report.totals.images ?? 0, cls: 'text-text' },
               { label: 'With Alt Text', value: report.totals.has_alt ?? 0, cls: 'text-emerald-600' },
               { label: 'Missing Alt Text', value: report.totals.missing_alt ?? report.totals.errors, cls: (report.totals.missing_alt ?? report.totals.errors) ? 'text-red-600' : 'text-emerald-600' },
-              { label: 'Warnings', value: report.totals.warnings, cls: 'text-amber-600' },
             ]).map((t) => (
               <div key={t.label} className="bg-card border border-border rounded-xl p-4">
                 <div className="text-[11px] uppercase tracking-wider text-muted font-semibold">{t.label}</div>
@@ -604,7 +646,7 @@ export function PostProdEocValidator() {
               </div>
             )) : ([
               { label: 'Files', value: report.totals.files, cls: 'text-text' },
-              { label: 'Questions', value: report.totals.questions, cls: 'text-text' },
+              { label: 'Questions', value: report.totals.sa ? `${report.totals.questions} (${report.totals.sa} SA)` : report.totals.questions, cls: 'text-text' },
               { label: isFix ? 'Errors left' : 'Errors', value: report.totals.errors, cls: 'text-red-600' },
               { label: isFix ? 'Warnings left' : 'Warnings', value: report.totals.warnings, cls: 'text-amber-600' },
               { label: 'Info', value: report.totals.info, cls: 'text-blue-600' },
@@ -640,6 +682,17 @@ export function PostProdEocValidator() {
                 <option key={r.rule} value={r.rule}>{r.rule} — {r.title} ({r.count})</option>
               ))}
             </select>
+            {isAltText && (
+              <label className="inline-flex items-center gap-1.5 text-xs text-muted cursor-pointer hover:text-text select-none">
+                <input
+                  type="checkbox"
+                  checked={hideZeroImages}
+                  onChange={(e) => setHideZeroImages(e.target.checked)}
+                  className="rounded"
+                />
+                <span>Only files with images ({report.files.filter((f) => f.images > 0).length})</span>
+              </label>
+            )}
             <div className="ml-auto flex gap-2">
               {isFix && (
                 <button
@@ -650,7 +703,11 @@ export function PostProdEocValidator() {
                   <Download size={13} /> Corrected Word files (ZIP)
                 </button>
               )}
-              <button onClick={downloadXlsx} className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-border hover:border-primary hover:text-primary">
+              <button
+                onClick={downloadXlsx}
+                title={isAltText ? "Download Excel report (only includes chapters containing images)" : "Download Excel report"}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-border hover:border-primary hover:text-primary"
+              >
                 <Download size={13} /> Excel report
               </button>
               <button onClick={downloadCsv} className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-border hover:border-primary hover:text-primary">
@@ -690,7 +747,7 @@ export function PostProdEocValidator() {
                       <>
                         <th className="text-right px-3 py-2.5 font-semibold">Ch.</th>
                         <th className="text-right px-3 py-2.5 font-semibold">Questions</th>
-                        <th className="text-right px-3 py-2.5 font-semibold">MC / TF</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">MC / TF / SA</th>
                         <th className="text-right px-3 py-2.5 font-semibold">Shuffle</th>
                         <th className="text-right px-3 py-2.5 font-semibold">Images</th>
                         {isFix && <th className="text-right px-3 py-2.5 font-semibold">Fixes</th>}
@@ -702,7 +759,7 @@ export function PostProdEocValidator() {
                   </tr>
                 </thead>
                 <tbody>
-                  {report.files.map((f) => {
+                  {(isAltText && hideZeroImages ? report.files.filter((f) => f.images > 0) : report.files).map((f) => {
                     const open = !!expanded[f.file]
                     const list = issuesByFile[f.file] ?? []
                     const fileFixes = fixesByFile[f.file] ?? []
@@ -728,8 +785,10 @@ export function PostProdEocValidator() {
                           ) : (
                             <>
                               <td className="text-right px-3">{f.chapter ?? '—'}</td>
-                              <td className="text-right px-3">{f.questions}</td>
-                              <td className="text-right px-3 text-muted">{f.mc} / {f.tf}</td>
+                              <td className="text-right px-3 font-semibold">{f.questions}</td>
+                              <td className="text-right px-3 text-muted text-xs">
+                                {f.sa ? (f.mc || f.tf ? `${f.mc} / ${f.tf} / ${f.sa}` : `${f.sa} SA`) : `${f.mc} / ${f.tf}`}
+                              </td>
                               <td className="text-right px-3 text-muted">{f.shuffle_lines}</td>
                               <td className="text-right px-3 text-muted">{f.images}</td>
                               {isFix && (
@@ -779,7 +838,9 @@ export function PostProdEocValidator() {
                               )}
                               {list.length === 0 ? (
                                 <p className="text-xs text-muted m-0">
-                                  {isFix ? 'Nothing left to review for the current filters.' : 'No issues match the current filters.'}
+                                  {isAltText
+                                    ? (f.images === 0 ? 'No images found in this document (excluded from Excel report).' : 'All images in this document passed validation.')
+                                    : (isFix ? 'Nothing left to review for the current filters.' : 'No issues match the current filters.')}
                                 </p>
                               ) : (
                                 <table className="w-full text-xs">
