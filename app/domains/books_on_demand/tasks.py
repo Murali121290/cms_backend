@@ -515,6 +515,30 @@ def send_bod_daily_receipt_summary(target_date_str: str | None = None):
             if ref_date.weekday() == 6:  # 6 = Sunday
                 logger.info(f"Today is {ref_date.strftime('%A')}. Skipping BOD daily receipt summary.")
                 return {"status": "skipped", "reason": "sunday", "date": ref_date.isoformat()}
+            
+            # Guard against Celery Beat catch-up triggers:
+            # If triggered without explicit date, ensure current local time is within 30 minutes of configured schedule time
+            summary_time_str = getattr(settings, "BOD_DAILY_SUMMARY_TIME", None)
+            if summary_time_str and str(summary_time_str).strip():
+                try:
+                    s_hour, s_minute = [int(p) for p in str(summary_time_str).strip().split(":", 1)]
+                    # Allow execution within a 30-minute window of the scheduled time
+                    scheduled_minutes = s_hour * 60 + s_minute
+                    current_minutes = now_local.hour * 60 + now_local.minute
+                    diff = abs(current_minutes - scheduled_minutes)
+                    if diff > 30:
+                        logger.warning(
+                            f"Skipping catch-up/stale execution: current time {now_local.strftime('%H:%M')} "
+                            f"is not near scheduled BOD_DAILY_SUMMARY_TIME {summary_time_str}."
+                        )
+                        return {
+                            "status": "skipped",
+                            "reason": "outside_scheduled_window",
+                            "current_time": now_local.strftime("%H:%M"),
+                            "scheduled_time": summary_time_str
+                        }
+                except Exception as ex:
+                    logger.warning(f"Could not parse BOD_DAILY_SUMMARY_TIME for window check: {ex}")
 
         display_date = ref_date.strftime("%m/%d/%Y")
 
