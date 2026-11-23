@@ -760,6 +760,21 @@
       "category": "CSS Check"
     },
     {
+      "id": "BOD-CSS-001",
+      "name": "Match EPUB CSS with BoD Standard CSS",
+      "target_path": "OEBPS/css",
+      "file_name_pattern": "*.css",
+      "enabled": true,
+      "rule_config": {
+        "master_css_file": "app/domains/post_prod/epub_validator/rules/customers/BOD/templates/bod_standard_v1.css",
+        "flag_modified": true,
+        "modified_severity": "Warning",
+        "flag_unmarked_additional": true,
+        "unmarked_severity": "Warning"
+      },
+      "category": "CSS Check"
+    },
+    {
       "id": "URL001",
       "name": "Internal Link Check",
       "target_path": "OEBPS/xhtml",
