@@ -766,7 +766,7 @@
       "file_name_pattern": "*.css",
       "enabled": true,
       "rule_config": {
-        "master_css_file": "app/domains/post_prod/epub_validator/rules/customers/BOD/templates/bod_standard_v1.css",
+        "master_css_file": "app/domains/post_prod/epub_validator/rules/customers/BOD/templates/bod_standard_v5_4.css",
         "flag_modified": true,
         "modified_severity": "Warning",
         "flag_unmarked_additional": true,
@@ -1103,6 +1103,65 @@
       "file_name_pattern": "*Contents.xhtml",
       "enabled": true,
       "category": "TOC Check"
+    },
+    {
+      "id": "COM-META-001",
+      "name": "OPF dc:publisher = 'Books on Demand'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher": "Books on Demand"
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-002",
+      "name": "OPF dc:rights match Copyright string",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_rights_pattern": "^©\\s*\\d{4}\\s+\\S+"
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-003",
+      "name": "OPF Basic Metadata Presence",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "required_tags": [
+          "dc:title",
+          "dc:date",
+          "dc:identifier",
+          "dc:format",
+          "dc:type",
+          "dc:rights",
+          "dc:publisher",
+          "dc:language",
+          "dc:creator"
+        ]
+      },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "COM-META-015",
+      "name": "OPF dcterms:modified ISO timestamp check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "category": "Metadata Check"
     },
     {
       "id": "COM-META-006",
