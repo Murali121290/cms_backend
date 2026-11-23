@@ -119,6 +119,136 @@ def validate_css_w3c(file_details, rule_config=None):
 
     return {"issues_count": len(issues), "issues": issues}
 
+
+@rule("BOD-CSS-001")
+def validate_css_matcher(file_details, rule_config=None):
+    """
+    Compare the EPUB's CSS against the customer's master/standard CSS template
+    using the CSS Matcher engine.
+    Flags modified standard rules and untracked additional CSS rules.
+    """
+    import os
+    from app.domains.post_prod.css_matcher.css_diff import parse_css, compare
+
+    file_path = file_details["full_path"]
+    rel_path = file_details.get("relative_path") or os.path.basename(file_path)
+    issues = []
+
+    if not file_path.endswith(".css"):
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            epub_css_text = f.read()
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{
+            "rule_name": "CSS Read Error",
+            "type": "css_read_error",
+            "message": f"Could not read CSS file: {e}",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    if not epub_css_text.strip():
+        return {"issues_count": 0, "issues": []}
+
+    lines = epub_css_text.splitlines()
+
+    def find_selector_line(sel):
+        clean_sel = sel.strip()
+        for idx, line in enumerate(lines, 1):
+            if clean_sel in line:
+                return idx
+        return 1
+
+    # Load master CSS strictly from rule_config
+    inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+    master_css_rel = inner_config.get("master_css_file")
+
+    if not master_css_rel:
+        return {"issues_count": 1, "issues": [{
+            "rule_name": "Configuration Error",
+            "type": "configuration_error",
+            "message": "Missing 'master_css_file' in rule_config for BOD-CSS-001 in customer.json.",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    # Resolve master CSS path: if absolute use directly, else search relative to current working dir or app root
+    if os.path.isabs(master_css_rel):
+        master_css_path = master_css_rel if os.path.exists(master_css_rel) else None
+    else:
+        possible_paths = [
+            os.path.abspath(master_css_rel),
+            os.path.join("/app", master_css_rel),
+        ]
+        master_css_path = next((p for p in possible_paths if os.path.exists(p)), None)
+
+    if not master_css_path:
+        return {"issues_count": 1, "issues": [{
+            "rule_name": "Master CSS Missing",
+            "type": "master_css_missing",
+            "message": f"Master standard CSS template file configured in customer.json not found: '{master_css_rel}'",
+            "category": "Error",
+            "file_path": rel_path,
+        }]}
+
+    with open(master_css_path, "r", encoding="utf-8") as mf:
+        master_css_text = mf.read()
+
+    master_rules = parse_css(master_css_text)
+    epub_rules = parse_css(epub_css_text)
+    diffs = compare(master_rules, epub_rules, epub_css_text)
+
+    # 1. Report MODIFIED rules (declarations altered on standard classes)
+    check_modified = inner_config.get("flag_modified", True)
+    if check_modified:
+        for d in diffs:
+            if d.status == "modified":
+                line_no = find_selector_line(d.selector)
+                change_descs = []
+                for c in (d.decl_diffs or []):
+                    if c.kind == "changed":
+                        change_descs.append(f"{c.prop}: changed from '{c.master_value}' to '{c.epub_value}'")
+                    elif c.kind == "removed":
+                        change_descs.append(f"{c.prop}: removed (expected '{c.master_value}')")
+                    elif c.kind == "added":
+                        change_descs.append(f"{c.prop}: added '{c.epub_value}'")
+
+                summary_str = "; ".join(change_descs[:3])
+                if len(change_descs) > 3:
+                    summary_str += f" (+{len(change_descs) - 3} more)"
+
+                issues.append({
+                    "rule_name": "Standard CSS Modified",
+                    "type": "css_standard_modified",
+                    "message": f"Standard CSS rule '{d.selector}' modified: {summary_str}",
+                    "category": inner_config.get("modified_severity", "Warning"),
+                    "file_path": rel_path,
+                    "line_number": line_no,
+                    "extract": d.selector,
+                    "snippet": d.selector,
+                })
+
+    # 2. Report UNMARKED ADDITIONAL rules (hand-added rules without /* additional css */ marker)
+    check_unmarked = inner_config.get("flag_unmarked_additional", True)
+    if check_unmarked:
+        for d in diffs:
+            if d.status == "additional" and not d.after_marker:
+                line_no = find_selector_line(d.selector)
+                issues.append({
+                    "rule_name": "Untracked Additional CSS",
+                    "type": "css_unmarked_additional",
+                    "message": f"Additional CSS selector '{d.selector}' is placed outside the '/* additional css */' section.",
+                    "category": inner_config.get("unmarked_severity", "Warning"),
+                    "file_path": rel_path,
+                    "line_number": line_no,
+                    "extract": d.selector,
+                    "snippet": d.selector,
+                })
+
+    return {"issues_count": len(issues), "issues": issues}
+
 @rule("GWP-CSS-001")
 def validate_gwp_inline_css(file_details, rule_config=None):
     """GWP000: Ensure CSS is in a separate file, not inline or embedded."""

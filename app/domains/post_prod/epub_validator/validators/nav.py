@@ -626,6 +626,13 @@ def validate_nav_xhtml(file_details, rule_config=None):
             chapter_file = href
             target_id = None
 
+        # Skip heading check for copyright files configured in rule_config
+        import fnmatch
+        target_fn_lower = os.path.basename(chapter_file).lower()
+        skip_file_patterns = inner_config.get("skip_heading_file_patterns") or []
+        if skip_file_patterns and any(fnmatch.fnmatch(target_fn_lower, pat.lower()) for pat in skip_file_patterns):
+            continue
+
         current_dir = os.path.dirname(file_path)
         target_file_path = os.path.normpath(os.path.join(current_dir, chapter_file))
 
@@ -813,6 +820,20 @@ def validate_nav_xhtml(file_details, rule_config=None):
         if current_element.name in heading_tags:
             heading_level = int(current_element.name[1])
 
+            # Top-level TOC item (nav_level == 1) should be an h1 heading
+            if nav_level == 1 and heading_level > 1:
+                issues.append({
+                    "rule_name": "Nav Hierarchy Mismatch",
+                    "type": "hierarchy_mismatch",
+                    "href": href,
+                    "message": (f'"{heading_text}" heading hierarchy does not match TOC hierarchy. '
+                               f'Top-level TOC entry implies this should be h1, '
+                               f'but an h{heading_level} was found in the chapter.'),
+                    "category": "Error",
+                    "line_number": line_num,
+                    "extract": nav_text,
+                })
+
             # Store current heading level per file
             if chapter_file not in file_heading_map:
                 file_heading_map[chapter_file] = {}
@@ -834,6 +855,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                                    f'but an h{heading_level} was found in the chapter.'),
                         "category": "Error",
                         "line_number": line_num,
+                        "extract": nav_text,
                     })
 
             # Store current level
@@ -917,6 +939,123 @@ def validate_cover_entry_required(file_details, rule_config=None):
                     "category": "Error",
                     "line_number": getattr(cover_link, "sourceline", None),
                     "extract": href,
+                })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-COV-009")
+def validate_no_cover_in_toc(file_details, rule_config=None):
+    """
+    Cover entry must not be included in TOC (both nav.xhtml and toc.ncx),
+    although found as a part of the book.
+    Config-driven: reads forbidden_titles and forbidden_file_patterns from rule_config.
+    """
+    import fnmatch
+    import os
+
+    file_path = file_details["full_path"]
+    rel_path = file_details.get("relative_path") or os.path.basename(file_path)
+    file_name = os.path.basename(file_path).lower()
+    issues = []
+
+    # Read configuration dynamically
+    inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+    forbidden_titles = [t.strip().lower() for t in inner_config.get("forbidden_titles", ["Cover"])]
+    forbidden_file_patterns = [p.strip().lower() for p in inner_config.get("forbidden_file_patterns", ["*cover*.xhtml", "*cover*.html"])]
+
+    text = read_text(file_path)
+    if not text.strip():
+        return {"issues_count": 0, "issues": []}
+
+    lines = text.splitlines()
+
+    def find_line_for_snippet(snippet):
+        if not snippet:
+            return 1
+        snip = snippet.strip()
+        for idx, line in enumerate(lines, 1):
+            if snip in line:
+                return idx
+        return 1
+
+    def is_forbidden_entry(label, target_href):
+        lbl_lower = label.strip().lower()
+        if lbl_lower and lbl_lower in forbidden_titles:
+            return True
+        target_fn = os.path.basename(target_href.split("#")[0]).lower()
+        if target_fn and any(fnmatch.fnmatch(target_fn, pat) for pat in forbidden_file_patterns):
+            return True
+        return False
+
+    is_ncx = file_name.endswith(".ncx")
+
+    if is_ncx:
+        # Check toc.ncx <navMap>
+        try:
+            soup = BeautifulSoup(text, "xml")
+        except Exception as e:
+            return {"issues_count": 1, "issues": [{"type": "ncx_read_error", "message": f"Could not read NCX file: {e}", "category": "Error"}]}
+
+        navmap = soup.find("navMap")
+        if not navmap:
+            return {"issues_count": 0, "issues": []}
+
+        for np in navmap.find_all("navPoint"):
+            text_tag = np.find("text")
+            label_text = text_tag.get_text(strip=True) if text_tag else ""
+            content_tag = np.find("content")
+            src = content_tag.get("src", "").strip() if content_tag else ""
+
+            if is_forbidden_entry(label_text, src):
+                np_id = np.get("id", "")
+                line_no = (
+                    getattr(text_tag, "sourceline", None)
+                    or getattr(content_tag, "sourceline", None)
+                    or getattr(np, "sourceline", None)
+                    or (find_line_for_snippet(label_text) if label_text else 1)
+                )
+                issues.append({
+                    "rule_name": "Cover image entry check",
+                    "type": "cover_entry_in_ncx_toc",
+                    "message": "Cover image entry should not be included in TOC (both NAV and NCX), although found as a part of the book.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_no,
+                    "extract": label_text or src or np_id,
+                    "snippet": label_text or src or str(np)[:150],
+                })
+
+    else:
+        # Check nav.xhtml <nav epub:type="toc"> or <nav role="doc-toc"> or id="toc"
+        try:
+            soup = BeautifulSoup(text, "html.parser")
+        except Exception as e:
+            return {"issues_count": 1, "issues": [{"type": "nav_read_error", "message": f"Could not read NAV file: {e}", "category": "Error"}]}
+
+        toc_nav = (
+            soup.find("nav", attrs={"epub:type": lambda v: v and "toc" in v.lower()})
+            or soup.find("nav", attrs={"role": lambda v: v and "doc-toc" in v.lower()})
+            or soup.find("nav", id="toc")
+        )
+        if not toc_nav:
+            return {"issues_count": 0, "issues": []}
+
+        for a in toc_nav.find_all("a"):
+            link_text = a.get_text(strip=True)
+            href = a.get("href", "").strip()
+
+            if is_forbidden_entry(link_text, href):
+                line_no = getattr(a, "sourceline", None) or (getattr(a.parent, "sourceline", None) if a.parent else None) or find_line_for_snippet(link_text or href)
+                issues.append({
+                    "rule_name": "Cover image entry check",
+                    "type": "cover_entry_in_nav_toc",
+                    "message": "Cover image entry should not be included in TOC (both NAV and NCX), although found as a part of the book.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_no,
+                    "extract": link_text or href,
+                    "snippet": link_text or href,
                 })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -1235,6 +1374,187 @@ def validate_ncx_isbn(file_details, rule_config=None):
         })
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-NCX-005")
+def validate_ncx_pagetarget_links(file_details, rule_config=None):
+    """Validate that pageTarget elements in toc.ncx have matching text vs target ID and existing targets."""
+    import os
+    import re
+    from urllib.parse import unquote
+
+    file_path = file_details["full_path"]
+    rel_path = file_details.get("relative_path") or os.path.basename(file_path)
+    issues = []
+
+    text = read_text(file_path)
+    if not text.strip():
+        return {"issues_count": 0, "issues": []}
+
+    lines = text.splitlines()
+
+    def find_line_for_target(pt_id, src_val, label_val):
+        candidates = []
+        if pt_id:
+            candidates.append(f'id="{pt_id}"')
+            candidates.append(f"id='{pt_id}'")
+            candidates.append(pt_id)
+        if src_val:
+            candidates.append(f'src="{src_val}"')
+            candidates.append(f"src='{src_val}'")
+            candidates.append(src_val)
+        if label_val:
+            candidates.append(f"<text>{label_val}</text>")
+
+        for needle in candidates:
+            for idx, line in enumerate(lines, 1):
+                if needle in line:
+                    return idx
+        return 1
+
+    try:
+        import warnings
+        from bs4 import XMLParsedAsHTMLWarning
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+            ncx_soup = BeautifulSoup(text, "html.parser")
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{"type": "ncx_read_error", "message": f"Could not read NCX file: {e}", "category": "Error"}]}
+
+    pagelist = ncx_soup.find(["pagelist", "pageList"])
+    if not pagelist:
+        return {"issues_count": 0, "issues": []}
+
+    pagetargets = pagelist.find_all(["pagetarget", "pageTarget"])
+    if not pagetargets:
+        return {"issues_count": 0, "issues": []}
+
+    current_dir = os.path.dirname(file_path)
+    parsed_files_cache = {}
+
+    for pt in pagetargets:
+        pt_id = pt.get("id", "")
+
+        # 1. Extract label text
+        nav_label = pt.find(["navlabel", "navLabel"])
+        text_tag = nav_label.find("text") if nav_label else None
+        label_text = text_tag.get_text(strip=True) if text_tag else ""
+
+        # 2. Extract content src
+        content_tag = pt.find("content")
+        src = content_tag.get("src", "").strip() if content_tag else ""
+
+        line_num = (
+            getattr(content_tag, "sourceline", None)
+            or getattr(text_tag, "sourceline", None)
+            or getattr(pt, "sourceline", None)
+            or find_line_for_target(pt_id, src, label_text)
+        )
+
+        if not src:
+            issues.append({
+                "rule_name": "Page Target Missing Content",
+                "type": "pagetarget_missing_src",
+                "message": f"<pageTarget id='{pt_id}'> is missing a valid <content src='...'>.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": line_num,
+                "extract": pt_id or label_text,
+                "snippet": str(pt)[:150],
+            })
+            continue
+
+        # Split file path and anchor ID
+        if "#" in src:
+            target_file, target_anchor = src.split("#", 1)
+        else:
+            target_file, target_anchor = src, ""
+
+        # Check 1: Label text vs target anchor mismatch (e.g. text '10' vs 'page_10')
+        if target_anchor:
+            clean_anchor = re.sub(r'^(page|p)[_-]?', '', target_anchor, flags=re.IGNORECASE)
+            if label_text.strip().lower() != clean_anchor.strip().lower():
+                text_line = (
+                    getattr(text_tag, "sourceline", None)
+                    or find_line_for_target(pt_id, f"<text>{label_text}</text>", label_text)
+                    or line_num
+                )
+                issues.append({
+                    "rule_name": "Page Target Text Mismatch",
+                    "type": "pagetarget_text_mismatch",
+                    "src": src,
+                    "message": f"Page target text '{label_text}' does not match target ID '{target_anchor}' in content src.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": text_line,
+                    "extract": label_text,
+                    "snippet": label_text,
+                })
+
+        # Check 2: Target file exists
+        target_abs_path = os.path.normpath(os.path.join(current_dir, unquote(target_file)))
+        if not os.path.exists(target_abs_path):
+            src_line = (
+                getattr(content_tag, "sourceline", None)
+                or find_line_for_target(pt_id, src, "")
+                or line_num
+            )
+            issues.append({
+                "rule_name": "Page Target File Missing",
+                "type": "pagetarget_file_missing",
+                "src": src,
+                "message": f"Referenced file '{target_file}' in pageTarget does not exist.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": src_line,
+                "extract": src,
+                "snippet": src,
+            })
+            continue
+
+        # Check 3: Target ID exists inside the target file
+        if target_anchor:
+            if target_abs_path not in parsed_files_cache:
+                try:
+                    with open(target_abs_path, "r", encoding="utf-8") as tf:
+                        parsed_files_cache[target_abs_path] = BeautifulSoup(tf.read(), "html.parser")
+                except Exception as e:
+                    src_line = getattr(content_tag, "sourceline", None) or line_num
+                    issues.append({
+                        "rule_name": "Page Target File Read Error",
+                        "type": "pagetarget_file_read_error",
+                        "src": src,
+                        "message": f"Could not read target file '{target_file}': {e}",
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": src_line,
+                        "extract": src,
+                        "snippet": src,
+                    })
+                    continue
+
+            tf_soup = parsed_files_cache[target_abs_path]
+            target_el = tf_soup.find(id=target_anchor) or tf_soup.find(attrs={"name": target_anchor})
+            if not target_el:
+                src_line = (
+                    getattr(content_tag, "sourceline", None)
+                    or find_line_for_target(pt_id, src, "")
+                    or line_num
+                )
+                issues.append({
+                    "rule_name": "Page Target Anchor Missing",
+                    "type": "pagetarget_anchor_missing",
+                    "src": src,
+                    "message": f"Target ID '{target_anchor}' does not exist in '{target_file}'.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": src_line,
+                    "extract": src,
+                    "snippet": src,
+                })
+
+    return {"issues_count": len(issues), "issues": issues}
+
 
 @rule("INDEX001")
 def validate_index_links(file_details, rule_config=None):
@@ -1782,6 +2102,412 @@ def validate_copyright_last_page(file_details, rule_config=None):
                         "snippet": raw_extract,
                         "extract": raw_extract,
                     })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-LM-001")
+def validate_bod_landmarks(file_details, rule_config=None):
+    """
+    BOD Landmark Validation:
+    Validates <nav epub:type="landmarks"> in nav.xhtml.
+    Must contain 3 ordered landmark items:
+    1. epub:type="cover" href pointing to cover file (e.g. *cover*.xhtml) and title 'Cover'
+    2. epub:type="toc" href pointing to TOC file and title based on book language
+    3. epub:type="bodymatter" href pointing to first bodymatter chapter (e.g. 01_*.xhtml) and title (e.g. 'Textbeginn' / 'Start of Text')
+    """
+    import os
+    import re
+    from bs4 import BeautifulSoup
+    from ._common import get_book_language
+
+    file_path = file_details.get("full_path") or ""
+    if not file_path or not os.path.isfile(file_path):
+        return {"issues_count": 0, "issues": []}
+
+    fn = os.path.basename(file_path).lower()
+    if fn not in ("nav.xhtml", "nav.html"):
+        return {"issues_count": 0, "issues": []}
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    soup = BeautifulSoup(content, "html.parser")
+    epub_root = file_details.get("epub_root") or file_details.get("epub_path") or os.path.dirname(os.path.dirname(file_path))
+    rel_path = file_details.get("file_path") or os.path.basename(file_path)
+
+    # Helper to find line numbers
+    lines = content.splitlines()
+
+    def find_tag_line(tag):
+        line = getattr(tag, "sourceline", None)
+        if line:
+            return line
+        tag_str = str(tag)
+        opening = tag_str.split(">")[0] + ">" if ">" in tag_str else tag_str[:50]
+        for idx, l in enumerate(lines, 1):
+            if opening[:40] in l:
+                return idx
+        return 1
+
+    # Locate landmarks nav: <nav epub:type="landmarks">
+    landmarks_nav = soup.find(
+        lambda t: t.name == "nav" and "landmarks" in (t.get("epub:type") or "").lower()
+    )
+
+    issues = []
+
+    if not landmarks_nav:
+        issues.append({
+            "type": "landmarks_nav_missing",
+            "message": 'Landmarks navigation (<nav epub:type="landmarks">) is missing in navigation document.',
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": '<nav epub:type="landmarks">',
+            "extract": '<nav epub:type="landmarks">',
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+    # Extract all landmark items <a> inside <nav epub:type="landmarks">
+    landmark_links = landmarks_nav.find_all("a")
+
+    if not landmark_links:
+        line_no = find_tag_line(landmarks_nav)
+        issues.append({
+            "type": "landmarks_empty",
+            "message": 'Landmarks navigation (<nav epub:type="landmarks">) contains no landmark entries.',
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": line_no,
+            "snippet": str(landmarks_nav)[:200],
+            "extract": str(landmarks_nav)[:200],
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+    # Read configuration
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+
+    toc_titles_map = cfg.get("toc_titles_by_language")
+    if not toc_titles_map or not isinstance(toc_titles_map, dict):
+        return {
+            "issues_count": 1,
+            "issues": [{
+                "rule_name": "Check landmark navigation in nav.xhtml",
+                "type": "configuration_error",
+                "message": "Missing required 'toc_titles_by_language' in rule configuration for BOD-LM-001.",
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": 1,
+            }]
+        }
+
+    detected_lang = get_book_language(file_details, soup=soup)
+    norm_lang = (detected_lang or "en").lower()
+    # Normalize 2-letter prefix
+    if "-" in norm_lang:
+        norm_lang = norm_lang.split("-")[0]
+    elif "_" in norm_lang:
+        norm_lang = norm_lang.split("_")[0]
+
+    # Resolve expected TOC title and allowed variants for this language from config
+    allowed_toc_titles = toc_titles_map.get(norm_lang) or toc_titles_map.get("en")
+    if not allowed_toc_titles:
+        # Fallback to first configured language list in config if language code not directly matched
+        allowed_toc_titles = list(toc_titles_map.values())[0] if toc_titles_map else []
+    if isinstance(allowed_toc_titles, str):
+        allowed_toc_titles = [allowed_toc_titles]
+    allowed_toc_lower = {t.lower().replace(" ", "") for t in allowed_toc_titles}
+    expected_toc_title = allowed_toc_titles[0]
+
+    # Find the actual landmarks by epub:type
+    cover_item = None
+    toc_item = None
+    bodymatter_item = None
+
+    for link in landmark_links:
+        raw_type = (link.get("epub:type") or "").strip().lower()
+        types = set(raw_type.split())
+        if "cover" in types and not cover_item:
+            cover_item = link
+        elif "toc" in types and not toc_item:
+            toc_item = link
+        elif ("bodymatter" in types or "ibooks:reader-start-page" in types) and not bodymatter_item:
+            bodymatter_item = link
+
+    # Helper to resolve target file path
+    nav_dir = os.path.dirname(file_path)
+
+    def resolve_target_file(href_val: str) -> str:
+        if not href_val:
+            return ""
+        clean_href = href_val.split("#")[0].strip()
+        if not clean_href:
+            return ""
+        # 1. Direct relative to nav.xhtml directory
+        target_abs = os.path.normpath(os.path.join(nav_dir, clean_href))
+        if os.path.isfile(target_abs):
+            return target_abs
+
+        # 2. Check if clean_href without subfolder or with 'xhtml' subfolder exists
+        target_in_xhtml = os.path.normpath(os.path.join(nav_dir, "xhtml", os.path.basename(clean_href)))
+        if os.path.isfile(target_in_xhtml):
+            return target_in_xhtml
+
+        # 3. Check directly in nav_dir by basename
+        target_in_nav_dir = os.path.normpath(os.path.join(nav_dir, os.path.basename(clean_href)))
+        if os.path.isfile(target_in_nav_dir):
+            return target_in_nav_dir
+
+        # 4. Search under epub_root
+        if epub_root and os.path.isdir(epub_root):
+            bn = os.path.basename(clean_href).lower()
+            for r, _d, files in os.walk(epub_root):
+                for f in files:
+                    if f.lower() == bn:
+                        return os.path.join(r, f)
+
+        return target_abs
+
+    # 1. Validate First Item: epub:type="cover"
+    if not cover_item:
+        first_li = landmark_links[0] if landmark_links else landmarks_nav
+        line_no = find_tag_line(first_li)
+        raw_extract = str(first_li.parent if getattr(first_li, "parent", None) and first_li.parent.name == "li" else first_li)[:200]
+        issues.append({
+            "type": "landmarks_cover_missing",
+            "message": 'Landmarks navigation is missing the required "cover" landmark (<li><a epub:type="cover" href="...">Cover</a></li>).',
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": line_no,
+            "snippet": raw_extract,
+            "extract": raw_extract,
+        })
+    else:
+        cov_href = (cover_item.get("href") or "").strip()
+        cov_title = cover_item.get_text(strip=True)
+        cov_li = cover_item.parent if getattr(cover_item, "parent", None) and cover_item.parent.name == "li" else cover_item
+        cov_line = find_tag_line(cov_li)
+        cov_extract = str(cov_li)[:200]
+        cov_target_fn = os.path.basename(cov_href.split("#")[0]).lower()
+
+        # Check title
+        if cov_title.lower() != "cover":
+            issues.append({
+                "type": "landmarks_cover_title_mismatch",
+                "message": f'Landmarks cover title should be "Cover", but found "{cov_title}".',
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": cov_line,
+                "snippet": cov_extract,
+                "extract": cov_extract,
+            })
+
+        # Check href points to cover file (e.g. A_Cover*.xhtml or cover.xhtml)
+        if not cov_href:
+            issues.append({
+                "type": "landmarks_cover_href_empty",
+                "message": 'Landmarks cover item has an empty href.',
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": cov_line,
+                "snippet": cov_extract,
+                "extract": cov_extract,
+            })
+        else:
+            stem, _ = os.path.splitext(cov_target_fn)
+            # Must match A_Cover*.xhtml (or cover.xhtml)
+            is_valid_cover_fn = bool(re.search(r'(^|/)a_cover', stem, re.IGNORECASE) or stem == "cover")
+            if not is_valid_cover_fn:
+                issues.append({
+                    "type": "landmarks_cover_href_mismatch",
+                    "message": f'Landmarks cover href should point to cover file ("A_Cover*.xhtml" or "cover.xhtml"), but points to "{cov_href}".',
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": cov_line,
+                    "snippet": cov_extract,
+                    "extract": cov_extract,
+                })
+            else:
+                # Check that the cover file actually exists on disk
+                target_cov_abs = resolve_target_file(cov_href)
+                if not (target_cov_abs and os.path.isfile(target_cov_abs)):
+                    issues.append({
+                        "type": "landmarks_cover_file_not_found",
+                        "message": f'Cover file "{cov_href}" referenced in landmarks does not exist in the EPUB.',
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": cov_line,
+                        "snippet": cov_href,
+                        "extract": cov_href,
+                    })
+
+    # 2. Validate Second Item: epub:type="toc"
+    if not toc_item:
+        second_li = landmark_links[1] if len(landmark_links) > 1 else (landmark_links[0] if landmark_links else landmarks_nav)
+        line_no = find_tag_line(second_li)
+        raw_extract = str(second_li.parent if getattr(second_li, "parent", None) and second_li.parent.name == "li" else second_li)[:200]
+        issues.append({
+            "type": "landmarks_toc_missing",
+            "message": f'Landmarks navigation is missing the required "toc" landmark (<li><a epub:type="toc" href="...">...</a></li>).',
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": line_no,
+            "snippet": raw_extract,
+            "extract": raw_extract,
+        })
+    else:
+        toc_href = (toc_item.get("href") or "").strip()
+        toc_title = toc_item.get_text(strip=True)
+        toc_li = toc_item.parent if getattr(toc_item, "parent", None) and toc_item.parent.name == "li" else toc_item
+        toc_line = find_tag_line(toc_li)
+        toc_extract = str(toc_li)[:200]
+        toc_target_fn = os.path.basename(toc_href.split("#")[0]).lower()
+
+        # Check title based on language
+        toc_title_clean = toc_title.lower().replace(" ", "")
+        if toc_title_clean not in allowed_toc_lower:
+            issues.append({
+                "type": "landmarks_toc_title_mismatch",
+                "message": (
+                    f'Landmarks TOC title for language "{norm_lang}" should be "{expected_toc_title}" '
+                    f'(allowed: {", ".join(allowed_toc_titles)}), but found "{toc_title}".'
+                ),
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": toc_line,
+                "snippet": toc_extract,
+                "extract": toc_extract,
+            })
+
+        # Check href points to TOC file (nav.xhtml, toc.xhtml, inhalt.xhtml, etc.)
+        if not toc_href:
+            issues.append({
+                "type": "landmarks_toc_href_empty",
+                "message": 'Landmarks TOC item has an empty href.',
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": toc_line,
+                "snippet": toc_extract,
+                "extract": toc_extract,
+            })
+        else:
+            stem, _ = os.path.splitext(toc_target_fn)
+            is_toc_file = bool(re.search(r'(toc|nav|inhalt|sommaire|contents|inhaltsverzeichnis|indice|indholdsforteg|innehall|sisallys|inhoud|sommario|sumario)', stem, re.IGNORECASE))
+            if not is_toc_file:
+                issues.append({
+                    "type": "landmarks_toc_href_mismatch",
+                    "message": f'Landmarks TOC href should point to the table of contents file (e.g. "nav.xhtml", "D_inhalt.xhtml"), but points to "{toc_href}".',
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": toc_line,
+                    "snippet": toc_extract,
+                    "extract": toc_extract,
+                })
+            else:
+                # Check that the TOC file actually exists on disk
+                target_toc_abs = resolve_target_file(toc_href)
+                if not (target_toc_abs and os.path.isfile(target_toc_abs)):
+                    issues.append({
+                        "type": "landmarks_toc_file_not_found",
+                        "message": f'TOC file "{toc_href}" referenced in landmarks does not exist in the EPUB.',
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": toc_line,
+                        "snippet": toc_href,
+                        "extract": toc_href,
+                    })
+
+    # 3. Validate Third Item: epub:type="bodymatter"
+    if not bodymatter_item:
+        third_li = landmark_links[2] if len(landmark_links) > 2 else (landmark_links[-1] if landmark_links else landmarks_nav)
+        line_no = find_tag_line(third_li)
+        raw_extract = str(third_li.parent if getattr(third_li, "parent", None) and third_li.parent.name == "li" else third_li)[:200]
+        issues.append({
+            "type": "landmarks_bodymatter_missing",
+            "message": f'Landmarks navigation is missing the required "bodymatter" landmark (<li><a epub:type="bodymatter" href="...">...</a></li>).',
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": line_no,
+            "snippet": raw_extract,
+            "extract": raw_extract,
+        })
+    else:
+        bm_href = (bodymatter_item.get("href") or "").strip()
+        bm_title = bodymatter_item.get_text(strip=True)
+        bm_li = bodymatter_item.parent if getattr(bodymatter_item, "parent", None) and bodymatter_item.parent.name == "li" else bodymatter_item
+        bm_line = find_tag_line(bm_li)
+        bm_extract = str(bm_li)[:200]
+        bm_target_fn = os.path.basename(bm_href.split("#")[0]).lower()
+
+        # Check href points to first chapter file (01 start file)
+        if not bm_href:
+            issues.append({
+                "type": "landmarks_bodymatter_href_empty",
+                "message": 'Landmarks bodymatter item has an empty href.',
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": bm_line,
+                "snippet": bm_extract,
+                "extract": bm_extract,
+            })
+        else:
+            stem, _ = os.path.splitext(bm_target_fn)
+            is_01_file = bool(re.search(r'(^|/)(01_|01[\s\-_]|ch(apter)?0?1[\s\-_]?|c0?1[\s\-_]?|part0?1[\s\-_]?|kapitel0?1[\s\-_]?)', stem, re.IGNORECASE) or stem.startswith("01") or stem.endswith("01"))
+            if not is_01_file:
+                issues.append({
+                    "type": "landmarks_bodymatter_href_not_01",
+                    "message": f'Landmarks bodymatter href should point to the first bodymatter chapter file (e.g. starting with "01_"), but points to "{bm_href}".',
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": bm_line,
+                    "snippet": bm_extract,
+                    "extract": bm_extract,
+                })
+            else:
+                # Check that the 01 bodymatter chapter file actually exists on disk
+                target_bm_abs = resolve_target_file(bm_href)
+                if not (target_bm_abs and os.path.isfile(target_bm_abs)):
+                    issues.append({
+                        "type": "landmarks_bodymatter_file_not_found",
+                        "message": f'First bodymatter chapter file "{bm_href}" referenced in landmarks does not exist in the EPUB.',
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": bm_line,
+                        "snippet": bm_href,
+                        "extract": bm_href,
+                    })
+
+        # Check that title is non-empty
+        if not bm_title:
+            issues.append({
+                "type": "landmarks_bodymatter_title_empty",
+                "message": 'Landmarks bodymatter item has empty title text.',
+                "category": "Error",
+                "file_path": rel_path,
+                "line_number": bm_line,
+                "snippet": bm_extract,
+                "extract": bm_extract,
+            })
+
+    # Check order if all three items are present: cover -> toc -> bodymatter
+    if cover_item and toc_item and bodymatter_item:
+        links_order = [l for l in landmark_links if l in (cover_item, toc_item, bodymatter_item)]
+        if len(links_order) >= 3:
+            expected_order = [cover_item, toc_item, bodymatter_item]
+            if links_order[:3] != expected_order:
+                issues.append({
+                    "type": "landmarks_order_invalid",
+                    "message": 'Landmarks order is invalid. Expected order: 1. Cover (epub:type="cover"), 2. TOC (epub:type="toc"), 3. Bodymatter (epub:type="bodymatter").',
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": find_tag_line(landmarks_nav),
+                    "snippet": str(landmarks_nav)[:200],
+                    "extract": str(landmarks_nav)[:200],
+                })
 
     return {"issues_count": len(issues), "issues": issues}
 

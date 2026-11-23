@@ -43,6 +43,7 @@ if summary_time_str and str(summary_time_str).strip():
         celery_app.conf.beat_schedule["send_bod_daily_receipt_summary"] = {
             "task": "app.domains.books_on_demand.tasks.send_bod_daily_receipt_summary",
             "schedule": crontab(hour=summary_hour, minute=summary_minute, day_of_week="mon-sat"),
+            "options": {"expires": 1800},  # Discard task if delayed / picked up more than 30 mins late
         }
     except Exception as err:
         import logging

@@ -38,6 +38,88 @@
       "category": "Structure Check"
     },
     {
+      "id": "NAV001",
+      "name": "NAV TOC Link Check",
+      "target_path": "OEBPS",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml",
+      "rule_config": {
+        "skip_heading_file_patterns": [
+          "*impressum*.xhtml",
+          "*copyright*.xhtml",
+          "*kolofon*.xhtml",
+          "*colophon*.xhtml",
+          "*valmistusmerkinnat*.xhtml",
+          "*valmistusmerkinnät*.xhtml",
+          "*valmistus*merkinn*.xhtml",
+          "*pie*de*imprenta*.xhtml",
+          "*imprenta*.xhtml",
+          "*pe*de*imprensa*.xhtml",
+          "*pé*de*imprensa*.xhtml",
+          "*imprensa*.xhtml",
+          "*kolofonside*.xhtml",
+          "*page*de*copyright*.xhtml",
+          "*drets*autor*.xhtml",
+          "*drets*d*autor*.xhtml"
+        ]
+      },
+      "category": "Navigation Check"
+    },
+    {
+      "id": "BOD-COV-009",
+      "name": "Cover image entry should not be included in TOC",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "forbidden_titles": [
+          "Cover"
+        ],
+        "forbidden_file_patterns": [
+          "*cover*.xhtml",
+          "*cover*.html",
+          "00_cover*.xhtml",
+          "a_cover*.xhtml"
+        ]
+      },
+      "category": "Navigation Check"
+    },
+    {
+      "id": "NAV005",
+      "name": "Page List Link Check",
+      "target_path": "OEBPS",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml",
+      "category": "Navigation Check"
+    },
+    {
+      "id": "COM-NCX-001",
+      "name": "toc.ncx navPoint Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": true,
+      "category": "TOC Check"
+    },
+    {
+      "id": "COM-NCX-002",
+      "name": "toc.ncx pageTarget Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": true,
+      "category": "TOC Check"
+    },
+    {
+      "id": "COM-NCX-005",
+      "name": "toc.ncx pageTarget Link and Text Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": true,
+      "category": "TOC Check"
+    },
+    {
       "id": "BOD-FN-001",
       "name": "Do not use unicode in file names",
       "scope": "book",
@@ -179,6 +261,71 @@
         "forbidden_file_stem_pattern": "(half[\\s\\-_]?title|title[\\s\\-_]?page|vortitel|vor[\\s\\-_]?titel|schmutztitel|schmutz[\\s\\-_]?titel|titelseite|titel[\\s\\-_]?seite|titelblatt|titel[\\s\\-_]?blatt|haupttitel|haupt[\\s\\-_]?titel|portadilla|portada|faux[\\s\\-_]?titre|smudstitel|titelside|titelsida|smusstittel|tittelside|occhietto|frontespizio|frontispicio|frontispício|rosto|franse[\\s\\-_]?pagina|titelpagina|nimiosivu|nimiösivu|esinymio|esinimiö)|^title$|^titel$"
       },
       "category": "Structure Check"
+    },
+    {
+      "id": "BOD-LM-001",
+      "name": "Check landmark navigation in nav.xhtml",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml",
+        "nav.html"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "toc_titles_by_language": {
+          "en": [
+            "Table of Contents",
+            "Contents"
+          ],
+          "de": [
+            "Inhaltsverzeichnis",
+            "Inhalt"
+          ],
+          "fr": [
+            "Sommaire",
+            "Table des matières"
+          ],
+          "da": [
+            "Indholdsfortegnelse",
+            "Indholdsforteg nelse"
+          ],
+          "sv": [
+            "Innehållsförteckning"
+          ],
+          "fi": [
+            "Sisällysluettelo"
+          ],
+          "it": [
+            "Indice",
+            "Sommario"
+          ],
+          "es": [
+            "Índice",
+            "Indice",
+            "Contenido"
+          ],
+          "pt": [
+            "Índice",
+            "Indice",
+            "Sumário"
+          ],
+          "no": [
+            "Innholdsfortegnelse"
+          ],
+          "nl": [
+            "Inhoudsopgave"
+          ],
+          "ca": [
+            "Índex",
+            "Index"
+          ],
+          "va": [
+            "Índex",
+            "Index"
+          ]
+        }
+      },
+      "category": "Navigation Check"
     },
     {
       "id": "BOD-COPY-001",
@@ -610,6 +757,21 @@
       "target_path": "OEBPS/css",
       "enabled": true,
       "file_name_pattern": "*.css",
+      "category": "CSS Check"
+    },
+    {
+      "id": "BOD-CSS-001",
+      "name": "Match EPUB CSS with BoD Standard CSS",
+      "target_path": "OEBPS/css",
+      "file_name_pattern": "*.css",
+      "enabled": true,
+      "rule_config": {
+        "master_css_file": "app/domains/post_prod/epub_validator/rules/customers/BOD/templates/bod_standard_v1.css",
+        "flag_modified": true,
+        "modified_severity": "Warning",
+        "flag_unmarked_additional": true,
+        "unmarked_severity": "Warning"
+      },
       "category": "CSS Check"
     },
     {
@@ -1143,6 +1305,16 @@
       "rule_config": {
         "expected_value": "1"
       },
+      "category": "Metadata Check"
+    },
+    {
+      "id": "BOD-FONT-001",
+      "name": "ibooks:specified-fonts metadata check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
       "category": "Metadata Check"
     }
   ],
