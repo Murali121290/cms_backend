@@ -66,6 +66,28 @@
       "category": "Navigation Check"
     },
     {
+      "id": "BOD-COV-009",
+      "name": "Cover image entry should not be included in TOC",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "forbidden_titles": [
+          "Cover"
+        ],
+        "forbidden_file_patterns": [
+          "*cover*.xhtml",
+          "*cover*.html",
+          "00_cover*.xhtml",
+          "a_cover*.xhtml"
+        ]
+      },
+      "category": "Navigation Check"
+    },
+    {
       "id": "NAV005",
       "name": "Page List Link Check",
       "target_path": "OEBPS",

@@ -944,6 +944,123 @@ def validate_cover_entry_required(file_details, rule_config=None):
     return {"issues_count": len(issues), "issues": issues}
 
 
+@rule("BOD-COV-009")
+def validate_no_cover_in_toc(file_details, rule_config=None):
+    """
+    Cover entry must not be included in TOC (both nav.xhtml and toc.ncx),
+    although found as a part of the book.
+    Config-driven: reads forbidden_titles and forbidden_file_patterns from rule_config.
+    """
+    import fnmatch
+    import os
+
+    file_path = file_details["full_path"]
+    rel_path = file_details.get("relative_path") or os.path.basename(file_path)
+    file_name = os.path.basename(file_path).lower()
+    issues = []
+
+    # Read configuration dynamically
+    inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+    forbidden_titles = [t.strip().lower() for t in inner_config.get("forbidden_titles", ["Cover"])]
+    forbidden_file_patterns = [p.strip().lower() for p in inner_config.get("forbidden_file_patterns", ["*cover*.xhtml", "*cover*.html"])]
+
+    text = read_text(file_path)
+    if not text.strip():
+        return {"issues_count": 0, "issues": []}
+
+    lines = text.splitlines()
+
+    def find_line_for_snippet(snippet):
+        if not snippet:
+            return 1
+        snip = snippet.strip()
+        for idx, line in enumerate(lines, 1):
+            if snip in line:
+                return idx
+        return 1
+
+    def is_forbidden_entry(label, target_href):
+        lbl_lower = label.strip().lower()
+        if lbl_lower and lbl_lower in forbidden_titles:
+            return True
+        target_fn = os.path.basename(target_href.split("#")[0]).lower()
+        if target_fn and any(fnmatch.fnmatch(target_fn, pat) for pat in forbidden_file_patterns):
+            return True
+        return False
+
+    is_ncx = file_name.endswith(".ncx")
+
+    if is_ncx:
+        # Check toc.ncx <navMap>
+        try:
+            soup = BeautifulSoup(text, "xml")
+        except Exception as e:
+            return {"issues_count": 1, "issues": [{"type": "ncx_read_error", "message": f"Could not read NCX file: {e}", "category": "Error"}]}
+
+        navmap = soup.find("navMap")
+        if not navmap:
+            return {"issues_count": 0, "issues": []}
+
+        for np in navmap.find_all("navPoint"):
+            text_tag = np.find("text")
+            label_text = text_tag.get_text(strip=True) if text_tag else ""
+            content_tag = np.find("content")
+            src = content_tag.get("src", "").strip() if content_tag else ""
+
+            if is_forbidden_entry(label_text, src):
+                np_id = np.get("id", "")
+                line_no = (
+                    getattr(text_tag, "sourceline", None)
+                    or getattr(content_tag, "sourceline", None)
+                    or getattr(np, "sourceline", None)
+                    or (find_line_for_snippet(label_text) if label_text else 1)
+                )
+                issues.append({
+                    "rule_name": "Cover image entry check",
+                    "type": "cover_entry_in_ncx_toc",
+                    "message": "Cover image entry should not be included in TOC (both NAV and NCX), although found as a part of the book.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_no,
+                    "extract": label_text or src or np_id,
+                    "snippet": label_text or src or str(np)[:150],
+                })
+
+    else:
+        # Check nav.xhtml <nav epub:type="toc"> or <nav role="doc-toc"> or id="toc"
+        try:
+            soup = BeautifulSoup(text, "html.parser")
+        except Exception as e:
+            return {"issues_count": 1, "issues": [{"type": "nav_read_error", "message": f"Could not read NAV file: {e}", "category": "Error"}]}
+
+        toc_nav = (
+            soup.find("nav", attrs={"epub:type": lambda v: v and "toc" in v.lower()})
+            or soup.find("nav", attrs={"role": lambda v: v and "doc-toc" in v.lower()})
+            or soup.find("nav", id="toc")
+        )
+        if not toc_nav:
+            return {"issues_count": 0, "issues": []}
+
+        for a in toc_nav.find_all("a"):
+            link_text = a.get_text(strip=True)
+            href = a.get("href", "").strip()
+
+            if is_forbidden_entry(link_text, href):
+                line_no = getattr(a, "sourceline", None) or (getattr(a.parent, "sourceline", None) if a.parent else None) or find_line_for_snippet(link_text or href)
+                issues.append({
+                    "rule_name": "Cover image entry check",
+                    "type": "cover_entry_in_nav_toc",
+                    "message": "Cover image entry should not be included in TOC (both NAV and NCX), although found as a part of the book.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": line_no,
+                    "extract": link_text or href,
+                    "snippet": link_text or href,
+                })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
 @rule("NAV005")
 def validate_page_list_links(file_details, rule_config=None):
     """Validate that page list items contain properly linked anchor tags."""
