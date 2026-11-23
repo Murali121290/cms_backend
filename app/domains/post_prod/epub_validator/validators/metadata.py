@@ -1391,6 +1391,7 @@ def validate_creator_count_matches_ncx(book_details, rule_config=None):
 
 
 @rule("ASP-META-015")
+@rule("COM-META-015")
 def validate_dcterms_modified(book_details, rule_config=None):
     """<meta property="dcterms:modified"> must be present with valid ISO timestamp."""
     soup, opf_path, lines = _load_opf_info(book_details)
