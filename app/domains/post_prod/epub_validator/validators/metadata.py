@@ -665,6 +665,90 @@ def validate_tdm_reservation(book_details, rule_config=None):
     return {"issues_count": len(issues), "issues": issues}
 
 
+@rule("BOD-FONT-001")
+def validate_embedded_fonts_metadata(book_details, rule_config=None):
+    """
+    If fonts are embedded in the ePub (font files exist in fonts directory or declared in manifest),
+    <meta property="ibooks:specified-fonts">true</meta> must be present in the OPF metadata.
+    """
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    metadata = soup.find("metadata") or soup.find(lambda tag: tag.name.endswith("metadata"))
+    if not metadata:
+        return {"issues_count": 0, "issues": []}
+
+    # 1. Check if font files exist in the epub folder / manifest
+    epub_folder = os.path.dirname(opf_path)
+    font_extensions = {".otf", ".ttf", ".woff", ".woff2"}
+    embedded_fonts_found = []
+
+    # Check manifest items
+    manifest = soup.find("manifest")
+    if manifest:
+        for item in manifest.find_all("item"):
+            href = item.get("href", "")
+            media_type = item.get("media-type", "").lower()
+            if "font" in media_type or any(href.lower().endswith(ext) for ext in font_extensions):
+                embedded_fonts_found.append(href)
+
+    # Check physical font files on disk in the epub directory
+    if not embedded_fonts_found and os.path.exists(epub_folder):
+        for root, dirs, files in os.walk(epub_folder):
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                if ext in font_extensions:
+                    embedded_fonts_found.append(os.path.join(root, f))
+
+    # If no fonts are embedded, this requirement does not apply
+    if not embedded_fonts_found:
+        return {"issues_count": 0, "issues": []}
+
+    # 2. Verify <meta property="ibooks:specified-fonts">true</meta>
+    issues = []
+    # Match property="ibooks:specified-fonts" or name="ibooks:specified-fonts"
+    specified_fonts_tag = next(
+        (
+            m for m in metadata.find_all("meta")
+            if m.get("property") == "ibooks:specified-fonts" or m.get("name") == "ibooks:specified-fonts"
+        ),
+        None,
+    )
+
+    if not specified_fonts_tag:
+        issues.append({
+            "rule_name": "Embedded Fonts Metadata Check",
+            "type": "missing_ibooks_specified_fonts",
+            "message": (
+                'Font files are embedded in the EPUB file. '
+                '<meta property="ibooks:specified-fonts">true</meta> must be added to the OPF metadata.'
+            ),
+            "category": "Error",
+            "file_path": book_details.get("relative_path") or os.path.basename(opf_path),
+            "line_number": _find_line(lines, "<metadata") or 1,
+            "extract": "<metadata",
+            "snippet": '<meta property="ibooks:specified-fonts">true</meta>',
+        })
+    else:
+        val = specified_fonts_tag.get_text(strip=True).lower() or specified_fonts_tag.get("content", "").strip().lower()
+        if val != "true":
+            issues.append({
+                "rule_name": "Embedded Fonts Metadata Check",
+                "type": "invalid_ibooks_specified_fonts",
+                "message": (
+                    f'<meta property="ibooks:specified-fonts"> value must be "true", but found "{val}".'
+                ),
+                "category": "Error",
+                "file_path": book_details.get("relative_path") or os.path.basename(opf_path),
+                "line_number": getattr(specified_fonts_tag, "sourceline", _find_line(lines, "ibooks:specified-fonts")),
+                "extract": specified_fonts_tag.get_text(strip=True) or specified_fonts_tag.get("content", ""),
+                "snippet": str(specified_fonts_tag)[:150],
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
 @rule("COM-SPINE-001")
 def validate_spine_linear(book_details, rule_config=None):
     """Validate that specific files in the spine have linear='no'."""

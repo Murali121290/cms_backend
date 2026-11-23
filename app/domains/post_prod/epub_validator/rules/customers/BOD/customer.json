@@ -1269,6 +1269,16 @@
         "expected_value": "1"
       },
       "category": "Metadata Check"
+    },
+    {
+      "id": "BOD-FONT-001",
+      "name": "ibooks:specified-fonts metadata check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "category": "Metadata Check"
     }
   ],
   "export": {
