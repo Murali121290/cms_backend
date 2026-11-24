@@ -323,6 +323,47 @@
             "Índex",
             "Index"
           ]
+        },
+        "bodymatter_titles_by_language": {
+          "en": [
+            "Start of Text"
+          ],
+          "de": [
+            "Textbeginn"
+          ],
+          "fr": [
+            "Début du texte"
+          ],
+          "da": [
+            "Tekstbegyndelse"
+          ],
+          "sv": [
+            "Textens inledning"
+          ],
+          "fi": [
+            "Tekstin alku"
+          ],
+          "it": [
+            "Inizio del Testo"
+          ],
+          "es": [
+            "Inicio del Texto"
+          ],
+          "pt": [
+            "Início do texto"
+          ],
+          "no": [
+            "Tekstbegynnelse"
+          ],
+          "nl": [
+            "Begin van de tekst"
+          ],
+          "ca": [
+            "Inici del text"
+          ],
+          "va": [
+            "Inici del text"
+          ]
         }
       },
       "category": "Navigation Check"

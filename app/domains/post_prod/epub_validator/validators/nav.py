@@ -2223,6 +2223,14 @@ def validate_bod_landmarks(file_details, rule_config=None):
     allowed_toc_lower = {t.lower().replace(" ", "") for t in allowed_toc_titles}
     expected_toc_title = allowed_toc_titles[0]
 
+    # Resolve expected Bodymatter title from config if provided
+    bm_titles_map = cfg.get("bodymatter_titles_by_language") or {}
+    allowed_bm_titles = bm_titles_map.get(norm_lang) or bm_titles_map.get("en") or []
+    if isinstance(allowed_bm_titles, str):
+        allowed_bm_titles = [allowed_bm_titles]
+    allowed_bm_lower = {t.lower().replace(" ", "") for t in allowed_bm_titles}
+    expected_bm_title = allowed_bm_titles[0] if allowed_bm_titles else ""
+
     # Find the actual landmarks by epub:type
     cover_item = None
     toc_item = None
@@ -2481,7 +2489,7 @@ def validate_bod_landmarks(file_details, rule_config=None):
                         "extract": bm_href,
                     })
 
-        # Check that title is non-empty
+        # Check that title is non-empty and matches language-specific title if configured
         if not bm_title:
             issues.append({
                 "type": "landmarks_bodymatter_title_empty",
@@ -2492,6 +2500,21 @@ def validate_bod_landmarks(file_details, rule_config=None):
                 "snippet": bm_extract,
                 "extract": bm_extract,
             })
+        elif allowed_bm_lower:
+            bm_title_clean = bm_title.lower().replace(" ", "")
+            if bm_title_clean not in allowed_bm_lower:
+                issues.append({
+                    "type": "landmarks_bodymatter_title_mismatch",
+                    "message": (
+                        f'Landmarks bodymatter title for language "{norm_lang}" should be "{expected_bm_title}" '
+                        f'(allowed: {", ".join(allowed_bm_titles)}), but found "{bm_title}".'
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": bm_line,
+                    "snippet": bm_extract,
+                    "extract": bm_extract,
+                })
 
     # Check order if all three items are present: cover -> toc -> bodymatter
     if cover_item and toc_item and bodymatter_item:
