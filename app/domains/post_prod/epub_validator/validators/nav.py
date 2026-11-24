@@ -2567,3 +2567,272 @@ def validate_bod_landmarks(file_details, rule_config=None):
 
     return {"issues_count": len(issues), "issues": issues}
 
+
+@rule("BOD-FM-002")
+def validate_standard_toc_frontmatter_order(file_details, rule_config=None):
+    """
+    Standard ToC format should be followed for the front matter.
+    ToC is always frontmatter, which means it must appear before the chapters (bodymatter) in the reading order.
+
+    Validates:
+    1. In OPF (<spine>):
+       The Table of Contents entry (itemref) must appear before the first chapter (e.g., 01_*.xhtml or configured chapter patterns).
+    2. In NAV (nav.xhtml <nav epub:type="toc">) / NCX (toc.ncx <navMap>):
+       If both TOC and chapters appear, the TOC entry must appear before the first chapter.
+    """
+    import os
+    import fnmatch
+    import xml.etree.ElementTree as ET
+
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+
+    toc_file_patterns = cfg.get("toc_file_patterns")
+    first_chapter_patterns = cfg.get("first_chapter_patterns")
+
+    if not toc_file_patterns or not first_chapter_patterns:
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    file_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(file_path)
+    rel_path = file_details.get("relative_path") or file_name
+
+    text = read_text(file_path)
+    if not text.strip():
+        return {"issues_count": 0, "issues": []}
+
+    lines = text.splitlines()
+
+    def matches_any_pattern(filename, patterns):
+        fn_lower = os.path.basename(filename).lower().split("#")[0]
+        for pat in patterns:
+            if fnmatch.fnmatch(fn_lower, pat.lower()):
+                return True
+        return False
+
+    is_opf = file_name.lower().endswith(".opf")
+    is_ncx = file_name.lower().endswith(".ncx") or "toc.ncx" in file_name.lower()
+    is_nav = ("nav" in file_name.lower()) and (file_name.lower().endswith(".xhtml") or file_name.lower().endswith(".html"))
+
+    if is_opf:
+        soup = BeautifulSoup(text, "xml")
+        manifest = soup.find("manifest")
+        spine = soup.find("spine")
+
+        # Map item id -> href and media-type
+        manifest_items = {}
+        if manifest:
+            for item in manifest.find_all("item"):
+                item_id = item.get("id", "").strip()
+                item_href = item.get("href", "").strip()
+                if item_id:
+                    manifest_items[item_id] = item_href
+
+        if spine:
+            itemrefs = spine.find_all("itemref")
+            first_chapter_idx = None
+            first_chapter_idref = None
+            first_chapter_href = None
+            first_chapter_tag = None
+
+            toc_entries = []  # list of (idx, idref, href, tag)
+
+            for idx, ir in enumerate(itemrefs):
+                idref = ir.get("idref", "").strip()
+                href = manifest_items.get(idref, "")
+                target_base = os.path.basename((href or "").split("#")[0])
+
+                if matches_any_pattern(target_base, first_chapter_patterns):
+                    if first_chapter_idx is None:
+                        first_chapter_idx = idx
+                        first_chapter_idref = idref
+                        first_chapter_href = href
+                        first_chapter_tag = ir
+
+                if matches_any_pattern(target_base, toc_file_patterns):
+                    toc_entries.append((idx, idref, href, ir))
+
+            if first_chapter_idx is not None:
+                if not toc_entries:
+                    # TOC is missing from spine or not placed before chapters
+                    # Check if a TOC file exists in manifest
+                    toc_in_manifest = None
+                    for mid, mhref in manifest_items.items():
+                        if matches_any_pattern(mhref, toc_file_patterns):
+                            toc_in_manifest = (mid, mhref)
+                            break
+
+                    line_no = getattr(first_chapter_tag, "sourceline", None)
+                    if not line_no:
+                        exact_ir_pattern = f'<itemref[^>]*idref=["\']{re.escape(first_chapter_idref)}["\']'
+                        for l_idx, line in enumerate(lines, 1):
+                            if re.search(exact_ir_pattern, line):
+                                line_no = l_idx
+                                break
+                    if not line_no:
+                        line_no = 1
+
+                    raw_extract = str(first_chapter_tag)[:200] if first_chapter_tag is not None else ""
+                    msg = (
+                        f"Standard ToC format should be followed for the front matter. "
+                        f"Table of Contents is frontmatter and must be placed before the chapters (chapter start: '{os.path.basename(first_chapter_href or '')}'). "
+                    )
+                    if toc_in_manifest:
+                        msg += f"The TOC file '{os.path.basename(toc_in_manifest[1])}' is declared in the manifest but missing from <spine> before the first chapter."
+                    else:
+                        msg += "No Table of Contents entry found in <spine> before the first chapter."
+
+                    issues.append({
+                        "type": "toc_missing_before_chapters",
+                        "message": msg,
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_no,
+                        "snippet": raw_extract,
+                        "extract": raw_extract,
+                    })
+                else:
+                    # Check if any TOC entry appears AFTER the first chapter
+                    for t_idx, t_idref, t_href, t_tag in toc_entries:
+                        if t_idx > first_chapter_idx:
+                            line_no = getattr(t_tag, "sourceline", None)
+                            if not line_no:
+                                exact_ir_pattern = f'<itemref[^>]*idref=["\']{re.escape(t_idref)}["\']'
+                                for l_idx, line in enumerate(lines, 1):
+                                    if re.search(exact_ir_pattern, line):
+                                        line_no = l_idx
+                                        break
+                            if not line_no:
+                                line_no = 1
+
+                            raw_extract = str(t_tag)[:200]
+                            issues.append({
+                                "type": "toc_placed_after_chapters",
+                                "message": (
+                                    f"Standard ToC format should be followed for the front matter. "
+                                    f"Table of Contents is frontmatter and must be placed before the chapters. "
+                                    f"TOC entry '{os.path.basename(t_href)}' (<itemref idref=\"{t_idref}\"/>) "
+                                    f"appears after the first chapter '{os.path.basename(first_chapter_href)}' (<itemref idref=\"{first_chapter_idref}\"/>) in <spine>."
+                                ),
+                                "category": "Error",
+                                "file_path": rel_path,
+                                "line_number": line_no,
+                                "snippet": raw_extract,
+                                "extract": raw_extract,
+                            })
+
+    elif is_ncx:
+        try:
+            clean_xml = re.sub(r'xmlns(:\w+)?="[^"]*"', '', text, count=1)
+            root = ET.fromstring(clean_xml.encode("utf-8"))
+        except Exception:
+            try:
+                root = ET.fromstring(text.encode("utf-8"))
+            except Exception:
+                return {"issues_count": 0, "issues": []}
+
+        nav_map = root.find(".//navMap")
+        if nav_map is not None:
+            top_navpoints = [elem for elem in nav_map if elem.tag.endswith("navPoint")]
+            first_ch_idx = None
+            first_ch_src = None
+            first_ch_np = None
+            toc_entries = []
+
+            for idx, np in enumerate(top_navpoints):
+                content_elem = np.find(".//content")
+                src = content_elem.get("src", "").strip() if content_elem is not None else ""
+                target_base = os.path.basename(src.split("#")[0])
+
+                if matches_any_pattern(target_base, first_chapter_patterns):
+                    if first_ch_idx is None:
+                        first_ch_idx = idx
+                        first_ch_src = src
+                        first_ch_np = np
+
+                if matches_any_pattern(target_base, toc_file_patterns):
+                    toc_entries.append((idx, src, np))
+
+            if first_ch_idx is not None and toc_entries:
+                for t_idx, t_src, t_np in toc_entries:
+                    if t_idx > first_ch_idx:
+                        np_id = t_np.get("id", "").strip()
+                        raw_extract = ET.tostring(t_np, encoding="unicode")[:200]
+                        line_no = 1
+                        for l_idx, line in enumerate(lines, 1):
+                            if (np_id and np_id in line) or (t_src and t_src in line):
+                                line_no = l_idx
+                                break
+                        issues.append({
+                            "type": "toc_placed_after_chapters_ncx",
+                            "message": (
+                                f"Standard ToC format should be followed for the front matter. "
+                                f"Table of Contents is frontmatter and must be placed before the chapters. "
+                                f"TOC entry '{os.path.basename(t_src)}' appears after the first chapter '{os.path.basename(first_ch_src)}' in <navMap>."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+    elif is_nav:
+        soup = BeautifulSoup(text, "html.parser")
+        toc_nav = (
+            soup.find("nav", attrs={"epub:type": lambda v: v and "toc" in v.lower().split()})
+            or soup.find("nav", attrs={"role": lambda v: v and "doc-toc" in v.lower().split()})
+            or soup.find("nav", id="toc")
+        )
+        if toc_nav:
+            top_ol = toc_nav.find("ol")
+            if top_ol:
+                top_lis = [child for child in top_ol.find_all("li", recursive=False)]
+                first_ch_idx = None
+                first_ch_href = None
+                first_ch_li = None
+                toc_entries = []
+
+                for idx, li in enumerate(top_lis):
+                    a_tag = li.find("a")
+                    href = a_tag.get("href", "").strip() if a_tag else ""
+                    target_base = os.path.basename(href.split("#")[0])
+
+                    if matches_any_pattern(target_base, first_chapter_patterns):
+                        if first_ch_idx is None:
+                            first_ch_idx = idx
+                            first_ch_href = href
+                            first_ch_li = li
+
+                    if matches_any_pattern(target_base, toc_file_patterns):
+                        toc_entries.append((idx, href, li))
+
+                if first_ch_idx is not None and toc_entries:
+                    for t_idx, t_href, t_li in toc_entries:
+                        if t_idx > first_ch_idx:
+                            line_no = getattr(t_li, "sourceline", None)
+                            if not line_no:
+                                for l_idx, line in enumerate(lines, 1):
+                                    if t_href and t_href in line:
+                                        line_no = l_idx
+                                        break
+                            if not line_no:
+                                line_no = 1
+                            raw_extract = str(t_li)[:200]
+                            issues.append({
+                                "type": "toc_placed_after_chapters_nav",
+                                "message": (
+                                    f"Standard ToC format should be followed for the front matter. "
+                                    f"Table of Contents is frontmatter and must be placed before the chapters. "
+                                    f"TOC entry '{os.path.basename(t_href)}' appears after the first chapter '{os.path.basename(first_ch_href)}' in TOC navigation list."
+                                ),
+                                "category": "Error",
+                                "file_path": rel_path,
+                                "line_number": line_no,
+                                "snippet": raw_extract,
+                                "extract": raw_extract,
+                            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+

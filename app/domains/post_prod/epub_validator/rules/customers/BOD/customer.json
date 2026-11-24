@@ -266,6 +266,36 @@
       "category": "Structure Check"
     },
     {
+      "id": "BOD-FM-002",
+      "name": "Standard ToC format should be followed for the front matter (ToC must be placed before chapters)",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf",
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "toc_file_patterns": [
+          "*inhalt*.xhtml",
+          "*inhaltsverzeichnis*.xhtml",
+          "*toc*.xhtml",
+          "table_of_content.xhtml",
+          "*_contents*.xhtml",
+          "*sommaire*.xhtml",
+          "*indice*.xhtml",
+          "*index*.xhtml"
+        ],
+        "first_chapter_patterns": [
+          "01_*.xhtml",
+          "01-*.xhtml",
+          "01.*.xhtml",
+          "*01*.xhtml"
+        ]
+      },
+      "category": "Navigation Check"
+    },
+    {
       "id": "BOD-LM-001",
       "name": "Check landmark navigation in nav.xhtml",
       "target_path": "OEBPS",
@@ -285,8 +315,7 @@
             "Inhalt"
           ],
           "fr": [
-            "Sommaire",
-            "Table des matières"
+            "Sommaire"
           ],
           "da": [
             "Indholdsfortegnelse",
@@ -299,18 +328,13 @@
             "Sisällysluettelo"
           ],
           "it": [
-            "Indice",
-            "Sommario"
+            "Indice"
           ],
           "es": [
-            "Índice",
-            "Indice",
-            "Contenido"
+            "Indice"
           ],
           "pt": [
-            "Índice",
-            "Indice",
-            "Sumário"
+            "Índice"
           ],
           "no": [
             "Innholdsfortegnelse"
@@ -319,12 +343,10 @@
             "Inhoudsopgave"
           ],
           "ca": [
-            "Índex",
-            "Index"
+            "Índex"
           ],
           "va": [
-            "Índex",
-            "Index"
+            "Índex"
           ]
         },
         "bodymatter_titles_by_language": {
