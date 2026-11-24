@@ -43,6 +43,7 @@ import {
   type WysiwygEditorHandle,
   type Occurrence
 } from '@/features/editor'
+import { LockBanner, useFileEditLock } from '@/features/fileLocks'
 import { useSessionStore } from '@/stores/sessionStore'
 import {
   upperCase,
@@ -351,6 +352,8 @@ export function LanguageReviewPage() {
   const commentCardRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const xhtmlQuery = useFileXhtmlQuery(normalizedFileId)
   const editorSave = useEditorSave(normalizedFileId)
+  // Opening the manuscript here takes the file's editor lock (released when the page closes).
+  const editLock = useFileEditLock({ fileId: normalizedFileId }, { kind: 'editor_wysiwyg' })
 
   // Read the TC toggle that lives inside WysiwygEditor at the moment of each
   // replace. The TrackChanges extension writes `enabled` into the editor's
@@ -2717,12 +2720,17 @@ export function LanguageReviewPage() {
                     <div className="text-xs text-slate-400 max-w-sm">Failed to fetch XHTML document. Verify file status.</div>
                   </div>
                 ) : (
+                  <div className="h-full flex flex-col min-h-0">
+                  <LockBanner lock={editLock} fileId={normalizedFileId} filename={fileName} />
+                  <div className="flex-1 min-h-0">
                   <WysiwygEditor
                     ref={editorRef}
                     key={`editor-${parsedFileId}`}
                     initialContent={xhtmlQuery.data?.content ?? ''}
+                    readOnly={!editLock.canEdit}
                     onSave={async (html) => {
                       await editorSave.save(html)
+                      editLock.markSaved()
                     }}
                     isSaving={editorSave.isPending}
                     saveLabel="Save Edits to DOCX"
@@ -2756,6 +2764,8 @@ export function LanguageReviewPage() {
                       ? (draft) => setSavedRuleDraft(draft)
                       : undefined}
                   />
+                  </div>
+                  </div>
                 )}
               </div>
             </div>

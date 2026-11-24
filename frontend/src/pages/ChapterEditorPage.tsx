@@ -17,6 +17,7 @@ import { chaptersApi } from '@/api/chapters'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
 import { OnlyOfficeEditor, TinyMceEditor, type TinyMceEditorHandle } from '@/features/editor'
+import { LockBanner, useFileEditLock } from '@/features/fileLocks'
 import { useParagraphStyles } from '@/features/editor/useParagraphStyles'
 import { getPersistedCustomStyles, savePersistedCustomStyle } from '@/utils/customStylesStorage'
 
@@ -528,7 +529,20 @@ export function ChapterEditorPage() {
       })
   }, [projectId, chapterId, decodedFilename])
 
-  const isEditable = !!chapter?.current_assignee_name
+  const isEditableByAssignment = !!chapter?.current_assignee_name
+
+  // Opening an XHTML (TinyMCE) or XML (source) file here takes its editor lock; someone else holding it makes
+  // the page read-only. Other file types are view-only here and take no lock.
+  const lockKind = ext === 'xml' ? 'editor_source' : (ext === 'xhtml' || ext === 'html') ? 'editor_tinymce' : null
+  const editLock = useFileEditLock(
+    {
+      byPath: projectId && chapterId && decodedFilename && lockKind
+        ? { projectId: Number(projectId), chapterId: Number(chapterId), chapter: chapter?.chapters ?? String(chapterId), subfolder: decodedSubfolder, filename: decodedFilename }
+        : null,
+    },
+    { kind: lockKind ?? 'editor_source', enabled: isEditableByAssignment && !!lockKind },
+  )
+  const isEditable = isEditableByAssignment && (lockKind == null || editLock.canEdit)
 
   // pdfjs-viewer-element only reacts to a `src` attribute change once its
   // internal viewer app has finished bootstrapping (its attributeChangedCallback
@@ -906,6 +920,10 @@ export function ChapterEditorPage() {
       content = wysiwygEditorRef.current.editor.getHTML()
     }
     if (!saveUrl || !content || xhtmlSaving) return
+    if (lockKind && !editLock.canEdit) {
+      toast.error(editLock.message ?? 'This file is locked by someone else; changes can\'t be saved.')
+      return
+    }
     setXhtmlSaving(true)
     try {
       const res = await fetch(saveUrl, {
@@ -916,11 +934,12 @@ export function ChapterEditorPage() {
         },
         body: JSON.stringify({ content }),
       })
-      if (!res.ok) throw new Error('Save failed')
+      if (!res.ok) throw new Error(res.status === 409 ? 'locked' : 'Save failed')
       setIsXhtmlDirty(false)
+      editLock.markSaved()
       toast.success('XHTML saved successfully')
     } catch (err) {
-      toast.error('Failed to save XHTML')
+      toast.error((err as Error)?.message === 'locked' ? 'Not saved: someone else holds this file.' : 'Failed to save XHTML')
     } finally {
       setXhtmlSaving(false)
     }
@@ -1009,6 +1028,10 @@ export function ChapterEditorPage() {
 
   const handleXmlSave = async () => {
     if (!saveUrl || xmlContent === null || xmlSaving) return
+    if (lockKind && !editLock.canEdit) {
+      toast.error(editLock.message ?? 'This file is locked by someone else; changes can\'t be saved.')
+      return
+    }
     setXmlSaving(true)
     try {
       const res = await fetch(saveUrl, {
@@ -1019,9 +1042,10 @@ export function ChapterEditorPage() {
         },
         body: JSON.stringify({ content: xmlContent }),
       })
-      if (!res.ok) throw new Error('Save failed')
+      if (!res.ok) throw new Error(res.status === 409 ? 'locked' : 'Save failed')
       const data = await res.json()
       setIsXmlDirty(false)
+      editLock.markSaved()
       if (data.log_content) {
         setLogContent(data.log_content)
       }
@@ -1030,7 +1054,7 @@ export function ChapterEditorPage() {
         loadLayoutPreview()
       }
     } catch (err) {
-      toast.error('Failed to save XML file')
+      toast.error((err as Error)?.message === 'locked' ? 'Not saved: someone else holds this file.' : 'Failed to save XML file')
     } finally {
       setXmlSaving(false)
     }
@@ -1161,6 +1185,7 @@ export function ChapterEditorPage() {
           </button>
         )}
       </header>
+      {lockKind && <LockBanner lock={editLock} filename={decodedFilename} />}
 
       {/* ── DOCUMENT AREA — full screen, no split ─────────────────────────── */}
       <div className="flex-1 overflow-hidden">
@@ -1220,6 +1245,7 @@ export function ChapterEditorPage() {
                   ref={wysiwygEditorRef}
                   key={fileUrl || 'xhtml'}
                   initialContent={xhtmlContent ?? ""}
+                  readOnly={!isEditable}
                   onSave={async (html) => {
                     await handleXhtmlSave(html)
                   }}

@@ -45,7 +45,12 @@ import {
   startBiasScan, startWordToXml, startWordToIndesign, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof, startInddToProof,
   startIndesignToXhtml, startXhtmlToIndesign,
 } from '@/api/processing'
-import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
+import { cancelFileLock, deleteFile, downloadFile, downloadWithLock, generateFigureAssessment, generateFigurePdf } from '@/api/files'
+import {
+  CheckinModal, ChapterTimeReportModal, FileLockHistoryModal, ForceReleaseModal, LockElapsed,
+  formatDuration, isEditorLock, lockKindLabel,
+} from '@/features/fileLocks'
+import { getApiErrorMessage } from '@/api/client'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
 import { uiPaths } from '@/utils/appPaths'
 import { openInWordWithFallback } from '@/utils/openInWord'
@@ -80,6 +85,13 @@ export interface FileRow {
   webdavLocked?: boolean
   webdavLockedBy?: string | null
   webdavLockedAt?: string | null
+  // File lock sessions (download with lock / editor open)
+  lockKind?: string | null
+  lockStartedAt?: string | null
+  lockStageName?: string | null
+  lockedByMe?: boolean
+  canForceRelease?: boolean
+  version?: number
   pageCount?: number
   dpi?: number
   width?: number
@@ -259,13 +271,14 @@ const POLL_INTERVAL_MS = 5_000
 const POLL_TIMEOUT_MS = 600_000 // 10 minutes, matches structuring's poll timeout
 
 function IconTooltipButton({
-  title, onClick, className, children, asChild,
+  title, onClick, className, children, asChild, disabled,
 }: {
   title: string
   onClick?: () => void
   className: string
   children: React.ReactElement
   asChild?: boolean
+  disabled?: boolean
 }) {
   return (
     <Tooltip.Provider>
@@ -278,8 +291,9 @@ function IconTooltipButton({
             : (
               <button
                 type="button"
-                onClick={e => { e.stopPropagation(); onClick?.() }}
-                className={`p-1 rounded transition-colors ${className}`}
+                aria-disabled={disabled || undefined}
+                onClick={e => { e.stopPropagation(); if (!disabled) onClick?.() }}
+                className={`p-1 rounded transition-colors ${className} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 {children}
               </button>
@@ -872,6 +886,51 @@ export function ChapterFilePage({
   const queryClient = useQueryClient()
   const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string; processType?: 'xml_to_indesign' | 'word_to_indesign' } | null>(null)
   const [artValidationFile, setArtValidationFile] = useState<{ id: number; name: string } | null>(null)
+  // File locks
+  const [checkinRow, setCheckinRow] = useState<FileRow | null>(null)
+  const [forceReleaseRow, setForceReleaseRow] = useState<FileRow | null>(null)
+  const [lockHistoryRow, setLockHistoryRow] = useState<FileRow | null>(null)
+  const [timeReportOpen, setTimeReportOpen] = useState(false)
+  const [lockBusyId, setLockBusyId] = useState<number | null>(null)
+
+  const saveBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleDownloadWithLock(r: FileRow) {
+    if (!r.db_id || lockBusyId) return
+    setLockBusyId(r.db_id)
+    try {
+      const { blob, filename } = await downloadWithLock(r.db_id, r.file_name)
+      saveBlob(blob, filename)
+      toast.success(`${r.file_name} v${r.version ?? ''} downloaded and locked to you. Upload the new version to release the lock.`)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not lock the file'))
+    } finally {
+      setLockBusyId(null)
+      invalidateFiles()
+    }
+  }
+
+  async function handleCancelLock(r: FileRow) {
+    if (!r.db_id || lockBusyId) return
+    setLockBusyId(r.db_id)
+    try {
+      const res = await cancelFileLock(r.db_id)
+      const took = res.session?.duration_seconds != null ? ` ${formatDuration(res.session.duration_seconds)} recorded.` : ''
+      toast.success(`Lock released, version unchanged.${took}`)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not release the lock'))
+    } finally {
+      setLockBusyId(null)
+      invalidateFiles()
+    }
+  }
 
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     template: true,
@@ -931,6 +990,12 @@ export function ChapterFilePage({
         webdavLocked: f.lock?.webdav_locked ?? false,
         webdavLockedBy: f.lock?.webdav_locked_by ?? null,
         webdavLockedAt: f.lock?.webdav_locked_at ?? null,
+        lockKind: f.lock?.lock_kind ?? (f.lock?.is_checked_out ? 'processing' : null),
+        lockStartedAt: f.lock?.lock_started_at ?? f.lock?.checked_out_at ?? null,
+        lockStageName: f.lock?.lock_stage_name ?? null,
+        lockedByMe: f.lock?.locked_by_me ?? false,
+        canForceRelease: f.lock?.can_force_release ?? false,
+        version: f.version,
         pageCount: f.page_count ?? undefined,
         width: f.width ?? undefined,
         height: f.height ?? undefined,
@@ -1234,13 +1299,29 @@ export function ChapterFilePage({
       header: 'Status',
       size: 160,
       cell: ({ row }) => {
-        const { isLocked, lockedBy, lockedAt, webdavLocked, webdavLockedBy, webdavLockedAt } = row.original
+        const { isLocked, lockedBy, webdavLocked, webdavLockedBy, webdavLockedAt, lockKind, lockStartedAt, lockedByMe } = row.original
+        const isProcessing = isLocked && (!lockKind || lockKind === 'processing')
+        const isUserLock = isLocked && !isProcessing
+        const holderName = useUsersStore.getState().getUserDisplayNameByUsername(lockedBy) || lockedBy || 'Unknown'
+        const userLockCls = lockedByMe
+          ? 'bg-sky-50 text-sky-800 border-sky-200'
+          : isEditorLock(lockKind)
+            ? 'bg-violet-50 text-violet-700 border-violet-200'
+            : 'bg-amber-50 text-amber-700 border-amber-200'
         return (
           <div className="flex flex-col gap-1">
-            {isLocked ? (
+            {isProcessing ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap w-fit">
                 <Loader2 size={9} className="animate-spin flex-shrink-0" />
                 Processing…
+              </span>
+            ) : isUserLock ? (
+              <span
+                title={`${lockKindLabel(lockKind)}${row.original.lockStageName ? ` · ${row.original.lockStageName}` : ''}`}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap w-fit ${userLockCls}`}
+              >
+                {isEditorLock(lockKind) ? <FilePen size={9} className="flex-shrink-0" /> : <Lock size={9} className="flex-shrink-0" />}
+                {lockedByMe ? 'Locked by you' : holderName}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap w-fit">
@@ -1248,18 +1329,17 @@ export function ChapterFilePage({
                 Ready
               </span>
             )}
-            {isLocked && (
-              <div className="flex flex-col gap-0.5">
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 whitespace-nowrap">
-                  <LogOut size={9} className="flex-shrink-0" />
-                  {useUsersStore.getState().getUserDisplayNameByUsername(lockedBy) || lockedBy || 'Unknown'}
-                </span>
-                {lockedAt && (
-                  <span className="text-[10px] text-muted whitespace-nowrap">{fmtDate(lockedAt)}</span>
-                )}
-              </div>
+            {isUserLock && (
+              <span className="text-[10px] text-muted whitespace-nowrap">
+                {lockKindLabel(lockKind)} · <LockElapsed since={lockStartedAt} />
+              </span>
             )}
-            {webdavLocked && (
+            {isProcessing && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-muted whitespace-nowrap">
+                <LogOut size={9} className="flex-shrink-0" /> {holderName}
+              </span>
+            )}
+            {webdavLocked && !(isUserLock && lockKind === 'editor_word') && (
               <div className="flex flex-col gap-0.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 whitespace-nowrap">
                   <ExternalLink size={9} className="flex-shrink-0" />
@@ -1282,11 +1362,17 @@ export function ChapterFilePage({
         const fid = r.db_id
         const isBackup = activeFolder === 'backup'
         const hideEdit = /\.(xlsx?|indd)$/i.test(r.file_name)
+        const isProcessing = !!r.isLocked && (!r.lockKind || r.lockKind === 'processing')
+        const lockedByOther = !!r.isLocked && !r.lockedByMe
+        const holder = useUsersStore.getState().getUserDisplayNameByUsername(r.lockedBy) || r.lockedBy || 'another user'
+        const myDownloadLock = !!r.isLocked && !!r.lockedByMe && r.lockKind === 'download'
+        const busy = lockBusyId != null && lockBusyId === fid
         return (
           <div className="flex items-center justify-center gap-1">
             {resolvedIsAssigned && !hideEdit && !isBackup && (
               <IconTooltipButton
-                title="Edit"
+                title={lockedByOther ? `Locked by ${holder} — opens read-only` : myDownloadLock ? 'You hold a download lock — upload or cancel it first' : 'Edit'}
+                disabled={myDownloadLock}
                 onClick={() => {
                   const isDocx = /\.docx?$/i.test(r.file_name)
                   if (isDocx && fid) {
@@ -1311,9 +1397,48 @@ export function ChapterFilePage({
                 </a>
               </IconTooltipButton>
             )}
+            {fid && resolvedIsAssigned && !isBackup && !r.isLocked && (
+              <IconTooltipButton
+                title="Download with lock — no one else can replace this file until you upload the new version"
+                disabled={busy}
+                onClick={() => void handleDownloadWithLock(r)}
+                className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+              >
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <Lock size={13} />}
+              </IconTooltipButton>
+            )}
+            {fid && myDownloadLock && (
+              <>
+                <IconTooltipButton
+                  title="Upload new version & release lock"
+                  onClick={() => setCheckinRow(r)}
+                  className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                >
+                  <Upload size={13} />
+                </IconTooltipButton>
+                <IconTooltipButton
+                  title="Cancel lock (no new version)"
+                  disabled={busy}
+                  onClick={() => void handleCancelLock(r)}
+                  className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                >
+                  {busy ? <Loader2 size={13} className="animate-spin" /> : <LogIn size={13} />}
+                </IconTooltipButton>
+              </>
+            )}
+            {fid && lockedByOther && !isProcessing && r.canForceRelease && (
+              <IconTooltipButton
+                title={`Force release ${holder}'s lock (Admin)`}
+                onClick={() => setForceReleaseRow(r)}
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                <ShieldCheck size={13} />
+              </IconTooltipButton>
+            )}
             {isAdminUser && !isBackup && (
               <IconTooltipButton
-                title="Delete"
+                title={lockedByOther ? `Locked by ${holder}` : 'Delete'}
+                disabled={lockedByOther}
                 onClick={() => handleDelete(r)}
                 className="text-muted hover:text-text hover:bg-surface"
               >
@@ -1327,7 +1452,7 @@ export function ChapterFilePage({
     col.display({
       id: 'history', header: 'History', size: 70,
       cell: ({ row }) => (
-        <div className="flex items-center justify-center">
+        <div className="flex items-center justify-center gap-0.5">
           <Tooltip.Provider>
             <Tooltip.Root>
               <Tooltip.Trigger asChild>
@@ -1342,10 +1467,19 @@ export function ChapterFilePage({
               <Tooltip.Content side="left" className="bg-text text-card text-[11px] px-2 py-1 rounded">View Meta &amp; Version Details</Tooltip.Content>
             </Tooltip.Root>
           </Tooltip.Provider>
+          {row.original.db_id && (
+            <IconTooltipButton
+              title="Lock & time log"
+              onClick={() => setLockHistoryRow(row.original)}
+              className="text-muted hover:text-text hover:bg-surface"
+            >
+              <Lock size={13} />
+            </IconTooltipButton>
+          )}
         </div>
       ),
     }),
-  ], [dynamicCols, pid, cid, resolvedStageName, resolvedIsAssigned, activeFolder]) // eslint-disable-line
+  ], [dynamicCols, pid, cid, resolvedStageName, resolvedIsAssigned, activeFolder, isAdminUser, lockBusyId]) // eslint-disable-line
 
   const table = useReactTable({
     data: rows,
@@ -1587,6 +1721,26 @@ export function ChapterFilePage({
             className="w-full pl-7 pr-7 py-1.5 text-xs bg-surface border border-border rounded-lg text-text placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/30" />
           {globalFilter && <button onClick={() => setGlobalFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"><X size={11} /></button>}
         </div>
+
+        {/* Time taken per stage (file lock sessions) */}
+        {pid > 0 && cid > 0 && (
+          <button
+            onClick={() => setTimeReportOpen(true)}
+            title="Time taken on this chapter by stage and person"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border text-muted hover:text-text hover:bg-surface transition-colors shadow-sm"
+          >
+            <History size={12} /> Time log
+          </button>
+        )}
+        {isAdminUser && (
+          <button
+            onClick={() => navigate('/file-locks')}
+            title="All open file locks (Admin)"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border text-muted hover:text-text hover:bg-surface transition-colors shadow-sm"
+          >
+            <Lock size={12} /> Active locks
+          </button>
+        )}
 
         {/* Bulk Download */}
         {activeFolderConfig[activeFolder]?.allowDownload && (
@@ -2084,6 +2238,45 @@ export function ChapterFilePage({
           onComplete={invalidateFiles}
         />
       )}
+
+      {/* ── File locks: check-in, admin release, lock log, chapter time log ── */}
+      {checkinRow?.db_id && (
+        <CheckinModal
+          open
+          onClose={() => setCheckinRow(null)}
+          fileId={checkinRow.db_id}
+          filename={checkinRow.file_name}
+          version={checkinRow.version ?? 1}
+          lockedAt={checkinRow.lockStartedAt}
+          stageName={checkinRow.lockStageName}
+          onDone={invalidateFiles}
+        />
+      )}
+      {forceReleaseRow?.db_id && (
+        <ForceReleaseModal
+          open
+          onClose={() => setForceReleaseRow(null)}
+          fileId={forceReleaseRow.db_id}
+          filename={forceReleaseRow.file_name}
+          holder={useUsersStore.getState().getUserDisplayNameByUsername(forceReleaseRow.lockedBy) || forceReleaseRow.lockedBy}
+          lockKind={forceReleaseRow.lockKind}
+          lockedAt={forceReleaseRow.lockStartedAt}
+          onDone={invalidateFiles}
+        />
+      )}
+      <FileLockHistoryModal
+        fileId={lockHistoryRow?.db_id ?? null}
+        filename={lockHistoryRow?.file_name}
+        onClose={() => setLockHistoryRow(null)}
+      />
+      <ChapterTimeReportModal
+        open={timeReportOpen}
+        onClose={() => setTimeReportOpen(false)}
+        projectId={pid}
+        chapterId={cid}
+        chapterLabel={resolvedChapterLabel}
+        currentStage={resolvedStageName}
+      />
 
       {/* ── Art Validation Modal ────────────────────────────────────────── */}
       {artValidationFile && (

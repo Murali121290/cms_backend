@@ -98,6 +98,14 @@ class LockState(BaseModel):
     webdav_locked: bool = False
     webdav_locked_by: str | None = None
     webdav_locked_at: datetime | None = None
+    # File lock sessions (download-with-lock / editor locks)
+    lock_kind: str | None = None
+    lock_session_id: int | None = None
+    lock_stage_name: str | None = None
+    lock_started_at: datetime | None = None
+    lock_elapsed_seconds: int | None = None
+    locked_by_me: bool = False
+    can_force_release: bool = False
 
 
 class ProjectSummary(BaseModel):

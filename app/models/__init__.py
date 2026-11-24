@@ -49,6 +49,10 @@ class File(Base):
     is_checked_out = Column(Boolean, default=False)
     checked_out_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     checked_out_at = Column(DateTime, nullable=True)
+    # What kind of lock is_checked_out represents (alembic 0074): "download", "editor_*" or "processing".
+    # NULL on rows locked before the migration (treated as a legacy/processing lock).
+    lock_kind = Column(String(30), nullable=True)
+    active_lock_session_id = Column(Integer, nullable=True)
 
     # Set when the last background processing job (structuring, PPD, etc.) raised
     # an error; cleared on the next successful run. Lets status endpoints report
@@ -112,6 +116,39 @@ class WebDAVLock(Base):
 
     file = relationship("File")
     owner = relationship("User")
+
+
+class FileLockSession(Base):
+    """One lock on a file (download-with-lock or an editor being open), from acquire to release.
+    Doubles as the time log: duration_seconds is the wall-clock time the person held the file,
+    attributed to the chapter's stage at the moment the lock was taken."""
+    __tablename__ = "file_lock_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    # SET NULL so the time log survives the file being deleted; filename is a snapshot for that case.
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True)
+    filename = Column(String(500), nullable=True)
+    category = Column(String(100), nullable=True)
+    project_id = Column(Integer, nullable=True, index=True)
+    chapter_id = Column(BigInteger, nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    lock_kind = Column(String(30), nullable=False)
+    stage_detail_id = Column(BigInteger, nullable=True, index=True)
+    stage_name = Column(String(100), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    ended_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    duration_seconds = Column(Integer, nullable=True)
+    from_version = Column(Integer, nullable=True)
+    to_version = Column(Integer, nullable=True)
+    end_reason = Column(String(30), nullable=True)
+    released_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    release_note = Column(Text, nullable=True)
+    editor_ref = Column(String(200), nullable=True, index=True)
+    clients = Column(JSON, nullable=True)
+
+    file = relationship("File")
+    user = relationship("User", foreign_keys=[user_id])
+    released_by = relationship("User", foreign_keys=[released_by_id])
 
 # Import all other domain models to register them in Base.metadata for foreign keys
 from app.domains.projects.models import Project  # noqa: F401

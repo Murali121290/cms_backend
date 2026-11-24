@@ -39,6 +39,15 @@ app.include_router(term_lists.router)
 app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])
 from app.routers import workspace_v2
 app.include_router(workspace_v2.router)  # /api/v2/workspace — stage custody lifecycle + schedule
+from app.routers import file_locks
+app.include_router(file_locks.router, prefix="/api/v2", tags=["File Locks"])  # download-with-lock, editor sessions
+
+
+@app.on_event("startup")
+async def start_file_lock_sweeper():
+    """Close editor locks whose browser stopped sending heartbeats (crash, closed laptop)."""
+    import asyncio
+    app.state.file_lock_sweeper = asyncio.create_task(file_locks.sweeper_loop())
 
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["Users"])
 app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["Projects"])
@@ -227,6 +236,9 @@ def init_data():
                 "CREATE INDEX IF NOT EXISTS ix_stages_details_project_chapter ON stages_details (project, chapters)",
                 "CREATE INDEX IF NOT EXISTS ix_stages_details_stage_end ON stages_details (stage_name, actual_end_date)",
                 "CREATE INDEX IF NOT EXISTS ix_stages_details_stage_custody ON stages_details (stage_name, custody_status)",
+                # File lock sessions (alembic 0074); the table itself comes from create_all below.
+                "ALTER TABLE files ADD COLUMN IF NOT EXISTS lock_kind VARCHAR(30)",
+                "ALTER TABLE files ADD COLUMN IF NOT EXISTS active_lock_session_id INTEGER",
             ]:
                 try:
                     db.execute(text(stmt))

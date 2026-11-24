@@ -2138,6 +2138,17 @@ def _reanalyze_abbreviations_for_job(
     )
 
 
+def _ensure_not_locked_by_other(db: Session, user, file_id: Optional[int]) -> None:
+    """Accept/edit decisions change the manuscript: refuse them while someone else holds the file (409)."""
+    if not file_id:
+        return
+    from app import models as _models
+    from app.domains.files import lock_service
+    f = db.get(_models.File, file_id)
+    if f is not None:
+        lock_service.assert_editor_save_allowed(db, f, user)
+
+
 @router.post("/language-edit/findings/{finding_id}/decide")
 def decide_finding(
     finding_id: int,
@@ -2151,6 +2162,7 @@ def decide_finding(
     if not finding:
         raise HTTPException(status_code=404, detail=f"Finding ID {finding_id} not found.")
     wf_access.ensure_can_write_file_id(db, current_user, finding.file_id)
+    _ensure_not_locked_by_other(db, current_user, finding.file_id)
 
     if body.status not in ("accepted", "edited", "rejected", "highlighted"):
         raise HTTPException(status_code=400, detail="Invalid status. Must be accepted, edited, rejected, or highlighted.")
@@ -2459,6 +2471,7 @@ def batch_decide_findings(
     _job = db.query(LanguageEditJob).filter(LanguageEditJob.job_id == job_id).first()
     if _job:
         wf_access.ensure_can_write_file_id(db, current_user, _job.file_id)
+        _ensure_not_locked_by_other(db, current_user, _job.file_id)
     if body.status not in ("accepted", "edited", "rejected", "highlighted"):
         raise HTTPException(
             status_code=400,

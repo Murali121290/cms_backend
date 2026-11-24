@@ -383,7 +383,8 @@ def upload_chapter_files(
                             existing_file.version = (existing_file.version or 1) + 1
                             existing_file.uploaded_at = now_ist_naive()
                             existing_file.uploaded_by_id = actor_user_id
-                            checkout_service.reset_checkout_after_overwrite(existing_file)
+                            checkout_service.reset_checkout_after_overwrite(
+                                existing_file, db=db, user=db.get(models.User, actor_user_id))
                             uploaded_results.append(
                                 {
                                     "file": existing_file,
@@ -474,7 +475,8 @@ def upload_chapter_files(
                 existing_file.version = (existing_file.version or 1) + 1
                 existing_file.uploaded_at = now_ist_naive()
                 existing_file.uploaded_by_id = actor_user_id
-                checkout_service.reset_checkout_after_overwrite(existing_file)
+                checkout_service.reset_checkout_after_overwrite(
+                    existing_file, db=db, user=db.get(models.User, actor_user_id))
                 uploaded_results.append(
                     {
                         "file": existing_file,

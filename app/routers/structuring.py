@@ -106,7 +106,11 @@ async def save_structuring_changes(
         raise HTTPException(status_code=401, detail="Unauthorized")
     from app.domains.workflow import access as wf_access
     wf_access.ensure_can_write_file_id(db, user, file_id)  # assignee / stage owner / Admin only
-
+    from app.domains.files import lock_service
+    from app import models as _models
+    _f = db.get(_models.File, file_id)
+    if _f is not None:
+        lock_service.assert_editor_save_allowed(db, _f, user)  # 409 while someone else holds the file
 
     result = structuring_review_service.save_changes(
         db,

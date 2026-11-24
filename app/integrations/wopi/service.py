@@ -93,6 +93,13 @@ def _user_fields(db: Session, file_id: int, user) -> dict:
     from app.integrations.wopi import access_token as wopi_token
 
     can_write = user is not None and wopi_token.can_write_file(db, user, file_id)
+    if can_write:
+        # Someone else holds the file (download lock, Word, another editor) or it is being processed: read-only.
+        from app import models
+        from app.domains.files import lock_service
+        f = db.get(models.File, file_id)
+        if f is not None and lock_service.is_locked_by_other(f, user.id):
+            can_write = False
     name = (f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username) if user else "Viewer"
     return {
         "UserId": user.username if user else "anonymous",
@@ -131,6 +138,7 @@ def build_check_file_info_payload(
             "OwnerId": str(file_record.project_id or "cms"),
             **_user_fields(db, file_id, user),
             "SupportsUpdate": True,
+            "SupportsLocks": True,
             "PostMessageOrigin": "*",
             "UIMode": "compact",
         }
@@ -156,7 +164,7 @@ def build_check_file_info_payload(
         **_user_fields(db, file_id, user),
         "UserCanNotWriteRelative": True,
         "SupportsUpdate": True,
-        "SupportsLocks": False,
+        "SupportsLocks": True,  # LOCK / UNLOCK / REFRESH_LOCK map to the file's editor lock (lock_service)
         "DisableExport": False,
         "DisablePrint": False,
         "HideSaveOption": False,

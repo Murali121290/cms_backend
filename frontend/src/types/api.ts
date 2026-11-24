@@ -192,6 +192,88 @@ export interface LockState {
   webdav_locked: boolean;
   webdav_locked_by: string | null;
   webdav_locked_at: string | null;
+  /** download | editor_onlyoffice | editor_word | editor_collabora | editor_wysiwyg | editor_tinymce | editor_source | processing */
+  lock_kind?: FileLockKind | null;
+  lock_session_id?: number | null;
+  lock_stage_name?: string | null;
+  lock_started_at?: string | null;
+  lock_elapsed_seconds?: number | null;
+  locked_by_me?: boolean;
+  can_force_release?: boolean;
+}
+
+export type FileLockKind =
+  | "download"
+  | "editor_onlyoffice"
+  | "editor_word"
+  | "editor_collabora"
+  | "editor_wysiwyg"
+  | "editor_tinymce"
+  | "editor_source"
+  | "processing";
+
+export type FileLockEndReason =
+  | "checked_in"
+  | "cancelled"
+  | "admin_released"
+  | "editor_closed"
+  | "editor_timeout"
+  | "custody_change";
+
+export interface FileLockSession {
+  id: number;
+  file_id: number | null;
+  filename: string | null;
+  category: string | null;
+  file_deleted?: boolean;
+  project_id: number | null;
+  chapter_id: number | null;
+  user_id: number | null;
+  user: string | null;
+  username: string | null;
+  lock_kind: FileLockKind;
+  lock_kind_label: string;
+  stage_detail_id: number | null;
+  stage_name: string | null;
+  started_at: string | null;
+  last_heartbeat_at: string | null;
+  ended_at: string | null;
+  active: boolean;
+  duration_seconds: number | null;
+  from_version: number | null;
+  to_version: number | null;
+  end_reason: FileLockEndReason | null;
+  released_by: string | null;
+  release_note: string | null;
+  is_mine: boolean;
+  /** only on GET /file-locks */
+  project_code?: string | null;
+  chapter?: string | null;
+  can_force_release?: boolean;
+}
+
+export interface FileLockActionResponse {
+  status: "ok";
+  file_id: number;
+  version?: number;
+  session: FileLockSession | null;
+  lock: LockState;
+}
+
+export interface ChapterTimeReport {
+  chapter_id: number;
+  project_id: number;
+  total_seconds: number;
+  stages: {
+    stage_name: string;
+    stage_detail_ids: number[];
+    seconds: number;
+    sessions: number;
+    running: number;
+    users: { user_id: number | null; user: string; seconds: number; sessions: number }[];
+    files: { file_id: number | null; filename: string | null; seconds: number; sessions: number }[];
+  }[];
+  active: FileLockSession[];
 }
 
 export interface ChapterCategoryCounts {

@@ -24,6 +24,8 @@ export interface TinyMceEditorProps {
   onShowUpdatedXml?: () => void;
   onShowPdfProof?: () => void;
   isConvertingXml?: boolean;
+  /** View only (someone else holds the file lock): the editor is disabled and Save does nothing. */
+  readOnly?: boolean;
 }
 
 export interface TinyMceEditorHandle {
@@ -427,6 +429,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
       onShowUpdatedXml,
       onShowPdfProof,
       isConvertingXml = false,
+      readOnly = false,
     }: TinyMceEditorProps,
     ref
   ) {
@@ -537,6 +540,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
     );
 
     const handleSaveClick = async () => {
+      if (readOnly) return;
       const rawHtml = editorRef.current ? editorRef.current.getContent() : content;
       const cleanHtml = serializeEditorHtmlToXhtml(rawHtml);
       await onSave(cleanHtml);
@@ -1222,6 +1226,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
           <div className="flex-1 overflow-hidden relative">
             <Editor
               tinymceScriptSrc="https://cdn.jsdelivr.net/npm/tinymce@6/tinymce.min.js"
+              disabled={readOnly}
               onInit={(evt, editor) => {
                 editorRef.current = editor;
                 try {

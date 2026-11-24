@@ -1,10 +1,14 @@
 import { apiClient } from "@/api/client";
 import type {
+  ChapterTimeReport,
   FileCheckoutResponse,
   FileDeleteResponse,
+  FileLockActionResponse,
+  FileLockSession,
   FileRecord,
   FileUploadResponse,
   FileVersionsResponse,
+  LockState,
 } from "@/types/api";
 
 export interface GenerateFigurePdfResponse {
@@ -85,6 +89,57 @@ export async function checkoutFile(fileId: number) {
 
 export async function cancelCheckout(fileId: number) {
   const response = await apiClient.delete<FileCheckoutResponse>(`/files/${fileId}/checkout`);
+  return response.data;
+}
+
+// ── File locks: download with lock / check-in / admin release / time log ────
+
+/** Take a download lock, then fetch the file. Throws (409) when someone else holds it. */
+export async function downloadWithLock(fileId: number, fallbackFilename: string) {
+  const lock = await apiClient.post<FileLockActionResponse>(`/files/${fileId}/download-with-lock`);
+  const file = await downloadFile(fileId, fallbackFilename);
+  return { ...file, lock: lock.data };
+}
+
+/** Upload the new version of a file you hold; releases the lock and records the time taken. */
+export async function checkinFile(fileId: number, file: File, note?: string) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (note) formData.append("note", note);
+  const response = await apiClient.post<FileLockActionResponse>(`/files/${fileId}/checkin`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+}
+
+export async function cancelFileLock(fileId: number) {
+  const response = await apiClient.post<FileLockActionResponse>(`/files/${fileId}/lock/cancel`);
+  return response.data;
+}
+
+export async function forceReleaseFileLock(fileId: number, note: string) {
+  const response = await apiClient.post<FileLockActionResponse>(`/files/${fileId}/lock/force-release`, { note });
+  return response.data;
+}
+
+export async function getFileLockSessions(fileId: number) {
+  const response = await apiClient.get<{
+    file_id: number;
+    filename: string;
+    version: number;
+    lock: LockState;
+    sessions: FileLockSession[];
+  }>(`/files/${fileId}/lock-sessions`);
+  return response.data;
+}
+
+export async function getChapterTimeReport(projectId: number, chapterId: number) {
+  const response = await apiClient.get<ChapterTimeReport>(`/projects/${projectId}/chapters/${chapterId}/time-report`);
+  return response.data;
+}
+
+export async function getActiveFileLocks(params?: { project_id?: number; chapter_id?: number }) {
+  const response = await apiClient.get<{ is_admin: boolean; locks: FileLockSession[] }>(`/file-locks`, { params });
   return response.data;
 }
 

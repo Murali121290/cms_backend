@@ -376,7 +376,7 @@ def _app_time(dt):
     return get_app_timezone().localize(dt)
 
 
-def _serialize_lock(file_record: models.File, db: Session | None = None):
+def _serialize_lock(file_record: models.File, db: Session | None = None, viewer: models.User | None = None):
     from datetime import timezone as _tz
     checked_out_by_username = None
     if file_record.checked_out_by is not None:
@@ -408,24 +408,36 @@ def _serialize_lock(file_record: models.File, db: Session | None = None):
                 full_name = f"{lock_owner.first_name or ''} {lock_owner.last_name or ''}".strip()
                 webdav_locked_by = full_name if full_name else lock_owner.username
 
+    extra = {}
+    if db is not None:
+        from app.domains.files import lock_service
+        try:
+            extra = lock_service.lock_state(db, file_record, viewer)
+        except Exception as exc:  # never break the file list over lock metadata
+            logger.warning(f"lock_state failed for file {file_record.id}: {exc}")
+
     return schemas_v2.LockState(
-        is_checked_out=file_record.is_checked_out,
+        is_checked_out=bool(file_record.is_checked_out),
         checked_out_by_id=file_record.checked_out_by_id,
         checked_out_by_username=checked_out_by_username,
         checked_out_at=_app_time(file_record.checked_out_at),
         webdav_locked=webdav_locked,
         webdav_locked_by=webdav_locked_by,
         webdav_locked_at=_app_time(webdav_locked_at),
+        **extra,
     )
 
 
 def _serialize_file_record(file_record: models.File, *, viewer: models.User, db: Session | None = None):
     actions = list(_STANDARD_FILE_ACTIONS)
     if file_record.is_checked_out:
-        if file_record.checked_out_by_id == viewer.id:
+        if file_record.checked_out_by_id == viewer.id and file_record.lock_kind != "processing":
             actions.append("cancel_checkout")
+            if file_record.lock_kind in (None, "download"):
+                actions.append("checkin")
     else:
         actions.append("checkout")
+        actions.append("download_with_lock")
     if file_record.category == "Manuscript":
         actions.append("structuring_review")
 
@@ -516,7 +528,7 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         category=file_record.category,
         uploaded_at=_app_time(file_record.uploaded_at),
         version=file_record.version,
-        lock=_serialize_lock(file_record, db=db),
+        lock=_serialize_lock(file_record, db=db, viewer=viewer),
         available_actions=actions,
         size_bytes=size_bytes,
         file_size=file_size,
@@ -1523,6 +1535,30 @@ def _ensure_chapter_writable(db: Session, viewer, *, file_id: int | None = None,
         wf_access.ensure_can_write_file_id(db, viewer, file_id)
     if chapter_id is not None:
         wf_access.ensure_can_write_chapter(db, viewer, db.get(ChapterInfo, chapter_id))
+
+
+def _editor_save_guard(db: Session, viewer, file_id: int) -> None:
+    """In-app editor saves (WYSIWYG / structuring / reference review): refuse when someone else holds the file
+    (download lock, Word, another editor) or it is being processed (409)."""
+    from app.domains.files import lock_service
+    f = db.get(models.File, file_id)
+    if f is not None:
+        lock_service.assert_editor_save_allowed(db, f, viewer)
+
+
+def _editor_save_done(db: Session, viewer, *file_ids) -> None:
+    """Remember the version a save produced on the editor's open lock session (best effort)."""
+    from app.domains.files import lock_service
+    try:
+        for fid in {i for i in file_ids if i}:
+            f = db.get(models.File, fid)
+            if f is not None:
+                db.refresh(f)
+                lock_service.record_new_version(db, f, viewer)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"Could not record editor save on lock session: {exc}")
 
 
 def _viewer_can_open_chapter(db: Session, viewer, chapter) -> bool:
@@ -3509,6 +3545,8 @@ async def api_v2_edit_save_file(
             code="FILE_NOT_FOUND",
             message="File not found.",
         )
+    from app.domains.files import lock_service as _lock_service
+    _lock_service.assert_can_modify(db, file_record, viewer)
 
     raw = await file.read()
     if not raw:
@@ -3726,6 +3764,8 @@ async def api_v2_replace_file(
             code="FILE_NOT_FOUND",
             message="File not found.",
         )
+    from app.domains.files import lock_service
+    lock_service.assert_can_modify(db, file_record, viewer)
 
     raw = await file.read()
     if not raw:
@@ -3778,6 +3818,7 @@ async def api_v2_replace_file(
 
     file_record.version = (file_record.version or 0) + 1
     file_record.uploaded_at = now_ist_naive()
+    lock_service.record_new_version(db, file_record, viewer)
     db.commit()
     db.refresh(file_record)
 
@@ -3897,6 +3938,10 @@ def api_v2_delete_file(
             code="FILE_NOT_FOUND",
             message="File not found.",
         )
+    from app.domains.files import lock_service
+    lock_service.assert_can_modify(db, file_record, viewer)
+    if file_record.is_checked_out and file_record.checked_out_by_id == viewer.id:
+        lock_service.release(db, file_record, viewer, lock_service.CANCELLED, note="File deleted")
 
     deleted_info = schemas_v2.FileDeleteInfo(
         file_id=file_record.id,
@@ -3948,7 +3993,7 @@ def api_v2_checkout_file(
     db.refresh(file_record)
     return schemas_v2.FileCheckoutResponse(
         file_id=file_record.id,
-        lock=_serialize_lock(file_record),
+        lock=_serialize_lock(file_record, db=db, viewer=viewer),
         redirect_to=_build_chapter_tab_redirect(file_record, "File+Checked+Out"),
     )
 
@@ -3979,7 +4024,7 @@ def api_v2_cancel_checkout(
     db.refresh(file_record)
     return schemas_v2.FileCheckoutResponse(
         file_id=file_record.id,
-        lock=_serialize_lock(file_record),
+        lock=_serialize_lock(file_record, db=db, viewer=viewer),
         redirect_to=_build_chapter_tab_redirect(file_record, "Checkout+Cancelled"),
     )
 
@@ -4474,7 +4519,6 @@ def api_v2_upload_zip(
 
                 os.makedirs(dest_dir, exist_ok=True)
                 dest_path = os.path.join(dest_dir, fname)
-                shutil.copy2(full_path, dest_path)
 
                 existing_file = db.query(models.File).filter(
                     models.File.project_id == project.id,
@@ -4483,16 +4527,25 @@ def api_v2_upload_zip(
                     models.File.filename == fname,
                 ).first()
 
+                if existing_file and checkout_service.is_locked_by_other(existing_file, viewer.id):
+                    # Someone holds this file (download lock / editor): never overwrite it.
+                    logger.info(f"ZIP upload skipped locked file {fname} (file {existing_file.id})")
+                    continue
+
                 if existing_file:
+                    # Archive before overwriting so the archived copy is the previous version.
                     version_service.archive_existing_file(
                         db,
                         existing_file=existing_file,
                         base_path=dest_dir,
                         uploaded_by_id=viewer.id,
                     )
+                shutil.copy2(full_path, dest_path)
+
+                if existing_file:
                     existing_file.version += 1
                     existing_file.uploaded_at = now_ist_naive()
-                    checkout_service.reset_checkout_after_overwrite(existing_file)
+                    checkout_service.reset_checkout_after_overwrite(existing_file, db=db, user=viewer)
                 else:
                     db_file = models.File(
                         project_id=project.id,
@@ -4735,6 +4788,25 @@ def api_v2_onlyoffice_config(
 
     from app.integrations.wopi import access_token as wopi_token
     can_write = wopi_token.can_write_file(db, viewer, file_id)  # assignee / stage owner / Admin
+
+    # Opening for edit takes the editor lock. When someone else holds the file (download lock, Word, another
+    # editor) the document opens read-only and the client shows who has it.
+    from app.domains.files import lock_service
+    lock_session = None
+    lock_conflict = None
+    if can_write:
+        try:
+            lock_session = lock_service.acquire(
+                db, file_record, viewer, lock_service.EDITOR_ONLYOFFICE, editor_ref=version_key,
+                client_id=request.query_params.get("client_id"), check_write=False)
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_409_CONFLICT:
+                raise
+            db.rollback()
+            can_write = False
+            lock_conflict = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+            db.refresh(file_record)
+
     callback_url = wopi_token.with_token(
         f"{WOPI_BASE_URL}/api/v2/onlyoffice/callback/{file_id}?mode={mode}", wopi_token.issue(db, viewer, file_id))
 
@@ -4793,6 +4865,9 @@ def api_v2_onlyoffice_config(
     return {
         "config": config,
         "onlyoffice_public_url": ONLYOFFICE_PUBLIC_URL,
+        "lock_session": lock_service.serialize_session(db, lock_session, viewer=viewer) if lock_session else None,
+        "lock_conflict": lock_conflict,
+        "lock": _serialize_lock(file_record, db=db, viewer=viewer).model_dump(mode="json"),
     }
 
 @router.post("/onlyoffice/callback/{file_id}")
@@ -4815,13 +4890,26 @@ async def api_v2_onlyoffice_callback(
         )
         
     status_code = verified_body.get("status")
+    doc_key = verified_body.get("key")
+    from app.domains.files import lock_service
     editor = None
+    # 1 = being edited (users connect / disconnect): keep the editor lock alive.
+    if status_code == 1 and doc_key:
+        lock_service.touch_by_editor_ref(db, doc_key)
+    # 4 = closed with no changes: release the lock, no new version.
+    if status_code == 4 and doc_key:
+        lock_service.close_by_editor_ref(db, doc_key, reason=lock_service.EDITOR_CLOSED)
     if status_code in (2, 6):
         # Saves only for the chapter's assignee / stage owner / Admin (token issued when the editor was opened).
         from app.integrations.wopi import access_token as wopi_token
         editor = wopi_token.read(db, access_token, file_id)
         if editor is None or not wopi_token.can_write_file(db, editor, file_id):
             logger.warning("OnlyOffice save refused for file %s (user %s): read-only", file_id, getattr(editor, "username", None))
+            return {"error": 1}
+        _oo_file = db.get(models.File, file_id)
+        if _oo_file is not None and lock_service.is_locked_by_other(_oo_file, editor.id):
+            logger.warning("OnlyOffice save refused for file %s (user %s): locked by user %s",
+                           file_id, editor.username, _oo_file.checked_out_by_id)
             return {"error": 1}
         download_url = verified_body.get("url")
         if not download_url:
@@ -4856,7 +4944,21 @@ async def api_v2_onlyoffice_callback(
             logger=logger,
             uploaded_by_id=editor.id,
         )
-        
+
+        # Track the version on the editor's lock session; status 2 means every editor closed, so release it.
+        try:
+            _oo_file = db.get(models.File, file_id)
+            if _oo_file is not None:
+                db.refresh(_oo_file)
+                lock_service.record_new_version(db, _oo_file, editor)
+                db.commit()
+                if status_code == 2 and doc_key:
+                    lock_service.close_by_editor_ref(db, doc_key, reason=lock_service.EDITOR_CLOSED,
+                                                     new_version=_oo_file.version)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Could not update OnlyOffice lock session for file %s: %s", file_id, exc)
+
         # Trigger background task for XHTML regeneration if in structuring mode
         if mode == "structuring":
             from app.integrations.wopi.router import _regen_xhtml_background
@@ -6790,6 +6892,7 @@ def api_v2_save_file_xhtml(
             message="Not authenticated",
         )
     _ensure_chapter_writable(db, viewer, file_id=file_id)
+    _editor_save_guard(db, viewer, file_id)
     try:
         result = structuring_review_service.save_xhtml_and_convert(
             db,
@@ -6798,6 +6901,7 @@ def api_v2_save_file_xhtml(
             username=viewer.username,
             logger=logger,
         )
+        _editor_save_done(db, viewer, file_id, result.get("file_id"))
         return {"status": "ok", "file_id": result["file_id"]}
     except HTTPException:
         raise
@@ -6849,6 +6953,7 @@ def api_v2_save_file_xhtml_runs(
             message="Not authenticated",
         )
     _ensure_chapter_writable(db, viewer, file_id=file_id)
+    _editor_save_guard(db, viewer, file_id)
     try:
         result = structuring_review_service.save_xhtml_delta_and_convert(
             db,
@@ -6857,6 +6962,7 @@ def api_v2_save_file_xhtml_runs(
             username=viewer.username,
             logger=logger,
         )
+        _editor_save_done(db, viewer, file_id, result.get("file_id"))
         # Invalidate the reference review cache so next load is fresh
         structuring_review_service.invalidate_ref_review_cache(
             structuring_review_service.resolve_processed_target(db, file_id=file_id)["processed_path"],
@@ -7372,6 +7478,7 @@ def api_v2_structuring_save(
             code="AUTH_REQUIRED",
             message="Unauthorized",
         )
+    _editor_save_guard(db, viewer, file_id)
 
     try:
         resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
@@ -7382,6 +7489,7 @@ def api_v2_structuring_save(
             update_document_structure_func=update_document_structure,
             logger=logger,
         )
+        _editor_save_done(db, viewer, file_id)
     except HTTPException as exc:
         code = "STRUCTURING_SAVE_FAILED"
         detail_message = str(exc.detail)
@@ -7528,16 +7636,18 @@ def api_v2_reference_save(
             code="AUTH_REQUIRED",
             message="Unauthorized",
         )
+    _editor_save_guard(db, viewer, file_id)
 
     try:
         resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
-        structuring_review_service.save_xhtml_delta_and_convert(
+        save_result = structuring_review_service.save_xhtml_delta_and_convert(
             db,
             file_id=file_id,
             html_content=payload.html_content,
             username=viewer.username,
             logger=logger,
         )
+        _editor_save_done(db, viewer, file_id, (save_result or {}).get("file_id"))
         # Invalidate the reference review cache so next load is fresh
         structuring_review_service.invalidate_ref_review_cache(
             resolved["processed_path"],

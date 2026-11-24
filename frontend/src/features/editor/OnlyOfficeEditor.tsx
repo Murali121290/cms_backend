@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
 import { useOnlyOfficeConfig } from "./useOnlyOfficeConfig";
 import { useOnlyOfficeScript } from "./useOnlyOfficeScript";
+import { apiClient } from "@/api/client";
 
 interface OnlyOfficeEditorProps {
   fileId: number;
@@ -33,6 +34,32 @@ export const OnlyOfficeEditor = forwardRef<OnlyOfficeEditorHandle, OnlyOfficeEdi
     const config = configData?.config;
     configRef.current = config;
     const hasConfig = Boolean(config);
+
+    // File lock: opening for edit took the editor lock server-side. Keep it alive while the editor is open and
+    // release it (recording the time) when it closes. OnlyOffice's own close callback releases it too.
+    const lockSessionId: number | null = configData?.lock_session?.id ?? null;
+    const lockConflict: { message?: string; locked_by?: string } | null = configData?.lock_conflict ?? null;
+    useEffect(() => {
+      if (lockSessionId == null) return;
+      const beat = window.setInterval(() => {
+        void apiClient.post(`/editor-sessions/${lockSessionId}/heartbeat`).catch(() => undefined);
+      }, 60_000);
+      let closed = false;
+      const release = () => {
+        if (closed) return;
+        closed = true;
+        const url = `/api/v2/editor-sessions/${lockSessionId}/close?saved=true`;
+        if (!navigator.sendBeacon?.(url)) {
+          void fetch(url, { method: "POST", credentials: "include", keepalive: true }).catch(() => undefined);
+        }
+      };
+      window.addEventListener("pagehide", release);
+      return () => {
+        window.clearInterval(beat);
+        window.removeEventListener("pagehide", release);
+        release();
+      };
+    }, [lockSessionId]);
 
     const scriptUrl = publicUrl ? `${publicUrl}/web-apps/apps/api/documents/api.js` : "";
     const { loaded: scriptLoaded, error: scriptError } = useOnlyOfficeScript(scriptUrl);
@@ -139,8 +166,13 @@ export const OnlyOfficeEditor = forwardRef<OnlyOfficeEditorHandle, OnlyOfficeEdi
     }
 
     return (
-      <div className="flex-1 min-w-0 relative bg-slate-200" style={{ height }}>
-        <div id={containerId} className="w-full h-full" />
+      <div className="flex-1 min-w-0 relative bg-slate-200 flex flex-col" style={{ height }}>
+        {lockConflict && (
+          <div className="px-3 py-1.5 text-[12px] bg-amber-50 text-amber-800 border-b border-amber-200">
+            <b>Read-only.</b> {lockConflict.message ?? "Someone else has this file open."}
+          </div>
+        )}
+        <div id={containerId} className="w-full flex-1 min-h-0" />
       </div>
     );
   }

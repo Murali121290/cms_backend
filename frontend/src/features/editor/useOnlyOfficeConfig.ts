@@ -10,5 +10,7 @@ export function useOnlyOfficeConfig(fileId: number | null, mode: "structuring" |
     },
     enabled: fileId !== null,
     staleTime: 0, // Always fetch fresh to ensure single-use version key and valid token
+    // Each fetch (re)takes the editor lock; don't re-run it just because the window regained focus.
+    refetchOnWindowFocus: false,
   });
 }

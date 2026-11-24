@@ -36,6 +36,7 @@ import { StylesPanel } from "@/features/structuringReview/components/EditorStyle
 import { VersionHistoryPanel } from "@/features/structuringReview/components/VersionHistoryPanel";
 import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { CollaboraSidePanel } from "@/features/editor/CollaboraSidePanel";
+import { LockBanner, useFileEditLock } from "@/features/fileLocks";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
 import { useStylesheetsQuery, useStylesheetMutations } from "@/features/stylesheets/useStylesheetsQuery";
@@ -73,6 +74,11 @@ export function TechnicalEditorPage() {
     (tabParam === "editor" || tabParam === "collabora" || tabParam === "overview") ? tabParam : "overview";
   const [activeTab, setActiveTab] = useState<"overview" | "editor" | "collabora">(defaultTab);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Editor tab holds the file's editor lock (Collabora takes its own via WOPI); overview takes none.
+  const editLock = useFileEditLock({ fileId: normalizedFileId }, {
+    kind: "editor_wysiwyg",
+    enabled: activeTab === "editor" || isFullscreen,
+  });
   const [customStyles, setCustomStyles] = useState<string[]>([]);
   const collaboraIframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -427,12 +433,15 @@ export function TechnicalEditorPage() {
         {/* â”€â”€ TAB 2: WYSIWYG EDITOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {(activeTab === "editor" || isFullscreen) && activeTab !== "collabora" && (
           <div className="flex-1 flex flex-col min-h-0 page-enter bg-white">
+            <LockBanner lock={editLock} fileId={normalizedFileId} filename={review.file.filename} />
             <WysiwygEditor
               ref={editorRef}
               key={`editor-${normalizedFileId}`}
               initialContent={xhtmlQuery.data?.content ?? ""}
+              readOnly={!editLock.canEdit}
               onSave={async (html) => {
                 const res = await editorSave.save(html);
+                editLock.markSaved();
                 if (res && res.file_id && res.file_id !== normalizedFileId) {
                   navigate(uiPaths.technicalEditor(normalizedProjectId, normalizedChapterId, res.file_id) + "?tab=editor");
                 } else {

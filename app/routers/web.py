@@ -469,6 +469,10 @@ async def save_folder_file(
         models.File.filename == file_name
     ).first()
 
+    if file_record:
+        from app.domains.files import lock_service
+        lock_service.assert_editor_save_allowed(db, file_record, user)  # 409 while someone else holds the file
+
     is_misc_delivery = any(file_name.lower().endswith(x) for x in ("epub.xml", "_epub.xml", "_final.xml", "_final.log", "_finalxml.xml", "_layout.html")) or (subfolder and subfolder.lower() in ("misc", "final delivery", "final_delivery", "miscellaneous"))
 
     if is_misc_delivery:
@@ -548,8 +552,13 @@ async def save_folder_file(
     if file_record:
         file_record.uploaded_at = datetime.now(timezone.utc)
         file_record.uploaded_by_id = user.id
+        try:
+            from app.domains.files import lock_service
+            lock_service.record_new_version(db, file_record, user)
+        except Exception:
+            pass
         db.commit()
-        
+
     # Run validation if file is XML
     log_content = None
     if file_name.lower().endswith(".xml"):

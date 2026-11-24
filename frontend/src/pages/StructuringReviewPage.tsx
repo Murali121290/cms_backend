@@ -44,6 +44,7 @@ import { DesignPdfViewer } from "@/features/structuringReview/components/DesignP
 import { getChapterFiles, getProjectChapters } from "@/api/projects";
 import { getPersistedCustomStyles, savePersistedCustomStyle } from "@/utils/customStylesStorage";
 import { useStyleShortcuts } from "@/features/structuringReview/shortcuts/useStyleShortcuts";
+import { LockBanner, useFileEditLock } from "@/features/fileLocks";
 import { resolveClientKey } from "@/features/structuringReview/shortcuts/shortcutsStorage";
 import { QuickStylePalette } from "@/features/structuringReview/components/QuickStylePalette";
 import { StyleShortcutsDialog } from "@/features/structuringReview/components/StyleShortcutsDialog";
@@ -303,6 +304,12 @@ export function StructuringReviewPage() {
     clientKey,
     onOpenPalette: () => setIsPaletteOpen((prev) => !prev),
     enabled: Boolean(reviewQuery.data && (activeTab === "editor" || isFullscreen)),
+  });
+
+  // WYSIWYG tab holds the file's editor lock; OnlyOffice / Collabora take theirs server-side.
+  const editLock = useFileEditLock({ fileId: normalizedFileId }, {
+    kind: "editor_wysiwyg",
+    enabled: (activeTab === "editor" || isFullscreen) && activeTab !== "onlyoffice" && activeTab !== "collabora",
   });
 
   useDocumentTitle(
@@ -725,12 +732,15 @@ export function StructuringReviewPage() {
               <div style={{ padding: "24px", textAlign: "center" }}>Loading document…</div>
             ) : (
               <>
+              <LockBanner lock={editLock} fileId={normalizedFileId} filename={review.file.filename} />
               <WysiwygEditor
                 ref={editorRef}
               key={`editor-${normalizedFileId}`}
               initialContent={xsltContent ?? xhtmlQuery.data?.content ?? ""}
+              readOnly={!editLock.canEdit}
               onSave={async (html) => {
                 const res = await editorSave.save(html);
+                editLock.markSaved();
                 if (res && res.file_id && res.file_id !== normalizedFileId) {
                   navigate(reviewPath(res.file_id, "editor"));
                 } else {

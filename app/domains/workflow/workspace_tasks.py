@@ -48,20 +48,13 @@ def load_task(db: Session, task_id: int) -> StageDetail:
 def release_chapter_locks(db: Session, sd: StageDetail, *, keep_user_id: Optional[int] = None) -> int:
     """Clear editor check-outs on the chapter's files when custody changes hands (hand back, review, move,
     reassign), so a file is never left locked by someone who no longer holds the chapter. No commit."""
-    from app.models import File
+    from app.domains.files import lock_service
 
     info = stage_service.chapter_info(db, sd.project, sd.chapters)
     if not info:
         return 0
-    n = 0
-    for f in db.query(File).filter(File.chapter_id == info.id, File.is_checked_out == True).all():  # noqa: E712
-        if keep_user_id is not None and f.checked_out_by_id == keep_user_id:
-            continue
-        f.is_checked_out = False
-        f.checked_out_by_id = None
-        f.checked_out_at = None
-        n += 1
-    return n
+    # Closes each lock session as custody_change (time recorded); processing jobs keep their lock.
+    return lock_service.release_for_custody_change(db, info.id, keep_user_id=keep_user_id)
 
 
 def _ensure_manage(db: Session, actor: User, sd: StageDetail) -> None:

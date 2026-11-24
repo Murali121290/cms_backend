@@ -47,6 +47,87 @@ def _get_target_path(file_record, mode: str = "original"):
     return wopi_service.get_target_path(file_record, mode=mode)
 
 
+def _ensure_save_allowed(db: Session, editor: User, file_id: int) -> None:
+    """PutFile while someone else holds the file (download lock, Word, another editor): 409 per WOPI."""
+    from app import models
+    from app.domains.files import lock_service
+    f = db.get(models.File, file_id)
+    if f is not None and lock_service.is_locked_by_other(f, editor.id):
+        s = lock_service.active_session(db, f)
+        raise HTTPException(status_code=409, detail="File is locked by another user.",
+                            headers={"X-WOPI-Lock": (s.editor_ref if s and s.editor_ref else "")})
+
+
+def _after_save(db: Session, editor: User, file_id: int) -> None:
+    from app import models
+    from app.domains.files import lock_service
+    try:
+        f = db.get(models.File, file_id)
+        if f is not None:
+            db.refresh(f)
+            lock_service.record_new_version(db, f, editor)
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Could not record Collabora save on lock session for file %s: %s", file_id, exc)
+
+
+def _wopi_lock_operation(db: Session, file_id: int, access_token: str | None, request: Request):
+    """WOPI LOCK / GET_LOCK / REFRESH_LOCK / UNLOCK / UNLOCK_AND_RELOCK -> the file's editor lock.
+    Collabora takes the lock when an editable session opens and unlocks when the last view closes."""
+    from fastapi.responses import Response
+    from app import models
+    from app.domains.files import lock_service
+
+    op = (request.headers.get("X-WOPI-Override") or "").upper()
+    lock_id = request.headers.get("X-WOPI-Lock") or ""
+    old_lock = request.headers.get("X-WOPI-OldLock") or ""
+    f = db.get(models.File, file_id)
+    if f is None:
+        raise HTTPException(status_code=404)
+    current = lock_service.active_session(db, f) if f.is_checked_out else None
+    current_ref = (current.editor_ref or "") if current else ""
+
+    def conflict():
+        return Response(status_code=409, headers={"X-WOPI-Lock": current_ref})
+
+    if op == "GET_LOCK":
+        return Response(status_code=200, headers={"X-WOPI-Lock": current_ref})
+
+    editor = wopi_token.read(db, access_token, file_id)
+    if editor is None:
+        raise HTTPException(status_code=401, detail="Missing or invalid editor token.")
+
+    if op in ("LOCK", "UNLOCK_AND_RELOCK"):
+        if op == "UNLOCK_AND_RELOCK" and current is not None and current_ref and current_ref != old_lock:
+            return conflict()
+        if current is not None and current.lock_kind == lock_service.EDITOR_COLLABORA and current_ref == lock_id:
+            lock_service.touch_by_editor_ref(db, lock_id)  # LOCK with the same id = refresh
+            return Response(status_code=200)
+        try:
+            lock_service.acquire(db, f, editor, lock_service.EDITOR_COLLABORA, editor_ref=lock_id)
+        except HTTPException:
+            db.rollback()
+            return conflict()
+        return Response(status_code=200)
+
+    if op == "REFRESH_LOCK":
+        if current is None or current_ref != lock_id:
+            return conflict()
+        lock_service.touch_by_editor_ref(db, lock_id)
+        return Response(status_code=200)
+
+    if op == "UNLOCK":
+        if current is None:
+            return Response(status_code=200)
+        if current_ref != lock_id:
+            return conflict()
+        lock_service.close_by_editor_ref(db, lock_id, reason=lock_service.EDITOR_CLOSED)
+        return Response(status_code=200)
+
+    raise HTTPException(status_code=501, detail=f"Unsupported WOPI operation {op}")
+
+
 # ---------------------------------------------------------------------------
 # Generic Editor UI
 # ---------------------------------------------------------------------------
@@ -105,6 +186,16 @@ async def wopi_check_file_info(
     return JSONResponse(payload)
 
 
+@router.post("/wopi/files/{file_id}")
+async def wopi_lock_ops(
+    file_id: int,
+    request: Request,
+    access_token: str | None = Query(None),
+    db: Session = Depends(database.get_db),
+):
+    return _wopi_lock_operation(db, file_id, access_token, request)
+
+
 # ---------------------------------------------------------------------------
 # GetFile
 # ---------------------------------------------------------------------------
@@ -136,8 +227,9 @@ async def wopi_put_file(
     db: Session = Depends(database.get_db),
 ):
     editor = _require_writer(db, access_token, file_id)
+    _ensure_save_allowed(db, editor, file_id)
     body = await request.body()
-    return wopi_service.write_file_bytes(
+    result = wopi_service.write_file_bytes(
         db,
         file_id=file_id,
         mode="original",
@@ -145,6 +237,8 @@ async def wopi_put_file(
         logger=logger,
         uploaded_by_id=editor.id,
     )
+    _after_save(db, editor, file_id)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +257,16 @@ async def wopi_check_file_info_structuring(
         user=wopi_token.read(db, access_token, file_id),
     )
     return JSONResponse(payload)
+
+
+@router.post("/wopi/files/{file_id}/structuring")
+async def wopi_lock_ops_structuring(
+    file_id: int,
+    request: Request,
+    access_token: str | None = Query(None),
+    db: Session = Depends(database.get_db),
+):
+    return _wopi_lock_operation(db, file_id, access_token, request)
 
 
 @router.get("/wopi/files/{file_id}/structuring/contents")
@@ -203,6 +307,7 @@ async def wopi_put_file_structuring(
     db: Session = Depends(database.get_db),
 ):
     editor = _require_writer(db, access_token, file_id)
+    _ensure_save_allowed(db, editor, file_id)
     body = await request.body()
     result = wopi_service.write_file_bytes(
         db,
@@ -212,6 +317,7 @@ async def wopi_put_file_structuring(
         logger=logger,
         uploaded_by_id=editor.id,
     )
+    _after_save(db, editor, file_id)
 
     # Trigger XHTML regeneration in background if body was written
     if body:

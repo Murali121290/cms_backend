@@ -17,6 +17,7 @@ export function DashboardAdminShortcuts({ userId: _userId }: DashboardAdminShort
       <Link to="/settings/roles" className={pillCls}>Roles</Link>
       <Link to="/settings/workflow" className={pillCls}>Workflows</Link>
       <Link to="/settings/customers" className={pillCls}>Customers</Link>
+      <Link to="/file-locks" className={pillCls}>File Locks</Link>
     </div>
   );
 }

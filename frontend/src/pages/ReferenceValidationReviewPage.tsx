@@ -35,6 +35,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { uiPaths } from "@/utils/appPaths";
 import { WysiwygEditor, type WysiwygEditorHandle, ChangesReviewPanel } from "@/features/editor";
+import { LockBanner, useFileEditLock } from "@/features/fileLocks";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
   EditReferenceModal,
@@ -73,6 +74,17 @@ export function ReferenceValidationReviewPage() {
   const reviewQuery = useReferenceReviewQuery(normalizedFileId, styleOverride === "AUTO" ? undefined : styleOverride, citationFormat === "auto" ? undefined : citationFormat);
   const saveMutation = useReferenceSave(normalizedFileId);
   const validateOnlyMutation = useReferenceValidateOnly(normalizedFileId ?? 0);
+  // Opening the file here takes its editor lock; every save path goes through saveReference so a
+  // read-only viewer (someone else holds the file) never posts changes.
+  const editLock = useFileEditLock({ fileId: normalizedFileId }, { kind: "editor_wysiwyg" });
+  const saveReference = async (endpoint: string, html: string) => {
+    if (!editLock.canEdit) {
+      throw new Error(editLock.message ?? "This file is locked by someone else; changes can't be saved.");
+    }
+    const res = await saveMutation.save(endpoint, html);
+    editLock.markSaved();
+    return res;
+  };
 
   // Pending merge queue — merges are staged here and applied on "Apply Merges"
   const [pendingMerges, setPendingMerges] = useState<Array<{ canonical: number; duplicate: number }>>([]);
@@ -206,7 +218,7 @@ export function ReferenceValidationReviewPage() {
     }
     updateParaText(paraIdx, body.innerHTML);
     if (editorRef.current?.editor && reviewQuery.data?.save_endpoint)
-      await saveMutation.save(reviewQuery.data.save_endpoint, editorRef.current.editor.getHTML());
+      await saveReference(reviewQuery.data.save_endpoint, editorRef.current.editor.getHTML());
   };
 
   // Tab 3 — Logs
@@ -1257,7 +1269,7 @@ export function ReferenceValidationReviewPage() {
 
     // Save and re-validate automatically
     if (reviewQuery.data?.save_endpoint) {
-      await saveMutation.save(reviewQuery.data.save_endpoint, updatedHtml);
+      await saveReference(reviewQuery.data.save_endpoint, updatedHtml);
       if (normalizedFileId) {
         const valRes = await validateOnlyMutation.mutateAsync();
         if (valRes?.validation_logs) {
@@ -1506,14 +1518,16 @@ export function ReferenceValidationReviewPage() {
         >
 
           <div className="flex-1 flex flex-col bg-white rounded-xl shadow-card border border-navy-100 overflow-hidden min-h-0 min-w-0">
+            <LockBanner lock={editLock} fileId={normalizedFileId} filename={review.file.filename} />
             {/* WYSIWYG Editor wrapper */}
             <div className="flex-1 min-h-0 bg-white">
               <WysiwygEditor
                 ref={editorRef}
                 key={`ref-editor-${normalizedFileId}-${review.file.version}`}
                 initialContent={review.content}
+                readOnly={!editLock.canEdit}
                 onSave={async (html) => {
-                  await saveMutation.save(review.save_endpoint, html);
+                  await saveReference(review.save_endpoint, html);
                 }}
                 isSaving={saveMutation.isPending}
                 saveLabel="Save Reference Changes"
@@ -1620,7 +1634,7 @@ export function ReferenceValidationReviewPage() {
                         // If there are pending merges, apply them first
                         if (pendingMerges.length > 0) applyPendingMerges();
                         const html = editorRef.current.editor.getHTML();
-                        await saveMutation.save(review.save_endpoint, html);
+                        await saveReference(review.save_endpoint, html);
                         const result = await validateOnlyMutation.mutateAsync({
                           style: styleOverride === "AUTO" ? undefined : styleOverride,
                           citationFormat: citationFormat === "auto" ? undefined : citationFormat,
@@ -3117,7 +3131,7 @@ export function ReferenceValidationReviewPage() {
 
               if (editorRef.current?.editor && reviewQuery.data?.save_endpoint) {
                 const html = editorRef.current.editor.getHTML();
-                await saveMutation.save(reviewQuery.data.save_endpoint, html);
+                await saveReference(reviewQuery.data.save_endpoint, html);
                 await reviewQuery.refetch();
               }
             }}

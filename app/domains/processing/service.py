@@ -33,6 +33,22 @@ def docx_has_changes(path1: str, path2: str) -> bool:
         return True
 
 
+def _is_processing_locked(file_record) -> bool:
+    """A processing job holds the file. User locks (download / editor) are not processing; NULL lock_kind is a
+    lock taken before alembic 0074 and is treated as processing, as before."""
+    return bool(file_record.is_checked_out) and file_record.lock_kind in (None, "processing")
+
+
+def _release_processing_lock(file_record) -> None:
+    """Clear the lock taken by start_process. A user's own download/editor lock is left alone."""
+    if file_record.lock_kind in (None, "processing"):
+        file_record.is_checked_out = False
+        file_record.checked_out_by_id = None
+        file_record.checked_out_at = None
+        file_record.lock_kind = None
+        file_record.active_lock_session_id = None
+
+
 def resolve_physical_file_path(path: str, upload_dir: str) -> str:
     """Resolve a relative or absolute file path to a verified existing physical file path under upload_dir."""
     if not path:
@@ -1277,9 +1293,7 @@ def background_processing_task(
             else:
                 logger.warning(f"No generated files returned from {process_type} processing")
 
-            file_record.is_checked_out = False
-            file_record.checked_out_by_id = None
-            file_record.checked_out_at = None
+            _release_processing_lock(file_record)
             file_record.processing_error = None
 
             db.commit()
@@ -1289,8 +1303,7 @@ def background_processing_task(
         except Exception as exc:
             logger.error(f"Processing FAILED for file {file_id}: {str(exc)}")
             logger.error(traceback.format_exc())
-            file_record.is_checked_out = False
-            file_record.checked_out_by_id = None
+            _release_processing_lock(file_record)
             file_record.processing_error = str(exc)
             db.commit()
             update_job_status(db, job_id, "failed", "Error occurred during execution", 100, error=str(exc))
@@ -1339,15 +1352,22 @@ def start_process(
         raise HTTPException(status_code=404, detail=f"Physical file missing: {file_path}")
 
     if file_record.is_checked_out:
-        if file_record.checked_out_by_id != user.id:
+        if file_record.checked_out_by_id != user.id or file_record.lock_kind == "processing":
+            holder = file_record.checked_out_by.username if file_record.checked_out_by else "another user"
             raise HTTPException(
                 status_code=400,
-                detail=f"File is locked by {file_record.checked_out_by.username}",
+                detail=("File is already being processed" if file_record.lock_kind == "processing"
+                        else f"File is locked by {holder}"),
             )
+        # The user holds their own download/editor lock: process without taking it over, so the lock (and its
+        # time tracking) survives the job.
+        file_record.processing_error = None
+        db.commit()
     else:
         file_record.is_checked_out = True
         file_record.checked_out_by_id = user.id
         file_record.checked_out_at = now_ist_naive()
+        file_record.lock_kind = "processing"
         file_record.processing_error = None
         db.commit()
 
@@ -1458,7 +1478,7 @@ def get_structuring_status(db: Session, *, file_id: int, user, process_type: str
             "new_file_id": file_record.id,
         }
 
-    if file_record.is_checked_out:
+    if _is_processing_locked(file_record):
         return {"status": "processing"}
 
     if file_record.processing_error:
@@ -1498,8 +1518,8 @@ def get_reference_validation_status(db: Session, *, file_id: int, user):
             "new_file_id": file_record.id,
         }
 
-    # If the parent file is still checked out, the job is still running
-    if file_record.is_checked_out:
+    # If the parent file is still locked for processing, the job is still running
+    if _is_processing_locked(file_record):
         return {"status": "processing"}
 
     if file_record.processing_error:

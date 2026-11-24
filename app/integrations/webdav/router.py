@@ -267,6 +267,13 @@ async def webdav_put(file_id: int, mode: str, token: str, filename: str, request
         logger.warning("WebDAV save refused on file %s for %s: read-only", file_id, getattr(editor, "username", None))
         raise HTTPException(status_code=403, detail="Read-only: only the assignee, the stage owner or Admin can save this chapter.")
 
+    from app.domains.files import lock_service
+    file_record = db.get(models.File, file_id)
+    if file_record is not None and editor is not None and lock_service.is_locked_by_other(file_record, editor.id):
+        logger.warning("WebDAV save refused on file %s for %s: locked by user %s",
+                       file_id, editor.username, file_record.checked_out_by_id)
+        return Response(status_code=423)
+
     body = await request.body()
     result = wopi_service.write_file_bytes(
         db,
@@ -276,6 +283,14 @@ async def webdav_put(file_id: int, mode: str, token: str, filename: str, request
         logger=logger,
         uploaded_by_id=editor.id if editor else None,
     )
+    if file_record is not None and editor is not None:
+        try:
+            db.refresh(file_record)
+            lock_service.record_new_version(db, file_record, editor)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Could not record Word save on lock session for file %s: %s", file_id, exc)
 
     # Trigger XHTML regen if structuring
     if mode == "structuring" and body:
@@ -300,6 +315,28 @@ async def webdav_lock(file_id: int, mode: str, token: str, filename: str, reques
 
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES)
 
+    from app.domains.files import lock_service
+    pending_token = None
+    refreshing = False
+    if existing_token:
+        refreshing = db.query(models.WebDAVLock).filter(models.WebDAVLock.lock_token == existing_token).first() is not None
+    if not refreshing:
+        # A new Word session: take the file's editor lock. Someone else holding it (download lock, another
+        # editor) or a read-only user gets 423, and Word opens the document read-only.
+        file_record = db.get(models.File, file_id)
+        owner = db.get(models.User, owner_id) if owner_id else None
+        if file_record is not None:
+            if owner is None:
+                return Response(status_code=423)
+            try:
+                pending_token = f"urn:uuid:{uuid4()}"
+                lock_service.acquire(db, file_record, owner, lock_service.EDITOR_WORD, editor_ref=pending_token)
+            except HTTPException as exc:
+                db.rollback()
+                logger.info("WebDAV LOCK refused on file %s for %s: %s", file_id, owner.username, exc.detail)
+                return Response(status_code=423)
+            existing_token = None  # create the WebDAV lock row with pending_token below
+
     if existing_token:
         # Attempt to refresh existing lock
         lock = db.query(models.WebDAVLock).filter(models.WebDAVLock.lock_token == existing_token).first()
@@ -309,6 +346,7 @@ async def webdav_lock(file_id: int, mode: str, token: str, filename: str, reques
             db.add(lock)
             db.commit()
             token_to_return = lock.lock_token
+            lock_service.touch_by_editor_ref(db, token_to_return)  # Word refresh = heartbeat
         else:
             # existing token provided but not found — create a new lock instead
             token_to_return = f"urn:uuid:{uuid4()}"
@@ -323,8 +361,8 @@ async def webdav_lock(file_id: int, mode: str, token: str, filename: str, reques
             db.add(lock)
             db.commit()
     else:
-        # No existing token — create a fresh lock
-        token_to_return = f"urn:uuid:{uuid4()}"
+        # No existing token — create a fresh lock (reuse the token the editor lock session was opened with)
+        token_to_return = pending_token or f"urn:uuid:{uuid4()}"
         lock = models.WebDAVLock(
             file_id=file_id,
             lock_token=token_to_return,
@@ -372,6 +410,13 @@ async def webdav_unlock(file_id: int, mode: str, token: str, filename: str, requ
         if lock:
             db.delete(lock)
             db.commit()
+        # Word closed the document: release the editor lock and record the time spent.
+        from app.domains.files import lock_service
+        try:
+            lock_service.close_by_editor_ref(db, lock_token, reason=lock_service.EDITOR_CLOSED)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Could not close Word lock session %s: %s", lock_token, exc)
 
     return Response(status_code=204)
 

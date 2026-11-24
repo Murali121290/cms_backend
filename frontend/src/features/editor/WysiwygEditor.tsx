@@ -522,6 +522,9 @@ export interface WysiwygEditorProps {
     firstMatch: string | null;
     firstReplacement: string | null;
   }) => void;
+  // View only: the document can't be edited and Save / Ctrl+S do nothing. Set while another user holds the
+  // file lock (download lock, Word, another editor) or after this editor lost its lock.
+  readOnly?: boolean;
 }
 
 const ToolbarButton = ({
@@ -615,6 +618,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       onSelectionChange,
       onCommentClick,
       onSaveAsRule,
+      readOnly = false,
     }: WysiwygEditorProps,
     ref
   ) {
@@ -829,10 +833,16 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         editor.commands.setContent(diffHtml, { emitUpdate: false });
       } else {
         editor.commands.setContent(preReviewHtmlRef.current || editor.getHTML(), { emitUpdate: false });
-        editor.setEditable(true);
+        editor.setEditable(!readOnly);
       }
       setReviewMode((on) => !on);
-    }, [editor, reviewMode]);
+    }, [editor, reviewMode, readOnly]);
+
+    // File lock: someone else holds the file (or our lock was lost) -> view only, saving disabled.
+    useEffect(() => {
+      if (!editor || reviewMode) return;
+      editor.setEditable(!readOnly);
+    }, [editor, readOnly, reviewMode]);
 
     // Handle track changes. The TrackChanges plugin reads storage via the editor's
     // shared storage map (editor.storage.trackChanges) — that's the live, mutable
@@ -1438,7 +1448,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     const handleToggleTrackChanges = () => setTcEnabled(!tcEnabled);
 
     const handleSave = async () => {
-      if (!editor) return;
+      if (!editor || readOnly) return;
       let html = "";
       let cleanHtml = "";
       try {
