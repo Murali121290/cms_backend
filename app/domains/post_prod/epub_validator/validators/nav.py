@@ -1238,10 +1238,16 @@ def validate_nav_epub_type(file_details, rule_config=None):
 
 @rule("COM-NCX-001")
 def validate_ncx_navpoint(file_details, rule_config=None):
-    """Ensure navPoint elements are present and have content src."""
+    """
+    Ensure navPoint elements are present and have content src.
+    If max_count is specified in rule_config (e.g. max_navpoints = 100),
+    validates that the count of <navPoint> elements does not exceed max_count.
+    If not specified, works as usual.
+    """
     file_path = file_details["full_path"]
+    rel_path = file_details.get("relative_path") or os.path.basename(file_path)
     issues = []
-    
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             ncx_soup = BeautifulSoup(f, "xml")
@@ -1254,8 +1260,33 @@ def validate_ncx_navpoint(file_details, rule_config=None):
             "type": "missing_navpoint",
             "message": "No <navPoint> elements found in toc.ncx.",
             "category": "Error",
+            "file_path": rel_path,
         })
         return {"issues_count": len(issues), "issues": issues}
+
+    # Check max navpoints limit if configured
+    inner_config = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    max_navpoints = inner_config.get("max_navpoints") or inner_config.get("max_count")
+    if max_navpoints is not None:
+        try:
+            max_limit = int(max_navpoints)
+            if len(navpoints) > max_limit:
+                first_line = getattr(navpoints[0], "sourceline", 1)
+                issues.append({
+                    "rule_name": "TOC Entry Count Exceeded",
+                    "type": "max_navpoints_exceeded",
+                    "message": (
+                        f"toc.ncx contains {len(navpoints)} <navPoint> elements, which exceeds the maximum limit of {max_limit}. "
+                        "If the title contains more than 100 ToC entries, no ToC needs to be created."
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": first_line,
+                    "extract": f"{len(navpoints)} navPoints",
+                    "snippet": f"Found {len(navpoints)} navPoints (max: {max_limit})",
+                })
+        except (ValueError, TypeError):
+            pass
 
     for np in navpoints:
         content = np.find("content")
@@ -1264,7 +1295,9 @@ def validate_ncx_navpoint(file_details, rule_config=None):
                 "type": "invalid_navpoint",
                 "message": f"<navPoint id='{np.get('id', '')}'> is missing a valid <content src='...'>.",
                 "category": "Error",
-                "line_number": getattr(np, "sourceline", None)
+                "file_path": rel_path,
+                "line_number": getattr(np, "sourceline", None),
+                "extract": np.get("id", ""),
             })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -2223,6 +2256,14 @@ def validate_bod_landmarks(file_details, rule_config=None):
     allowed_toc_lower = {t.lower().replace(" ", "") for t in allowed_toc_titles}
     expected_toc_title = allowed_toc_titles[0]
 
+    # Resolve expected Bodymatter title from config if provided
+    bm_titles_map = cfg.get("bodymatter_titles_by_language") or {}
+    allowed_bm_titles = bm_titles_map.get(norm_lang) or bm_titles_map.get("en") or []
+    if isinstance(allowed_bm_titles, str):
+        allowed_bm_titles = [allowed_bm_titles]
+    allowed_bm_lower = {t.lower().replace(" ", "") for t in allowed_bm_titles}
+    expected_bm_title = allowed_bm_titles[0] if allowed_bm_titles else ""
+
     # Find the actual landmarks by epub:type
     cover_item = None
     toc_item = None
@@ -2481,7 +2522,7 @@ def validate_bod_landmarks(file_details, rule_config=None):
                         "extract": bm_href,
                     })
 
-        # Check that title is non-empty
+        # Check that title is non-empty and matches language-specific title if configured
         if not bm_title:
             issues.append({
                 "type": "landmarks_bodymatter_title_empty",
@@ -2492,6 +2533,21 @@ def validate_bod_landmarks(file_details, rule_config=None):
                 "snippet": bm_extract,
                 "extract": bm_extract,
             })
+        elif allowed_bm_lower:
+            bm_title_clean = bm_title.lower().replace(" ", "")
+            if bm_title_clean not in allowed_bm_lower:
+                issues.append({
+                    "type": "landmarks_bodymatter_title_mismatch",
+                    "message": (
+                        f'Landmarks bodymatter title for language "{norm_lang}" should be "{expected_bm_title}" '
+                        f'(allowed: {", ".join(allowed_bm_titles)}), but found "{bm_title}".'
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": bm_line,
+                    "snippet": bm_extract,
+                    "extract": bm_extract,
+                })
 
     # Check order if all three items are present: cover -> toc -> bodymatter
     if cover_item and toc_item and bodymatter_item:
@@ -2510,4 +2566,556 @@ def validate_bod_landmarks(file_details, rule_config=None):
                 })
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-FM-002")
+def validate_standard_toc_frontmatter_order(file_details, rule_config=None):
+    """
+    Standard ToC format should be followed for the front matter.
+    ToC is always frontmatter, which means it must appear before the chapters (bodymatter) in the reading order.
+
+    Validates:
+    1. In OPF (<spine>):
+       The Table of Contents entry (itemref) must appear before the first chapter (e.g., 01_*.xhtml or configured chapter patterns).
+    2. In NAV (nav.xhtml <nav epub:type="toc">) / NCX (toc.ncx <navMap>):
+       If both TOC and chapters appear, the TOC entry must appear before the first chapter.
+    """
+    import os
+    import fnmatch
+    import xml.etree.ElementTree as ET
+
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+
+    toc_file_patterns = cfg.get("toc_file_patterns")
+    first_chapter_patterns = cfg.get("first_chapter_patterns")
+
+    if not toc_file_patterns or not first_chapter_patterns:
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    file_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(file_path)
+    rel_path = file_details.get("relative_path") or file_name
+
+    text = read_text(file_path)
+    if not text.strip():
+        return {"issues_count": 0, "issues": []}
+
+    lines = text.splitlines()
+
+    def matches_any_pattern(filename, patterns):
+        fn_lower = os.path.basename(filename).lower().split("#")[0]
+        for pat in patterns:
+            if fnmatch.fnmatch(fn_lower, pat.lower()):
+                return True
+        return False
+
+    is_opf = file_name.lower().endswith(".opf")
+    is_ncx = file_name.lower().endswith(".ncx") or "toc.ncx" in file_name.lower()
+    is_nav = ("nav" in file_name.lower()) and (file_name.lower().endswith(".xhtml") or file_name.lower().endswith(".html"))
+
+    if is_opf:
+        soup = BeautifulSoup(text, "xml")
+        manifest = soup.find("manifest")
+        spine = soup.find("spine")
+
+        # Map item id -> href and media-type
+        manifest_items = {}
+        if manifest:
+            for item in manifest.find_all("item"):
+                item_id = item.get("id", "").strip()
+                item_href = item.get("href", "").strip()
+                if item_id:
+                    manifest_items[item_id] = item_href
+
+        if spine:
+            itemrefs = spine.find_all("itemref")
+            first_chapter_idx = None
+            first_chapter_idref = None
+            first_chapter_href = None
+            first_chapter_tag = None
+
+            toc_entries = []  # list of (idx, idref, href, tag)
+
+            for idx, ir in enumerate(itemrefs):
+                idref = ir.get("idref", "").strip()
+                href = manifest_items.get(idref, "")
+                target_base = os.path.basename((href or "").split("#")[0])
+
+                if matches_any_pattern(target_base, first_chapter_patterns):
+                    if first_chapter_idx is None:
+                        first_chapter_idx = idx
+                        first_chapter_idref = idref
+                        first_chapter_href = href
+                        first_chapter_tag = ir
+
+                if matches_any_pattern(target_base, toc_file_patterns):
+                    toc_entries.append((idx, idref, href, ir))
+
+            if first_chapter_idx is not None:
+                if not toc_entries:
+                    # TOC is missing from spine or not placed before chapters
+                    # Check if a TOC file exists in manifest
+                    toc_in_manifest = None
+                    for mid, mhref in manifest_items.items():
+                        if matches_any_pattern(mhref, toc_file_patterns):
+                            toc_in_manifest = (mid, mhref)
+                            break
+
+                    line_no = getattr(first_chapter_tag, "sourceline", None)
+                    if not line_no:
+                        exact_ir_pattern = f'<itemref[^>]*idref=["\']{re.escape(first_chapter_idref)}["\']'
+                        for l_idx, line in enumerate(lines, 1):
+                            if re.search(exact_ir_pattern, line):
+                                line_no = l_idx
+                                break
+                    if not line_no:
+                        line_no = 1
+
+                    raw_extract = str(first_chapter_tag)[:200] if first_chapter_tag is not None else ""
+                    msg = (
+                        f"Standard ToC format should be followed for the front matter. "
+                        f"Table of Contents is frontmatter and must be placed before the chapters (chapter start: '{os.path.basename(first_chapter_href or '')}'). "
+                    )
+                    if toc_in_manifest:
+                        msg += f"The TOC file '{os.path.basename(toc_in_manifest[1])}' is declared in the manifest but missing from <spine> before the first chapter."
+                    else:
+                        msg += "No Table of Contents entry found in <spine> before the first chapter."
+
+                    issues.append({
+                        "type": "toc_missing_before_chapters",
+                        "message": msg,
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_no,
+                        "snippet": raw_extract,
+                        "extract": raw_extract,
+                    })
+                else:
+                    # Check if any TOC entry appears AFTER the first chapter
+                    for t_idx, t_idref, t_href, t_tag in toc_entries:
+                        if t_idx > first_chapter_idx:
+                            line_no = getattr(t_tag, "sourceline", None)
+                            if not line_no:
+                                exact_ir_pattern = f'<itemref[^>]*idref=["\']{re.escape(t_idref)}["\']'
+                                for l_idx, line in enumerate(lines, 1):
+                                    if re.search(exact_ir_pattern, line):
+                                        line_no = l_idx
+                                        break
+                            if not line_no:
+                                line_no = 1
+
+                            raw_extract = str(t_tag)[:200]
+                            issues.append({
+                                "type": "toc_placed_after_chapters",
+                                "message": (
+                                    f"Standard ToC format should be followed for the front matter. "
+                                    f"Table of Contents is frontmatter and must be placed before the chapters. "
+                                    f"TOC entry '{os.path.basename(t_href)}' (<itemref idref=\"{t_idref}\"/>) "
+                                    f"appears after the first chapter '{os.path.basename(first_chapter_href)}' (<itemref idref=\"{first_chapter_idref}\"/>) in <spine>."
+                                ),
+                                "category": "Error",
+                                "file_path": rel_path,
+                                "line_number": line_no,
+                                "snippet": raw_extract,
+                                "extract": raw_extract,
+                            })
+
+    elif is_ncx:
+        try:
+            clean_xml = re.sub(r'xmlns(:\w+)?="[^"]*"', '', text, count=1)
+            root = ET.fromstring(clean_xml.encode("utf-8"))
+        except Exception:
+            try:
+                root = ET.fromstring(text.encode("utf-8"))
+            except Exception:
+                return {"issues_count": 0, "issues": []}
+
+        nav_map = root.find(".//navMap")
+        if nav_map is not None:
+            top_navpoints = [elem for elem in nav_map if elem.tag.endswith("navPoint")]
+            first_ch_idx = None
+            first_ch_src = None
+            first_ch_np = None
+            toc_entries = []
+
+            for idx, np in enumerate(top_navpoints):
+                content_elem = np.find(".//content")
+                src = content_elem.get("src", "").strip() if content_elem is not None else ""
+                target_base = os.path.basename(src.split("#")[0])
+
+                if matches_any_pattern(target_base, first_chapter_patterns):
+                    if first_ch_idx is None:
+                        first_ch_idx = idx
+                        first_ch_src = src
+                        first_ch_np = np
+
+                if matches_any_pattern(target_base, toc_file_patterns):
+                    toc_entries.append((idx, src, np))
+
+            if first_ch_idx is not None and toc_entries:
+                for t_idx, t_src, t_np in toc_entries:
+                    if t_idx > first_ch_idx:
+                        np_id = t_np.get("id", "").strip()
+                        raw_extract = ET.tostring(t_np, encoding="unicode")[:200]
+                        line_no = 1
+                        for l_idx, line in enumerate(lines, 1):
+                            if (np_id and np_id in line) or (t_src and t_src in line):
+                                line_no = l_idx
+                                break
+                        issues.append({
+                            "type": "toc_placed_after_chapters_ncx",
+                            "message": (
+                                f"Standard ToC format should be followed for the front matter. "
+                                f"Table of Contents is frontmatter and must be placed before the chapters. "
+                                f"TOC entry '{os.path.basename(t_src)}' appears after the first chapter '{os.path.basename(first_ch_src)}' in <navMap>."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+    elif is_nav:
+        soup = BeautifulSoup(text, "html.parser")
+        toc_nav = (
+            soup.find("nav", attrs={"epub:type": lambda v: v and "toc" in v.lower().split()})
+            or soup.find("nav", attrs={"role": lambda v: v and "doc-toc" in v.lower().split()})
+            or soup.find("nav", id="toc")
+        )
+        if toc_nav:
+            top_ol = toc_nav.find("ol")
+            if top_ol:
+                top_lis = [child for child in top_ol.find_all("li", recursive=False)]
+                first_ch_idx = None
+                first_ch_href = None
+                first_ch_li = None
+                toc_entries = []
+
+                for idx, li in enumerate(top_lis):
+                    a_tag = li.find("a")
+                    href = a_tag.get("href", "").strip() if a_tag else ""
+                    target_base = os.path.basename(href.split("#")[0])
+
+                    if matches_any_pattern(target_base, first_chapter_patterns):
+                        if first_ch_idx is None:
+                            first_ch_idx = idx
+                            first_ch_href = href
+                            first_ch_li = li
+
+                    if matches_any_pattern(target_base, toc_file_patterns):
+                        toc_entries.append((idx, href, li))
+
+                if first_ch_idx is not None and toc_entries:
+                    for t_idx, t_href, t_li in toc_entries:
+                        if t_idx > first_ch_idx:
+                            line_no = getattr(t_li, "sourceline", None)
+                            if not line_no:
+                                for l_idx, line in enumerate(lines, 1):
+                                    if t_href and t_href in line:
+                                        line_no = l_idx
+                                        break
+                            if not line_no:
+                                line_no = 1
+                            raw_extract = str(t_li)[:200]
+                            issues.append({
+                                "type": "toc_placed_after_chapters_nav",
+                                "message": (
+                                    f"Standard ToC format should be followed for the front matter. "
+                                    f"Table of Contents is frontmatter and must be placed before the chapters. "
+                                    f"TOC entry '{os.path.basename(t_href)}' appears after the first chapter '{os.path.basename(first_ch_href)}' in TOC navigation list."
+                                ),
+                                "category": "Error",
+                                "file_path": rel_path,
+                                "line_number": line_no,
+                                "snippet": raw_extract,
+                                "extract": raw_extract,
+                            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("BOD-TOC-001")
+def validate_toc_terms_consistent(file_details, rule_config=None):
+    """
+    Check TOC file headings across NAV (nav.xhtml) and NCX (toc.ncx).
+    Terms should be consistent and match:
+    1. The <h1> tag name/content inside the actual TOC document (e.g. xhtml/D_inhalt.xhtml).
+    2. The heading / link in nav.xhtml (<nav epub:type="toc">).
+    3. The <navPoint> label in toc.ncx (<navLabel><text>...</text></navLabel>).
+    4. The configured allowed TOC terms for the detected book language.
+    (Note: OPF <guide> reference is ignored as requested, as 'Table of Contents' is default).
+    """
+    import os
+    import fnmatch
+    import xml.etree.ElementTree as ET
+
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+
+    toc_titles_map = cfg.get("toc_titles_by_language")
+    toc_file_patterns = cfg.get("toc_file_patterns")
+
+    if not toc_titles_map or not isinstance(toc_titles_map, dict):
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    file_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(file_path)
+    rel_path = file_details.get("relative_path") or file_name
+    current_dir = os.path.dirname(file_path)
+
+    text = read_text(file_path)
+    if not text.strip():
+        return {"issues_count": 0, "issues": []}
+
+    lines = text.splitlines()
+
+    def find_line(*needles):
+        for n in needles:
+            if not n:
+                continue
+            ns = str(n).strip()
+            if not ns:
+                continue
+            for idx, line in enumerate(lines, 1):
+                if ns in line:
+                    return idx
+        return 1
+
+    def matches_any_pattern(filename, patterns):
+        if not patterns:
+            return False
+        fn_lower = os.path.basename(filename).lower().split("#")[0]
+        for pat in patterns:
+            if fnmatch.fnmatch(fn_lower, pat.lower()):
+                return True
+        return False
+
+    def find_toc_file_h1(target_href_or_name):
+        """Locate the TOC XHTML file on disk and extract its <h1> text."""
+        candidates = []
+        if target_href_or_name:
+            clean_href = target_href_or_name.split("#")[0].strip()
+            candidates.append(os.path.normpath(os.path.join(current_dir, clean_href)))
+            candidates.append(os.path.normpath(os.path.join(current_dir, "xhtml", os.path.basename(clean_href))))
+            candidates.append(os.path.normpath(os.path.join(current_dir, "..", "xhtml", os.path.basename(clean_href))))
+
+        for cand in candidates:
+            if os.path.isfile(cand):
+                try:
+                    content = read_text(cand)
+                    if content:
+                        s = BeautifulSoup(content, "html.parser")
+                        h1 = s.find("h1")
+                        if h1:
+                            return h1.get_text(strip=True), os.path.basename(cand)
+                except Exception:
+                    pass
+
+        search_dirs = [current_dir, os.path.join(current_dir, "xhtml"), os.path.normpath(os.path.join(current_dir, "..", "xhtml"))]
+        for sdir in search_dirs:
+            if os.path.isdir(sdir):
+                for fname in os.listdir(sdir):
+                    if matches_any_pattern(fname, toc_file_patterns):
+                        f_full = os.path.join(sdir, fname)
+                        if os.path.isfile(f_full):
+                            try:
+                                content = read_text(f_full)
+                                if content:
+                                    s = BeautifulSoup(content, "html.parser")
+                                    h1 = s.find("h1")
+                                    if h1:
+                                        return h1.get_text(strip=True), fname
+                            except Exception:
+                                pass
+        return None, None
+
+    # Detect book language
+    detected_lang = get_book_language(file_details)
+    norm_lang = (detected_lang or "en").lower().split("-")[0].strip()
+
+    allowed_terms = None
+    for lang_k, terms in toc_titles_map.items():
+        if lang_k.lower().strip() == norm_lang or lang_k.lower().strip() == detected_lang.lower().strip():
+            allowed_terms = terms
+            break
+
+    if not allowed_terms:
+        lang_name_map = {
+            "en": "english", "de": "german", "fr": "french", "da": "danish",
+            "sv": "swedish", "fi": "finnish", "it": "italian", "es": "spanish",
+            "pt": "portuguese", "no": "norwegian", "nl": "dutch", "ca": "catalan", "va": "valencian"
+        }
+        target_name = lang_name_map.get(norm_lang, "")
+        for lang_k, terms in toc_titles_map.items():
+            if lang_k.lower().strip() == target_name:
+                allowed_terms = terms
+                break
+
+    if not allowed_terms:
+        allowed_terms = toc_titles_map.get("en") or toc_titles_map.get("English") or list(toc_titles_map.values())[0]
+
+    if isinstance(allowed_terms, str):
+        allowed_terms = [allowed_terms]
+
+    allowed_terms_clean = {t.strip().lower(): t.strip() for t in allowed_terms if t and t.strip()}
+    allowed_display = ", ".join(f'"{t}"' for t in allowed_terms)
+
+    # Resolve actual TOC file <h1> text if available
+    toc_h1_text, toc_fn = find_toc_file_h1(None)
+
+    is_ncx = file_name.lower().endswith(".ncx") or "toc.ncx" in file_name.lower()
+    is_nav = ("nav" in file_name.lower()) and (file_name.lower().endswith(".xhtml") or file_name.lower().endswith(".html"))
+
+    if is_ncx:
+        # Check NCX <navPoint> that points to TOC file
+        try:
+            clean_xml = re.sub(r'xmlns(:\w+)?="[^"]*"', '', text, count=1)
+            root = ET.fromstring(clean_xml.encode("utf-8"))
+        except Exception:
+            try:
+                root = ET.fromstring(text.encode("utf-8"))
+            except Exception:
+                return {"issues_count": 0, "issues": []}
+
+        nav_map = root.find(".//navMap")
+        if nav_map is not None:
+            for np in nav_map.findall(".//navPoint"):
+                content_elem = np.find(".//content")
+                src = content_elem.get("src", "").strip() if content_elem is not None else ""
+                target_base = os.path.basename(src.split("#")[0])
+
+                if matches_any_pattern(target_base, toc_file_patterns):
+                    text_elem = np.find(".//navLabel/text")
+                    label_text = (text_elem.text or "").strip() if text_elem is not None else ""
+                    np_id = np.get("id", "").strip()
+                    raw_extract = ET.tostring(np, encoding="unicode")[:200]
+                    line_no = find_line(np_id, label_text, src)
+
+                    # Check 1: Allowed language terms
+                    if label_text and label_text.strip().lower() not in allowed_terms_clean:
+                        issues.append({
+                            "type": "ncx_toc_title_inconsistent",
+                            "message": (
+                                f"TOC entry title in NCX <navPoint> is '{label_text}', which is inconsistent with "
+                                f"the expected TOC term for language '{norm_lang}' (allowed: {allowed_display})."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+                    # Check 2: Match TOC file <h1> tag
+                    spec_h1, spec_fn = find_toc_file_h1(src)
+                    h1_to_compare = spec_h1 or toc_h1_text
+                    fn_to_compare = spec_fn or toc_fn or target_base
+                    if h1_to_compare and label_text and label_text.strip().lower() != h1_to_compare.strip().lower():
+                        issues.append({
+                            "type": "ncx_toc_title_h1_mismatch",
+                            "message": (
+                                f"TOC entry title in toc.ncx ('{label_text}') does not match the <h1> tag name ('{h1_to_compare}') "
+                                f"in TOC file '{fn_to_compare}'. TOC heading should be consistent across all files."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+    elif is_nav:
+        soup = BeautifulSoup(text, "html.parser")
+
+        # 1. Check heading in <nav epub:type="toc">
+        toc_nav = (
+            soup.find("nav", attrs={"epub:type": lambda v: v and "toc" in v.lower().split()})
+            or soup.find("nav", attrs={"role": lambda v: v and "doc-toc" in v.lower().split()})
+            or soup.find("nav", id="toc")
+        )
+        if toc_nav:
+            # Check direct heading inside toc_nav (h1, h2, h3, or header)
+            heading = toc_nav.find(["h1", "h2", "h3", "h4", "header"])
+            if heading:
+                heading_text = heading.get_text(strip=True)
+                line_no = getattr(heading, "sourceline", None) or find_line(heading_text)
+                raw_extract = str(heading)[:200]
+
+                # Check 1: Allowed language terms
+                if heading_text and heading_text.strip().lower() not in allowed_terms_clean:
+                    issues.append({
+                        "type": "nav_toc_heading_inconsistent",
+                        "message": (
+                            f"TOC heading in nav.xhtml is '{heading_text}', which is inconsistent with "
+                            f"the expected TOC term for language '{norm_lang}' (allowed: {allowed_display})."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_no,
+                        "snippet": raw_extract,
+                        "extract": raw_extract,
+                    })
+
+                # Check 2: Match TOC file <h1> tag
+                if toc_h1_text and heading_text and heading_text.strip().lower() != toc_h1_text.strip().lower():
+                    issues.append({
+                        "type": "nav_toc_heading_h1_mismatch",
+                        "message": (
+                            f"TOC heading in nav.xhtml ('{heading_text}') does not match the <h1> tag name ('{toc_h1_text}') "
+                            f"in TOC file '{toc_fn}'. TOC heading should be consistent across all files."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_no,
+                        "snippet": raw_extract,
+                        "extract": raw_extract,
+                    })
+
+            # 2. Check any nav link pointing to a TOC file
+            for a_tag in toc_nav.find_all("a", href=True):
+                href = a_tag["href"].strip()
+                target_base = os.path.basename(href.split("#")[0])
+                if matches_any_pattern(target_base, toc_file_patterns):
+                    link_text = a_tag.get_text(strip=True)
+                    line_no = getattr(a_tag, "sourceline", None) or find_line(link_text, href)
+                    raw_extract = str(a_tag)[:200]
+
+                    # Check 1: Allowed language terms
+                    if link_text and link_text.strip().lower() not in allowed_terms_clean:
+                        issues.append({
+                            "type": "nav_toc_link_inconsistent",
+                            "message": (
+                                f"TOC link in nav.xhtml is '{link_text}', which is inconsistent with "
+                                f"the expected TOC term for language '{norm_lang}' (allowed: {allowed_display})."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+                    # Check 2: Match TOC file <h1> tag
+                    spec_h1, spec_fn = find_toc_file_h1(href)
+                    h1_to_compare = spec_h1 or toc_h1_text
+                    fn_to_compare = spec_fn or toc_fn or target_base
+                    if h1_to_compare and link_text and link_text.strip().lower() != h1_to_compare.strip().lower():
+                        issues.append({
+                            "type": "nav_toc_link_h1_mismatch",
+                            "message": (
+                                f"TOC link in nav.xhtml ('{link_text}') does not match the <h1> tag name ('{h1_to_compare}') "
+                                f"in TOC file '{fn_to_compare}'. TOC heading should be consistent across all files."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
 

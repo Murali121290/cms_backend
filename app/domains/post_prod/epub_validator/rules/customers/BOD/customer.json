@@ -101,6 +101,9 @@
       "target_path": "OEBPS",
       "file_name_pattern": "toc.ncx",
       "enabled": true,
+      "rule_config": {
+        "max_navpoints": 100
+      },
       "category": "TOC Check"
     },
     {
@@ -146,6 +149,7 @@
             "Titelseite",
             "Impressum",
             "Inhaltsverzeichnis",
+            "Inhalt",
             "Motto",
             "Widmung",
             "Danksagung"
@@ -263,6 +267,103 @@
       "category": "Structure Check"
     },
     {
+      "id": "BOD-FM-002",
+      "name": "Standard ToC format should be followed for the front matter (ToC must be placed before chapters)",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf",
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "toc_file_patterns": [
+          "*inhalt*.xhtml",
+          "*inhaltsverzeichnis*.xhtml",
+          "*toc*.xhtml",
+          "table_of_content.xhtml",
+          "*_contents*.xhtml",
+          "*sommaire*.xhtml",
+          "*indice*.xhtml",
+          "*index*.xhtml"
+        ],
+        "first_chapter_patterns": [
+          "01_*.xhtml",
+          "01-*.xhtml",
+          "01.*.xhtml",
+          "*01*.xhtml"
+        ]
+      },
+      "category": "Navigation Check"
+    },
+    {
+      "id": "BOD-TOC-001",
+      "name": "Terms should be consistent for all tocs in nav and ncx",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "toc_file_patterns": [
+          "*inhalt*.xhtml",
+          "*inhaltsverzeichnis*.xhtml",
+          "*toc*.xhtml",
+          "table_of_content.xhtml",
+          "*_contents*.xhtml",
+          "*sommaire*.xhtml",
+          "*indice*.xhtml",
+          "*index*.xhtml"
+        ],
+        "toc_titles_by_language": {
+          "en": [
+            "Table of Contents",
+            "Contents"
+          ],
+          "de": [
+            "Inhaltsverzeichnis",
+            "Inhalt"
+          ],
+          "fr": [
+            "Sommaire"
+          ],
+          "da": [
+            "Indholdsfortegnelse",
+            "Indholdsforteg nelse"
+          ],
+          "sv": [
+            "Innehållsförteckning"
+          ],
+          "fi": [
+            "Sisällysluettelo"
+          ],
+          "it": [
+            "Indice"
+          ],
+          "es": [
+            "Indice"
+          ],
+          "pt": [
+            "Índice"
+          ],
+          "no": [
+            "Innholdsfortegnelse"
+          ],
+          "nl": [
+            "Inhoudsopgave"
+          ],
+          "ca": [
+            "Índex"
+          ],
+          "va": [
+            "Índex"
+          ]
+        }
+      },
+      "category": "TOC Check"
+    },
+    {
       "id": "BOD-LM-001",
       "name": "Check landmark navigation in nav.xhtml",
       "target_path": "OEBPS",
@@ -282,8 +383,7 @@
             "Inhalt"
           ],
           "fr": [
-            "Sommaire",
-            "Table des matières"
+            "Sommaire"
           ],
           "da": [
             "Indholdsfortegnelse",
@@ -296,18 +396,13 @@
             "Sisällysluettelo"
           ],
           "it": [
-            "Indice",
-            "Sommario"
+            "Indice"
           ],
           "es": [
-            "Índice",
-            "Indice",
-            "Contenido"
+            "Indice"
           ],
           "pt": [
-            "Índice",
-            "Indice",
-            "Sumário"
+            "Índice"
           ],
           "no": [
             "Innholdsfortegnelse"
@@ -316,12 +411,51 @@
             "Inhoudsopgave"
           ],
           "ca": [
-            "Índex",
-            "Index"
+            "Índex"
           ],
           "va": [
-            "Índex",
-            "Index"
+            "Índex"
+          ]
+        },
+        "bodymatter_titles_by_language": {
+          "en": [
+            "Start of Text"
+          ],
+          "de": [
+            "Textbeginn"
+          ],
+          "fr": [
+            "Début du texte"
+          ],
+          "da": [
+            "Tekstbegyndelse"
+          ],
+          "sv": [
+            "Textens inledning"
+          ],
+          "fi": [
+            "Tekstin alku"
+          ],
+          "it": [
+            "Inizio del Testo"
+          ],
+          "es": [
+            "Inicio del Texto"
+          ],
+          "pt": [
+            "Início do texto"
+          ],
+          "no": [
+            "Tekstbegynnelse"
+          ],
+          "nl": [
+            "Begin van de tekst"
+          ],
+          "ca": [
+            "Inici del text"
+          ],
+          "va": [
+            "Inici del text"
           ]
         }
       },
