@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap, PauseCircle, RotateCcw, MessageSquare, Paperclip, File, CheckCircle, ExternalLink, Table } from 'lucide-react'
+import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, X, Filter, Zap, PauseCircle, RotateCcw, MessageSquare, Paperclip, File, CheckCircle, ExternalLink, Table, Image as ImageIcon, FileSpreadsheet, Eye, Info } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import { toast } from '@/store/useToastStore'
@@ -26,6 +26,15 @@ export function BodCustomerReportPage() {
   const [holdAnswerText, setHoldAnswerText] = useState('')
   const [holdAnswerFiles, setHoldAnswerFiles] = useState<File[]>([])
   const [submittingHoldAnswer, setSubmittingHoldAnswer] = useState(false)
+
+  // Customer Reopen / Revise Modal state
+  const [reopenModalJob, setReopenModalJob] = useState<any | null>(null)
+  const [reopenReason, setReopenReason] = useState('')
+  const [reopenFiles, setReopenFiles] = useState<File[]>([])
+  const [submittingReopen, setSubmittingReopen] = useState(false)
+
+  // Customer Revise Info Modal (view submitted corrections & attachments)
+  const [viewReviseJob, setViewReviseJob] = useState<any | null>(null)
 
   // Active view: 'chart' | 'table' (Split view toggle)
   const [activeTab, setActiveTab] = useState<'chart' | 'table'>('chart')
@@ -126,6 +135,53 @@ export function BodCustomerReportPage() {
     setHoldAnswerJob(job)
     setHoldAnswerText('')
     setHoldAnswerFiles([])
+  }
+
+  const handleOpenReopenModal = (e: React.MouseEvent, job: any) => {
+    e.stopPropagation()
+    setReopenModalJob(job)
+    setReopenReason('')
+    setReopenFiles([])
+  }
+
+  const submitReopenJob = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!reopenModalJob || !reopenReason.trim()) return
+
+    setSubmittingReopen(true)
+    try {
+      const formData = new FormData()
+      formData.append('reason', reopenReason.trim())
+
+      if (reopenFiles && reopenFiles.length > 0) {
+        reopenFiles.forEach((file) => {
+          formData.append('files', file)
+        })
+      }
+
+      const { data } = await api.post(`/bod/jobs/${reopenModalJob.id}/reopen`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      // Update state in table & cards
+      setReport(prev => prev.map(j => j.id === reopenModalJob.id ? {
+        ...j,
+        status: data.job?.status || 'Active',
+        current_stage: data.job?.current_stage_name || 'QC',
+        revision: data.revision || data.job?.revision,
+        version: data.revision || data.job?.revision,
+        reopen_history: data.reopen_history || j.reopen_history,
+        stage_history: data.job?.stage_history || j.stage_history
+      } : j))
+
+      toast.success(data.message || `Job reopened for revision ${data.revision || 'R1'}! Moved to QC.`)
+      setReopenModalJob(null)
+    } catch (err: any) {
+      console.error(err)
+      toast.error(err.response?.data?.detail || "Failed to reopen job")
+    } finally {
+      setSubmittingReopen(false)
+    }
   }
 
   const submitHoldAnswer = async (e: React.FormEvent) => {
@@ -256,6 +312,8 @@ export function BodCustomerReportPage() {
   }
 
   const isJobCompleted = (job: any) => job.status === 'Completed' || job.current_stage === 'Archive'
+
+  const isJobRevised = (job: any) => Boolean(job.revision) || (job.reopen_history && job.reopen_history.length > 0)
 
   const getCompletedDate = (job: any): string | null => {
     const history = job.stage_history || {}
@@ -389,6 +447,16 @@ export function BodCustomerReportPage() {
       return true
     }
 
+    // When filtering specifically for completed jobs (Total Completed, Ahead, On-time, Delay),
+    // include all completed jobs unless user explicitly requested a specific historical date window
+    if (cardFilter === 'completed' || cardFilter === 'completed_ahead' || cardFilter === 'completed_ontime' || cardFilter === 'completed_delay') {
+      if (datePreset === 'all') return true
+      const compDateStr = getCompletedDate(job)
+      // If user selected Today but 0 completed today, allow completed jobs to show under Completed filter
+      if (datePreset === 'today') return true
+      return dateMatchesPreset(compDateStr) || dateMatchesPreset(job.created_at)
+    }
+
     // For tomorrow and future days, no jobs completed in the future
     if (datePreset === 'tomorrow' || datePreset === 'day_3' || datePreset === 'day_4' || datePreset === 'day_5') {
       return false
@@ -438,6 +506,9 @@ export function BodCustomerReportPage() {
       finalStatus = completionTiming ? `Completed (${completionTiming})` : 'Completed'
     } else if (job.status === 'Hold') {
       finalStatus = 'Hold'
+    } else if (isJobRevised(job)) {
+      // Reopened / Revised jobs are in Revise cycle and must NOT be marked Overdue
+      finalStatus = 'Revise'
     } else {
       if (overdueRefDate && isOverdue(job.due_date, overdueRefDate)) {
         finalStatus = 'Overdue'
@@ -482,10 +553,10 @@ export function BodCustomerReportPage() {
       return !isDateInPreset(job.created_at, datePreset === 'all' ? 'today' : datePreset)
     }
     if (cardFilter === 'yts') {
-      return !completed && job.current_stage === 'Add job'
+      return !completed && job.status !== 'Hold' && !isJobRevised(job) && job.current_stage === 'Add job'
     }
     if (cardFilter === 'in_progress') {
-      return !completed && (job.current_stage === 'Add job' || job.current_stage === 'Production' || job.current_stage === 'QC' || job.current_stage === 'Ready to Dispatch')
+      return !completed && job.status !== 'Hold' && !isJobRevised(job) && (job.current_stage === 'Job Analysis' || job.current_stage === 'Production' || job.current_stage === 'QC' || job.current_stage === 'Ready to Dispatch')
     }
     if (cardFilter === 'hold') {
       return !completed && job.status === 'Hold'
@@ -494,19 +565,19 @@ export function BodCustomerReportPage() {
       return !completed && (Boolean(job.revision) || (job.reopen_history && job.reopen_history.length > 0))
     }
     if (cardFilter === 'overdue') {
-      return !completed && Boolean(overdueRefDate && isOverdue(job.due_date, overdueRefDate))
+      return !completed && job.status !== 'Hold' && !isJobRevised(job) && Boolean(overdueRefDate && isOverdue(job.due_date, overdueRefDate))
     }
     if (cardFilter === 'completed') {
       return completed
     }
     if (cardFilter === 'completed_ahead') {
-      return completed && finalStatus === 'Ahead'
+      return completed && (finalStatus === 'Ahead' || finalStatus === 'Completed (Ahead)')
     }
     if (cardFilter === 'completed_ontime') {
-      return completed && finalStatus === 'On-time'
+      return completed && (finalStatus === 'On-time' || finalStatus === 'Completed (On-time)')
     }
     if (cardFilter === 'completed_delay') {
-      return completed && finalStatus === 'Delay'
+      return completed && (finalStatus === 'Delay' || finalStatus === 'Completed (Delay)')
     }
     return true
   })
@@ -516,11 +587,11 @@ export function BodCustomerReportPage() {
   const totalIntakeJobs = baseJobs.filter(j => isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)).length
   const totalBacklogJobs = baseJobs.filter(j => !isDateInPreset(j.created_at, datePreset === 'all' ? 'today' : datePreset)).length
 
-  // YTS: Add job stage
-  const ytsJobs = baseJobs.filter(j => !isJobCompleted(j) && j.current_stage === 'Add job').length
+  // YTS: Add job stage only (excludes Hold and Revise)
+  const ytsJobs = baseJobs.filter(j => !isJobCompleted(j) && j.status !== 'Hold' && !isJobRevised(j) && j.current_stage === 'Add job').length
 
-  // In-Progress: Add job, Production, QC, Ready to Dispatch
-  const inProgressJobs = baseJobs.filter(j => !isJobCompleted(j) && (j.current_stage === 'Add job' || j.current_stage === 'Production' || j.current_stage === 'QC' || j.current_stage === 'Ready to Dispatch')).length
+  // In-Progress (Production): Job Analysis, Production, QC, Ready to Dispatch (excludes Add job, Hold and Revise)
+  const inProgressJobs = baseJobs.filter(j => !isJobCompleted(j) && j.status !== 'Hold' && !isJobRevised(j) && (j.current_stage === 'Job Analysis' || j.current_stage === 'Production' || j.current_stage === 'QC' || j.current_stage === 'Ready to Dispatch')).length
 
   // Hold: Active jobs on Hold (Customer Query)
   const holdJobs = baseJobs.filter(j => !isJobCompleted(j) && j.status === 'Hold').length
@@ -528,8 +599,8 @@ export function BodCustomerReportPage() {
   // Reopen / Revise: Active jobs with revision or reopen history
   const reopenJobs = baseJobs.filter(j => !isJobCompleted(j) && (Boolean(j.revision) || (j.reopen_history && j.reopen_history.length > 0))).length
 
-  // Overdue
-  const overdueJobs = baseJobs.filter(j => !isJobCompleted(j) && Boolean(overdueRefDate && isOverdue(j.due_date, overdueRefDate))).length
+  // Overdue (excludes revised jobs and hold jobs)
+  const overdueJobs = baseJobs.filter(j => !isJobCompleted(j) && j.status !== 'Hold' && !isJobRevised(j) && Boolean(overdueRefDate && isOverdue(j.due_date, overdueRefDate))).length
 
   // Completed metrics
   const completedJobs = baseJobs.filter(isJobCompleted).length
@@ -1021,8 +1092,8 @@ export function BodCustomerReportPage() {
           </div>
         </div>
 
-        {/* Metrics Row: Total Books (7), In-Progress (5), Completed (10), Overdue (5), Hold (5), Revise (5) = Total 37 cols */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-[7fr_5fr_10fr_5fr_5fr_5fr] gap-3">
+        {/* Metrics Row: Total Books, YTS, Production, Completed, Overdue, Hold, Revise */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-[5.5fr_3.5fr_3.5fr_6.5fr_5fr_3.5fr_3.5fr] gap-2.5">
           {/* 1. Total (Intake + Backlogs) */}
           <div
             className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'all' || cardFilter === 'total_all' || cardFilter === 'total_intake' || cardFilter === 'total_backlog') && cardFilter !== 'all' ? 'border-primary/60 ring-2 ring-primary/20' : 'border-border/80 hover:border-primary/40'}`}
@@ -1078,7 +1149,27 @@ export function BodCustomerReportPage() {
             </div>
           </div>
 
-          {/* 2. Production (In-Progress) */}
+          {/* 2. YTS (Add job stage) */}
+          <div
+            onClick={() => setCardFilter(cardFilter === 'yts' ? 'all' : 'yts')}
+            className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'yts' ? 'border-amber-500/60 ring-2 ring-amber-500/20' : 'border-border/80 hover:border-amber-500/40'}`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md">
+                  <Clock size={13} />
+                </div>
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider">YTS</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400">Intake</span>
+            </div>
+            <div className="flex items-baseline justify-between mt-2">
+              <span className="text-xl font-bold text-amber-600 dark:text-amber-400 leading-none">{ytsJobs}</span>
+              <span className="text-[9px] text-amber-600/80 dark:text-amber-400/80 truncate">Awaiting CSV</span>
+            </div>
+          </div>
+
+          {/* 3. Production (Job Analysis, Production, QC, Dispatch) */}
           <div
             onClick={() => setCardFilter(cardFilter === 'in_progress' ? 'all' : 'in_progress')}
             className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between cursor-pointer transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${cardFilter === 'in_progress' ? 'border-purple-500/60 ring-2 ring-purple-500/20' : 'border-border/80 hover:border-purple-500/40'}`}
@@ -1094,11 +1185,11 @@ export function BodCustomerReportPage() {
             </div>
             <div className="flex items-baseline justify-between mt-2">
               <span className="text-xl font-bold text-purple-600 dark:text-purple-400 leading-none">{inProgressJobs}</span>
-              <span className="text-[9px] text-purple-600/80 dark:text-purple-400/80 truncate">Active</span>
+              <span className="text-[9px] text-purple-600/80 dark:text-purple-400/80 truncate">In Progress</span>
             </div>
           </div>
 
-          {/* 3. Completed: 3 split (Ahead, On-time, Delay) */}
+          {/* 4. Completed: 3 split (Ahead, On-time, Delay) */}
           <div
             className={`bg-card border rounded-xl px-3 py-2 flex flex-col justify-between transition-all duration-200 shadow-xs hover:shadow-sm min-h-[72px] ${(cardFilter === 'completed' || cardFilter.startsWith('completed_')) ? 'border-emerald-500/60 ring-2 ring-emerald-500/20' : 'border-border/80 hover:border-emerald-500/30'}`}
           >
@@ -1643,6 +1734,7 @@ export function BodCustomerReportPage() {
                         <option value="Delay">Completed (Delay)</option>
                         <option value="In-progress">In-progress</option>
                         <option value="Hold">Hold</option>
+                        <option value="Revise">Revise</option>
                         <option value="Overdue">Overdue</option>
                         <option value="YTS">YTS</option>
                       </select>
@@ -1676,6 +1768,7 @@ export function BodCustomerReportPage() {
                         if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-bold'
                         if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
                         if (s === 'Hold') return 'bg-[#E0F2FE] text-sky-900 border-sky-300 dark:bg-sky-950/60 dark:text-sky-200 dark:border-sky-800 font-bold'
+                        if (s === 'Revise') return 'bg-[#FCE4D6] text-[#9A3412] border-[#F8B88B] dark:bg-[#7C2D12]/40 dark:text-[#FED7AA] font-bold'
                         if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
                         return 'bg-muted/10 text-muted-foreground border-border/50'
                       }
@@ -1683,10 +1776,25 @@ export function BodCustomerReportPage() {
                       return (
                         <tr key={job.id} className="hover:bg-muted/5 transition-colors group">
                           <td className="px-2 py-3">
-                            <div className="font-medium text-text break-all whitespace-normal max-w-[260px]" title={job.pdf_filename}>
-                              {job.pdf_filename}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-medium text-text break-all whitespace-normal max-w-[260px]" title={job.pdf_filename}>
+                                {job.pdf_filename}
+                              </span>
+                              {job.revision && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setViewReviseJob(job)
+                                  }}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[#FCE4D6] hover:bg-[#F8B88B]/60 text-[#9A3412] dark:bg-[#7C2D12]/40 dark:text-[#FED7AA] border border-[#F8B88B]/60 shadow-xs transition-all cursor-pointer group/rev"
+                                  title="Click to view revision info, correction reasons & attachments"
+                                >
+                                  <span>{job.revision}</span>
+                                  <Info size={10} className="text-[#C2410C] dark:text-[#FDBA74] opacity-75 group-hover/rev:opacity-100" />
+                                </button>
+                              )}
                             </div>
-
                           </td>
                           <td className="px-2 py-3 text-center">
                             {(() => {
@@ -1767,12 +1875,11 @@ export function BodCustomerReportPage() {
                                 {(finalStatus === 'Completed (Delay)' || finalStatus === 'Delay') && <AlertCircle size={10} className="mr-1 text-rose-500" />}
                                 {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1 text-emerald-500" />}
                                 {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
+                                {finalStatus === 'Revise' && <RotateCcw size={10} className="mr-1 text-[#EA580C] dark:text-[#FDBA74]" />}
                                 {finalStatus === 'Hold' && <PauseCircle size={10} className="mr-1 text-sky-600 dark:text-sky-400" />}
                                 {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
                                 {finalStatus}
                               </span>
-
-                              {/* Customer Query Answer Button for Hold jobs */}
                               {job.status === 'Hold' && (
                                 <button
                                   type="button"
@@ -1782,6 +1889,19 @@ export function BodCustomerReportPage() {
                                 >
                                   <MessageSquare size={11} />
                                   <span>Answer Query</span>
+                                </button>
+                              )}
+
+                              {/* Customer Reopen / Revise Button for Completed jobs */}
+                              {isJobCompleted(job) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOpenReopenModal(e, job)}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#FCE4D6] hover:bg-[#F8B88B]/40 text-[#9A3412] dark:bg-[#7C2D12]/40 dark:text-[#FFEDD5] border border-[#F8B88B] shadow-xs transition-all cursor-pointer"
+                                  title="Reopen completed job for correction / revise"
+                                >
+                                  <RotateCcw size={10} className="text-[#C2410C] dark:text-[#FED7AA]" />
+                                  <span>Revise</span>
                                 </button>
                               )}
                             </div>
@@ -2100,6 +2220,279 @@ export function BodCustomerReportPage() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reopen / Revise Job Modal for Customer */}
+      {reopenModalJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setReopenModalJob(null)} />
+          <div className="relative bg-card rounded-xl shadow-2xl w-full max-w-lg flex flex-col border border-border animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-[#FCE4D6]/50 dark:bg-[#7C2D12]/20 rounded-t-xl">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-[#FCE4D6] text-[#C2410C] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA]">
+                  <RotateCcw size={18} className="text-[#EA580C] dark:text-[#FDBA74]" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-[#7C2D12] dark:text-[#FFEDD5] m-0">
+                    Reopen Job for Revision
+                  </h2>
+                  <p className="text-[10px] text-muted m-0 truncate max-w-[260px]" title={reopenModalJob.pdf_filename}>
+                    {reopenModalJob.pdf_filename}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReopenModalJob(null)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={submitReopenJob}>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Correction Reason / Revision Note <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    placeholder="Specify the correction or revision request required for this job (Mandatory)..."
+                    value={reopenReason}
+                    onChange={(e) => setReopenReason(e.target.value)}
+                    className="w-full p-3 bg-background border border-border rounded-lg text-sm text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-[#F8B88B]/40 focus:border-[#F8B88B] resize-y"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted">
+                      Attach Supporting Files (Images, PDF, Excel, DOCX)
+                    </label>
+                    <span className="text-[11px] text-muted">Optional</span>
+                  </div>
+
+                  <div className="border border-dashed border-border rounded-lg p-3 bg-accent/20 hover:bg-accent/40 transition-colors text-center">
+                    <input
+                      type="file"
+                      id="customer-reopen-file-input"
+                      multiple
+                      accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx"
+                      onChange={(e) => {
+                        if (e.target.files) {
+                          const newFiles = Array.from(e.target.files)
+                          setReopenFiles(prev => [...prev, ...newFiles])
+                          e.target.value = ''
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="customer-reopen-file-input"
+                      className="cursor-pointer flex flex-col items-center justify-center gap-1.5 text-xs text-muted hover:text-text"
+                    >
+                      <Paperclip size={20} className="text-[#EA580C] dark:text-[#FDBA74]" />
+                      <span>
+                        <span className="font-semibold text-[#EA580C] dark:text-[#FDBA74]">Click to browse</span> or drag and drop files
+                      </span>
+                      <span className="text-[10px] text-muted">
+                        Supports images, PDF, Excel (.xlsx, .xls, .csv), Word (.doc, .docx)
+                      </span>
+                    </label>
+                  </div>
+
+                  {reopenFiles.length > 0 && (
+                    <div className="mt-2.5 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {reopenFiles.map((file, fIdx) => (
+                        <div
+                          key={fIdx}
+                          className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <File size={14} className="text-[#EA580C] dark:text-[#FDBA74] shrink-0" />
+                            <span className="font-medium text-text truncate max-w-[260px]">{file.name}</span>
+                            <span className="text-[10px] text-muted shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReopenFiles(prev => prev.filter((_, i) => i !== fIdx))}
+                            className="text-muted hover:text-rose-600 p-1 rounded transition-colors"
+                            title="Remove file"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-border flex justify-end gap-3 bg-muted/5 rounded-b-xl">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setReopenModalJob(null)}
+                  disabled={submittingReopen}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={submittingReopen || !reopenReason.trim()}
+                  className="bg-[#EA580C] hover:bg-[#C2410C] text-white min-w-[130px]"
+                >
+                  {submittingReopen ? (
+                    <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Submitting...</span>
+                  ) : (
+                    <span className="flex items-center gap-1.5"><RotateCcw size={14} /> Submit Revise to QC</span>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* View Revise Information Modal for Customer */}
+      {viewReviseJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setViewReviseJob(null)} />
+          <div className="relative bg-card rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border border-border animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-[#FCE4D6]/50 dark:bg-[#7C2D12]/20 rounded-t-xl shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-[#FCE4D6] text-[#C2410C] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA]">
+                  <RotateCcw size={18} className="text-[#EA580C] dark:text-[#FDBA74]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-[#7C2D12] dark:text-[#FFEDD5] m-0">
+                      Revision Details
+                    </h2>
+                    {viewReviseJob.revision && (
+                      <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-[#FCE4D6] text-[#9A3412] dark:bg-[#7C2D12]/60 dark:text-[#FED7AA] border border-[#F8B88B]">
+                        {viewReviseJob.revision}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted m-0 truncate max-w-[280px]" title={viewReviseJob.pdf_filename}>
+                    {viewReviseJob.pdf_filename}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewReviseJob(null)}
+                className="text-muted hover:text-text transition-colors p-1 rounded-md"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-4">
+              {viewReviseJob.reopen_history && Array.isArray(viewReviseJob.reopen_history) && viewReviseJob.reopen_history.length > 0 ? (
+                <div className="space-y-3">
+                  {[...viewReviseJob.reopen_history].reverse().map((record: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="bg-background border border-[#F8B88B]/60 rounded-xl p-3.5 space-y-3 ring-1 ring-[#FCE4D6]/50 shadow-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded bg-[#FCE4D6] border border-[#F8B88B] text-[#9A3412] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA]">
+                            {record.revision || `R${viewReviseJob.reopen_history.length - idx}`}
+                          </span>
+                          <span className="text-[10px] font-semibold text-muted">
+                            Current Stage: <strong className="text-text">{viewReviseJob.current_stage || viewReviseJob.current_stage_name || 'QC'}{viewReviseJob.status === 'Hold' ? ' (Hold)' : ''}</strong>
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-muted font-mono">
+                          {record.reopened_at ? fmtUtcDateTime(record.reopened_at) : '-'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0">Correction Reason / Request</p>
+                        <p className="text-xs text-text leading-relaxed bg-accent/40 p-2.5 rounded border border-border/40 m-0 break-words font-sans whitespace-pre-wrap">
+                          {record.reason}
+                        </p>
+                        <p className="text-[10px] text-muted m-0 pt-0.5">
+                          Submitted by <strong className="text-text/90">{record.reopened_by || 'Customer'}</strong>
+                        </p>
+                      </div>
+
+                      {/* Attached Files */}
+                      {record.attachments && Array.isArray(record.attachments) && record.attachments.length > 0 && (
+                        <div className="space-y-1.5 pt-1 border-t border-border/40">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted m-0 flex items-center gap-1">
+                            <Paperclip size={11} className="text-[#EA580C] dark:text-[#FDBA74]" />
+                            Attached Files ({record.attachments.length})
+                          </p>
+                          <div className="space-y-1.5">
+                            {record.attachments.map((att: any, aIdx: number) => {
+                              const rev = record.revision
+                              const downloadUrl = `/api/v2/bod/jobs/${viewReviseJob.id}/reopen-attachments/${rev}/${encodeURIComponent(att.saved_filename || att.filename)}`
+                              const ext = (att.filename || '').split('.').pop()?.toLowerCase()
+                              const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)
+                              const isPdf = ext === 'pdf'
+                              const isViewable = isImg || isPdf || ext === 'txt'
+                              const isSheet = ['xlsx', 'xls', 'csv'].includes(ext)
+
+                              return (
+                                <a
+                                  key={aIdx}
+                                  href={downloadUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  {...(!isViewable ? { download: att.filename } : {})}
+                                  className="flex items-center justify-between gap-2 p-2 rounded-lg bg-background border border-border hover:border-[#F8B88B] hover:bg-[#FCE4D6]/20 transition-all group/att"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="p-1 rounded bg-[#FCE4D6]/50 text-[#C2410C] dark:bg-[#7C2D12]/50 dark:text-[#FED7AA] shrink-0">
+                                      {isImg ? <ImageIcon size={13} /> : isSheet ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-medium text-text group-hover/att:text-[#C2410C] dark:group-hover/att:text-[#FED7AA] truncate m-0">
+                                        {att.filename}
+                                      </p>
+                                      {att.size ? (
+                                        <p className="text-[10px] text-muted m-0">
+                                          {(att.size / 1024).toFixed(1)} KB
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <Download size={13} className="text-muted group-hover/att:text-[#C2410C] dark:group-hover/att:text-[#FED7AA] shrink-0" />
+                                </a>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted text-xs">
+                  No revision history records found for this job.
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3.5 border-t border-border flex justify-end bg-muted/5 rounded-b-xl shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setViewReviseJob(null)}
+              >
+                Close
+              </Button>
+            </div>
           </div>
         </div>
       )}
