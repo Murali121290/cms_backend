@@ -70,10 +70,16 @@ export function StageBanner({ stages, stage, onStage, nextStageHint, counts }: {
       </div>
       <div className="flex flex-col gap-0.5">
         <span className={eyebrow}>Stage owner</span>
-        <span className="inline-flex items-center gap-1.5 text-sm text-text">
-          <Avatar username={stage.owner_username} name={stage.owner_name ?? undefined} />
-          {stage.owner_name ?? stage.owner_username ?? "Not set"}
-        </span>
+        {stage.owner_per_project ? (
+          <span className="text-sm text-text" title="Each chapter's owner is its project's PM (Project → PM).">
+            Project&apos;s PM <span className="text-muted">(per project)</span>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-sm text-text">
+            <Avatar username={stage.owner_username} name={stage.owner_name ?? undefined} />
+            {stage.owner_name ?? stage.owner_username ?? "Not set"}
+          </span>
+        )}
       </div>
       <div className="flex flex-col gap-0.5">
         <span className={eyebrow}>Team email</span>

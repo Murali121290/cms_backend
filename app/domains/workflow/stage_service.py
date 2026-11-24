@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domains.auth.models import User
@@ -244,9 +244,15 @@ def resolve_stage_owner_by_designation(db: Session, stage_name: str, project_cod
                                        client_identifier: Optional[str] = None) -> Optional[User]:
     """Active user configured as owner of a stage via StageMaster.owner_designation.
 
-    Preference when several match: customer_access contains the client/project, then the project's
-    team, then the first match. (Unchanged behaviour, moved from api_v1.)
+    Matched on the user's Role (User Management), not the HR designation.
+    A stage owned by a PM role (e.g. Job Initiation → "Project Manager") is owned per project: the owner is the
+    project's PM (projects.project_manager); without a project, or when the project has no active PM, there is
+    no single owner (None) rather than an arbitrary PM.
+    Otherwise, when several users match: customer_access contains the client/project, then the project's
+    team, then the first match.
     """
+    from app.domains.workflow import access
+
     if not stage_name:
         return None
     stage_rec = db.execute(select(StageMaster).where(StageMaster.stage_name == stage_name)).scalars().first()
@@ -254,21 +260,15 @@ def resolve_stage_owner_by_designation(db: Session, stage_name: str, project_cod
         return None
     target = stage_rec.owner_designation.strip()
 
-    users = list(db.execute(
-        select(User).where(
-            User.active_status == True,  # noqa: E712
-            or_(func.lower(func.trim(User.designation)) == target.lower(), func.lower(func.trim(User.role)) == target.lower()),
-        )
-    ).scalars().all())
+    if access.owner_is_project_pm(stage_rec):
+        pm = access.project_pm_username(db, project_code)
+        if not pm:
+            return None
+        return db.execute(select(User).where(User.username == pm, User.active_status == True)).scalars().first()  # noqa: E712
 
-    if not users:
-        norm = lambda s: (s or "").lower().replace("-", " ").replace("_", " ").strip()  # noqa: E731
-        want = norm(target)
-        for u in db.execute(select(User).where(User.active_status == True)).scalars().all():  # noqa: E712
-            if norm(u.designation) == want or norm(u.role) == want:
-                users.append(u)
-            elif isinstance(u.additional_roles, list) and any(norm(str(r)) == want for r in u.additional_roles):
-                users.append(u)
+    want = access._owner_key(target)
+    users = [u for u in db.execute(select(User).where(User.active_status == True).order_by(User.id)).scalars().all()  # noqa: E712
+             if access._owner_key(u.role) == want]
     if not users:
         return None
     if len(users) == 1:

@@ -414,6 +414,52 @@ def test_stage_owner_with_unlisted_role_gets_board_for_every_owned_stage(world, 
     assert "ma_op" in members
 
 
+def test_pm_owned_stage_is_owned_by_each_projects_pm(world, as_user):
+    """Job Initiation owner = "Project Manager": each chapter's owner is its project's PM, not the first PM found."""
+    from app.domains.projects.models import Project
+    from app.domains.workflow import access, stage_service
+    db = world["db"]
+    _stage(db, "Job Initiation", '["Project Manager", "Manuscript Analysis Operator"]', owner="Project Manager")
+    ann = _user(db, "pm_ann", "Project Manager", team="PM Team")
+    _user(db, "pm_lead", "Project Manager", team="PM Team", designation="Senior Account Manager")  # matches by role, owns no project
+    spm = _user(db, "spm_raj", "Senior Project Manager", team="PM Team")
+    _user(db, "ma_op", "Manuscript Analysis Operator", team="Ops Team")
+    _user(db, "desig_only", "Copyeditor", designation="Project Manager")  # designation alone never makes an owner
+    db.add_all([Project(project_code="P1", project_manager="pm_marcus"), Project(project_code="P2", project_manager="pm_ann"),
+                Project(project_code="P3")])
+    db.commit()
+    now = datetime.now(timezone.utc)
+    rows = {}
+    for code in ("P1", "P2", "P3"):
+        db.add(ChapterInfo(client="CUP", project=code, chapters="J1", workflow="WF", stage_name="Job Initiation", status="In-progress"))
+        rows[code] = StageDetail(client="CUP", project=code, chapters="J1", stage_name="Job Initiation", workflow="WF",
+                                 planned_end_date=now + timedelta(days=1), stage_status="In-progress", custody_status="unassigned")
+        db.add(rows[code])
+    db.commit()
+
+    owner = lambda code: stage_service.resolve_stage_owner_by_designation(db, "Job Initiation", project_code=code)  # noqa: E731
+    assert owner("P1").username == "pm_marcus" and owner("P2").username == "pm_ann"
+    assert owner("P3") is None and owner(None) is None    # no PM on the project: waits unassigned, no random PM
+
+    data = as_user(ann).get("/api/v2/dashboard/workspaces").json()["pipeline"]
+    info = next(s for s in data["stages"] if s["stage_name"] == "Job Initiation")
+    assert info["owner_per_project"] is True and info["owner_username"] is None and "per project" in info["owner_name"]
+    can = {i["project"]: i["can_manage"] for i in data["items"] if i["stage_name"] == "Job Initiation"}
+    assert can == {"P1": False, "P2": True, "P3": False}
+
+    pm_ann = as_user(ann)
+    r = pm_ann.post(f"/api/v2/workspace/tasks/{rows['P1'].id}/assign", json={"assignee": "ma_op"})
+    assert r.status_code == 403, r.text                    # another PM's project
+    assert pm_ann.post(f"/api/v2/workspace/tasks/{rows['P2'].id}/assign", json={"assignee": "ma_op"}).status_code == 200
+    # Senior PM / Admin aren't limited to their own projects
+    assert as_user(spm).post(f"/api/v2/workspace/tasks/{rows['P1'].id}/assign", json={"assignee": "ma_op"}).status_code == 200
+    assert as_user(world["admin"]).post(f"/api/v2/workspace/tasks/{rows['P3'].id}/assign", json={"assignee": "ma_op"}).status_code == 200
+
+    ch = {c.project: c for c in db.query(ChapterInfo).filter_by(chapters="J1").all()}
+    assert access.can_write_chapter(db, world["pm"], ch["P1"]) is True     # owner of P1's Job Initiation
+    assert access.can_write_chapter(db, ann, ch["P1"]) is False            # not her project
+
+
 def test_assignee_role_must_be_one_of_the_stage_roles(world, as_user):
     t = world["task"].id
     lead = as_user(world["lead"])

@@ -54,6 +54,8 @@ export interface WorkspaceItem {
   live?: boolean;
   /** When not live: the stage the chapter is in now. */
   upcoming_from?: string | null;
+  /** Per-row override of the stage's can_manage (PM-owned stages: only the project's PM). null = use the stage's. */
+  can_manage?: boolean | null;
   /** Ids for linking to the chapter folder page (uiPaths.chapterDetail). */
   project_id?: number | null;
   chapter_id?: number | null;
@@ -107,6 +109,8 @@ export interface WorkspaceStageInfo {
   stage_name: string;
   owner_username: string | null;
   owner_name: string | null;
+  /** Owner is each chapter's project PM (Stage Management owner is a PM role). */
+  owner_per_project?: boolean;
   group_email: string | null;
   sla_days: number | null;
   can_manage: boolean;

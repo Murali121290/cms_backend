@@ -22,7 +22,7 @@ interface Props {
 
 export function TaskCard({ item, showStage, onDragStart, onDragEnd }: Props) {
   const ui = useWorkspaceUi();
-  const canManage = ui.canManage(item.stage_name);
+  const canManage = ui.canManage(item.stage_name, item);
   const pending = ui.pending.has(item.id);
   const actions = availableActions(item, { viewer: ui.viewer, canManage });
   const draggable = canManage && isOpen(item) && !pending && Boolean(onDragStart);

@@ -110,7 +110,7 @@ export function ScheduleView({ stage, people }: { stage: string; people: string[
           </span>
           {isUpcoming(item) && <span className="text-xs font-medium text-muted">Upcoming · still in {item.upcoming_from ?? "an earlier stage"}</span>}
         </button>
-        {isUpcoming(item) ? null : item.custody_status === "unassigned" && manage ? (
+        {isUpcoming(item) ? null : item.custody_status === "unassigned" && ui.canManage(item.stage_name, item) ? (
           <Button size="sm" onClick={() => ui.open.assign(item)}>Assign</Button>
         ) : group === "chapter" ? (
           <span title={ui.nameOf(item.assignee_name)}><Avatar username={item.assignee_name} name={ui.nameOf(item.assignee_name)} /></span>

@@ -143,7 +143,7 @@ export function TeamTable({ people, legacyMembers, stage }: Props) {
                                   <span className="min-w-48 flex-1"><b className="text-text">{chapterOf(i)}</b> <span className="text-xs text-muted">{i.project} · {i.stage_name}</span></span>
                                   <CustodyBadge status={i.custody_status} />
                                   <DueLabel info={dueInfo(i, ui.todayKey)} />
-                                  {ui.canManage(i.stage_name) && isAssignable(i) ? (
+                                  {ui.canManage(i.stage_name, i) && isAssignable(i) ? (
                                     <AssigneePicker
                                       people={rankPeople(ui.peopleFor([i.stage_name]), ui.items)}
                                       current={i.assignee_name}

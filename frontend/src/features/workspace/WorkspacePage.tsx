@@ -79,7 +79,11 @@ export function WorkspacePage() {
 
   const stages = useMemo(() => data?.pipeline?.stages ?? [], [data]);
   const manageable = useMemo(() => new Set(stages.filter((s) => s.can_manage).map((s) => s.stage_name)), [stages]);
-  const canManage = useCallback((stage: string) => manageable.has(stage), [manageable]);
+  const canManage = useCallback(
+    (stage: string, item?: { can_manage?: boolean | null }) =>
+      typeof item?.can_manage === "boolean" ? item.can_manage : manageable.has(stage),
+    [manageable],
+  );
   const peopleFor = useCallback(
     (stageNames: string[]) => (data?.pipeline?.people ?? []).filter((p) => p.stage_names.some((s) => stageNames.includes(s))).map((p) => p.username),
     [data],
@@ -207,7 +211,7 @@ export function WorkspacePage() {
       case "assignWork": {
         const person = data?.pipeline?.people.find((p) => p.username === dialog.username);
         const stageNames = person?.stage_names ?? [];
-        const inbound = items.filter((i) => i.custody_status === "unassigned" && stageNames.includes(i.stage_name) && canManage(i.stage_name));
+        const inbound = items.filter((i) => i.custody_status === "unassigned" && stageNames.includes(i.stage_name) && canManage(i.stage_name, i));
         return (
           <AssignWorkModal
             username={dialog.username}

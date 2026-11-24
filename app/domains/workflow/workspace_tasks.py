@@ -65,7 +65,7 @@ def release_chapter_locks(db: Session, sd: StageDetail, *, keep_user_id: Optiona
 
 
 def _ensure_manage(db: Session, actor: User, sd: StageDetail) -> None:
-    if not access.can_manage_stage(db, actor, sd.stage_name):
+    if not access.can_manage_row(db, actor, sd.stage_name, sd.project):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"You don't manage the {sd.stage_name} stage.")
 
 
@@ -208,7 +208,7 @@ def send_assignment_email(db: Session, actor: User, person: User, rows: list[Sta
 def handback_task(db: Session, actor: User, task_id: int, *, notes: str, checklist_confirmed: bool,
                   expected: Optional[str] = None, background: Optional[BackgroundTasks] = None) -> StageDetail:
     sd = load_task(db, task_id)
-    if sd.assignee_name != actor.username and not access.can_manage_stage(db, actor, sd.stage_name):
+    if sd.assignee_name != actor.username and not access.can_manage_row(db, actor, sd.stage_name, sd.project):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the assigned person or the stage owner can hand this back.")
     stage_service.ensure_live(db, sd)
     if not checklist_confirmed:
@@ -415,7 +415,7 @@ def bulk(db: Session, actor: User, *, action: str, task_ids: list[int], assignee
     for task_id in dict.fromkeys(task_ids):
         try:
             sd = load_task(db, task_id)
-            if not access.can_manage_stage(db, actor, sd.stage_name):
+            if not access.can_manage_row(db, actor, sd.stage_name, sd.project):
                 results.append({"task_id": task_id, "status": "forbidden", "message": f"You don't manage {sd.stage_name}."})
                 continue
             cur = custody.effective_custody(sd)
@@ -475,7 +475,7 @@ def _event_text(ev: dict, names: dict[str, str]) -> str:
 
 def activity(db: Session, actor: User, task_id: int) -> dict:
     sd = load_task(db, task_id)
-    if sd.assignee_name != actor.username and not access.can_manage_stage(db, actor, sd.stage_name) and not access.is_manager_level(actor):
+    if sd.assignee_name != actor.username and not access.can_manage_row(db, actor, sd.stage_name, sd.project) and not access.is_manager_level(actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can't view this task's history.")
     history = list(sd.history or [])
     usernames = {u for ev in history for u in (ev.get("by"), ev.get("assignee"), ev.get("previous_assignee")) if u}
@@ -529,6 +529,7 @@ def schedule(db: Session, actor: User, stage_name: str, date_from: date, date_to
 
     from app.domains.projects.dashboard_service import WorkspaceContext
     ctx = WorkspaceContext(db)
+    ctx.set_viewer(actor, access.active_stages(db))
     ctx.preload(rows)
     return {"stage_name": stage_name, "date_from": start, "date_to": end, "items": [ctx.item(r) for r in rows], "truncated": truncated}
 
@@ -552,7 +553,7 @@ def chapter_task(db: Session, actor: User, chapter_id: int) -> dict:
     sd = (db.query(StageDetail)
           .filter(StageDetail.project == chapter.project, StageDetail.chapters == chapter.chapters, StageDetail.stage_name == stage)
           .order_by((StageDetail.stage_status == "Completed").asc(), StageDetail.id.desc()).first())
-    can_manage = access.can_manage_stage(db, actor, stage)
+    can_manage = access.can_manage_row(db, actor, stage, chapter.project)
     owner = stage_service.resolve_stage_owner_by_designation(db, stage, project_code=chapter.project, client_identifier=chapter.client)
     out.update(can_manage=can_manage, owner_name=_name(owner) if owner else None)
     if not sd:

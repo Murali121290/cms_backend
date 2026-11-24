@@ -1364,6 +1364,7 @@ class WorkspaceItem(BaseModel):
     project_id: int | None = None      # Project.id / ChapterInfo.id: link to the chapter folder page
     chapter_id: int | None = None
     upcoming_from: str | None = None   # when not live: the stage the chapter is in now
+    can_manage: bool | None = None     # per-row override (PM-owned stages: only the project's PM); None = stage's can_manage
 
 
 class ChapterTaskPerson(BaseModel):
@@ -1433,6 +1434,7 @@ class WorkspaceStageInfo(BaseModel):
     stage_name: str
     owner_username: str | None = None
     owner_name: str | None = None
+    owner_per_project: bool = False    # owner = each chapter's project PM (stage owner is a PM role)
     group_email: str | None = None
     sla_days: int | None = None
     can_manage: bool = False

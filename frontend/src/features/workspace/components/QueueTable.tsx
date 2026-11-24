@@ -50,7 +50,7 @@ export function QueueTable({ items, stageOptions, currentStage, filters, onFilte
     [items, filters, sort, ui.nameOf],
   );
   const counts = useMemo(() => statusCounts(items, filters, ui.nameOf), [items, filters, ui.nameOf]);
-  const selectable = useMemo(() => rows.filter((r) => isOpen(r) && ui.canManage(r.stage_name)), [rows, ui]);
+  const selectable = useMemo(() => rows.filter((r) => isOpen(r) && ui.canManage(r.stage_name, r)), [rows, ui]);
   const allSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.id));
   const someSelected = selectable.some((r) => selected.has(r.id));
   const headerBox = useRef<HTMLInputElement>(null);
@@ -111,7 +111,7 @@ export function QueueTable({ items, stageOptions, currentStage, filters, onFilte
         />
       ),
       cell: ({ row }) =>
-        isOpen(row.original) && ui.canManage(row.original.stage_name) ? (
+        isOpen(row.original) && ui.canManage(row.original.stage_name, row.original) ? (
           <input
             type="checkbox"
             aria-label={`Select ${chapterOf(row.original)}`}
@@ -162,7 +162,7 @@ export function QueueTable({ items, stageOptions, currentStage, filters, onFilte
       header: () => sortHeader("assignee", "Assignee", "assignee"),
       cell: ({ row }) => {
         const it = row.original;
-        if (ui.canManage(it.stage_name) && isAssignable(it)) {
+        if (ui.canManage(it.stage_name, it) && isAssignable(it)) {
           return (
             <AssigneePicker
               people={rankPeople(ui.peopleFor([it.stage_name]), ui.items)}
@@ -184,7 +184,7 @@ export function QueueTable({ items, stageOptions, currentStage, filters, onFilte
       header: () => <span className="sr-only">Actions</span>,
       cell: ({ row }) => {
         const it = row.original;
-        const manage = ui.canManage(it.stage_name);
+        const manage = ui.canManage(it.stage_name, it);
         return (
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
             {manage && it.custody_status === "unassigned" && <Button size="sm" variant="secondary" onClick={() => ui.open.assign(it)}>Assign</Button>}

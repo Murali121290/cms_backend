@@ -47,6 +47,19 @@ class WorkspaceContext:
         self._client_by_code: dict[str, str] = {}      # client division code -> company name
         self._pm_names: dict[str, str] = {}            # username -> first name
         self._project_ids: dict[str, int] = {}         # project code -> Project.id (for links to the chapter page)
+        # Per-project stages where the viewer may act only on their own projects (see access.can_manage_row).
+        self.viewer: Optional[User] = None
+        self.own_projects_only: set[str] = set()
+
+    def set_viewer(self, viewer: User, stages: Iterable[StageMaster]) -> None:
+        self.viewer = viewer
+        self.own_projects_only = {s.stage_name for s in stages if access.restricted_to_own_projects(s, viewer)}
+
+    def row_can_manage(self, sd: StageDetail) -> Optional[bool]:
+        """False/True only where the stage-level answer doesn't hold for this row; None = use the stage's can_manage."""
+        if self.viewer is None or sd.stage_name not in self.own_projects_only:
+            return None
+        return self._project_pm.get(sd.project) == self.viewer.username
 
     def preload(self, rows: Iterable[StageDetail]) -> None:
         rows = list(rows)
@@ -153,6 +166,7 @@ class WorkspaceContext:
             "chapter_id": meta.get("chapter_id"),
             "live": self.is_live(sd),
             "upcoming_from": None if self.is_live(sd) else meta.get("current_stage"),
+            "can_manage": self.row_can_manage(sd),
         }
 
     def is_live(self, sd: StageDetail) -> bool:
@@ -257,11 +271,14 @@ def _stage_infos(db: Session, stages: list[StageMaster], stage_names: set[str], 
     out = []
     owner_cache: dict[str, Optional[User]] = {}
     for st in sorted((s for s in stages if s.stage_name in stage_names), key=lambda s: s.id or 0):
-        owner = owner_cache.setdefault(st.stage_name, stage_service.resolve_stage_owner_by_designation(db, st.stage_name))
+        per_project = access.owner_is_project_pm(st)
+        # Per-project stages (owner = a PM role) have no single owner: each chapter's owner is its project's PM.
+        owner = None if per_project else owner_cache.setdefault(st.stage_name, stage_service.resolve_stage_owner_by_designation(db, st.stage_name))
         out.append({
             "stage_name": st.stage_name,
             "owner_username": owner.username if owner else None,
-            "owner_name": _display_name(owner) if owner else None,
+            "owner_name": "Project's PM (per project)" if per_project else (_display_name(owner) if owner else None),
+            "owner_per_project": per_project,
             "group_email": st.group_email,
             "sla_days": st.sla_level1,
             "can_manage": manage_scope.covers(st.stage_name),
@@ -348,6 +365,7 @@ def get_workspace_dashboard_data(db: Session, user: User, completed_days: int = 
     cutoff = ctx.now_utc - timedelta(days=completed_days)
     role_type = access.dashboard_role_type(user)
     stages = access.active_stages(db)
+    ctx.set_viewer(user, stages)
     # A stage owner (Stage Master "Owner stage" = one of their roles) gets the owner board for every stage
     # they own, even when their role name isn't one of the fixed manager / team-lead roles.
     owned = access.owned_scope(db, user, stages) if role_type == "user" else None

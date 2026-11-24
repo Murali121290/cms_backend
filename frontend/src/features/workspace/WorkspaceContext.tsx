@@ -21,7 +21,8 @@ export interface WorkspaceUi {
   nameOf: NameOf;
   items: WorkspaceItem[];
   stages: WorkspaceStageInfo[];
-  canManage: (stage: string) => boolean;
+  /** Pass the item when there is one: on PM-owned stages a PM manages only their own projects' chapters. */
+  canManage: (stage: string, item?: { can_manage?: boolean | null }) => boolean;
   /** Usernames who work in any of the given stages (assignment candidates). */
   peopleFor: (stageNames: string[]) => string[];
   pending: ReadonlySet<number>;

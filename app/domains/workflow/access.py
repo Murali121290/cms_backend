@@ -98,6 +98,49 @@ def stage_owner_matches(stage: StageMaster, user: User) -> bool:
     return bool(owner) and owner == role
 
 
+# Stages owned by a PM role (e.g. Job Initiation, owner = "Project Manager") are owned per project: the owner of a
+# chapter there is its project's PM (projects.project_manager), not whichever PM the user table returns first.
+PM_OWNER_ROLES = {"project manager", "senior project manager", "asst general manager"}
+
+
+def _owner_key(value: Optional[str]) -> str:
+    return " ".join(_norm(value).replace("-", " ").replace("_", " ").split())
+
+
+def owner_is_project_pm(stage: Optional[StageMaster]) -> bool:
+    return bool(stage) and _owner_key(stage.owner_designation) in PM_OWNER_ROLES
+
+
+def get_stage(db: Session, stage_name: Optional[str]) -> Optional[StageMaster]:
+    if not stage_name:
+        return None
+    return db.query(StageMaster).filter(StageMaster.stage_name == stage_name).first()
+
+
+def project_pm_username(db: Session, project_code: Optional[str]) -> Optional[str]:
+    if not project_code:
+        return None
+    from app.domains.projects.models import Project
+    proj = db.query(Project).filter(Project.project_code == project_code).first()
+    return (proj.project_manager or None) if proj else None
+
+
+def restricted_to_own_projects(stage: Optional[StageMaster], user: Optional[User]) -> bool:
+    """True when the user holds this stage's PM owner role, so they own it only for projects where they are the PM.
+    Admins, and managers with another role (e.g. Senior PM / AGM on a "Project Manager" stage), keep every project."""
+    return bool(user) and owner_is_project_pm(stage) and stage_owner_matches(stage, user) and not _is_admin_role(user)
+
+
+def can_manage_row(db: Session, user: Optional[User], stage_name: str, project_code: Optional[str]) -> bool:
+    """can_manage_stage for one chapter: on a per-project stage a PM manages only their own projects' chapters."""
+    if not user:
+        return False
+    stage = get_stage(db, stage_name)
+    if restricted_to_own_projects(stage, user):
+        return project_pm_username(db, project_code) == user.username
+    return can_manage_stage(db, user, stage_name)
+
+
 def owned_scope(db: Session, user: User, stages: Optional[list[StageMaster]] = None) -> StageScope:
     """Every stage whose Stage Master owner designation is one of the user's roles (an owner may hold several)."""
     stages = stages if stages is not None else active_stages(db)
@@ -200,7 +243,7 @@ def can_view_chapter(db: Session, user: Optional[User], chapter) -> bool:
         return False
     if sees_all_chapters(user) or chapter.current_assignee_name == user.username:
         return True
-    return bool(chapter.stage_name) and can_manage_stage(db, user, chapter.stage_name)
+    return bool(chapter.stage_name) and can_manage_row(db, user, chapter.stage_name, chapter.project)
 
 
 def _is_admin_role(user: User) -> bool:
@@ -219,13 +262,17 @@ def can_write_chapter(db: Session, user: Optional[User], chapter) -> bool:
         return True
     if chapter.current_assignee_name == user.username or _is_admin_role(user):
         return True
-    return bool(chapter.stage_name) and leads_stage(db, user, chapter.stage_name)
+    return bool(chapter.stage_name) and leads_stage(db, user, chapter.stage_name, chapter.project)
 
 
-def leads_stage(db: Session, user: User, stage_name: str) -> bool:
+def leads_stage(db: Session, user: User, stage_name: str, project_code: Optional[str] = None) -> bool:
     """Owner (Stage Master owner designation = user's role) or team lead of the stage. Unlike can_manage_stage this
-    does NOT include managers/PMs who oversee every stage: they keep workflow rights but files stay read-only."""
+    does NOT include managers/PMs who oversee every stage: they keep workflow rights but files stay read-only.
+    On a per-project stage (owner = a PM role) the owner is only the chapter's project PM."""
     if owned_scope(db, user).covers(stage_name):
+        stage = get_stage(db, stage_name)
+        if restricted_to_own_projects(stage, user) and project_code is not None:
+            return project_pm_username(db, project_code) == user.username
         return True
     if dashboard_role_type(user) == "teamlead" or get_user_access_level(user) == "TeamLead":
         return teamlead_scope(db, user).covers(stage_name)
