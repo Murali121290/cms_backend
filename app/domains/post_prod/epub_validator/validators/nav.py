@@ -1238,10 +1238,16 @@ def validate_nav_epub_type(file_details, rule_config=None):
 
 @rule("COM-NCX-001")
 def validate_ncx_navpoint(file_details, rule_config=None):
-    """Ensure navPoint elements are present and have content src."""
+    """
+    Ensure navPoint elements are present and have content src.
+    If max_count is specified in rule_config (e.g. max_navpoints = 100),
+    validates that the count of <navPoint> elements does not exceed max_count.
+    If not specified, works as usual.
+    """
     file_path = file_details["full_path"]
+    rel_path = file_details.get("relative_path") or os.path.basename(file_path)
     issues = []
-    
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             ncx_soup = BeautifulSoup(f, "xml")
@@ -1254,8 +1260,33 @@ def validate_ncx_navpoint(file_details, rule_config=None):
             "type": "missing_navpoint",
             "message": "No <navPoint> elements found in toc.ncx.",
             "category": "Error",
+            "file_path": rel_path,
         })
         return {"issues_count": len(issues), "issues": issues}
+
+    # Check max navpoints limit if configured
+    inner_config = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+    max_navpoints = inner_config.get("max_navpoints") or inner_config.get("max_count")
+    if max_navpoints is not None:
+        try:
+            max_limit = int(max_navpoints)
+            if len(navpoints) > max_limit:
+                first_line = getattr(navpoints[0], "sourceline", 1)
+                issues.append({
+                    "rule_name": "TOC Entry Count Exceeded",
+                    "type": "max_navpoints_exceeded",
+                    "message": (
+                        f"toc.ncx contains {len(navpoints)} <navPoint> elements, which exceeds the maximum limit of {max_limit}. "
+                        "If the title contains more than 100 ToC entries, no ToC needs to be created."
+                    ),
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "line_number": first_line,
+                    "extract": f"{len(navpoints)} navPoints",
+                    "snippet": f"Found {len(navpoints)} navPoints (max: {max_limit})",
+                })
+        except (ValueError, TypeError):
+            pass
 
     for np in navpoints:
         content = np.find("content")
@@ -1264,7 +1295,9 @@ def validate_ncx_navpoint(file_details, rule_config=None):
                 "type": "invalid_navpoint",
                 "message": f"<navPoint id='{np.get('id', '')}'> is missing a valid <content src='...'>.",
                 "category": "Error",
-                "line_number": getattr(np, "sourceline", None)
+                "file_path": rel_path,
+                "line_number": getattr(np, "sourceline", None),
+                "extract": np.get("id", ""),
             })
 
     return {"issues_count": len(issues), "issues": issues}

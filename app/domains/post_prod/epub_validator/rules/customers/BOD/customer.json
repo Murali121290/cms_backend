@@ -101,6 +101,9 @@
       "target_path": "OEBPS",
       "file_name_pattern": "toc.ncx",
       "enabled": true,
+      "rule_config": {
+        "max_navpoints": 100
+      },
       "category": "TOC Check"
     },
     {
