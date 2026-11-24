@@ -297,6 +297,73 @@
       "category": "Navigation Check"
     },
     {
+      "id": "BOD-TOC-001",
+      "name": "Terms should be consistent for all tocs in nav and ncx",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "toc_file_patterns": [
+          "*inhalt*.xhtml",
+          "*inhaltsverzeichnis*.xhtml",
+          "*toc*.xhtml",
+          "table_of_content.xhtml",
+          "*_contents*.xhtml",
+          "*sommaire*.xhtml",
+          "*indice*.xhtml",
+          "*index*.xhtml"
+        ],
+        "toc_titles_by_language": {
+          "en": [
+            "Table of Contents",
+            "Contents"
+          ],
+          "de": [
+            "Inhaltsverzeichnis",
+            "Inhalt"
+          ],
+          "fr": [
+            "Sommaire"
+          ],
+          "da": [
+            "Indholdsfortegnelse",
+            "Indholdsforteg nelse"
+          ],
+          "sv": [
+            "Innehållsförteckning"
+          ],
+          "fi": [
+            "Sisällysluettelo"
+          ],
+          "it": [
+            "Indice"
+          ],
+          "es": [
+            "Indice"
+          ],
+          "pt": [
+            "Índice"
+          ],
+          "no": [
+            "Innholdsfortegnelse"
+          ],
+          "nl": [
+            "Inhoudsopgave"
+          ],
+          "ca": [
+            "Índex"
+          ],
+          "va": [
+            "Índex"
+          ]
+        }
+      },
+      "category": "TOC Check"
+    },
+    {
       "id": "BOD-LM-001",
       "name": "Check landmark navigation in nav.xhtml",
       "target_path": "OEBPS",

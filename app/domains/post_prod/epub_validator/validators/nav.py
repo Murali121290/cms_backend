@@ -2836,3 +2836,286 @@ def validate_standard_toc_frontmatter_order(file_details, rule_config=None):
     return {"issues_count": len(issues), "issues": issues}
 
 
+@rule("BOD-TOC-001")
+def validate_toc_terms_consistent(file_details, rule_config=None):
+    """
+    Check TOC file headings across NAV (nav.xhtml) and NCX (toc.ncx).
+    Terms should be consistent and match:
+    1. The <h1> tag name/content inside the actual TOC document (e.g. xhtml/D_inhalt.xhtml).
+    2. The heading / link in nav.xhtml (<nav epub:type="toc">).
+    3. The <navPoint> label in toc.ncx (<navLabel><text>...</text></navLabel>).
+    4. The configured allowed TOC terms for the detected book language.
+    (Note: OPF <guide> reference is ignored as requested, as 'Table of Contents' is default).
+    """
+    import os
+    import fnmatch
+    import xml.etree.ElementTree as ET
+
+    cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
+
+    toc_titles_map = cfg.get("toc_titles_by_language")
+    toc_file_patterns = cfg.get("toc_file_patterns")
+
+    if not toc_titles_map or not isinstance(toc_titles_map, dict):
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    file_path = file_details.get("full_path") or ""
+    file_name = file_details.get("file_name") or os.path.basename(file_path)
+    rel_path = file_details.get("relative_path") or file_name
+    current_dir = os.path.dirname(file_path)
+
+    text = read_text(file_path)
+    if not text.strip():
+        return {"issues_count": 0, "issues": []}
+
+    lines = text.splitlines()
+
+    def find_line(*needles):
+        for n in needles:
+            if not n:
+                continue
+            ns = str(n).strip()
+            if not ns:
+                continue
+            for idx, line in enumerate(lines, 1):
+                if ns in line:
+                    return idx
+        return 1
+
+    def matches_any_pattern(filename, patterns):
+        if not patterns:
+            return False
+        fn_lower = os.path.basename(filename).lower().split("#")[0]
+        for pat in patterns:
+            if fnmatch.fnmatch(fn_lower, pat.lower()):
+                return True
+        return False
+
+    def find_toc_file_h1(target_href_or_name):
+        """Locate the TOC XHTML file on disk and extract its <h1> text."""
+        candidates = []
+        if target_href_or_name:
+            clean_href = target_href_or_name.split("#")[0].strip()
+            candidates.append(os.path.normpath(os.path.join(current_dir, clean_href)))
+            candidates.append(os.path.normpath(os.path.join(current_dir, "xhtml", os.path.basename(clean_href))))
+            candidates.append(os.path.normpath(os.path.join(current_dir, "..", "xhtml", os.path.basename(clean_href))))
+
+        for cand in candidates:
+            if os.path.isfile(cand):
+                try:
+                    content = read_text(cand)
+                    if content:
+                        s = BeautifulSoup(content, "html.parser")
+                        h1 = s.find("h1")
+                        if h1:
+                            return h1.get_text(strip=True), os.path.basename(cand)
+                except Exception:
+                    pass
+
+        search_dirs = [current_dir, os.path.join(current_dir, "xhtml"), os.path.normpath(os.path.join(current_dir, "..", "xhtml"))]
+        for sdir in search_dirs:
+            if os.path.isdir(sdir):
+                for fname in os.listdir(sdir):
+                    if matches_any_pattern(fname, toc_file_patterns):
+                        f_full = os.path.join(sdir, fname)
+                        if os.path.isfile(f_full):
+                            try:
+                                content = read_text(f_full)
+                                if content:
+                                    s = BeautifulSoup(content, "html.parser")
+                                    h1 = s.find("h1")
+                                    if h1:
+                                        return h1.get_text(strip=True), fname
+                            except Exception:
+                                pass
+        return None, None
+
+    # Detect book language
+    detected_lang = get_book_language(file_details)
+    norm_lang = (detected_lang or "en").lower().split("-")[0].strip()
+
+    allowed_terms = None
+    for lang_k, terms in toc_titles_map.items():
+        if lang_k.lower().strip() == norm_lang or lang_k.lower().strip() == detected_lang.lower().strip():
+            allowed_terms = terms
+            break
+
+    if not allowed_terms:
+        lang_name_map = {
+            "en": "english", "de": "german", "fr": "french", "da": "danish",
+            "sv": "swedish", "fi": "finnish", "it": "italian", "es": "spanish",
+            "pt": "portuguese", "no": "norwegian", "nl": "dutch", "ca": "catalan", "va": "valencian"
+        }
+        target_name = lang_name_map.get(norm_lang, "")
+        for lang_k, terms in toc_titles_map.items():
+            if lang_k.lower().strip() == target_name:
+                allowed_terms = terms
+                break
+
+    if not allowed_terms:
+        allowed_terms = toc_titles_map.get("en") or toc_titles_map.get("English") or list(toc_titles_map.values())[0]
+
+    if isinstance(allowed_terms, str):
+        allowed_terms = [allowed_terms]
+
+    allowed_terms_clean = {t.strip().lower(): t.strip() for t in allowed_terms if t and t.strip()}
+    allowed_display = ", ".join(f'"{t}"' for t in allowed_terms)
+
+    # Resolve actual TOC file <h1> text if available
+    toc_h1_text, toc_fn = find_toc_file_h1(None)
+
+    is_ncx = file_name.lower().endswith(".ncx") or "toc.ncx" in file_name.lower()
+    is_nav = ("nav" in file_name.lower()) and (file_name.lower().endswith(".xhtml") or file_name.lower().endswith(".html"))
+
+    if is_ncx:
+        # Check NCX <navPoint> that points to TOC file
+        try:
+            clean_xml = re.sub(r'xmlns(:\w+)?="[^"]*"', '', text, count=1)
+            root = ET.fromstring(clean_xml.encode("utf-8"))
+        except Exception:
+            try:
+                root = ET.fromstring(text.encode("utf-8"))
+            except Exception:
+                return {"issues_count": 0, "issues": []}
+
+        nav_map = root.find(".//navMap")
+        if nav_map is not None:
+            for np in nav_map.findall(".//navPoint"):
+                content_elem = np.find(".//content")
+                src = content_elem.get("src", "").strip() if content_elem is not None else ""
+                target_base = os.path.basename(src.split("#")[0])
+
+                if matches_any_pattern(target_base, toc_file_patterns):
+                    text_elem = np.find(".//navLabel/text")
+                    label_text = (text_elem.text or "").strip() if text_elem is not None else ""
+                    np_id = np.get("id", "").strip()
+                    raw_extract = ET.tostring(np, encoding="unicode")[:200]
+                    line_no = find_line(np_id, label_text, src)
+
+                    # Check 1: Allowed language terms
+                    if label_text and label_text.strip().lower() not in allowed_terms_clean:
+                        issues.append({
+                            "type": "ncx_toc_title_inconsistent",
+                            "message": (
+                                f"TOC entry title in NCX <navPoint> is '{label_text}', which is inconsistent with "
+                                f"the expected TOC term for language '{norm_lang}' (allowed: {allowed_display})."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+                    # Check 2: Match TOC file <h1> tag
+                    spec_h1, spec_fn = find_toc_file_h1(src)
+                    h1_to_compare = spec_h1 or toc_h1_text
+                    fn_to_compare = spec_fn or toc_fn or target_base
+                    if h1_to_compare and label_text and label_text.strip().lower() != h1_to_compare.strip().lower():
+                        issues.append({
+                            "type": "ncx_toc_title_h1_mismatch",
+                            "message": (
+                                f"TOC entry title in toc.ncx ('{label_text}') does not match the <h1> tag name ('{h1_to_compare}') "
+                                f"in TOC file '{fn_to_compare}'. TOC heading should be consistent across all files."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+    elif is_nav:
+        soup = BeautifulSoup(text, "html.parser")
+
+        # 1. Check heading in <nav epub:type="toc">
+        toc_nav = (
+            soup.find("nav", attrs={"epub:type": lambda v: v and "toc" in v.lower().split()})
+            or soup.find("nav", attrs={"role": lambda v: v and "doc-toc" in v.lower().split()})
+            or soup.find("nav", id="toc")
+        )
+        if toc_nav:
+            # Check direct heading inside toc_nav (h1, h2, h3, or header)
+            heading = toc_nav.find(["h1", "h2", "h3", "h4", "header"])
+            if heading:
+                heading_text = heading.get_text(strip=True)
+                line_no = getattr(heading, "sourceline", None) or find_line(heading_text)
+                raw_extract = str(heading)[:200]
+
+                # Check 1: Allowed language terms
+                if heading_text and heading_text.strip().lower() not in allowed_terms_clean:
+                    issues.append({
+                        "type": "nav_toc_heading_inconsistent",
+                        "message": (
+                            f"TOC heading in nav.xhtml is '{heading_text}', which is inconsistent with "
+                            f"the expected TOC term for language '{norm_lang}' (allowed: {allowed_display})."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_no,
+                        "snippet": raw_extract,
+                        "extract": raw_extract,
+                    })
+
+                # Check 2: Match TOC file <h1> tag
+                if toc_h1_text and heading_text and heading_text.strip().lower() != toc_h1_text.strip().lower():
+                    issues.append({
+                        "type": "nav_toc_heading_h1_mismatch",
+                        "message": (
+                            f"TOC heading in nav.xhtml ('{heading_text}') does not match the <h1> tag name ('{toc_h1_text}') "
+                            f"in TOC file '{toc_fn}'. TOC heading should be consistent across all files."
+                        ),
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "line_number": line_no,
+                        "snippet": raw_extract,
+                        "extract": raw_extract,
+                    })
+
+            # 2. Check any nav link pointing to a TOC file
+            for a_tag in toc_nav.find_all("a", href=True):
+                href = a_tag["href"].strip()
+                target_base = os.path.basename(href.split("#")[0])
+                if matches_any_pattern(target_base, toc_file_patterns):
+                    link_text = a_tag.get_text(strip=True)
+                    line_no = getattr(a_tag, "sourceline", None) or find_line(link_text, href)
+                    raw_extract = str(a_tag)[:200]
+
+                    # Check 1: Allowed language terms
+                    if link_text and link_text.strip().lower() not in allowed_terms_clean:
+                        issues.append({
+                            "type": "nav_toc_link_inconsistent",
+                            "message": (
+                                f"TOC link in nav.xhtml is '{link_text}', which is inconsistent with "
+                                f"the expected TOC term for language '{norm_lang}' (allowed: {allowed_display})."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+                    # Check 2: Match TOC file <h1> tag
+                    spec_h1, spec_fn = find_toc_file_h1(href)
+                    h1_to_compare = spec_h1 or toc_h1_text
+                    fn_to_compare = spec_fn or toc_fn or target_base
+                    if h1_to_compare and link_text and link_text.strip().lower() != h1_to_compare.strip().lower():
+                        issues.append({
+                            "type": "nav_toc_link_h1_mismatch",
+                            "message": (
+                                f"TOC link in nav.xhtml ('{link_text}') does not match the <h1> tag name ('{h1_to_compare}') "
+                                f"in TOC file '{fn_to_compare}'. TOC heading should be consistent across all files."
+                            ),
+                            "category": "Error",
+                            "file_path": rel_path,
+                            "line_number": line_no,
+                            "snippet": raw_extract,
+                            "extract": raw_extract,
+                        })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+
