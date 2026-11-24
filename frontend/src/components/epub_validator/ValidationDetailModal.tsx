@@ -403,6 +403,12 @@ function IssueRow({
           {issue.message && (
             <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap break-all font-sans">{issue.message}</p>
           )}
+          {issue.is_ignored && issue.ignore_reason && (
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-md">
+              <span className="font-semibold shrink-0">Ignore Reason:</span>
+              <span className="italic break-all">{issue.ignore_reason}</span>
+            </div>
+          )}
           {targetUrl && (
             <div className="mt-1.5 flex items-center gap-1.5">
               <a
@@ -857,24 +863,51 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning' | 'info' | 'ignored'>('all');
   const [ruleNameFilter, setRuleNameFilter] = useState<string | null>(null);
 
-  const [localIgnoredKeys, setLocalIgnoredKeys] = useState<Set<string>>(new Set());
+  const [localIgnoredKeys, setLocalIgnoredKeys] = useState<Map<string, string>>(new Map());
   const [localUnignoredKeys, setLocalUnignoredKeys] = useState<Set<string>>(new Set());
+  const [ignoreModalIssue, setIgnoreModalIssue] = useState<DisplayIssue | null>(null);
+  const [ignoreReasonInput, setIgnoreReasonInput] = useState<string>('');
+  const [isSubmittingIgnore, setIsSubmittingIgnore] = useState<boolean>(false);
 
-  const handleIgnore = async (issue: DisplayIssue, e: React.MouseEvent) => {
+  const handleOpenIgnoreModal = (issue: DisplayIssue, e: React.MouseEvent) => {
     e.stopPropagation();
+    setIgnoreModalIssue(issue);
+    setIgnoreReasonInput(issue.ignore_reason || '');
+  };
+
+  const handleConfirmIgnore = async () => {
+    if (!ignoreModalIssue) return;
+    const issue = ignoreModalIssue;
+    const reason = ignoreReasonInput.trim();
     const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.extract || issue.message}|${issue.line_number ?? ''}`;
-    setLocalIgnoredKeys(prev => new Set(prev).add(key));
-    setLocalUnignoredKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+    
+    setLocalIgnoredKeys(prev => {
+      const m = new Map(prev);
+      m.set(key, reason);
+      return m;
+    });
+    setLocalUnignoredKeys(prev => {
+      const s = new Set(prev);
+      s.delete(key);
+      return s;
+    });
+
+    setIsSubmittingIgnore(true);
     try {
       await ignoreIssue(folderName, {
         rule_id: String(issue._ruleId || ''),
         file_name: issue._fileName || '',
         snippet: issue.snippet || issue.extract || issue.message || '',
         line_number: issue.line_number ?? undefined,
+        reason: reason,
       });
+      setIgnoreModalIssue(null);
+      setIgnoreReasonInput('');
       onValidationDataChange?.();
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSubmittingIgnore(false);
     }
   };
 
@@ -882,7 +915,11 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     e.stopPropagation();
     const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.extract || issue.message}|${issue.line_number ?? ''}`;
     setLocalUnignoredKeys(prev => new Set(prev).add(key));
-    setLocalIgnoredKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+    setLocalIgnoredKeys(prev => {
+      const m = new Map(prev);
+      m.delete(key);
+      return m;
+    });
     try {
       await unignoreIssue(folderName, {
         rule_id: String(issue._ruleId || ''),
@@ -924,7 +961,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
 
     return raw.map(issue => {
       const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.extract || issue.message}|${issue.line_number ?? ''}`;
-      if (localIgnoredKeys.has(key)) return { ...issue, is_ignored: true };
+      if (localIgnoredKeys.has(key)) return { ...issue, is_ignored: true, ignore_reason: localIgnoredKeys.get(key) || issue.ignore_reason };
       if (localUnignoredKeys.has(key)) return { ...issue, is_ignored: false };
       return issue;
     });
@@ -1394,7 +1431,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                             </div>
                           ) : (
                             displayedIssues.map((issue, i) => (
-                              <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} onIgnore={(e) => handleIgnore(issue, e)} onUnignore={(e) => handleUnignore(issue, e)} folderName={folderName} onRefresh={onRevalidate} />
+                              <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} onIgnore={(e) => handleOpenIgnoreModal(issue, e)} onUnignore={(e) => handleUnignore(issue, e)} folderName={folderName} onRefresh={onRevalidate} />
                             ))
                           )}
                         </div>
@@ -1881,6 +1918,104 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
             setImageVersion(Date.now());
           }}
         />
+
+        {/* ── Ignore Issue Reason Modal ────────────────────────────────────────── */}
+        <AnimatePresence>
+          {ignoreModalIssue && (
+            <motion.div
+              className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => { if (!isSubmittingIgnore) setIgnoreModalIssue(null); }}
+            >
+              <motion.div
+                className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden"
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                transition={{ duration: 0.16 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-5">
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                        <EyeOff className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-foreground m-0">Ignore Issue</h3>
+                        <p className="text-[11px] text-muted-foreground m-0">Provide an optional or required reason to ignore this validation issue</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setIgnoreModalIssue(null)}
+                      disabled={isSubmittingIgnore}
+                      className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="bg-muted/30 border border-border/60 rounded-lg p-2.5 mb-4 text-xs">
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-primary font-bold mb-1">
+                      <span>{ignoreModalIssue._ruleId}</span>
+                      {typeof ignoreModalIssue.line_number === 'number' && (
+                        <span>• Line {ignoreModalIssue.line_number}</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-foreground font-sans line-clamp-2 m-0">
+                      {ignoreModalIssue.message || ignoreModalIssue.snippet || 'Validation issue'}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 mb-2">
+                    <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Reason for Ignore
+                    </label>
+                    <textarea
+                      autoFocus
+                      className="w-full text-xs p-2.5 rounded-lg border border-input bg-background resize-none h-20 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-sans"
+                      placeholder="e.g. Approved publisher exception, visual check verified, intentional style..."
+                      value={ignoreReasonInput}
+                      onChange={(e) => setIgnoreReasonInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          e.preventDefault();
+                          handleConfirmIgnore();
+                        }
+                      }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground italic m-0">
+                    Press <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[9px]">Ctrl</kbd>+<kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[9px]">Enter</kbd> to confirm
+                  </p>
+                </div>
+
+                <div className="px-5 py-3 bg-muted/20 border-t border-border flex items-center justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => setIgnoreModalIssue(null)}
+                    disabled={isSubmittingIgnore}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="h-8 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white"
+                    onClick={handleConfirmIgnore}
+                    disabled={isSubmittingIgnore}
+                  >
+                    {isSubmittingIgnore ? 'Ignoring…' : 'Ignore Issue'}
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </div>
   );

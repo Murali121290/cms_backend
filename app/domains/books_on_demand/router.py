@@ -10,6 +10,18 @@ import logging
 import mimetypes
 from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
+import zoneinfo
+
+LOCAL_TZ = zoneinfo.ZoneInfo("Asia/Kolkata")
+
+def get_local_now() -> datetime:
+    """Returns the current datetime in the local timezone (Asia/Kolkata)."""
+    return datetime.now(LOCAL_TZ)
+
+def get_local_iso() -> str:
+    """Returns the current local ISO timestamp with timezone."""
+    return get_local_now().isoformat()
+
 
 from app.database import get_db, SessionLocal
 from app.domains.books_on_demand.models import BodJob
@@ -1567,8 +1579,8 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
         })
         job.assigned_users = new_history
         flag_modified(job, "assigned_users")
-    elif new_stage == "Production" or current_stage == "QC":
-        # Unassign assignee when moving to Production
+    elif new_stage in ("Production", "QC") or current_stage in ("Production", "QC"):
+        # Unassign assignee when moving to Production or QC so the respective team can pick up fresh
         job.current_assignee = None
         new_stage_data["assignee"] = None
         
@@ -1968,7 +1980,7 @@ def upload_epub(
 
     # If an EPUB already exists for this job, create a backup
     if job.epub_filepath and os.path.exists(job.epub_filepath):
-        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp_str = get_local_now().strftime("%Y%m%d_%H%M%S")
         old_basename = os.path.basename(job.epub_filepath)
         name_no_ext, ext = os.path.splitext(old_basename)
         if not ext:
@@ -1985,7 +1997,7 @@ def upload_epub(
             logger.info(f"Backed up existing EPUB to {backup_path}")
             
             # Record in job.file_history
-            now_iso = datetime.now(timezone.utc).isoformat()
+            now_iso = get_local_iso()
             file_hist = list(job.file_history or [])
             file_hist.append({
                 "action": "reupload_backup",
@@ -2033,42 +2045,22 @@ def upload_epub(
         logger.warning(f"Could not reset existing EPUB validator data on reupload: {e}")
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    history = dict(job.stage_history)
+    history = dict(job.stage_history or {})
     
-    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Job Analysis,Production,QC,Ready to Dispatch,Archive"
-    stages = [s.strip() for s in stages_str.split(",")]
-    
-    qc_index = stages.index("QC") if "QC" in stages else 2
-    
-    # Auto-advance directly to QC if not already there or past it
-    if job.current_stage_index < qc_index:
-        # End current stage
-        current_stage = job.current_stage_name
-        stage_data = history.get(current_stage, {})
-        stage_data["end_time"] = now_iso
-        history[current_stage] = stage_data
-        
-        # Advance directly to QC
-        job.current_stage_index = qc_index
-        job.current_stage_name = "QC"
-        
-        # Set start time for QC
-        new_stage_data = history.get("QC", {})
-        new_stage_data["start_time"] = now_iso
-        history["QC"] = new_stage_data
-        
-        # Unassign the job
-        job.current_assignee = None
-        
-        # Send email
-        if settings.BOD_MANAGER_EMAIL:
-            send_bod_qc_ready_email(settings.BOD_MANAGER_EMAIL, job.project_name, job.epub_filename or job.pdf_filename)
-            
+    # Record upload in stage history
+    current_stage = job.current_stage_name or "Production"
+    stage_data = history.get(current_stage, {})
+    stage_data["epub_uploaded_at"] = now_iso
+    stage_data["epub_filename"] = file.filename
+    history[current_stage] = stage_data
+
+    # Do NOT auto-advance to QC on upload. The user remains in Production to open the EPUB Validator,
+    # inspect and fix issues, and explicitly click 'Complete Production' when finished.
     job.stage_history = history
     db.commit()
     db.refresh(job)
     
-    return {"message": "EPUB uploaded and moved to QC", "job": job}
+    return {"message": "EPUB uploaded successfully", "job": job}
 
 
 @router.post("/jobs/{job_id}/upload-cover")
@@ -2106,7 +2098,7 @@ def upload_cover(
 
     # Backup existing cover if present
     if job.cover_filepath and os.path.exists(job.cover_filepath):
-        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp_str = get_local_now().strftime("%Y%m%d_%H%M%S")
         old_basename = os.path.basename(job.cover_filepath)
         name_no_ext, old_ext = os.path.splitext(old_basename)
         backup_filename = f"{name_no_ext}_{re.sub(r'[^a-zA-Z0-9_-]', '_', user_identifier)}_{timestamp_str}{old_ext}"
@@ -2430,7 +2422,7 @@ def sync_qc_reports_and_complete(
     before_dir = os.path.join(bod_project_dir, "_before")
     os.makedirs(before_dir, exist_ok=True)
 
-    timestamp_suffix = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp_suffix = get_local_now().strftime("%Y%m%d_%H%M%S")
 
     # Move current EPUB to _before if exists
     if job.epub_filepath and os.path.exists(job.epub_filepath):
@@ -2507,31 +2499,21 @@ def sync_qc_reports_and_complete(
     except Exception as e:
         logger.warning(f"EPUBCheck report sync skipped: {e}")
 
-    # 5. Generate history.csv for the job
+    # 5. Generate history.csv for the job (especially important for QC and dispatch)
     try:
         generate_bod_history_csv(job, bod_project_dir)
         logger.info(f"Generated history.csv for job {job.id} ({job.project_name})")
     except Exception as e:
-        logger.warning(f"Could not generate history.csv during QC complete: {e}")
+        logger.warning(f"Could not generate history.csv during stage complete: {e}")
 
     db.commit()
     db.refresh(job)
 
-    # 6. Advance stage to Ready to Dispatch if in QC & auto-assign to BOD Manager
-    if job.current_stage_name == "QC":
-        _advance_job_logic(job, background_tasks, db)
-    else:
-        from app.domains.auth.models import User
-        settings = get_settings()
-        manager_email = getattr(settings, "BOD_MANAGER_EMAIL", None)
-        manager_user = None
-        if manager_email:
-            manager_user = db.query(User).filter(User.email.ilike(manager_email.strip())).first()
-        manager_assignee = manager_user.username if manager_user else (manager_email or "System")
-
-        job.current_assignee = manager_assignee
-        db.commit()
-        db.refresh(job)
+    # 6. Advance stage according to current stage
+    # If in Production: Advance to QC (unassigning production user so QC can pick up)
+    # If in QC: Advance to Ready to Dispatch (auto-assigning to BOD Manager)
+    current_stage = job.current_stage_name
+    _advance_job_logic(job, background_tasks, db)
 
     # Also unassign the EPUB Validator project record
     from app.domains.post_prod.epub_validator.models import EvProject
@@ -2541,11 +2523,43 @@ def sync_qc_reports_and_complete(
     ).first()
     if ev_proj:
         ev_proj.assignee = None
+        # When Production completes, reset the validator status and clear cached reports in DB
+        # so that when the QC specialist opens the EPUB Validator, they generate fresh reports
+        # rather than reusing the old Production report.
+        # NOTE: file_mappings, language, and project history are PRESERVED!
+        if current_stage == "Production":
+            ev_proj.status = "uploaded"
+            ev_proj.validation_status = None
+            ev_proj.latest_validation_file = None
         db.commit()
+
+    # When moving from Production to QC, clean out the validator's report/cache subfolders
+    # (ace, epubcheck, validations, output, summary_cache.json) on disk so QC runs afresh.
+    # The extracted EPUB files and the DB record (including file_mappings) are completely preserved,
+    # so QC will NOT be prompted for file mapping again!
+    if current_stage == "Production":
+        try:
+            for sub in ["ace", "epubcheck", "validations", "output"]:
+                p = os.path.join(validator_project_dir, sub)
+                if os.path.exists(p):
+                    shutil.rmtree(p, ignore_errors=True)
+            summary_json = os.path.join(validator_project_dir, "summary_cache.json")
+            if os.path.exists(summary_json):
+                os.remove(summary_json)
+            logger.info(f"Cleared Production validation caches for '{folder_name}' to ensure fresh QC run")
+        except Exception as e:
+            logger.warning(f"Could not clear validator report subfolders for '{folder_name}': {e}")
+
+    if current_stage == "Production":
+        msg = "Production completed! Verified EPUB and reports stored in BOD folder, backup created, and job moved to QC."
+    elif current_stage == "QC":
+        msg = "QC completed! Verified EPUB and reports stored in BOD folder, backup created, and job moved to Ready to Dispatch."
+    else:
+        msg = f"Stage '{current_stage}' completed and advanced to '{job.current_stage_name}'."
 
     return {
         "status": True,
-        "message": "EPUB and QC reports updated to BOD folder, old files archived to _before, stage moved to Ready to Dispatch, and job unassigned.",
+        "message": msg,
         "job": job
     }
 

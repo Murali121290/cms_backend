@@ -66,6 +66,7 @@ export interface ValidationIssue {
   file_path?: string | null;
   extract?: string;
   is_ignored?: boolean;
+  ignore_reason?: string;
   [key: string]: unknown;
 }
 

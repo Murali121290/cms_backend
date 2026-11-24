@@ -449,13 +449,8 @@ export function BodInternalJobPage() {
       await api.post(`/bod/jobs/${jobId}/upload-epub`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      if (job?.current_stage_name === 'QC') {
-        toast.success("EPUB re-uploaded and validator workspace refreshed")
-        fetchJob()
-      } else {
-        toast.success("EPUB uploaded and moved to QC")
-        navigate('/bod/internal')
-      }
+      toast.success("EPUB uploaded successfully! You can now open EPUB Validator to inspect and complete production.")
+      fetchJob()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to upload EPUB")
     } finally {

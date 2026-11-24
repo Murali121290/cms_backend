@@ -164,6 +164,11 @@ def run_epub_validation_task(
             progress_callback=_write_progress,
         )
 
+        # Flag ignored issues in the result before saving and returning
+        from app.domains.post_prod.epub_validator.router import _flag_ignored_issues
+        if isinstance(result, dict):
+            result = _flag_ignored_issues(folder_name, result)
+
         # Save result to DB
         db = SessionLocal()
         try:

@@ -7,6 +7,7 @@ export interface IgnoreIssuePayload {
   file_name: string;
   snippet: string;
   line_number?: number;
+  reason?: string;
 }
 
 export async function ignoreIssue(folderName: string, payload: IgnoreIssuePayload) {
