@@ -969,6 +969,19 @@ export function PostProdEpubValidatorFiles() {
   const [isCheckingQc, setIsCheckingQc] = useState(false);
   const [revealedStage, setRevealedStage] = useState<number>(0);
 
+  const [bodJob, setBodJob] = useState<any>(null);
+
+  // Fetch BOD job details if navigating from BOD
+  useEffect(() => {
+    if (fromSource === 'bod' && bodJobId) {
+      api.get(`/bod/jobs/${bodJobId}`)
+        .then((res) => setBodJob(res.data?.job || res.data))
+        .catch((err) => console.error("Could not fetch BOD job:", err));
+    }
+  }, [fromSource, bodJobId]);
+
+  const isProductionStage = bodJob?.current_stage_name === 'Production';
+
   // Trigger sequential stage evaluation when modal opens
   useEffect(() => {
     if (!showBodCompleteModal) {
@@ -1008,12 +1021,15 @@ export function PostProdEpubValidatorFiles() {
     if (!bodJobId) return;
     setIsCompletingBod(true);
     try {
-      await api.post(`/bod/jobs/${bodJobId}/sync-qc-reports-and-complete`);
-      toast.success("QC completed & reports synced! Job moved to Ready to Dispatch.");
+      const res = await api.post(`/bod/jobs/${bodJobId}/sync-qc-reports-and-complete`);
+      const msg = res.data?.message || (isProductionStage 
+        ? "Production completed! Job moved to QC." 
+        : "QC completed! Job moved to Ready to Dispatch.");
+      toast.success(msg);
       navigate('/bod/internal');
     } catch (err: any) {
-      console.error("Failed to complete BOD QC", err);
-      toast.error(err.response?.data?.detail || "Failed to sync reports and complete QC");
+      console.error("Failed to complete BOD stage", err);
+      toast.error(err.response?.data?.detail || "Failed to sync reports and complete stage");
     } finally {
       setIsCompletingBod(false);
     }
@@ -1292,8 +1308,14 @@ export function PostProdEpubValidatorFiles() {
                     <CheckCircle2 className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-foreground m-0">Quality Control (Books on Demand)</h3>
-                    <p className="text-xs text-muted-foreground m-0 mt-0.5">Final verification before advancing to Ready to Dispatch</p>
+                    <h3 className="text-base font-bold text-foreground m-0">
+                      {isProductionStage ? "Complete Production (Books on Demand)" : "Quality Control (Books on Demand)"}
+                    </h3>
+                    <p className="text-xs text-muted-foreground m-0 mt-0.5">
+                      {isProductionStage 
+                        ? "Verify validations and advance job from Production to QC" 
+                        : "Final verification before advancing to Ready to Dispatch"}
+                    </p>
                   </div>
                 </div>
 
@@ -1414,10 +1436,20 @@ export function PostProdEpubValidatorFiles() {
                         ) : qcReadiness?.stages?.customised_check?.status === 'passed' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                             <CheckCircle2 className="w-3 h-3" /> All rules passed (0)
+                            {Number(qcReadiness?.stages?.customised_check?.ignored_count || 0) > 0 && (
+                              <span className="text-[10px] font-normal text-muted-foreground ml-1">
+                                ({qcReadiness.stages.customised_check.ignored_count} ignored)
+                              </span>
+                            )}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                             <XCircle className="w-3 h-3" /> {qcReadiness?.stages?.customised_check?.failed_count || 1} rule(s) failed
+                            {Number(qcReadiness?.stages?.customised_check?.ignored_count || 0) > 0 && (
+                              <span className="text-[10px] font-normal text-muted-foreground ml-1">
+                                ({qcReadiness.stages.customised_check.ignored_count} ignored)
+                              </span>
+                            )}
                           </span>
                         )}
                       </div>
@@ -1512,7 +1544,7 @@ export function PostProdEpubValidatorFiles() {
                   </div>
 
                   <p className="text-[11px] text-muted-foreground mt-3 italic">
-                    Clicking "Yes, Complete QC" will generate <span className="font-semibold text-foreground">history.csv</span>, package latest QC reports, and move the job to <span className="font-semibold text-emerald-600 dark:text-emerald-400">Ready to Dispatch</span>.
+                    Clicking "{isProductionStage ? 'Yes, Complete Production' : 'Yes, Complete QC'}" will save validated reports & EPUB to BOD folder, create backup, and move the job to <span className="font-semibold text-emerald-600 dark:text-emerald-400">{isProductionStage ? 'QC' : 'Ready to Dispatch'}</span>.
                   </p>
                 </div>
 
@@ -1540,7 +1572,9 @@ export function PostProdEpubValidatorFiles() {
                     disabled={isCompletingBod || isCheckingQc || !qcReadiness?.all_passed || !manualVerified}
                     leftIcon={isCompletingBod ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                   >
-                    {isCompletingBod ? 'Completing QC…' : 'Yes, Complete QC'}
+                    {isCompletingBod 
+                      ? (isProductionStage ? 'Completing Production…' : 'Completing QC…') 
+                      : (isProductionStage ? 'Yes, Complete Production' : 'Yes, Complete QC')}
                   </Button>
                 </div>
               </div>
@@ -1760,14 +1794,20 @@ export function PostProdEpubValidatorFiles() {
                     onClick={() => setShowBodCompleteModal(true)}
                     disabled={isCompletingBod || isValidating || isAceRunning || isEpubCheckRunning}
                     className="inline-flex flex-row items-center justify-center gap-2 px-3.5 py-1.5 h-8 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-                    title="Update latest EPUB, ACE report, and EPUBCheck to BOD folder, archive previous files to _before, and move job to Dispatch"
+                    title={isProductionStage 
+                      ? "Complete production checks, save validated EPUB to BOD folder, and move job to QC" 
+                      : "Update latest EPUB, ACE report, and EPUBCheck to BOD folder, archive previous files to _before, and move job to Dispatch"}
                   >
                     {isCompletingBod ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                     ) : (
                       <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                     )}
-                    <span className="whitespace-nowrap">{isCompletingBod ? 'Completing QC…' : 'Completed QC '}</span>
+                    <span className="whitespace-nowrap">
+                      {isCompletingBod 
+                        ? (isProductionStage ? 'Completing Production…' : 'Completing QC…') 
+                        : (isProductionStage ? 'Complete Production' : 'Completed QC')}
+                    </span>
                   </button>
                 )}
 

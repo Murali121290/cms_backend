@@ -689,6 +689,8 @@ async def get_validation_task_status(filename: str, task_id: str):
             # Fetch actual result from Celery backend
             task_result = celery_app.AsyncResult(task_id)
             result = task_result.result if task_result.ready() else None
+            if isinstance(result, dict):
+                result = _flag_ignored_issues(filename, result)
             return {"status": "completed", "result": result}
 
     # 2. Fall back to Celery task state
@@ -696,7 +698,10 @@ async def get_validation_task_status(filename: str, task_id: str):
     state = task_result.state  # PENDING | STARTED | SUCCESS | FAILURE
 
     if state == "SUCCESS":
-        return {"status": "completed", "result": task_result.result}
+        result = task_result.result
+        if isinstance(result, dict):
+            result = _flag_ignored_issues(filename, result)
+        return {"status": "completed", "result": result}
     if state == "FAILURE":
         return {"status": "failed", "error": str(task_result.result)}
     # PENDING or STARTED
@@ -722,14 +727,14 @@ def _flag_ignored_issues(folder_name: str, validation_result: dict) -> dict:
     import os
     from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
     ignored_file = os.path.join(UPLOAD_DIR, folder_name, "ignored_issues.json")
-    ignored_set = set()
+    ignored_map = {}
     if os.path.exists(ignored_file):
         try:
             with open(ignored_file, 'r', encoding='utf-8') as f:
                 ignored_list = json.load(f)
                 for item in ignored_list:
                     key = f"{item.get('rule_id')}|{item.get('file_name')}|{item.get('snippet')}|{item.get('line_number', '')}"
-                    ignored_set.add(key)
+                    ignored_map[key] = item.get('reason', '')
         except Exception:
             pass
 
@@ -742,8 +747,9 @@ def _flag_ignored_issues(folder_name: str, validation_result: dict) -> dict:
         issues = file_entry.get("result", {}).get("issues", [])
         for issue in issues:
             key = f"{rule_id}|{file_name}|{issue.get('snippet') or issue.get('extract') or issue.get('message')}|{issue.get('line_number', '')}"
-            if key in ignored_set:
+            if key in ignored_map:
                 issue["is_ignored"] = True
+                issue["ignore_reason"] = ignored_map[key]
             else:
                 issue["is_ignored"] = False
             
@@ -802,6 +808,7 @@ class IgnoreIssueRequest(BaseModel):
     file_name: str
     snippet: str
     line_number: Optional[int] = None
+    reason: Optional[str] = ""
 
 @router.post("/projects/{folder_name}/ignore_issue")
 def ignore_issue(folder_name: str, payload: IgnoreIssueRequest):
@@ -823,7 +830,11 @@ def ignore_issue(folder_name: str, payload: IgnoreIssueRequest):
            item.get("file_name") == payload.file_name and \
            item.get("snippet") == payload.snippet and \
            item.get("line_number") == payload.line_number:
-            return {"status": True, "message": "Already ignored"}
+            # Update reason if already exists
+            item["reason"] = payload.reason or ""
+            with open(ignored_file, 'w', encoding='utf-8') as f:
+                json.dump(ignored_list, f, indent=2)
+            return {"status": True, "message": "Updated ignore reason"}
             
     ignored_list.append(payload.model_dump())
     
@@ -1233,29 +1244,41 @@ def get_qc_readiness_status(folder_name: str, db: Session = Depends(get_db)):
             with open(latest_val_file, "r", encoding="utf-8", errors="replace") as f:
                 val_data = json.load(f)
 
+            # Apply ignored issues filtering so that ignored errors/warnings do NOT count as failures
+            val_data = _flag_ignored_issues(folder_name, val_data)
+
             files = val_data.get("files", [])
             failing_entries = []
+            total_ignored_count = 0
             for item in files:
-                res = item.get("result", {})
-                count = res.get("issues_count", 0)
+                issues = item.get("result", {}).get("issues", [])
+                ignored_issues = [i for i in issues if i.get("is_ignored")]
+                total_ignored_count += len(ignored_issues)
+                # Only count active, unignored issues (errors and warnings)
+                active_issues = [i for i in issues if not i.get("is_ignored")]
+                count = len(active_issues)
                 if count > 0:
                     r_id = item.get("rule_id", "Rule")
                     f_name = item.get("file_details", {}).get("file_name", "unknown")
-                    failing_entries.append(f"{r_id} on {f_name} ({count} issue{'s' if count > 1 else ''})")
+                    failing_entries.append(f"{r_id} on {f_name} ({count} active issue{'s' if count > 1 else ''})")
+
+            ignored_suffix = f" ({total_ignored_count} ignored)" if total_ignored_count > 0 else ""
 
             if len(failing_entries) == 0:
                 stages["customised_check"] = {
                     "status": "passed",
-                    "message": "All customised validation rules passed (0 issues).",
+                    "message": f"All customised validation rules passed (0 active issues){ignored_suffix}.",
                     "details": os.path.basename(latest_val_file),
                     "failed_count": 0,
+                    "ignored_count": total_ignored_count,
                 }
             else:
                 stages["customised_check"] = {
                     "status": "failed",
-                    "message": f"{len(failing_entries)} rule failure(s) found in {os.path.basename(latest_val_file)}.",
+                    "message": f"{len(failing_entries)} rule failure(s) found in {os.path.basename(latest_val_file)}{ignored_suffix}.",
                     "details": failing_entries[:5],
                     "failed_count": len(failing_entries),
+                    "ignored_count": total_ignored_count,
                 }
         except Exception as e:
             stages["customised_check"] = {

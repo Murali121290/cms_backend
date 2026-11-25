@@ -299,6 +299,7 @@ export function BodInternalPage() {
 
   // Calculate metrics
   const isJobCompleted = (job: any) => job.status === 'Completed' || job.current_stage_name === 'Archive'
+  const isJobRevised = (job: any) => Boolean(job.revision) || (job.reopen_history && job.reopen_history.length > 0)
 
   // Build chronological sequence of stage events (without artificial grouping, preserving full cycle progression)
   const getChronologicalStageTimeline = (jobObj: any) => {
@@ -798,7 +799,7 @@ export function BodInternalPage() {
 
   activeJobs.forEach(job => {
     if (job.due_date) {
-      if (overdueRefDate && isOverdue(job.due_date, overdueRefDate)) overdueJobs++
+      if (overdueRefDate && job.status !== 'Hold' && !isJobRevised(job) && isOverdue(job.due_date, overdueRefDate)) overdueJobs++
       if (isDueTomorrow(job.due_date)) dueSoonJobs++
     }
   })
@@ -899,7 +900,7 @@ export function BodInternalPage() {
       }
     }
 
-    const isOverdueJob = isOverdue(job.due_date)
+    const isOverdueJob = !isJobRevised(job) && isOverdue(job.due_date)
     const isTomorrowJob = isDueTomorrow(job.due_date)
 
     if (job.status === 'Hold') {
@@ -1053,7 +1054,7 @@ export function BodInternalPage() {
     } else if (cardFilter === 'ready_to_dispatch') {
       matchesFilter = !jobCompleted && j.current_stage_name === 'Ready to Dispatch'
     } else if (cardFilter === 'overdue') {
-      matchesFilter = Boolean(overdueRefDate && !jobCompleted && isOverdue(j.due_date, overdueRefDate))
+      matchesFilter = Boolean(overdueRefDate && !jobCompleted && j.status !== 'Hold' && !isJobRevised(j) && isOverdue(j.due_date, overdueRefDate))
     } else if (cardFilter === 'today_due') {
       matchesFilter = isDateInPreset(j.due_date, datePreset === 'all' ? 'today' : datePreset)
     } else if (cardFilter === 'tomorrow_due') {
@@ -4007,7 +4008,7 @@ export function BodInternalPage() {
                                 {record.revision}
                               </span>
                               <span className="text-[10px] font-semibold text-muted">
-                                Moved back to: <strong className="text-text">QC (Yet to Start)</strong>
+                                Current Stage: <strong className="text-text">{historyJob.current_stage_name || 'QC'} {historyJob.status === 'Hold' ? '(Hold)' : historyJob.status === 'Support' ? '(Support)' : historyJob.current_assignee ? '(In Progress)' : '(Yet to Start)'}</strong>
                               </span>
                             </div>
                             <span className="text-[10px] text-muted">
