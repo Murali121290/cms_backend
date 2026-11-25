@@ -41,7 +41,7 @@
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "OEBPS",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "nav.xhtml",
       "rule_config": {
         "skip_heading_file_patterns": [
@@ -91,7 +91,7 @@
       "id": "NAV005",
       "name": "Page List Link Check",
       "target_path": "OEBPS",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "nav.xhtml",
       "category": "Navigation Check"
     },
@@ -119,7 +119,7 @@
       "name": "toc.ncx pageTarget Link and Text Check",
       "target_path": "OEBPS",
       "file_name_pattern": "toc.ncx",
-      "enabled": true,
+      "enabled": false,
       "category": "TOC Check"
     },
     {
