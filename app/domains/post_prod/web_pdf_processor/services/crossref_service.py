@@ -65,8 +65,8 @@ def find_crossrefs_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     for ref in references:
         target = ref.get("target_info")
         if target:
-            # Check if link already exists
-            linked = _check_link_exists(doc, ref["page_idx"], ref["rect"])
+            # Check if link already exists pointing to the expected target page
+            linked = _check_link_exists(doc, ref["page_idx"], ref["rect"], expected_page_idx=target["page_idx"])
 
             # Create link if needed
             if not analyze_only and not linked:
@@ -191,6 +191,34 @@ def _identify_bibliography_sections(doc) -> set:
     return bibliography_pages
 
 
+_PROSE_AFTER_RE = re.compile(
+    r'^(?:Figure|Fig\.?|Table|Tab\.?|Box|Case)\s+\d+(?:[\.\-–]\d+)?\s+'
+    r'(?:illustrates?|provides?|shows?|demonstrates?|presents?|depicts?|summarizes?|'
+    r'highlights?|compares?|lists?|describes?|details?|outlines?|gives?|contains?|'
+    r'defines?|explains?|is|are|was|were|has|have|can|will|may|also|further)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_bold_line(line_dict: dict) -> bool:
+    for sp in line_dict.get("spans", []):
+        if not sp.get("text", "").strip():
+            continue
+        flags = sp.get("flags", 0)
+        font = (sp.get("font") or "").lower()
+        return bool(flags & 16) or any(k in font for k in ("bold", "semibold", "demi", "heavy", "black"))
+    return False
+
+
+def _is_caption_line(line_dict: dict, line_str: str) -> bool:
+    """Return True if line_str looks like an actual Figure/Table/Box caption rather than body prose."""
+    if _PROSE_AFTER_RE.match(line_str):
+        return False
+    if _is_bold_line(line_dict):
+        return True
+    return bool(re.match(r'^(?:Figure|Fig\.?|Table|Tab\.?|Box|Case)\s+\d+(?:[\.\-–]\d+)?\s*:', line_str, re.IGNORECASE))
+
+
 def _find_targets(doc) -> dict:
     """
     Find link targets: figure captions, table titles, chapters.
@@ -198,6 +226,17 @@ def _find_targets(doc) -> dict:
     Returns: {identifier -> {"page_idx": idx, "page": physical_page, "type": type}}
     """
     targets = {}
+    target_scores = {}
+
+    def _consider_target(key: str, entry: dict, line_dict: dict, line_str: str):
+        if _PROSE_AFTER_RE.match(line_str):
+            return
+        is_bold = _is_bold_line(line_dict)
+        has_colon = bool(re.match(r'^(?:Figure|Fig\.?|Table|Tab\.?|Box|Case)\s+\d+(?:[\.\-–]\d+)?\s*:', line_str, re.IGNORECASE))
+        score = (2 if is_bold else 0) + (1 if has_colon else 0)
+        if key not in targets or score > target_scores.get(key, -1):
+            targets[key] = entry
+            target_scores[key] = score
 
     for page_idx in range(len(doc)):
         page = doc[page_idx]
@@ -216,42 +255,36 @@ def _find_targets(doc) -> dict:
                 if fig_match:
                     norm_num = re.sub(r'[\-–]', '.', fig_match.group(1))
                     fig_id = f"figure_{norm_num}"
-                    if fig_id not in targets:
-                        targets[fig_id] = {
-                            "page_idx": page_idx,
-                            "page": physical_page,
-                            "type": "figure",
-                            "identifier": fig_match.group(1),
-                        }
-                        logger.debug(f"Found figure target {fig_id} on page {physical_page}")
+                    _consider_target(fig_id, {
+                        "page_idx": page_idx,
+                        "page": physical_page,
+                        "type": "figure",
+                        "identifier": fig_match.group(1),
+                    }, line, line_text)
 
                 # Match table titles at line start: "Table 5.1" or "Table 5.1:" or "Table 5-1"
                 table_match = re.match(r'(?:Table|Tab\.?)\s+(\d+(?:[\.\-–]\d+)?)', line_text, re.IGNORECASE)
                 if table_match:
                     norm_num = re.sub(r'[\-–]', '.', table_match.group(1))
                     table_id = f"table_{norm_num}"
-                    if table_id not in targets:
-                        targets[table_id] = {
-                            "page_idx": page_idx,
-                            "page": physical_page,
-                            "type": "table",
-                            "identifier": table_match.group(1),
-                        }
-                        logger.debug(f"Found table target {table_id} on page {physical_page}")
+                    _consider_target(table_id, {
+                        "page_idx": page_idx,
+                        "page": physical_page,
+                        "type": "table",
+                        "identifier": table_match.group(1),
+                    }, line, line_text)
 
                 # Match Box / Case titles at line start: "Box 11-2" or "Box 11.2:"
                 box_match = re.match(r'(?:Box|Case)\s+(\d+(?:[\.\-–]\d+)?)', line_text, re.IGNORECASE)
                 if box_match:
                     norm_num = re.sub(r'[\-–]', '.', box_match.group(1))
                     box_id = f"box_{norm_num}"
-                    if box_id not in targets:
-                        targets[box_id] = {
-                            "page_idx": page_idx,
-                            "page": physical_page,
-                            "type": "box",
-                            "identifier": box_match.group(1),
-                        }
-                        logger.debug(f"Found box target {box_id} on page {physical_page}")
+                    _consider_target(box_id, {
+                        "page_idx": page_idx,
+                        "page": physical_page,
+                        "type": "box",
+                        "identifier": box_match.group(1),
+                    }, line, line_text)
 
                 # Detect chapter headers: "Chapter 4", "CHAPTER 4", "Ch. 4"
                 chapter_match = re.search(r'(?:Chapter|Ch\.?|CHAPTER|CH\.?)\s+(\d+)', line_text, re.IGNORECASE)
@@ -299,6 +332,14 @@ def _resolve_match_rects(page, check_item: dict, matched_str: str, raw_id: str, 
     line2_rect = check_item["r_secondary"]
     clip1 = fitz.Rect(line1_rect.x0 - 2, line1_rect.y0 - 2, line1_rect.x1 + 2, line1_rect.y1 + 2)
     clip2 = fitz.Rect(line2_rect.x0 - 2, line2_rect.y0 - 2, line2_rect.x1 + 2, line2_rect.y1 + 2)
+
+    # If the match already fits completely on line 1 or line 2, don't treat it as a split-line match
+    if page.search_for(matched_str.strip(), clip=clip1):
+        r = _get_exact_match_rect(page, matched_str, line1_rect)
+        return [r] if r else [line1_rect]
+    if page.search_for(matched_str.strip(), clip=clip2):
+        r = _get_exact_match_rect(page, matched_str, line2_rect)
+        return [r] if r else [line2_rect]
 
     if check_item.get("is_hyphenated"):
         part1 = check_item.get("part1", "")
@@ -356,6 +397,7 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                     lines.append({
                         "text": l_text,
                         "rect": l_rect,
+                        "spans": spans,
                         "block_no": block.get("number", 0)
                     })
 
@@ -392,7 +434,7 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                         })
 
                     # Check B: Split at space across lines (e.g. "see Table" \n "1.1")
-                    if re.search(r'\b(?:Figure|Fig\.?|Table|Tab\.?|Chapter|Ch\.?|Box|Case)\s*$', line_text, re.I):
+                    if re.search(r'\b(?:Figures?|Figs?\.?|Tables?|Tabs?\.?|Chapters?|Chs?\.?|Box(?:es)?|Cases?)\s*$', line_text, re.I):
                         stitched_space = line_text + " " + next_l["text"]
                         check_items.append({
                             "text": stitched_space,
@@ -403,15 +445,55 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                             "next_text": next_l["text"]
                         })
 
+                def _collect_plural_refs(item_dict, kw_pat: str, ref_type: str, num_pat: str, require_long_line: bool = False):
+                    if require_long_line and len(line_text) < 50:
+                        return
+                    full_pat = rf'\b(?:see|refer\s+to|read|look\s+at|in)?\s*(?:{kw_pat})\s+({num_pat}(?:\s*(?:,|and|&|through|to|-|–|—)\s*{num_pat})+)'
+                    for list_match in re.finditer(full_pat, item_dict["text"], re.I):
+                        list_str = list_match.group(1)
+                        line_b = item_dict["r_primary"]
+                        pad_line = fitz.Rect(line_b.x0 - 2, line_b.y0 - 2, line_b.x1 + 2, line_b.y1 + 2)
+                        phrase_rects = page.search_for(list_match.group(0).strip(), clip=pad_line)
+                        phrase_clip = fitz.Rect()
+                        for pr in phrase_rects:
+                            phrase_clip |= pr
+                        if phrase_clip.is_empty:
+                            phrase_clip = pad_line
+                        for num_m in re.finditer(rf'\b({num_pat})\b', list_str):
+                            raw_id = num_m.group(1)
+                            norm_id = re.sub(r'[\-–]', '.', re.sub(r'[a-z]+$', '', raw_id))
+                            t_id = f"{ref_type}_{norm_id}"
+                            if t_id not in targets:
+                                continue
+                            tgt = targets[t_id]
+                            if page_idx == tgt["page_idx"] and line_text.startswith(list_match.group(0).lstrip()):
+                                continue
+                            num_hits = page.search_for(raw_id, clip=phrase_clip)
+                            exact_rect = [num_hits[0]] if num_hits else [line_b]
+                            if not any(_any_rect_overlap(exact_rect, ex["rect"]) for ex in references if ex["page_idx"] == page_idx):
+                                references.append({
+                                    "page_idx": page_idx,
+                                    "page": physical_page,
+                                    "rect": exact_rect,
+                                    "type": ref_type,
+                                    "text": f"{ref_type.title()} {raw_id}",
+                                    "target_info": tgt,
+                                })
+
                 for item in check_items:
                     text_to_check = item["text"]
+                    _collect_plural_refs(item, r'Figures|Figs\.?', "figure", r'\d+(?:[\.\-–]\d+)?[a-z]?')
+                    _collect_plural_refs(item, r'Tables|Tabs\.?', "table", r'\d+(?:[\.\-–]\d+)?[a-z]?')
+                    _collect_plural_refs(item, r'Chapters|Chs\.?', "chapter", r'\d+', require_long_line=True)
+                    _collect_plural_refs(item, r'Boxes|Cases', "box", r'\d+(?:[\.\-–]\d+)?[a-z]?')
+
                     # 1. Figure references
-                    for fig_match in re.finditer(r'\b(?:see|refer\s+to|look\s+at)?\s*(?:Figure|Fig\.?)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
+                    for fig_match in re.finditer(r'\b(?:see|refer\s+to|look\s+at)?\s*(?:Figures?|Figs?\.?)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
                         raw_id = fig_match.group(1)
                         norm_id = re.sub(r'[\-–]', '.', re.sub(r'[a-z]+$', '', raw_id))
                         fig_id = f"figure_{norm_id}"
                         if fig_id in targets:
-                            if targets[fig_id]["page_idx"] == page_idx and line_text.startswith(fig_match.group(0).lstrip()):
+                            if targets[fig_id]["page_idx"] == page_idx and line_text.startswith(fig_match.group(0).lstrip()) and _is_caption_line(curr_l, line_text):
                                 continue
                             exact_rect = _resolve_match_rects(page, item, fig_match.group(0), raw_id, "Figure")
                             # Avoid duplicates
@@ -426,12 +508,12 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                                 })
 
                     # 2. Table references
-                    for table_match in re.finditer(r'\b(?:see|refer\s+to|look\s+at)?\s*(?:Table|Tab\.?)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
+                    for table_match in re.finditer(r'\b(?:see|refer\s+to|look\s+at)?\s*(?:Tables?|Tabs?\.?)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
                         raw_id = table_match.group(1)
                         norm_id = re.sub(r'[\-–]', '.', re.sub(r'[a-z]+$', '', raw_id))
                         table_id = f"table_{norm_id}"
                         if table_id in targets:
-                            if targets[table_id]["page_idx"] == page_idx and line_text.startswith(table_match.group(0).lstrip()):
+                            if targets[table_id]["page_idx"] == page_idx and line_text.startswith(table_match.group(0).lstrip()) and _is_caption_line(curr_l, line_text):
                                 continue
                             exact_rect = _resolve_match_rects(page, item, table_match.group(0), raw_id, "Table")
                             if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
@@ -444,8 +526,8 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                                     "target_info": targets[table_id],
                                 })
 
-                    # 3. Chapter references
-                    for ch_match in re.finditer(r'\b(?:see|refer\s+to|read)?\s*(?:Chapter|Ch\.?)\s+(\d+)', text_to_check, re.I):
+                    # 3. Single Chapter references: "Chapter 1", "Ch. 4"
+                    for ch_match in re.finditer(r'\b(?:see|refer\s+to|read)?\s*(?:Chapters?|Chs?\.?)\s+(\d+)', text_to_check, re.I):
                         raw_id = ch_match.group(1)
                         ch_id = f"chapter_{raw_id}"
                         if ch_id in targets:
@@ -471,7 +553,7 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                         box_id = f"box_{norm_id}"
                         if box_id in targets:
                             # Don't create a link on the target caption itself
-                            if targets[box_id]["page_idx"] == page_idx and line_text.startswith(box_match.group(0).lstrip()):
+                            if targets[box_id]["page_idx"] == page_idx and line_text.startswith(box_match.group(0).lstrip()) and _is_caption_line(curr_l, line_text):
                                 continue
                             exact_rect = _resolve_match_rects(page, item, box_match.group(0), raw_id, "Box")
                             if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):
@@ -512,34 +594,44 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
     return references
 
 
-def _check_link_exists(doc, page_idx: int, rect) -> bool:
-    """Check if a link already exists in the given area."""
+def _check_link_exists(doc, page_idx: int, rect, expected_page_idx: int | None = None) -> bool:
+    """Check if a link already exists in the given area (and matches expected_page_idx if given)."""
     try:
         page = doc[page_idx]
         rect_list = rect if isinstance(rect, list) else [rect]
         for link in page.get_links():
-            is_link = link.get('kind') in (fitz.LINK_URI, fitz.LINK_GOTO)
-            if is_link:
+            kind = link.get('kind')
+            if kind in (fitz.LINK_URI, fitz.LINK_GOTO):
                 link_rect = link.get('from')
                 if link_rect:
                     lr = fitz.Rect(link_rect)
                     for r in rect_list:
                         if lr.intersects(fitz.Rect(r)):
-                            return True
+                            if expected_page_idx is not None and kind == fitz.LINK_GOTO:
+                                if link.get('page') == expected_page_idx:
+                                    return True
+                            else:
+                                return True
     except Exception:
         pass
     return False
 
 
 def _create_crossref_link(doc, ref_page_idx: int, ref_rect, target_page_idx: int, ref_text: str):
-    """Create a link from a cross-reference to its target."""
+    """Create a link from a cross-reference to its target, replacing any stale overlapping GOTO link."""
     try:
         page = doc[ref_page_idx]
         rect_list = ref_rect if isinstance(ref_rect, list) else [ref_rect]
+        existing_links = page.get_links()
         for r in rect_list:
+            rr = fitz.Rect(r)
+            for l in existing_links:
+                if l.get("kind") == fitz.LINK_GOTO and l.get("from"):
+                    if fitz.Rect(l["from"]).intersects(rr):
+                        page.delete_link(l)
             page.insert_link({
                 "kind": fitz.LINK_GOTO,
-                "from": fitz.Rect(r),
+                "from": rr,
                 "page": target_page_idx,
             })
         logger.debug(f"Created cross-reference link for '{ref_text}' to page {target_page_idx + 1}")

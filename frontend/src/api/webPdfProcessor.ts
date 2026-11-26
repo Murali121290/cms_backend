@@ -407,6 +407,19 @@ export async function generateEndnoteLinks(
   }
 }
 
+export interface ReferenceCitationDetail {
+  citation: string;
+  author: string;
+  year: string;
+  page: number;
+  def_page: number | null;
+  target_author: string | null;
+  target_preview: string | null;
+  match_type: string;
+  is_linked: boolean;
+  status: string;
+}
+
 export interface CrossrefDetail {
   type: string;
   reference_text: string;
@@ -476,6 +489,28 @@ export async function generateGlossaryLinks(
     return data;
   } catch (err) {
     throw new Error(getApiErrorMessage(err, 'Failed to generate glossary links'));
+  }
+}
+
+export async function generateReferenceCitationLinks(
+  projectId: number,
+  analyzeOnly: boolean = true
+): Promise<{
+  success: boolean;
+  total_citations: number;
+  matched: number;
+  linked: number;
+  not_linked: number;
+  details: ReferenceCitationDetail[];
+}> {
+  try {
+    const { data } = await api.post(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-reference-citation-links`,
+      { analyze_only: analyzeOnly }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate reference citation links'));
   }
 }
 
@@ -559,6 +594,220 @@ export interface ValidationDiffReport {
     max_drift_pt: number;
   }[];
   error?: string;
+}
+
+export interface PageDimensionItem {
+  page: number;
+  width_pt: number;
+  height_pt: number;
+  width_in: number;
+  height_in: number;
+  width_mm: number;
+  height_mm: number;
+}
+
+export interface PageDimensionsResponse {
+  total_pages: number;
+  pages: PageDimensionItem[];
+}
+
+export async function getPageDimensions(projectId: number): Promise<PageDimensionsResponse> {
+  try {
+    const { data } = await api.get<PageDimensionsResponse>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/page-dimensions`
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to fetch page dimensions'));
+  }
+}
+
+export async function updatePageDimensions(
+  projectId: number,
+  payload: {
+    page?: number;
+    width: number;
+    height: number;
+    unit: 'in' | 'mm' | 'pt';
+    mode?: 'scale' | 'crop';
+    crop_rect?: [number, number, number, number];
+  }
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const { data } = await api.put<{ success: boolean; message: string }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/page-dimensions`,
+      payload
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to update page dimensions'));
+  }
+}
+
+export interface PageLabelUpdatePayload {
+  subset: 'all' | 'selected' | 'range';
+  pages?: string;
+  style: 'D' | 'r' | 'R' | 'a' | 'A' | '';
+  prefix: string;
+  start: number;
+}
+
+export async function updatePageLabels(
+  projectId: number,
+  payload: PageLabelUpdatePayload
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const { data } = await api.put<{ success: boolean; message: string }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/page-labels`,
+      payload
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to update page labels'));
+  }
+}
+
+export interface PageLinkItem {
+  link_index: number;
+  xref?: number | null;
+  rect: [number, number, number, number];
+  kind: 'goto' | 'uri' | 'other';
+  target_page?: number | null;
+  uri?: string | null;
+}
+
+export interface PageLinksResponse {
+  page: number;
+  total_pages: number;
+  width_pt: number;
+  height_pt: number;
+  links: PageLinkItem[];
+}
+
+export async function getPageLinks(
+  projectId: number,
+  page: number
+): Promise<PageLinksResponse> {
+  try {
+    const { data } = await api.get<PageLinksResponse>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/page-links`,
+      { params: { page } }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to fetch page links'));
+  }
+}
+
+export async function updatePageLink(
+  projectId: number,
+  payload: {
+    action: 'update' | 'create' | 'delete';
+    page: number;
+    xref?: number | null;
+    link_index?: number | null;
+    rect?: [number, number, number, number];
+    kind?: 'goto' | 'uri';
+    target_page?: number | null;
+    uri?: string | null;
+  }
+): Promise<{ success: boolean; message: string; links: PageLinkItem[] }> {
+  try {
+    const { data } = await api.put<{ success: boolean; message: string; links: PageLinkItem[] }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/page-links`,
+      payload
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to update page link'));
+  }
+}
+
+export interface DocumentPropertiesResponse {
+  file_size_bytes: number;
+  pdf_version: string;
+  page_count: number;
+  page_size: string;
+  title: string;
+  author: string;
+  subject: string;
+  keywords: string;
+  creator: string;
+  producer: string;
+  creation_date?: string;
+  mod_date?: string;
+}
+
+export async function getDocumentProperties(projectId: number): Promise<DocumentPropertiesResponse> {
+  try {
+    const { data } = await api.get<DocumentPropertiesResponse>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/document-properties`
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to fetch document properties'));
+  }
+}
+
+export async function updateDocumentProperties(
+  projectId: number,
+  payload: {
+    title: string;
+    author: string;
+    subject: string;
+    keywords: string;
+    creator: string;
+    producer: string;
+  }
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const { data } = await api.put<{ success: boolean; message: string }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/document-properties`,
+      payload
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to update document properties'));
+  }
+}
+
+export async function getPdfHistoryStatus(
+  projectId: number
+): Promise<{ can_undo: boolean; can_redo: boolean; undo_count: number; redo_count: number }> {
+  try {
+    const { data } = await api.get<{ can_undo: boolean; can_redo: boolean; undo_count: number; redo_count: number }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/pdf-history-status`
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to fetch PDF history status'));
+  }
+}
+
+export async function undoPdfEdit(
+  projectId: number
+): Promise<{ success: boolean; message: string; can_undo: boolean; can_redo: boolean }> {
+  try {
+    const { data } = await api.post<{ success: boolean; message: string; can_undo: boolean; can_redo: boolean }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/pdf-undo`
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to undo PDF edit'));
+  }
+}
+
+export async function redoPdfEdit(
+  projectId: number
+): Promise<{ success: boolean; message: string; can_undo: boolean; can_redo: boolean }> {
+  try {
+    const { data } = await api.post<{ success: boolean; message: string; can_undo: boolean; can_redo: boolean }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/pdf-redo`
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to redo PDF edit'));
+  }
 }
 
 export async function runValidationDiff(projectId: number): Promise<ValidationDiffReport> {

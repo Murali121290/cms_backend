@@ -102,6 +102,11 @@ def apply_corrections_and_verify(
             existing_links = page.get_links()
 
             # 2. Process page items
+            replaced_stale_uris = set()
+            valid_page_uris = {
+                (it.reconstructed_url or it.annotation_dest or '').strip().rstrip('/').lower()
+                for it in page_items
+            }
             for item in page_items:
                 target_uri = item.reconstructed_url or item.annotation_dest
                 if not target_uri or target_uri.strip().lower() in ('https://', 'http://', 'https:', 'http:', '//'):
@@ -138,6 +143,8 @@ def apply_corrections_and_verify(
                             has_correct_link = True
                         else:
                             # Outdated, mismatched, or malformed link destination -> replace with target_uri
+                            if ex_uri and ex_uri.lower() not in valid_page_uris:
+                                replaced_stale_uris.add(ex_uri.lower())
                             try:
                                 page.delete_link(ex)
                             except Exception:
@@ -169,6 +176,17 @@ def apply_corrections_and_verify(
                                 page.parent.update_stream(xref, new_stream.encode('latin1'))
                     except Exception as ex_color:
                         logger.debug(f"Stream text recolor failed for {target_uri}: {ex_color}")
+
+            # Remove any orphaned multi-line segments belonging to replaced stale URIs
+            if replaced_stale_uris:
+                for ex in page.get_links():
+                    if ex.get('kind') == pymupdf.LINK_URI:
+                        ex_uri = (ex.get('uri') or '').strip().rstrip('/').lower()
+                        if ex_uri in replaced_stale_uris:
+                            try:
+                                page.delete_link(ex)
+                            except Exception:
+                                pass
 
         # Save the updated PDF
         temp_path = pdf_path.replace('.pdf', '_temp.pdf')

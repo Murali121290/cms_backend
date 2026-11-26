@@ -136,6 +136,24 @@ def trim_crop_engine(pdf_path, mode, margins=None, standardize_size=False, remov
                     page.delete_annot(annot)
             # Clean content stream to merge/sanitize 
             page.clean_contents()
+
+    # Ensure OCG layer settings (e.g. hidden Grid / Guides) are preserved across trim/save
+    try:
+        ocgs = [x for x in range(1, doc.xref_length()) if doc.xref_get_key(x, 'Type')[1] == '/OCG']
+        if ocgs:
+            off_list = [
+                f"{x} 0 R" for x in ocgs
+                if any(w in doc.xref_get_key(x, 'Name')[1].lower() for w in ['grid', 'guid', 'trim', 'bleed', 'slug', 'fold'])
+            ]
+            all_list = [f"{x} 0 R" for x in ocgs]
+            ocprops = (
+                "<</D<</BaseState/ON"
+                + (f"/OFF[{' '.join(off_list)}]" if off_list else "")
+                + f">> /OCGs[{' '.join(all_list)}]>>"
+            )
+            doc.xref_set_key(doc.pdf_catalog(), "OCProperties", ocprops)
+    except Exception:
+        pass
             
     num_pages = len(doc)
     # Save to temp file first, then replace original (avoids "save to original must be incremental" error)
