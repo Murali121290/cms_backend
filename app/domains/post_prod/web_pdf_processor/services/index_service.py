@@ -98,9 +98,9 @@ def find_index_links_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     page_map = build_page_map(doc, toc_pages)
     roman_map = page_map.get('_roman', {})
 
-    # Pattern to match Arabic page numbers, ranges, and note references
-    # e.g. '157–8', '155', '238n129', '40–1'
-    PAGE_REF_PAT = re.compile(r'^(\d+)(?:[–\-](\d+))?(?:n(\d+))?[,;]?$')
+    # Pattern to match Arabic page numbers, ranges, note references, and trailing figure/table/box suffixes
+    # e.g. '157–8', '155', '238n129', '40–1', '631t', '129f', '573b', '631–633t'
+    PAGE_REF_PAT = re.compile(r'^(\d+)(?:[–\-](\d+))?(?:n(\d+)|(?!(?:st|nd|rd|th|s)$)[a-zA-Z]{1,2})?[,;]?$')
     # Pattern to match lowercase Roman numeral page references, ranges, and note references
     # e.g. 'viii', 'x', 'xi', 'xii', 'vii–viii', 'xn1'
     ROMAN_REF_PAT = re.compile(r'^([ivxlcdm]+)(?:[–\-]([ivxlcdm]+|\d+))?(?:n(\d+))?[,;]?$')
@@ -127,7 +127,7 @@ def find_index_links_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
             word_rect = fitz.Rect(w[:4])
             if raw_token.endswith(('-', '–')) and i + 1 < len(words):
                 next_raw = words[i + 1][4].rstrip('.,;:!?')
-                if next_raw.isdigit() or STRICT_ROMAN_PAT.match(next_raw):
+                if re.match(r'^\d+(?:n\d+|(?!(?:st|nd|rd|th|s)$)[a-zA-Z]{1,2})?$', next_raw) or STRICT_ROMAN_PAT.match(next_raw):
                     raw_token = raw_token.rstrip('-–') + '-' + next_raw
                     word_rect = word_rect | fitz.Rect(words[i + 1][:4])
 
@@ -173,7 +173,7 @@ def find_index_links_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                 prev_core = prev_txt.rstrip('.,;:!?')
                 # Stop if we hit previous page number (Arabic or Roman) or another entry line
                 if (
-                    re.search(r'\d+[,;]?$', prev_txt)
+                    re.search(r'\d+(?:n\d+|[a-zA-Z]{1,2})?[,;]?$', prev_txt)
                     or (STRICT_ROMAN_PAT.match(prev_core) and (prev_core in roman_map or roman_to_int(prev_core) in roman_map))
                     or abs(prev_w[1] - w[1]) > 5
                 ):
