@@ -23,7 +23,9 @@ import {
   Download,
   Upload,
   RefreshCw,
+  Copy,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
 import { getFileContent, getPdfPage, saveFileContent, ValidationProgress, renameEpubFile } from '@/api/epubValidator';
@@ -196,13 +198,13 @@ import { diffChars } from 'diff';
 
 function DiffText({ expected, actual, type }: { expected: string; actual: string; type: 'expected' | 'actual' }) {
   if (!expected || !actual) {
-    return <span className={type === 'expected' ? 'text-emerald-800 dark:text-emerald-300' : 'text-red-800 dark:text-red-300'}>{type === 'expected' ? expected : actual}</span>;
+    return <span className={cn('whitespace-pre-wrap', type === 'expected' ? 'text-emerald-800 dark:text-emerald-300' : 'text-red-800 dark:text-red-300')}>{type === 'expected' ? expected : actual}</span>;
   }
 
   const differences = diffChars(expected, actual);
 
   return (
-    <span className="font-mono leading-relaxed break-words">
+    <span className="font-mono leading-relaxed break-words whitespace-pre-wrap">
       {differences.map((part, i) => {
         if (type === 'expected') {
           if (part.added) return null;
@@ -441,8 +443,23 @@ function IssueRow({
         )}>
           {issue.expected_text && (
             <div className="px-3 py-2 flex flex-col gap-1 border-b border-inherit">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-sans">Expected</span>
-              <div className="break-all font-mono">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-sans">Expected</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(issue.expected_text || '');
+                    toast.success('Copied expected CSS to clipboard');
+                  }}
+                  className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground font-sans px-1.5 py-0.5 rounded bg-background/50 hover:bg-background border border-border/40 transition-colors"
+                  title="Copy expected CSS"
+                >
+                  <Copy className="h-2.5 w-2.5" />
+                  <span>Copy</span>
+                </button>
+              </div>
+              <div className="break-all font-mono whitespace-pre-wrap">
                 <DiffText expected={issue.expected_text} actual={issue.actual_text || ''} type="expected" />
               </div>
             </div>
@@ -664,7 +681,23 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
       setActiveTab('result');
     }
     if (typeof issue.line_number === 'number' && sourceEditorRef.current) {
-      sourceEditorRef.current.scrollToLine(issue.line_number);
+      // Determine the specific target phrase/word to focus in the line
+      let searchWord: string | undefined = undefined;
+      if (issue.extract && !issue.extract.startsWith('<')) {
+        searchWord = issue.extract;
+      } else {
+        const punctMatch = issue.message ? issue.message.match(/before ['"]([^'"]+)['"]/) : null;
+        if (punctMatch && punctMatch[1]) {
+          const punct = punctMatch[1];
+          const escapedPunct = punct.split('').map(c => /[.*+?^${}()|[\]\\]/.test(c) ? '\\' + c : c).join('');
+          const pRegex = new RegExp(`(\\S+)[ \\t\\u00A0\\u202F]+${escapedPunct}`);
+          const m = (issue.snippet && pRegex.exec(issue.snippet)) || (issue.extract && pRegex.exec(issue.extract));
+          if (m) {
+            searchWord = m[0];
+          }
+        }
+      }
+      sourceEditorRef.current.scrollToLine(issue.line_number, searchWord);
     }
   };
 
@@ -1579,6 +1612,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                 line: issue.line_number ?? 0,
                                 message: issue.message || 'Unknown error',
                                 extract: issue.extract,
+                                snippet: issue.snippet ?? undefined,
                               }))}
                             />
                           )}

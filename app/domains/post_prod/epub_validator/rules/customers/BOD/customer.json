@@ -904,7 +904,11 @@
         "flag_modified": true,
         "modified_severity": "Warning",
         "flag_unmarked_additional": true,
-        "unmarked_severity": "Warning"
+        "unmarked_severity": "Warning",
+        "flag_missing": true,
+        "missing_severity": "Error",
+        "flag_missing_semicolon": true,
+        "semicolon_severity": "Error"
       },
       "category": "CSS Check"
     },

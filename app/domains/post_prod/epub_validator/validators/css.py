@@ -128,6 +128,7 @@ def validate_css_matcher(file_details, rule_config=None):
     Flags modified standard rules and untracked additional CSS rules.
     """
     import os
+    import re
     from app.domains.post_prod.css_matcher.css_diff import parse_css, compare
 
     file_path = file_details["full_path"]
@@ -196,6 +197,35 @@ def validate_css_matcher(file_details, rule_config=None):
     with open(master_css_path, "r", encoding="utf-8") as mf:
         master_css_text = mf.read()
 
+    # 0. Check Version Banner
+    from app.domains.post_prod.css_matcher.css_diff import VERSION_BANNER_RE
+    m_banner = VERSION_BANNER_RE.search(master_css_text)
+    e_banner = VERSION_BANNER_RE.search(epub_css_text)
+    m_ver = m_banner.group(2) if m_banner else None
+    e_ver = e_banner.group(2) if e_banner else None
+    if m_ver and e_ver and m_ver != e_ver:
+        issues.append({
+            "rule_name": "CSS Version Mismatch",
+            "type": "css_version_mismatch",
+            "message": f"Stylesheet version banner mismatch: Expected Version {m_ver}, found Version {e_ver}.",
+            "category": "Warning",
+            "file_path": rel_path,
+            "line_number": 1,
+            "extract": e_banner.group(0) if e_banner else f"Version {e_ver}",
+            "snippet": e_banner.group(0) if e_banner else f"Version {e_ver}",
+        })
+    elif m_ver and not e_banner:
+        issues.append({
+            "rule_name": "CSS Version Banner Missing",
+            "type": "css_version_missing",
+            "message": f"Stylesheet is missing the required BoD standard header banner (Expected: '/* BoD Standard CSS ... Version {m_ver} */').",
+            "category": "Warning",
+            "file_path": rel_path,
+            "line_number": 1,
+            "extract": "/* BoD Standard CSS",
+            "snippet": f"Expected banner Version {m_ver}",
+        })
+
     master_rules = parse_css(master_css_text)
     epub_rules = parse_css(epub_css_text)
     diffs = compare(master_rules, epub_rules, epub_css_text)
@@ -219,6 +249,9 @@ def validate_css_matcher(file_details, rule_config=None):
                 if len(change_descs) > 3:
                     summary_str += f" (+{len(change_descs) - 3} more)"
 
+                m_decls_str = "; ".join(f"{p}: {v}" for p, v in (d.master_declarations or []))
+                e_decls_str = "; ".join(f"{p}: {v}" for p, v in (d.epub_declarations or []))
+
                 issues.append({
                     "rule_name": "Standard CSS Modified",
                     "type": "css_standard_modified",
@@ -228,6 +261,8 @@ def validate_css_matcher(file_details, rule_config=None):
                     "line_number": line_no,
                     "extract": d.selector,
                     "snippet": d.selector,
+                    "expected_text": f"{d.selector} {{ {m_decls_str} }}",
+                    "actual_text": f"{d.selector} {{ {e_decls_str} }}",
                 })
 
     # 2. Report UNMARKED ADDITIONAL rules (hand-added rules without /* additional css */ marker)
@@ -236,6 +271,7 @@ def validate_css_matcher(file_details, rule_config=None):
         for d in diffs:
             if d.status == "additional" and not d.after_marker:
                 line_no = find_selector_line(d.selector)
+                e_decls_str = "; ".join(f"{p}: {v}" for p, v in (d.epub_declarations or []))
                 issues.append({
                     "rule_name": "Untracked Additional CSS",
                     "type": "css_unmarked_additional",
@@ -245,7 +281,92 @@ def validate_css_matcher(file_details, rule_config=None):
                     "line_number": line_no,
                     "extract": d.selector,
                     "snippet": d.selector,
+                    "expected_text": "/* additional css */\n" + f"{d.selector} {{ {e_decls_str} }}",
+                    "actual_text": f"{d.selector} {{ {e_decls_str} }}",
                 })
+
+    # 3. Report MISSING rules (standard selectors removed from EPUB)
+    check_missing = inner_config.get("flag_missing", True)
+    if check_missing:
+        for d in diffs:
+            if d.status == "missing":
+                decls_str = ";\n  ".join(f"{p}: {v}" for p, v in (d.master_declarations or []))
+                expected_rule = f"{d.selector} {{\n  {decls_str};\n}}" if decls_str else f"{d.selector} {{}}"
+                issues.append({
+                    "rule_name": "Standard CSS Rule Missing",
+                    "type": "css_standard_missing",
+                    "message": f"Standard CSS rule '{d.selector}' is missing from the stylesheet.",
+                    "category": inner_config.get("missing_severity", "Error"),
+                    "file_path": rel_path,
+                    "line_number": 1,
+                    "extract": d.selector,
+                    "snippet": f"Missing: {d.selector}",
+                    "expected_text": expected_rule,
+                    "actual_text": "",
+                })
+
+    # 4. Report MISSING SEMICOLON (every declaration in CSS must terminate with ';')
+    check_semicolon = inner_config.get("flag_missing_semicolon", True)
+    if check_semicolon:
+        # Strip comments while preserving character offsets and line count
+        def _strip_comments(text: str) -> str:
+            def repl(m):
+                return re.sub(r"[^\n]", " ", m.group(0))
+            return re.sub(r"/\*.*?\*/", repl, text, flags=re.DOTALL)
+
+        stripped_css = _strip_comments(epub_css_text)
+        
+        # 1. Catch missing semicolon before '}'
+        no_semi_pattern = re.compile(r"([a-zA-Z0-9\-_]+)\s*:\s*([^;{}]+?)\s*(?=\})")
+        for m in no_semi_pattern.finditer(stripped_css):
+            prop = m.group(1).strip()
+            val = m.group(2).strip()
+            line_no = epub_css_text[:m.start()].count("\n") + 1
+            faulty_decl = f"{prop}: {val}"
+            expected_decl = f"{prop}: {val};"
+
+            issues.append({
+                "rule_name": "Missing Semicolon in CSS",
+                "type": "css_missing_semicolon",
+                "message": f"Declaration '{faulty_decl}' is missing a terminating semicolon (';').",
+                "category": inner_config.get("semicolon_severity", "Error"),
+                "file_path": rel_path,
+                "line_number": line_no,
+                "extract": faulty_decl,
+                "snippet": faulty_decl,
+                "expected_text": expected_decl,
+                "actual_text": faulty_decl,
+            })
+
+        # 2. Catch missing semicolon on any intermediate declaration line inside { ... }
+        in_block = False
+        for idx, line in enumerate(stripped_css.splitlines(), 1):
+            trimmed = line.strip()
+            if "{" in trimmed:
+                in_block = True
+            if in_block and ":" in trimmed:
+                # If line is not a selector, not an @-rule, not an opening or closing brace
+                if not trimmed.startswith("@") and not trimmed.endswith("{") and not trimmed.endswith("}"):
+                    if not trimmed.endswith(";"):
+                        # Extract the declaration
+                        prop_val = trimmed.split(";")[0].strip()
+                        expected_decl = f"{prop_val};"
+                        # Only add if not already caught
+                        if not any(iss.get("line_number") == idx and iss.get("type") == "css_missing_semicolon" for iss in issues):
+                            issues.append({
+                                "rule_name": "Missing Semicolon in CSS",
+                                "type": "css_missing_semicolon",
+                                "message": f"Declaration '{prop_val}' is missing a terminating semicolon (';').",
+                                "category": inner_config.get("semicolon_severity", "Error"),
+                                "file_path": rel_path,
+                                "line_number": idx,
+                                "extract": prop_val,
+                                "snippet": prop_val,
+                                "expected_text": expected_decl,
+                                "actual_text": prop_val,
+                            })
+            if "}" in trimmed:
+                in_block = False
 
     return {"issues_count": len(issues), "issues": issues}
 

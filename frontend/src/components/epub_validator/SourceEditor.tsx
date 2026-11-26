@@ -12,10 +12,11 @@ export interface LintError {
   line: number;
   message: string;
   extract?: string;
+  snippet?: string;
 }
 
 export interface SourceEditorRef {
-  scrollToLine: (lineNum: number) => void;
+  scrollToLine: (lineNum: number, searchWord?: string) => void;
 }
 
 interface Props {
@@ -118,14 +119,27 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
     }, [value]);
 
     useImperativeHandle(ref, () => ({
-      scrollToLine(lineNum) {
+      scrollToLine(lineNum, searchWord) {
         const view = cmRef.current?.view;
         if (!view) return;
         try {
           const line = view.state.doc.line(lineNum);
+          let targetFrom = line.from;
+          let targetTo = line.from;
+
+          // If a specific target word/punctuation is specified or found in line text, select and focus directly on it
+          if (searchWord && searchWord.trim()) {
+            const trimmed = searchWord.trim();
+            const idx = line.text.indexOf(trimmed);
+            if (idx !== -1) {
+              targetFrom = line.from + idx;
+              targetTo = targetFrom + trimmed.length;
+            }
+          }
+
           view.dispatch({
-            effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
-            selection: { anchor: line.from }
+            effects: EditorView.scrollIntoView(targetFrom, { y: 'center' }),
+            selection: { anchor: targetFrom, head: targetTo }
           });
           view.focus();
         } catch (e) {
@@ -162,11 +176,47 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
             let from = line.from;
             let to = line.to;
 
+            let foundRange: { from: number; to: number } | null = null;
+            const raw = line.text;
+
+            // Strategy 1: Check err.extract directly in raw text or plain-text mapping
             if (err.extract) {
+              const exactIdx = raw.indexOf(err.extract);
+              if (exactIdx !== -1) {
+                foundRange = {
+                  from: line.from + exactIdx,
+                  to: line.from + exactIdx + err.extract.length,
+                };
+              }
+            }
+
+            // Strategy 2: Smart exact punctuation/word match from error message & snippet
+            // e.g. "Found space before '?'." -> locates the word + space + punctuation "wo ?"
+            if (!foundRange) {
+              const punctMatch = err.message ? err.message.match(/before ['"]([^'"]+)['"]/) : null;
+              if (punctMatch && punctMatch[1]) {
+                const punct = punctMatch[1];
+                const escapedPunct = punct.split('').map(c => /[.*+?^${}()|[\]\\]/.test(c) ? '\\' + c : c).join('');
+                const pRegex = new RegExp(`(\\S+)[ \\t\\u00A0\\u202F]+${escapedPunct}`);
+                const m = (err.snippet && pRegex.exec(err.snippet)) || pRegex.exec(raw);
+                if (m) {
+                  const phrase = m[0];
+                  const pIdx = raw.indexOf(phrase);
+                  if (pIdx !== -1) {
+                    foundRange = {
+                      from: line.from + pIdx,
+                      to: line.from + pIdx + phrase.length,
+                    };
+                  }
+                }
+              }
+            }
+
+            // Strategy 3: Check err.extract via plain-text mapping
+            if (!foundRange && err.extract) {
               // Robust fuzzy matching: map plain text characters back to source indices.
               const plainToSource: number[] = [];
               let plainText = '';
-              const raw = line.text;
               
               // Helper to decode a single HTML entity
               const decodeEntity = (entity: string) => {
@@ -207,12 +257,6 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                 }
               }
 
-              // Since BeautifulSoup get_text(strip=True) might compress multiple spaces, 
-              // we can normalize whitespace in both plainText and err.extract for comparison,
-              // but we need to keep the mapping intact.
-              // To avoid complexity, we'll try an exact indexOf first, and if it fails, 
-              // we just fallback to the old simple indexOf on the raw line.
-              
               let matchIdx = plainText.indexOf(err.extract);
               
               // If we didn't find it exactly, try ignoring multiple spaces
@@ -222,7 +266,6 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                 let normIdx = normPlain.indexOf(normExtract);
                 
                 if (normIdx !== -1) {
-                  // Map normIdx back to plainText index by walking through plainText
                   let plainIdx = 0;
                   let nIdx = 0;
                   while (plainIdx < plainText.length && nIdx < normIdx) {
@@ -239,35 +282,35 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
 
               if (matchIdx !== -1) {
                 let mappedStart = plainToSource[matchIdx];
-                // mappedEnd is the source index of the LAST matched character, plus its length (1, or more if it was an entity)
-                // We'll just grab the mapped index of the character AFTER the match, if it exists.
                 let endMatchIdx = matchIdx + err.extract.length;
-                
                 let mappedEnd = raw.length;
                 if (endMatchIdx < plainToSource.length) {
                    mappedEnd = plainToSource[endMatchIdx];
                 }
-
-                diagnostics.push({
+                foundRange = {
                   from: line.from + mappedStart,
                   to: line.from + mappedEnd,
-                  severity: 'error',
-                  message: err.message,
-                });
+                };
               } else {
-                // Absolute fallback to simple indexOf on the raw string
                 const idx = raw.indexOf(err.extract);
                 if (idx !== -1) {
-                  diagnostics.push({
+                  foundRange = {
                     from: line.from + idx,
                     to: line.from + idx + err.extract.length,
-                    severity: 'error',
-                    message: err.message,
-                  });
+                  };
                 }
               }
+            }
+
+            if (foundRange) {
+              diagnostics.push({
+                from: foundRange.from,
+                to: foundRange.to,
+                severity: 'error',
+                message: err.message,
+              });
             } else if (line.to > line.from) {
-              // No extract (e.g. a DTD error reported by line only): mark the whole line.
+              // No specific extract found: mark the line
               diagnostics.push({ from, to, severity: 'error', message: err.message });
             }
           } catch (e) {
@@ -384,8 +427,9 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
           fontWeight: '600',
         },
         '.cm-lintRange-error': {
-          backgroundColor: 'rgba(239, 68, 68, 0.2) !important', // Light red background (tailwind red-500 at 20%)
-          backgroundImage: 'none !important', // Remove the default red squiggly underline
+          backgroundColor: 'rgba(239, 68, 68, 0.3) !important', // Distinct light red background
+          borderBottom: '2px solid #ef4444 !important', // High-visibility red underline for exact faulty word
+          borderRadius: '2px',
         },
         '.cm-tooltip': {
           maxWidth: '600px !important',
