@@ -1,7 +1,7 @@
 """Create feedback_tickets table for CRM Support Ticket Management
 
-Revision ID: 0074_feedback_tickets
-Revises: 0073_stage_custody
+Revision ID: 0075_feedback_tickets
+Revises: 0074_file_lock_sessions
 Create Date: 2026-11-25 14:42:00.000000
 """
 from alembic import op
@@ -9,8 +9,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = "0074_feedback_tickets"
-down_revision = "0073_stage_custody"
+revision = "0075_feedback_tickets"
+down_revision = "0074_file_lock_sessions"
 branch_labels = None
 depends_on = None
 
