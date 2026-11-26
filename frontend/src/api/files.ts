@@ -17,6 +17,44 @@ export interface GenerateFigureAssessmentResponse {
   status: "ok";
   file: FileRecord;
   figures_included: number;
+  /** "excel" when an uploaded client workbook drove the output, "images" when the
+   *  legacy image-scanning fallback ran. */
+  source: "excel" | "images";
+  /** Rows parsed from the client workbook (0 on the images path). */
+  parsed_row_count: number;
+  /** Raw client headers not in the backend alias registry (preserved verbatim
+   *  in the output xlsx and in the persisted assessment). */
+  unmapped_columns: string[];
+  /** Non-fatal parser warnings surfaced to the UI. */
+  warnings: string[];
+  /** art_assessments.id — present when the Excel path ran. */
+  assessment_id: number | null;
+}
+
+
+export interface ParsedAssessmentRow {
+  row_index: number;
+  /** Canonical field name → verbatim Excel value (null when blank). */
+  canonical: Record<string, string | null>;
+  /** Raw client header → verbatim Excel value. Preserved even when the header
+   *  is not in the backend alias registry. */
+  unmapped: Record<string, string | null>;
+}
+
+export interface ParseAssessmentExcelResponse {
+  status: "ok";
+  file_id: number;
+  filename: string;
+  project_info_sheet: string | null;
+  project_info: Record<string, string | null>;
+  data_sheet_name: string | null;
+  header_row_index: number | null;
+  /** canonical field name → raw client header that matched. */
+  canonical_columns: Record<string, string>;
+  /** raw client headers whose names did not match the alias registry. */
+  unmapped_columns: string[];
+  rows: ParsedAssessmentRow[];
+  warnings: string[];
 }
 
 
@@ -126,6 +164,26 @@ export async function generateFigureAssessment(projectId: number, chapterId: num
     `/projects/${projectId}/chapters/${chapterId}/generate-figure-assessment`,
     undefined,
     fileId != null ? { params: { file_id: fileId } } : undefined,
+  );
+  return response.data;
+}
+
+/**
+ * Parse an uploaded Art Assessment workbook (read-only preview).
+ *
+ * The backend never mutates the file or the DB here — callers use this to
+ * show the detected sheet, column mapping, warnings, and figure rows before
+ * the user confirms "Generate Assessment" (Phase 4).
+ */
+export async function parseAssessmentExcel(
+  projectId: number,
+  chapterId: number,
+  fileId: number,
+) {
+  const response = await apiClient.post<ParseAssessmentExcelResponse>(
+    `/projects/${projectId}/chapters/${chapterId}/parse-assessment-excel`,
+    undefined,
+    { params: { file_id: fileId } },
   );
   return response.data;
 }

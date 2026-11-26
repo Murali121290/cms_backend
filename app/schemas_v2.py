@@ -626,6 +626,41 @@ class GenerateFigureAssessmentResponse(BaseModel):
     status: Literal["ok"] = "ok"
     file: FileRecord
     figures_included: int
+    # New in Phase 4 (additive — pre-existing clients ignore these):
+    source: Literal["excel", "images"] = "images"
+    parsed_row_count: int = 0
+    unmapped_columns: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    assessment_id: Optional[int] = None
+
+
+class ParsedAssessmentRowResponse(BaseModel):
+    """One figure row returned by the parse-assessment-excel endpoint."""
+
+    row_index: int
+    canonical: dict[str, Optional[str]] = Field(default_factory=dict)
+    unmapped: dict[str, Optional[str]] = Field(default_factory=dict)
+
+
+class ParseAssessmentExcelResponse(BaseModel):
+    """Read-only preview of an uploaded Art Assessment workbook.
+
+    Every value from the workbook is preserved verbatim. ``canonical`` keys
+    are field names from ``ALIAS_REGISTRY``; ``unmapped`` keys are the raw
+    client headers whose names did not match the registry.
+    """
+
+    status: Literal["ok"] = "ok"
+    file_id: int
+    filename: str
+    project_info_sheet: Optional[str] = None
+    project_info: dict[str, Optional[str]] = Field(default_factory=dict)
+    data_sheet_name: Optional[str] = None
+    header_row_index: Optional[int] = None
+    canonical_columns: dict[str, str] = Field(default_factory=dict)
+    unmapped_columns: list[str] = Field(default_factory=list)
+    rows: list[ParsedAssessmentRowResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class VersionRecord(BaseModel):

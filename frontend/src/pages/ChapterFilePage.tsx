@@ -33,6 +33,7 @@ import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import { ArtValidationModal } from '@/components/ArtValidationModal'
+import { AssessmentPreview } from '@/features/artAssessment/AssessmentPreview'
 import { Modal } from '@/components/ui/Modal'
 import { chaptersApi } from '@/api/chapters'
 import { useStageActionsStore } from '@/store/useStageActionsStore'
@@ -830,6 +831,11 @@ export function ChapterFilePage({
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [generatingFigurePdf, setGeneratingFigurePdf] = useState(false)
   const [generatingAssessment, setGeneratingAssessment] = useState(false)
+  // Art Assessment preview — populated when Generate Assessment opens the
+  // Excel-review step (see ``handleGenerateAssessment``). The modal itself is
+  // read-only; confirming it calls the same generateFigureAssessment() flow
+  // the button used to call directly.
+  const [assessmentPreview, setAssessmentPreview] = useState<{ fileId: number; filename: string } | null>(null)
   const [batchBusy, setBatchBusy] = useState<string | null>(null)
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
   const queryClient = useQueryClient()
@@ -1355,18 +1361,37 @@ export function ChapterFilePage({
     }
   }
 
-  async function handleGenerateAssessment() {
-    if (generatingAssessment) return
-    const only = selectedRows.length === 1 ? selectedRows[0] : null
-    const canScope = !!only && /\.(docx|docm|jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(only.file_name)
-    const sourceId = canScope ? only?.db_id : undefined
+  // True for an uploaded client Art Assessment xlsx — excludes files generated
+  // by this feature. Keep the suffix check in sync with
+  // ``_is_excel_assessment_source`` on the backend.
+  function isUploadedAssessmentXlsx(r: FileRow): boolean {
+    const name = (r.file_name || '').toLowerCase()
+    if (!name.endsWith('.xlsx')) return false
+    if (name.endsWith('_artassessment.xlsx')) return false
+    if (name.endsWith('_artassessment_generated.xlsx')) return false
+    // Nested children are derived artefacts (by convention in this page); the
+    // original upload is always a top-level row.
+    if (r.is_child) return false
+    return true
+  }
+
+  async function runGenerateAssessment(sourceId: number | undefined, label: string | undefined) {
     setGeneratingAssessment(true)
     try {
       const res = await generateFigureAssessment(pid, cid, sourceId)
-      const label = sourceId ? ` from ${only?.file_name}` : ''
-      toast.success(
-        `Assessment generated${label} (${res.figures_included} figure${res.figures_included === 1 ? '' : 's'})`,
-      )
+      const source = res.source ?? 'images'
+      const detail = label ? ` from ${label}` : ''
+      const bits: string[] = []
+      if (source === 'excel') {
+        bits.push(`from Excel (${res.parsed_row_count} rows)`)
+        const unmapped = res.unmapped_columns?.length ?? 0
+        if (unmapped) bits.push(`${unmapped} unmapped column${unmapped === 1 ? '' : 's'} preserved`)
+        const warns = res.warnings?.length ?? 0
+        if (warns) bits.push(`${warns} warning${warns === 1 ? '' : 's'}`)
+      } else {
+        bits.push(`${res.figures_included} figure${res.figures_included === 1 ? '' : 's'}`)
+      }
+      toast.success(`Assessment generated${detail} — ${bits.join(' · ')}`)
       if (sourceId) setExpandedSources(s => ({ ...s, [sourceId]: true }))
       void filesQuery.refetch()
       try {
@@ -1380,6 +1405,7 @@ export function ChapterFilePage({
       } catch {
         toast.error('Assessment generated but auto-download failed — use the file list to download it.')
       }
+      setAssessmentPreview(null)
     } catch (e: any) {
       const msg = e?.response?.data?.message
         || e?.response?.data?.error?.message
@@ -1389,6 +1415,35 @@ export function ChapterFilePage({
     } finally {
       setGeneratingAssessment(false)
     }
+  }
+
+  async function handleGenerateAssessment() {
+    if (generatingAssessment) return
+    const only = selectedRows.length === 1 ? selectedRows[0] : null
+
+    // F3 (per docs/art-assessment/ART_ASSESSMENT_FINALIZATION.md §4 G3):
+    // The assessment xlsx is always the source of truth. If the Art folder
+    // contains exactly one uploaded xlsx — OR the user explicitly selected
+    // one — open the preview, regardless of whether an image row happens
+    // to be selected.
+    let previewRow: FileRow | null = null
+    if (only && isUploadedAssessmentXlsx(only)) {
+      previewRow = only
+    } else if (activeFolder === 'art') {
+      const candidates = rows.filter(isUploadedAssessmentXlsx)
+      if (candidates.length === 1) previewRow = candidates[0]
+    }
+
+    if (previewRow && previewRow.db_id != null) {
+      setAssessmentPreview({ fileId: previewRow.db_id, filename: previewRow.file_name })
+      return
+    }
+
+    // No Excel source in the folder — fall through to the legacy
+    // images-only behavior (scope-to-selected-DOCX/image if applicable).
+    const canScope = !!only && /\.(docx|docm|jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(only.file_name)
+    const sourceId = canScope ? only?.db_id : undefined
+    await runGenerateAssessment(sourceId, canScope ? only?.file_name : undefined)
   }
 
   async function handleBulkDownload() {
@@ -2006,6 +2061,20 @@ export function ChapterFilePage({
           onClose={() => setArtValidationFile(null)}
           fileId={artValidationFile.id}
           fileName={artValidationFile.name}
+        />
+      )}
+
+      {/* ── Art Assessment Preview ───────────────────────────────────────── */}
+      {assessmentPreview && (
+        <AssessmentPreview
+          projectId={pid}
+          chapterId={cid}
+          fileId={assessmentPreview.fileId}
+          filename={assessmentPreview.filename}
+          isOpen={true}
+          onClose={() => { if (!generatingAssessment) setAssessmentPreview(null) }}
+          onConfirm={() => runGenerateAssessment(assessmentPreview.fileId, assessmentPreview.filename)}
+          confirmBusy={generatingAssessment}
         />
       )}
 
