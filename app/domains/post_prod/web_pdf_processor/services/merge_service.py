@@ -87,6 +87,8 @@ def merge_pdfs(input_files: List[dict], output_path: str) -> dict:
     global_toc = []
     page_labels = []
     current_page_offset = 0
+    seen_fm_label = False
+    seen_text_label = False
 
     first_metadata = None
 
@@ -111,15 +113,91 @@ def merge_pdfs(input_files: List[dict], output_path: str) -> dict:
                 item[2] += current_page_offset
                 global_toc.append(item)
 
-            # Assign Page Labels based on category
-            if cat == 'FC':
+            # Assign Page Labels: preserve existing multi-range / Roman labels on full-book PDFs,
+            # or auto-detect Roman front matter for single-file PDFs; otherwise assign by category.
+            orig_labels = doc.get_page_labels() or []
+            has_meaningful_labels = (
+                len(orig_labels) > 1
+                or (
+                    len(orig_labels) == 1
+                    and (
+                        orig_labels[0].get('style', 'D') != 'D'
+                        or bool(orig_labels[0].get('prefix', ''))
+                    )
+                )
+            )
+
+            if has_meaningful_labels:
+                has_roman_label = any(l.get('style') in ('r', 'R') for l in orig_labels)
+                if not has_roman_label and len(ordered_files) == 1 and cat == 'TEXT':
+                    from .toc_service import build_page_map, get_toc_page_indices
+                    pm = build_page_map(doc, get_toc_page_indices(doc))
+                    first_arabic = pm.get(1)
+                    if first_arabic and 1 < first_arabic < 60:
+                        # Source PDF had Cover/BackCover but omitted Roman front-matter labels
+                        fm_start = 1 if any(l.get('prefix') == 'Cover' and l.get('startpage') == 0 for l in orig_labels) else 0
+                        updated_labels = []
+                        inserted_rom_and_arab = False
+                        for lbl in orig_labels:
+                            sp = lbl.get('startpage', 0)
+                            if sp == fm_start and lbl.get('style', 'D') == 'D' and not lbl.get('prefix'):
+                                updated_labels.append({'startpage': current_page_offset + fm_start, 'prefix': '', 'style': 'r', 'firstpagenum': 1})
+                                updated_labels.append({'startpage': current_page_offset + first_arabic, 'prefix': '', 'style': 'D', 'firstpagenum': 1})
+                                inserted_rom_and_arab = True
+                            else:
+                                shifted = dict(lbl)
+                                shifted['startpage'] = sp + current_page_offset
+                                updated_labels.append(shifted)
+                        if not inserted_rom_and_arab:
+                            updated_labels.append({'startpage': current_page_offset + fm_start, 'prefix': '', 'style': 'r', 'firstpagenum': 1})
+                            updated_labels.append({'startpage': current_page_offset + first_arabic, 'prefix': '', 'style': 'D', 'firstpagenum': 1})
+                        updated_labels.sort(key=lambda x: x.get('startpage', 0))
+                        page_labels.extend(updated_labels)
+                    else:
+                        for lbl in orig_labels:
+                            shifted = dict(lbl)
+                            shifted['startpage'] = shifted.get('startpage', 0) + current_page_offset
+                            page_labels.append(shifted)
+                else:
+                    for lbl in orig_labels:
+                        shifted = dict(lbl)
+                        shifted['startpage'] = shifted.get('startpage', 0) + current_page_offset
+                        page_labels.append(shifted)
+                seen_fm_label = True
+                seen_text_label = True
+            elif len(ordered_files) == 1 and cat == 'TEXT':
+                # Single-file PDF without embedded page labels: auto-detect Roman front matter vs Arabic body
+                from .toc_service import build_page_map, get_toc_page_indices
+                pm = build_page_map(doc, get_toc_page_indices(doc))
+                rom_map = pm.get('_roman', {})
+                first_arabic = pm.get(1)
+                if rom_map and first_arabic and first_arabic > 0:
+                    rom_offsets = [p - k for k, p in rom_map.items() if isinstance(k, int)]
+                    if rom_offsets:
+                        import collections
+                        rom_off = collections.Counter(rom_offsets).most_common(1)[0][0]
+                        rom_start = max(0, 1 + rom_off)
+                        if rom_start > 0:
+                            page_labels.append({'startpage': current_page_offset, 'prefix': 'Cover', 'firstpagenum': 1})
+                        page_labels.append({'startpage': current_page_offset + rom_start, 'prefix': '', 'style': 'r', 'firstpagenum': 1})
+                        page_labels.append({'startpage': current_page_offset + first_arabic, 'prefix': '', 'style': 'D', 'firstpagenum': 1})
+                    else:
+                        page_labels.append({'startpage': current_page_offset, 'prefix': '', 'style': 'D', 'firstpagenum': 1})
+                else:
+                    page_labels.append({'startpage': current_page_offset, 'prefix': '', 'style': 'D', 'firstpagenum': 1})
+                seen_text_label = True
+            elif cat == 'FC':
                 page_labels.append({'startpage': current_page_offset, 'prefix': 'Cover', 'firstpagenum': 1})
             elif cat == 'TEXT':
-                # Start arabic numbering from 1 at the beginning of the text block
-                page_labels.append({'startpage': current_page_offset, 'prefix': '', 'style': 'D', 'firstpagenum': 1})
+                if not seen_text_label:
+                    # Start arabic numbering from 1 at the beginning of the text block
+                    page_labels.append({'startpage': current_page_offset, 'prefix': '', 'style': 'D', 'firstpagenum': 1})
+                    seen_text_label = True
             elif cat == 'FM':
-                # Roman numerals for front matter
-                page_labels.append({'startpage': current_page_offset, 'prefix': '', 'style': 'r', 'firstpagenum': 1})
+                if not seen_fm_label:
+                    # Roman numerals for front matter
+                    page_labels.append({'startpage': current_page_offset, 'prefix': '', 'style': 'r', 'firstpagenum': 1})
+                    seen_fm_label = True
             elif cat == 'BC':
                 # Back cover
                 page_labels.append({'startpage': current_page_offset, 'prefix': 'BackCover', 'firstpagenum': 1})
@@ -140,6 +218,26 @@ def merge_pdfs(input_files: List[dict], output_path: str) -> dict:
         final_doc.set_page_labels(page_labels)
     if first_metadata:
         final_doc.set_metadata(first_metadata)
+
+    # Preserve / restore Optional Content Groups (OCGs / Layers) configuration
+    # By default, insert_pdf() drops OCProperties, causing hidden design/grid/guide layers to render.
+    try:
+        ocgs = [x for x in range(1, final_doc.xref_length()) if final_doc.xref_get_key(x, 'Type')[1] == '/OCG']
+        if ocgs:
+            off_list = [
+                f"{x} 0 R" for x in ocgs
+                if any(w in final_doc.xref_get_key(x, 'Name')[1].lower() for w in ['grid', 'guid', 'trim', 'bleed', 'slug', 'fold'])
+            ]
+            all_list = [f"{x} 0 R" for x in ocgs]
+            ocprops = (
+                "<</D<</BaseState/ON"
+                + (f"/OFF[{' '.join(off_list)}]" if off_list else "")
+                + f">> /OCGs[{' '.join(all_list)}]>>"
+            )
+            final_doc.xref_set_key(final_doc.pdf_catalog(), "OCProperties", ocprops)
+            print(f"Applied OCProperties to merged PDF ({len(ocgs)} layers, {len(off_list)} hidden guides/grids).")
+    except Exception as ocg_err:
+        print(f"Warning: Failed to configure OCG layer properties: {ocg_err}")
 
     # Save final book
     total_pages = len(final_doc)

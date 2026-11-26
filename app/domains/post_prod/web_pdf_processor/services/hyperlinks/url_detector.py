@@ -79,7 +79,8 @@ def is_valid_url_continuation(
     accumulated_url: str,
     next_token: str,
     prev_word: tuple,
-    next_word: tuple
+    next_word: tuple,
+    block_margin_x1: Optional[float] = None
 ) -> Tuple[bool, str]:
     """
     Evaluates whether `next_token` (on the same visual line or next line L+1)
@@ -92,7 +93,8 @@ def is_valid_url_continuation(
         return False, ""
 
     # Negative check 1: List bullets, numbered markers, or bibliography entry citations like '[30]'
-    if re.match(r'^(?:\[\d+\]|[•\*\u2022\u25cf\u25cb]|\d+[\.\)\]\t]|[a-zA-Z][\.\)\t])', clean_next):
+    # Note: Require whitespace or end of string after period to avoid matching DOI paths or IP fragments (e.g. '10.1080/...' or '01402390...')
+    if re.match(r'^(?:\[\d+\]|[•\*\u2022\u25cf\u25cb]|\d+[\)\]\t]|[a-zA-Z][\)\]\t]|\d+\.(?:\s+|$)|[a-zA-Z]\.(?:\s+|$))', clean_next):
         return False, ""
 
     # Negative check 2: New scheme or separate URL (unless accumulated_url is just a scheme prefix like 'https://' or 'https:')
@@ -144,24 +146,81 @@ def is_valid_url_continuation(
         if '.' in clean_next or '/' in clean_next or clean_next in ('www.',) or clean_next.startswith('www.'):
             return True, clean_next
 
-    # Delimiters and path continuation
-    trailing_delim = any(accumulated_url.endswith(ch) for ch in ['/', '.', '-', '_', '?', '=', '&', ':', '~', '%', '#'])
+    # Delimiters and path continuation:
+    # Note: A trailing '.' is almost always a sentence-ending period in prose/citations (e.g. "...locksley-hall." or "...war-in-ukraine/.").
+    # A URL NEVER wraps across lines after a sentence-ending period to swallow the next footnote number or line text!
+    clean_accum = clean_invisible_chars(accumulated_url).lower().strip()
+    trailing_delim = any(clean_accum.endswith(ch) for ch in ['/', '-', '_', '?', '=', '&', ':', '~', '%', '#'])
     leading_delim = any(clean_next.startswith(ch) for ch in ['/', '-', '_', '?', '=', '&', '#', '~', '%'])
-    has_domain_and_path = ('/' in accumulated_url and not any(accumulated_url.lower().endswith(ext) for ext in URL_EXTENSIONS))
 
-    # Same line continuation of URL tokens (e.g. slashes or hyphens separated by spaces in LaTeX typesetting)
-    if is_same_line:
-        if trailing_delim or leading_delim or clean_next in ('/', '-') or has_domain_and_path:
-            return True, clean_next
-
-    # Next line continuation
+    # Next line continuation (multi-line URL wrapped at line margin)
     if is_next_line:
+        # If accumulated_url is an incomplete domain prefix ending in dot (e.g. 'https://www.' or 'http://www.'), allow next token
+        if clean_accum.endswith(('www.', '://www.')):
+            if is_path_like:
+                return True, clean_next
+
+        # 1. Line Boundary / Whitespace Check:
+        # When a URL legitimately breaks and wraps across lines, it breaks because it reached the right margin!
+        # If the word on line 1 finished with remaining white space before the right margin (e.g. > 35pt gap),
+        # then the line did NOT break naturally due to margin wrap — the sentence/item simply finished there!
+        # (Example: '...locksley-hall.' stops at x1=250.8 whereas the line margin is ~377.9).
+        if block_margin_x1 is not None:
+            line_remaining_space = block_margin_x1 - prev_word[2]
+            if line_remaining_space > 35.0:
+                return False, ""
+
+        # 2. Check for domain continuation starting with dot or domain label (e.g. 'https://doi.' + 'org/...') on the next line:
+        has_protocol = bool(re.match(r'^https?://', clean_accum))
+        accum_path_part = re.sub(r'^https?://', '', clean_accum)
+        is_host_prefix_without_slash = '/' not in accum_path_part
+
+        # 2a. Next line starts with dot (e.g. 'https://www.ncsbn' + '.org/...' or 'https://example.com/documents/my' + '.document/file.pdf')
+        if clean_next.startswith('.') and len(clean_next) > 1 and not clean_next.startswith('..'):
+            after_dot = clean_next[1:]
+            tld_or_sub = re.split(r'[\/\?\=\&\#]', after_dot)[0].lower()
+            if is_host_prefix_without_slash:
+                if (tld_or_sub in COMMON_TLDS or '/' in after_dot) and is_path_like:
+                    return True, clean_next
+            elif not clean_accum.endswith(('.', ',', ';', '!', ')', ']')) and is_path_like:
+                if '/' in after_dot or re.match(r'^[a-zA-Z0-9_\-]{1,20}$', after_dot.rstrip(TRAILING_PUNCT)):
+                    return True, clean_next
+
+        # 2b. Line 1 ended with domain dot (e.g. line 1: 'https://doi.', line 2: 'org/10.1353/book.87484')
+        if clean_accum.endswith('.') and is_host_prefix_without_slash:
+            tld_or_sub = re.split(r'[\/\?\=\&\#]', clean_next)[0].lower()
+            if (tld_or_sub in COMMON_TLDS or '/' in clean_next) and is_path_like:
+                return True, clean_next
+
+        # 2c. Line 1 ended with a path dot inside a DOI / ID path (e.g. '.../01402390.2013.' wrapped before '776958')
+        if clean_accum.endswith('.') and not is_host_prefix_without_slash and re.search(r'\d+\.$', clean_accum):
+            if is_path_like:
+                return True, clean_next
+
+        # 3. If next line starts with a footnote number, list number, or bullet (e.g. '2', '26', '[2]'), it's a new item!
+        # Do not treat pure numbers as list items if the previous line ended with a path delimiter (e.g. '.../' or '...-')
+        if re.match(r'^\[?\d+\]?\.?$', clean_next) and not trailing_delim:
+            return False, ""
+
+        # 4. If accumulated_url ended with sentence punctuation like a period or comma (e.g. "...locksley-hall.", "...ukraine/.")
+        # and clean_next does NOT start with a path delimiter ('/', '-', '?', '#', '='), it is prose punctuation ending the link!
+        if accumulated_url.endswith(('.', ',', ';', '!', ')', ']')):
+            if not leading_delim:
+                return False, ""
+
         if accumulated_url.endswith('-') and is_path_like:
             return True, clean_next
         if (trailing_delim or leading_delim) and is_path_like:
             return True, clean_next
-        if has_domain_and_path and is_path_like and (' ' not in clean_next):
+
+    # Same line continuation:
+    # In standard text, spaces delimit words. A URL CANNOT continue across a space on the same line
+    # unless there is an explicit trailing or leading delimiter (e.g. 'https:' followed by '//...' or path segment).
+    # Normal prose words (like author names or titles) following a space must NEVER be joined!
+    if is_same_line:
+        if (trailing_delim or leading_delim or clean_next in ('/', '-')) and is_path_like:
             return True, clean_next
+        return False, ""
 
     return False, ""
 
@@ -210,6 +269,10 @@ def extract_page_urls(page: pymupdf.Page) -> List[DetectedUrl]:
     if not words:
         return []
 
+    # Map blocks to their right boundaries x1
+    blocks = page.get_text('blocks')
+    block_right_margins: Dict[int, float] = {b[5]: b[2] for b in blocks}
+
     # Sort words primarily by block_no, line_no, word_no (visual reading order)
     # word: (x0, y0, x1, y1, text, block_no, line_no, word_no)
     words.sort(key=lambda w: (w[5], w[6], w[7]))
@@ -236,12 +299,15 @@ def extract_page_urls(page: pymupdf.Page) -> List[DetectedUrl]:
             while j < len(words):
                 w_prev = words[j - 1]
                 w_curr = words[j]
+                block_no = w_prev[5]
+                margin_x1 = block_right_margins.get(block_no, page.rect.width - 40.0)
 
                 is_cont, next_clean = is_valid_url_continuation(
                     accumulated_url=accum_clean,
                     next_token=w_curr[4],
                     prev_word=w_prev,
-                    next_word=w_curr
+                    next_word=w_curr,
+                    block_margin_x1=margin_x1
                 )
 
                 if is_cont:

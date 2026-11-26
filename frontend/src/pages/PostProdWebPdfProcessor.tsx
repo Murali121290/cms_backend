@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import 'pdfjs-viewer-element';
 import {
   ArrowLeft,
   CheckCircle2, Lock, Unlock, ShieldAlert, AlertCircle,
@@ -36,6 +37,11 @@ import {
   Link2,
   AlertTriangle,
   Globe,
+  Mail,
+  Tag,
+  Crop,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -69,14 +75,29 @@ import {
   generateUrlLinks,
   generateEmailLinks,
   generateEndnoteLinks,
+  generateReferenceCitationLinks,
   generateCrossrefLinks,
   generateIndexLinks,
   generateGlossaryLinks,
   runValidationDiff,
+  getPageDimensions,
+  updatePageDimensions,
+  updatePageLabels,
+  getPageLinks,
+  updatePageLink,
+  getDocumentProperties,
+  updateDocumentProperties,
+  getPdfHistoryStatus,
+  undoPdfEdit,
+  redoPdfEdit,
+  type PageDimensionItem,
+  type PageLinkItem,
+  type DocumentPropertiesResponse,
   type ValidationDiffReport,
   type UrlLinkDetail,
   type EmailLinkDetail,
   type EndnoteDetail,
+  type ReferenceCitationDetail,
   type CrossrefDetail,
   type IndexLinkDetail,
   type GlossaryLinkDetail,
@@ -529,6 +550,57 @@ export function PostProdWebPdfProcessor() {
   const [securityStatus, setSecurityStatus] = useState<any>(null);
 
   const [showEditBookmarksModal, setShowEditBookmarksModal] = useState(false);
+  const [pageLabelMenu, setPageLabelMenu] = useState<{ x: number; y: number; page: number } | null>(null);
+  const [showLabelPagesModal, setShowLabelPagesModal] = useState(false);
+  const [labelTargetPage, setLabelTargetPage] = useState(1);
+  const [labelTotalPages, setLabelTotalPages] = useState(1);
+  const [labelSubset, setLabelSubset] = useState<'all' | 'selected' | 'range'>('selected');
+  const [labelPagesInput, setLabelPagesInput] = useState('1');
+  const [labelStyle, setLabelStyle] = useState<'D' | 'r' | 'R' | 'a' | 'A' | ''>('D');
+  const [labelPrefix, setLabelPrefix] = useState('');
+  const [labelStart, setLabelStart] = useState(1);
+  const [savingPageLabels, setSavingPageLabels] = useState(false);
+  const [editLinksMode, setEditLinksMode] = useState(false);
+  const [editLinkModal, setEditLinkModal] = useState<{
+    mode: 'create' | 'edit';
+    page: number;
+    rect: [number, number, number, number];
+    xref?: number | null;
+    link_index?: number | null;
+    kind: 'goto' | 'uri';
+    target_page: number;
+    uri: string;
+  } | null>(null);
+  const [savingLinkEdit, setSavingLinkEdit] = useState(false);
+  const pageLinksCacheRef = useRef<Map<string, { width_pt: number; height_pt: number; links: PageLinkItem[] }>>(new Map());
+  const linksDirtyRef = useRef(false);
+  const [linkOverlayNonce, setLinkOverlayNonce] = useState(0);
+  const [overlapLinksMenu, setOverlapLinksMenu] = useState<{
+    x: number;
+    y: number;
+    page: number;
+    links: PageLinkItem[];
+  } | null>(null);
+  const [showDocPropsModal, setShowDocPropsModal] = useState(false);
+  const [loadingDocProps, setLoadingDocProps] = useState(false);
+  const [savingDocProps, setSavingDocProps] = useState(false);
+  const [docPropsMeta, setDocPropsMeta] = useState<DocumentPropertiesResponse | null>(null);
+  const [docPropsForm, setDocPropsForm] = useState({
+    title: '',
+    author: '',
+    subject: '',
+    keywords: '',
+    creator: '',
+    producer: '',
+  });
+  const openDocPropsRef = useRef<() => void>(() => {});
+  const [dimMode, setDimMode] = useState<'scale' | 'crop'>('scale');
+  const [pendingCropRect, setPendingCropRect] = useState<{ page: number; rect: [number, number, number, number] } | null>(null);
+  const [canUndoPdf, setCanUndoPdf] = useState(false);
+  const [canRedoPdf, setCanRedoPdf] = useState(false);
+  const [undoRedoBusy, setUndoRedoBusy] = useState(false);
+  const [lockAspectRatio, setLockAspectRatio] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [editingBookmarksList, setEditingBookmarksList] = useState<BookmarkItem[]>([]);
   const [loadingBookmarks, setLoadingBookmarks] = useState(false);
   const [savingBookmarks, setSavingBookmarks] = useState(false);
@@ -560,7 +632,7 @@ export function PostProdWebPdfProcessor() {
   const [colorUrls, setColorUrls] = useState(false);
   const [fixMultilineUrls, setFixMultilineUrls] = useState(true);
   const [fixMissingUrls, setFixMissingUrls] = useState(true);
-  const [urlFilterTab, setUrlFilterTab] = useState<'all' | 'unlinked' | 'multiline' | 'broken' | 'mismatch' | 'valid'>('all');
+  const [urlFilterTab, setUrlFilterTab] = useState<'all' | 'unlinked' | 'multiline' | 'broken' | 'mismatch' | 'valid' | 'restricted'>('all');
   const [editingUrlIdx, setEditingUrlIdx] = useState<number | null>(null);
   const [editingUrlValue, setEditingUrlValue] = useState<string>('');
   const [urlSearchQuery, setUrlSearchQuery] = useState<string>('');
@@ -572,10 +644,14 @@ export function PostProdWebPdfProcessor() {
   const [applyingEmailLinks, setApplyingEmailLinks] = useState(false);
   const [colorEmails, setColorEmails] = useState(false);
 
-  // Endnote Links (Step 9)
+  // Endnote & Reference Links (Step 9)
+  const [refMode, setRefMode] = useState<'numeric' | 'author_year'>('numeric');
   const [endnoteLinksAnalysis, setEndnoteLinksAnalysis] = useState<any>(null);
   const [analyzingEndnoteLinks, setAnalyzingEndnoteLinks] = useState(false);
   const [applyingEndnoteLinks, setApplyingEndnoteLinks] = useState(false);
+  const [citationLinksAnalysis, setCitationLinksAnalysis] = useState<any>(null);
+  const [analyzingCitationLinks, setAnalyzingCitationLinks] = useState(false);
+  const [applyingCitationLinks, setApplyingCitationLinks] = useState(false);
 
   // Cross-Reference Links (Step 10)
   const [crossrefLinksAnalysis, setCrossrefLinksAnalysis] = useState<any>(null);
@@ -599,6 +675,8 @@ export function PostProdWebPdfProcessor() {
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
   const [previewPage, setPreviewPage] = useState<number | null>(null);
   const [highlightSearch, setHighlightSearch] = useState<string | null>(null);
+  const [navNonce, setNavNonce] = useState(0);
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const PDF_AVAILABLE_STATUSES = [
     'Merged',
@@ -614,6 +692,921 @@ export function PostProdWebPdfProcessor() {
     'Index Linked',
     'Glossary Linked',
   ];
+
+  const triggerTemporaryHighlight = (page: number, searchText?: string | null) => {
+    setPreviewPage(page);
+    setNavNonce((n) => n + 1);
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = null;
+    }
+    if (searchText && searchText.trim()) {
+      let clean = searchText.trim();
+      if (clean.includes('://')) {
+        clean = clean.split('://')[1];
+      }
+      // For multi-line text/URLs containing spaces or line breaks, pick the longest contiguous token
+      // so PDF.js matches it reliably on the target page without breaking across lines.
+      const tokens = clean.split(/\s+/).filter(Boolean);
+      if (tokens.length > 1) {
+        clean = tokens.reduce((best, cur) => (cur.length > best.length ? cur : best), tokens[0]);
+      }
+      setHighlightSearch(clean);
+    } else {
+      setHighlightSearch(null);
+    }
+  };
+
+  // Load PDF into pdfjs-viewer-element when project, status, or refresh key changes
+  const pdfViewerUrl = selectedProject && PDF_AVAILABLE_STATUSES.includes(selectedProject.status)
+    ? `/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf?t=${pdfRefreshKey}`
+    : null;
+
+  openDocPropsRef.current = async () => {
+    if (!selectedProject) return;
+    setShowDocPropsModal(true);
+    setLoadingDocProps(true);
+    try {
+      const props = await getDocumentProperties(selectedProject.id);
+      setDocPropsMeta(props);
+      setDocPropsForm({
+        title: props.title || '',
+        author: props.author || '',
+        subject: props.subject || '',
+        keywords: props.keywords || '',
+        creator: props.creator || '',
+        producer: props.producer || '',
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load document properties');
+      setShowDocPropsModal(false);
+    } finally {
+      setLoadingDocProps(false);
+    }
+  };
+
+  useEffect(() => {
+    const el = iframeRef.current as (HTMLElement & {
+      initPromise?: Promise<any>;
+      injectViewerStyles?: (css: string) => void;
+      setViewerOptions?: (opts: Record<string, any>) => Promise<any>;
+      iframe?: HTMLIFrameElement;
+    }) | null;
+    if (!el || !pdfViewerUrl) return;
+    let cancelled = false;
+    Promise.resolve(el.initPromise).then((res: any) => {
+      if (cancelled) return;
+      const app = res?.viewerApp || res;
+      if (app?.pdfLinkService) {
+        app.pdfLinkService.externalLinkTarget = 2; // LinkTarget.BLANK
+      }
+      el.setViewerOptions?.({ externalLinkTarget: 2 }).catch(() => {});
+
+      if (app?.eventBus && !(app as any).__cmsScaleHooked) {
+        (app as any).__cmsScaleHooked = true;
+        app.eventBus.on('pagesinit', () => {
+          if (app.pdfViewer) {
+            app.pdfViewer.currentScaleValue = 'page-actual';
+          }
+        });
+      }
+
+      const iframeDoc = el.iframe?.contentDocument;
+      if (iframeDoc && !(iframeDoc as any).__cmsBlankLinksHooked) {
+        (iframeDoc as any).__cmsBlankLinksHooked = true;
+        iframeDoc.addEventListener('click', (ev: MouseEvent) => {
+          const docPropsBtn = (ev.target as HTMLElement | null)?.closest('#documentProperties');
+          if (docPropsBtn) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            app?.secondaryToolbar?.close?.();
+            openDocPropsRef.current();
+            return;
+          }
+          const anchor = (ev.target as HTMLElement | null)?.closest('a[href]') as HTMLAnchorElement | null;
+          const href = anchor?.getAttribute('href') || '';
+          if (/^(https?:|mailto:|ftp:)/i.test(href)) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            window.open(href, '_blank', 'noopener,noreferrer');
+          } else if (anchor && (href.startsWith('#') || anchor.classList.contains('internalLink'))) {
+            setTimeout(() => {
+              if (app?.pdfViewer) {
+                app.pdfViewer.currentScaleValue = 'page-actual';
+              }
+            }, 60);
+          }
+        }, true);
+        iframeDoc.addEventListener('contextmenu', (ev: MouseEvent) => {
+          const thumb = (ev.target as HTMLElement | null)?.closest('.thumbnail[page-number], .thumbnail[data-page-number]') as HTMLElement | null;
+          if (!thumb) {
+            setPageLabelMenu(null);
+            return;
+          }
+          ev.preventDefault();
+          ev.stopPropagation();
+          const pageNum = Math.max(1, Number(thumb.getAttribute('page-number') || thumb.getAttribute('data-page-number') || 1));
+          const total = Number(app?.pagesCount || 1);
+          const iframeRect = el.iframe?.getBoundingClientRect();
+          const rawX = (iframeRect?.left ?? 0) + ev.clientX;
+          const rawY = (iframeRect?.top ?? 0) + ev.clientY;
+          const clampedX = Math.min(rawX, window.innerWidth - 190);
+          const clampedY = Math.min(rawY, window.innerHeight - 60);
+          setLabelTotalPages(total);
+          setPageLabelMenu({ x: clampedX, y: clampedY, page: pageNum });
+        }, true);
+        iframeDoc.addEventListener('mousedown', () => setPageLabelMenu(null), true);
+        iframeDoc.addEventListener('scroll', () => setPageLabelMenu(null), true);
+      }
+
+      el.injectViewerStyles?.(`
+        :root {
+          --sidebar-width: 264px;
+        }
+        #sidebarContainer {
+          border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+          background: #141820 !important;
+        }
+        #sidebarContent {
+          box-shadow: none !important;
+          border: none !important;
+          border-radius: 0 !important;
+        }
+        #toolbarSidebar {
+          background: #181d27 !important;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+          padding: 4px 8px !important;
+        }
+        #toolbarSidebar .toolbarButton,
+        #viewsManagerHeader {
+          white-space: nowrap !important;
+          font-size: 12px !important;
+        }
+        #outlineView {
+          padding: 6px 8px !important;
+        }
+        .treeItem > a {
+          border-radius: 6px !important;
+          padding: 5px 8px !important;
+          line-height: 1.35 !important;
+          font-size: 12px !important;
+          transition: background-color 0.15s ease !important;
+        }
+        .treeItem > a:hover {
+          background: rgba(255, 255, 255, 0.08) !important;
+        }
+        .treeItem.selected > a {
+          background: rgba(59, 130, 246, 0.22) !important;
+          color: #93c5fd !important;
+        }
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+        }
+        *::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        *::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        *::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.3);
+          border-radius: 9999px;
+        }
+        *::-webkit-scrollbar-thumb:hover {
+          background: rgba(148, 163, 184, 0.5);
+        }
+        .cms-temp-link-highlight {
+          background-color: rgba(250, 204, 21, 0.35) !important;
+          outline: 2px solid #f59e0b !important;
+          outline-offset: 2px !important;
+          border-radius: 3px !important;
+          box-shadow: 0 0 8px rgba(245, 158, 11, 0.45) !important;
+          z-index: 20 !important;
+        }
+        .cms-link-edit-layer {
+          position: absolute;
+          inset: 0;
+          z-index: 1000 !important;
+          cursor: crosshair;
+          user-select: none;
+          pointer-events: auto !important;
+        }
+        .cms-editing-links-active .annotationLayer,
+        .cms-editing-links-active .annotationLayer a {
+          pointer-events: none !important;
+        }
+        .cms-link-box {
+          position: absolute;
+          border: 2px solid #2563eb;
+          background: rgba(59, 130, 246, 0.16);
+          box-sizing: border-box;
+          cursor: move;
+          border-radius: 2px;
+        }
+        .cms-link-box:hover {
+          background: rgba(59, 130, 246, 0.26);
+          border-color: #1d4ed8;
+        }
+        .cms-link-box.selected {
+          border-color: #f59e0b;
+          background: rgba(245, 158, 11, 0.22);
+          z-index: 60 !important;
+        }
+        .cms-link-box.selected .cms-link-actions {
+          display: flex;
+        }
+        .cms-link-handle {
+          position: absolute;
+          width: 9px;
+          height: 9px;
+          background: #ffffff;
+          border: 1.5px solid #1d4ed8;
+          border-radius: 2px;
+          box-sizing: border-box;
+        }
+        .cms-link-handle[data-dir="nw"] { top: -5px; left: -5px; cursor: nwse-resize; }
+        .cms-link-handle[data-dir="n"]  { top: -5px; left: calc(50% - 4.5px); cursor: ns-resize; }
+        .cms-link-handle[data-dir="ne"] { top: -5px; right: -5px; cursor: nesw-resize; }
+        .cms-link-handle[data-dir="e"]  { top: calc(50% - 4.5px); right: -5px; cursor: ew-resize; }
+        .cms-link-handle[data-dir="se"] { bottom: -5px; right: -5px; cursor: nwse-resize; }
+        .cms-link-handle[data-dir="s"]  { bottom: -5px; left: calc(50% - 4.5px); cursor: ns-resize; }
+        .cms-link-handle[data-dir="sw"] { bottom: -5px; left: -5px; cursor: nesw-resize; }
+        .cms-link-handle[data-dir="w"]  { top: calc(50% - 4.5px); left: -5px; cursor: ew-resize; }
+        .cms-link-actions {
+          position: absolute;
+          top: -22px;
+          right: 0;
+          display: none;
+          gap: 3px;
+          background: #0f172a;
+          border: 1px solid rgba(148, 163, 184, 0.35);
+          border-radius: 4px;
+          padding: 1px 4px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+          white-space: nowrap;
+        }
+        .cms-link-box:hover .cms-link-actions {
+          display: flex;
+        }
+        .cms-link-act-btn {
+          border: 0;
+          background: transparent;
+          color: #e2e8f0;
+          font-size: 10px;
+          font-weight: 600;
+          padding: 1px 4px;
+          cursor: pointer;
+          border-radius: 3px;
+        }
+        .cms-link-act-btn:hover {
+          background: rgba(59, 130, 246, 0.35);
+          color: #ffffff;
+        }
+        .cms-link-act-btn.del:hover {
+          background: rgba(239, 68, 68, 0.4);
+          color: #fecaca;
+        }
+        .cms-link-draw-preview {
+          position: absolute;
+          border: 2px dashed #10b981;
+          background: rgba(16, 185, 129, 0.18);
+          pointer-events: none;
+        }
+        .cms-crop-overlay {
+          position: absolute;
+          inset: 0;
+          z-index: 1010 !important;
+          background: rgba(0, 0, 0, 0.25);
+          user-select: none;
+        }
+        .cms-crop-box {
+          position: absolute;
+          border: 2px dashed #10b981;
+          background: rgba(16, 185, 129, 0.12);
+          box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+          box-sizing: border-box;
+          cursor: move;
+        }
+      `);
+      el.setAttribute('src', pdfViewerUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfViewerUrl]);
+
+  // Navigate directly to target page, scroll to the link, and highlight it for 10 seconds
+  useEffect(() => {
+    const el = iframeRef.current as (HTMLElement & {
+      initPromise?: Promise<any>;
+      iframe?: HTMLIFrameElement;
+    }) | null;
+    if (!el || !selectedProject || !previewPage) return;
+
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearAllHighlights = (doc: Document | null | undefined) => {
+      if (!doc) return;
+      doc.querySelectorAll('.cms-temp-link-highlight').forEach((node) => {
+        node.classList.remove('cms-temp-link-highlight');
+      });
+    };
+
+    Promise.resolve(el.initPromise).then((res: any) => {
+      if (cancelled) return;
+      const app = res?.viewerApp || res;
+      if (app?.pdfDocument) {
+        app.page = previewPage;
+      }
+      if (app?.pdfViewer) {
+        app.pdfViewer.currentScaleValue = 'page-actual';
+      }
+
+      const iframeDoc = el.iframe?.contentDocument;
+      clearAllHighlights(iframeDoc);
+
+      if (!highlightSearch || !iframeDoc) return;
+
+      const needle = highlightSearch.toLowerCase();
+      let attempts = 0;
+
+      const tryHighlightOnPage = () => {
+        if (cancelled) return;
+        const pageEl = iframeDoc.querySelector(`.page[data-page-number="${previewPage}"]`);
+        if (!pageEl) {
+          if (attempts++ < 25) pollTimer = setTimeout(tryHighlightOnPage, 120);
+          return;
+        }
+
+        const matchedEls: HTMLElement[] = [];
+
+        // 1. Match rendered PDF link annotations by href (covers linked single & multi-line URLs/emails)
+        pageEl.querySelectorAll<HTMLAnchorElement>('.annotationLayer a[href]').forEach((a) => {
+          const href = (a.getAttribute('href') || '').toLowerCase();
+          if (href && (href.includes(needle) || needle.includes(href.replace(/^https?:\/\//, '')))) {
+            matchedEls.push(a);
+          }
+        });
+
+        // 2. Fallback / additional match in the page's textLayer spans (covers unlinked URLs, TOC, index, etc.)
+        if (matchedEls.length === 0) {
+          pageEl.querySelectorAll<HTMLElement>('.textLayer span').forEach((span) => {
+            const txt = (span.textContent || '').toLowerCase().trim();
+            if (txt && (txt.includes(needle) || (txt.length >= 6 && needle.includes(txt)))) {
+              matchedEls.push(span);
+            }
+          });
+        }
+
+        if (matchedEls.length > 0) {
+          matchedEls.forEach((m) => m.classList.add('cms-temp-link-highlight'));
+          matchedEls[0].scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        } else if (attempts++ < 25) {
+          // Wait for PDF.js to finish rendering annotationLayer/textLayer on the newly selected page
+          pollTimer = setTimeout(tryHighlightOnPage, 120);
+        }
+      };
+
+      pollTimer = setTimeout(tryHighlightOnPage, 120);
+    });
+
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+  }, [previewPage, highlightSearch, navNonce, selectedProject?.id]);
+
+  // Interactive "Edit Links" overlay: resize/move/create/delete link annotations directly on PDF pages
+  useEffect(() => {
+    const el = iframeRef.current as (HTMLElement & {
+      initPromise?: Promise<any>;
+      iframe?: HTMLIFrameElement;
+    }) | null;
+    if (!el || !selectedProject || !pdfViewerUrl) return;
+
+    let cancelled = false;
+    let cleanupFns: Array<() => void> = [];
+
+    Promise.resolve(el.initPromise).then((res: any) => {
+      if (cancelled) return;
+      const app = res?.viewerApp || res;
+      const iframeDoc = el.iframe?.contentDocument;
+      if (!iframeDoc || !app?.pdfViewer) return;
+
+      const clearAllOverlays = () => {
+        iframeDoc.body?.classList.remove('cms-editing-links-active');
+        iframeDoc.querySelectorAll('.cms-link-edit-layer').forEach((n) => n.remove());
+      };
+
+      if (!editLinksMode) {
+        clearAllOverlays();
+        return;
+      }
+
+      iframeDoc.body?.classList.add('cms-editing-links-active');
+
+      const projectId = selectedProject.id;
+
+      const renderPageOverlay = async (pageNum: number) => {
+        if (cancelled || !editLinksMode) return;
+        const pageEl = iframeDoc.querySelector(`.page[data-page-number="${pageNum}"]`) as HTMLElement | null;
+        const pageView = app.pdfViewer.getPageView(pageNum - 1);
+        if (!pageEl || !pageView?.viewport) return;
+
+        const cacheKey = `${projectId}-${pdfRefreshKey}-${pageNum}`;
+        let info = pageLinksCacheRef.current.get(cacheKey);
+        if (!info) {
+          try {
+            const fetched = await getPageLinks(projectId, pageNum);
+            info = { width_pt: fetched.width_pt, height_pt: fetched.height_pt, links: fetched.links };
+            pageLinksCacheRef.current.set(cacheKey, info);
+          } catch {
+            return;
+          }
+        }
+        if (cancelled || !editLinksMode) return;
+
+        pageEl.querySelectorAll('.cms-link-edit-layer').forEach((n) => n.remove());
+        const layer = iframeDoc.createElement('div');
+        layer.className = 'cms-link-edit-layer';
+        const viewport = pageView.viewport;
+        const pageH = info.height_pt;
+
+        const fitzToCss = (r: [number, number, number, number]) => {
+          const pdfRect = [r[0], pageH - r[3], r[2], pageH - r[1]];
+          const vr = viewport.convertToViewportRectangle(pdfRect);
+          const left = Math.min(vr[0], vr[2]);
+          const top = Math.min(vr[1], vr[3]);
+          const width = Math.max(8, Math.abs(vr[2] - vr[0]));
+          const height = Math.max(8, Math.abs(vr[3] - vr[1]));
+          return { left, top, width, height };
+        };
+
+        const cssToFitz = (left: number, top: number, width: number, height: number): [number, number, number, number] => {
+          const p1 = viewport.convertToPdfPoint(left, top);
+          const p2 = viewport.convertToPdfPoint(left + width, top + height);
+          const x0 = Math.min(p1[0], p2[0]);
+          const x1 = Math.max(p1[0], p2[0]);
+          const y0 = pageH - Math.max(p1[1], p2[1]);
+          const y1 = pageH - Math.min(p1[1], p2[1]);
+          return [
+            Number(x0.toFixed(2)),
+            Number(y0.toFixed(2)),
+            Number(x1.toFixed(2)),
+            Number(y1.toFixed(2)),
+          ];
+        };
+
+        // Sort by area descending so smaller inner boxes sit on top of larger outer boxes
+        const sortedLinks = [...info.links].sort((a, b) => {
+          const areaA = Math.abs((a.rect[2] - a.rect[0]) * (a.rect[3] - a.rect[1]));
+          const areaB = Math.abs((b.rect[2] - b.rect[0]) * (b.rect[3] - b.rect[1]));
+          return areaB - areaA;
+        });
+
+        for (const link of sortedLinks) {
+          const box = iframeDoc.createElement('div');
+          box.className = 'cms-link-box';
+          const pos = fitzToCss(link.rect);
+          box.style.left = `${pos.left}px`;
+          box.style.top = `${pos.top}px`;
+          box.style.width = `${pos.width}px`;
+          box.style.height = `${pos.height}px`;
+          box.title = link.kind === 'uri'
+            ? (link.uri || 'External URL')
+            : `Go to page ${link.target_page ?? '?'}`;
+
+          const actions = iframeDoc.createElement('div');
+          actions.className = 'cms-link-actions';
+
+          const editBtn = iframeDoc.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'cms-link-act-btn';
+          editBtn.textContent = 'Edit';
+          editBtn.addEventListener('mousedown', (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+          });
+          editBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+            setEditLinkModal({
+              mode: 'edit',
+              page: pageNum,
+              rect: link.rect,
+              xref: link.xref,
+              link_index: link.link_index,
+              kind: link.kind === 'uri' ? 'uri' : 'goto',
+              target_page: link.target_page || 1,
+              uri: link.uri || '',
+            });
+          });
+
+          const delBtn = iframeDoc.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'cms-link-act-btn del';
+          delBtn.textContent = '×';
+          delBtn.title = 'Delete link';
+          delBtn.addEventListener('mousedown', (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+          });
+          delBtn.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+            try {
+              const updated = await updatePageLink(projectId, {
+                action: 'delete',
+                page: pageNum,
+                xref: link.xref,
+                link_index: link.link_index,
+              });
+              pageLinksCacheRef.current.set(cacheKey, { ...info!, links: updated.links });
+              linksDirtyRef.current = true;
+              toast.success('Link deleted');
+              renderPageOverlay(pageNum);
+            } catch (err: any) {
+              toast.error(err?.message || 'Failed to delete link');
+            }
+          });
+
+          actions.appendChild(editBtn);
+          actions.appendChild(delBtn);
+          box.appendChild(actions);
+
+          for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
+            const handle = iframeDoc.createElement('div');
+            handle.className = 'cms-link-handle';
+            handle.setAttribute('data-dir', dir);
+            box.appendChild(handle);
+          }
+
+          box.addEventListener('mousedown', (ev: MouseEvent) => {
+            if ((ev.target as HTMLElement)?.closest('.cms-link-actions')) return;
+            if (ev.button !== 0) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            setOverlapLinksMenu(null);
+            layer.querySelectorAll('.cms-link-box.selected').forEach((n) => n.classList.remove('selected'));
+            box.classList.add('selected');
+            const handleEl = (ev.target as HTMLElement)?.closest('.cms-link-handle') as HTMLElement | null;
+            const dir = handleEl?.getAttribute('data-dir') || 'move';
+            const startX = ev.clientX;
+            const startY = ev.clientY;
+            const origLeft = parseFloat(box.style.left);
+            const origTop = parseFloat(box.style.top);
+            const origW = parseFloat(box.style.width);
+            const origH = parseFloat(box.style.height);
+            let curLeft = origLeft;
+            let curTop = origTop;
+            let curW = origW;
+            let curH = origH;
+
+            const onMove = (mEv: MouseEvent) => {
+              const dx = mEv.clientX - startX;
+              const dy = mEv.clientY - startY;
+              if (dir === 'move') {
+                curLeft = origLeft + dx;
+                curTop = origTop + dy;
+              } else {
+                if (dir.includes('e')) curW = Math.max(8, origW + dx);
+                if (dir.includes('s')) curH = Math.max(8, origH + dy);
+                if (dir.includes('w')) {
+                  const nw = Math.max(8, origW - dx);
+                  curLeft = origLeft + (origW - nw);
+                  curW = nw;
+                }
+                if (dir.includes('n')) {
+                  const nh = Math.max(8, origH - dy);
+                  curTop = origTop + (origH - nh);
+                  curH = nh;
+                }
+              }
+              box.style.left = `${curLeft}px`;
+              box.style.top = `${curTop}px`;
+              box.style.width = `${curW}px`;
+              box.style.height = `${curH}px`;
+            };
+
+            const onUp = async () => {
+              iframeDoc.removeEventListener('mousemove', onMove, true);
+              iframeDoc.removeEventListener('mouseup', onUp, true);
+              if (curLeft === origLeft && curTop === origTop && curW === origW && curH === origH) return;
+              const newRect = cssToFitz(curLeft, curTop, curW, curH);
+              try {
+                const updated = await updatePageLink(projectId, {
+                  action: 'update',
+                  page: pageNum,
+                  xref: link.xref,
+                  link_index: link.link_index,
+                  rect: newRect,
+                });
+                pageLinksCacheRef.current.set(cacheKey, { ...info!, links: updated.links });
+                linksDirtyRef.current = true;
+                toast.success('Link area updated');
+                renderPageOverlay(pageNum);
+              } catch (err: any) {
+                box.style.left = `${origLeft}px`;
+                box.style.top = `${origTop}px`;
+                box.style.width = `${origW}px`;
+                box.style.height = `${origH}px`;
+                toast.error(err?.message || 'Failed to update link area');
+              }
+            };
+
+            iframeDoc.addEventListener('mousemove', onMove, true);
+            iframeDoc.addEventListener('mouseup', onUp, true);
+          });
+
+          layer.appendChild(box);
+        }
+
+        // Drag on empty space to draw a new link box
+        layer.addEventListener('mousedown', (ev: MouseEvent) => {
+          if (ev.target !== layer || ev.button !== 0) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          const layerRect = layer.getBoundingClientRect();
+          const startX = ev.clientX - layerRect.left;
+          const startY = ev.clientY - layerRect.top;
+          const preview = iframeDoc.createElement('div');
+          preview.className = 'cms-link-draw-preview';
+          preview.style.left = `${startX}px`;
+          preview.style.top = `${startY}px`;
+          preview.style.width = '0px';
+          preview.style.height = '0px';
+          layer.appendChild(preview);
+
+          let curL = startX;
+          let curT = startY;
+          let curW = 0;
+          let curH = 0;
+
+          const onDrawMove = (mEv: MouseEvent) => {
+            const x = mEv.clientX - layerRect.left;
+            const y = mEv.clientY - layerRect.top;
+            curL = Math.min(startX, x);
+            curT = Math.min(startY, y);
+            curW = Math.abs(x - startX);
+            curH = Math.abs(y - startY);
+            preview.style.left = `${curL}px`;
+            preview.style.top = `${curT}px`;
+            preview.style.width = `${curW}px`;
+            preview.style.height = `${curH}px`;
+          };
+
+          const onDrawUp = () => {
+            iframeDoc.removeEventListener('mousemove', onDrawMove, true);
+            iframeDoc.removeEventListener('mouseup', onDrawUp, true);
+            preview.remove();
+            if (curW < 10 || curH < 10) return;
+            const newRect = cssToFitz(curL, curT, curW, curH);
+            setEditLinkModal({
+              mode: 'create',
+              page: pageNum,
+              rect: newRect,
+              kind: 'goto',
+              target_page: pageNum,
+              uri: 'https://',
+            });
+          };
+
+          iframeDoc.addEventListener('mousemove', onDrawMove, true);
+          iframeDoc.addEventListener('mouseup', onDrawUp, true);
+        });
+
+        // Right-click on overlapping boxes to inspect & delete any stacked layer
+        layer.addEventListener('contextmenu', (ev: MouseEvent) => {
+          const layerRect = layer.getBoundingClientRect();
+          const px = ev.clientX - layerRect.left;
+          const py = ev.clientY - layerRect.top;
+          const hits = sortedLinks.filter((l) => {
+            const p = fitzToCss(l.rect);
+            return px >= p.left && px <= p.left + p.width && py >= p.top && py <= p.top + p.height;
+          });
+          if (hits.length === 0) {
+            setOverlapLinksMenu(null);
+            return;
+          }
+          ev.preventDefault();
+          ev.stopPropagation();
+          const iframeRect = el.iframe?.getBoundingClientRect();
+          const rawX = (iframeRect?.left ?? 0) + ev.clientX;
+          const rawY = (iframeRect?.top ?? 0) + ev.clientY;
+          setOverlapLinksMenu({
+            x: Math.min(rawX, window.innerWidth - 260),
+            y: Math.min(rawY, window.innerHeight - 200),
+            page: pageNum,
+            links: hits,
+          });
+        }, true);
+
+        pageEl.appendChild(layer);
+      };
+
+      const renderVisible = () => {
+        if (cancelled || !editLinksMode) return;
+        const pages = Array.from(iframeDoc.querySelectorAll<HTMLElement>('.page[data-page-number][data-loaded="true"]'));
+        if (pages.length === 0 && app.page) {
+          renderPageOverlay(Number(app.page));
+        } else {
+          pages.forEach((p) => renderPageOverlay(Number(p.getAttribute('data-page-number'))));
+        }
+      };
+
+      const onPageRendered = (e: any) => {
+        if (e?.pageNumber) renderPageOverlay(Number(e.pageNumber));
+      };
+      const onScaleOrPage = () => {
+        setTimeout(renderVisible, 60);
+      };
+
+      app.eventBus?.on?.('pagerendered', onPageRendered);
+      app.eventBus?.on?.('scalechanging', onScaleOrPage);
+      app.eventBus?.on?.('pagechanging', onScaleOrPage);
+      cleanupFns.push(() => {
+        app.eventBus?.off?.('pagerendered', onPageRendered);
+        app.eventBus?.off?.('scalechanging', onScaleOrPage);
+        app.eventBus?.off?.('pagechanging', onScaleOrPage);
+        clearAllOverlays();
+      });
+
+      renderVisible();
+    });
+
+    return () => {
+      cancelled = true;
+      cleanupFns.forEach((fn) => fn());
+    };
+  }, [editLinksMode, pdfViewerUrl, pdfRefreshKey, linkOverlayNonce, selectedProject?.id]);
+
+  // Interactive visual Crop overlay on the current PDF page
+  useEffect(() => {
+    const el = iframeRef.current as (HTMLElement & {
+      initPromise?: Promise<any>;
+      iframe?: HTMLIFrameElement;
+    }) | null;
+    if (!el || !selectedProject || !pdfViewerUrl) return;
+
+    let cancelled = false;
+    let cleanupFn: (() => void) | null = null;
+
+    Promise.resolve(el.initPromise).then((res: any) => {
+      if (cancelled) return;
+      const app = res?.viewerApp || res;
+      const iframeDoc = el.iframe?.contentDocument;
+      if (!iframeDoc || !app?.pdfViewer) return;
+
+      const clearCrop = () => {
+        iframeDoc.querySelectorAll('.cms-crop-overlay').forEach((n) => n.remove());
+      };
+
+      if (dimMode !== 'crop') {
+        clearCrop();
+        return;
+      }
+
+      const targetPage = previewPage || Number(app.page) || 1;
+      const attachCropOverlay = () => {
+        if (cancelled || dimMode !== 'crop') return;
+        const pageEl = iframeDoc.querySelector(`.page[data-page-number="${targetPage}"]`) as HTMLElement | null;
+        const pageView = app.pdfViewer.getPageView(targetPage - 1);
+        if (!pageEl || !pageView?.viewport || pageEl.clientWidth === 0) return;
+
+        clearCrop();
+        const overlay = iframeDoc.createElement('div');
+        overlay.className = 'cms-crop-overlay';
+
+        const viewport = pageView.viewport;
+        const pageW = pageView.pdfPage?.view ? (pageView.pdfPage.view[2] - pageView.pdfPage.view[0]) : 612;
+        const pageH = pageView.pdfPage?.view ? (pageView.pdfPage.view[3] - pageView.pdfPage.view[1]) : 792;
+
+        const box = iframeDoc.createElement('div');
+        box.className = 'cms-crop-box';
+
+        const layerW = pageEl.clientWidth;
+        const layerH = pageEl.clientHeight;
+        let curL = Math.round(layerW * 0.05);
+        let curT = Math.round(layerH * 0.05);
+        let curW = Math.max(40, Math.round(layerW * 0.90));
+        let curH = Math.max(40, Math.round(layerH * 0.90));
+
+        const syncBox = () => {
+          box.style.left = `${curL}px`;
+          box.style.top = `${curT}px`;
+          box.style.width = `${curW}px`;
+          box.style.height = `${curH}px`;
+          const p1 = viewport.convertToPdfPoint(curL, curT);
+          const p2 = viewport.convertToPdfPoint(curL + curW, curT + curH);
+          const x0 = Math.max(0, Math.min(p1[0], p2[0]));
+          const x1 = Math.min(pageW, Math.max(p1[0], p2[0]));
+          const y0 = Math.max(0, pageH - Math.max(p1[1], p2[1]));
+          const y1 = Math.min(pageH, pageH - Math.min(p1[1], p2[1]));
+          const rectPts: [number, number, number, number] = [
+            Number(x0.toFixed(2)),
+            Number(y0.toFixed(2)),
+            Number(x1.toFixed(2)),
+            Number(y1.toFixed(2)),
+          ];
+          setPendingCropRect({ page: targetPage, rect: rectPts });
+          const wPt = x1 - x0;
+          const hPt = y1 - y0;
+          if (dimensionUnit === 'in') {
+            setEditWidthInput((wPt / 72).toFixed(2));
+            setEditHeightInput((hPt / 72).toFixed(2));
+          } else if (dimensionUnit === 'mm') {
+            setEditWidthInput(((wPt / 72) * 25.4).toFixed(1));
+            setEditHeightInput(((hPt / 72) * 25.4).toFixed(1));
+          } else {
+            setEditWidthInput(String(Math.round(wPt)));
+            setEditHeightInput(String(Math.round(hPt)));
+          }
+        };
+
+        for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
+          const handle = iframeDoc.createElement('div');
+          handle.className = 'cms-link-handle';
+          handle.setAttribute('data-dir', dir);
+          box.appendChild(handle);
+        }
+
+        box.addEventListener('mousedown', (ev: MouseEvent) => {
+          if (ev.button !== 0) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          const handleEl = (ev.target as HTMLElement)?.closest('.cms-link-handle') as HTMLElement | null;
+          const dir = handleEl?.getAttribute('data-dir') || 'move';
+          const startX = ev.clientX;
+          const startY = ev.clientY;
+          const origL = curL;
+          const origT = curT;
+          const origW = curW;
+          const origH = curH;
+
+          const onMove = (mEv: MouseEvent) => {
+            const dx = mEv.clientX - startX;
+            const dy = mEv.clientY - startY;
+            if (dir === 'move') {
+              curL = Math.max(0, Math.min(layerW - origW, origL + dx));
+              curT = Math.max(0, Math.min(layerH - origH, origT + dy));
+            } else {
+              if (dir.includes('e')) curW = Math.max(20, Math.min(layerW - origL, origW + dx));
+              if (dir.includes('s')) curH = Math.max(20, Math.min(layerH - origT, origH + dy));
+              if (dir.includes('w')) {
+                const nw = Math.max(20, Math.min(origL + origW, origW - dx));
+                curL = origL + (origW - nw);
+                curW = nw;
+              }
+              if (dir.includes('n')) {
+                const nh = Math.max(20, Math.min(origT + origH, origH - dy));
+                curT = origT + (origH - nh);
+                curH = nh;
+              }
+            }
+            syncBox();
+          };
+
+          const onUp = () => {
+            iframeDoc.removeEventListener('mousemove', onMove, true);
+            iframeDoc.removeEventListener('mouseup', onUp, true);
+          };
+
+          iframeDoc.addEventListener('mousemove', onMove, true);
+          iframeDoc.addEventListener('mouseup', onUp, true);
+        });
+
+        syncBox();
+        overlay.appendChild(box);
+        pageEl.appendChild(overlay);
+      };
+
+      const onScale = () => setTimeout(attachCropOverlay, 60);
+      app.eventBus?.on?.('scalechanging', onScale);
+      app.eventBus?.on?.('pagerendered', onScale);
+      attachCropOverlay();
+      cleanupFn = () => {
+        app.eventBus?.off?.('scalechanging', onScale);
+        app.eventBus?.off?.('pagerendered', onScale);
+        clearCrop();
+      };
+    });
+
+    return () => {
+      cancelled = true;
+      cleanupFn?.();
+    };
+  }, [dimMode, previewPage, pdfViewerUrl, pdfRefreshKey, selectedProject?.id]);
+
+  // PDF Page Dimensions state
+  const [pageDimensions, setPageDimensions] = useState<PageDimensionItem[]>([]);
+  const [dimensionUnit, setDimensionUnit] = useState<'in' | 'mm' | 'pt'>('in');
+  const [editWidthInput, setEditWidthInput] = useState<string>('');
+  const [editHeightInput, setEditHeightInput] = useState<string>('');
+  const [savingDimensions, setSavingDimensions] = useState(false);
+  const iframeRef = useRef<any>(null);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -740,10 +1733,147 @@ export function PostProdWebPdfProcessor() {
     getExistingTocLinksInfo(selectedProject.id)
       .then((info) => setExistingTocLinksInfo(info))
       .catch(() => setExistingTocLinksInfo(null));
-  }, [selectedProject?.id]);
+
+    // Load PDF Page Dimensions
+    if (PDF_AVAILABLE_STATUSES.includes(selectedProject.status)) {
+      getPageDimensions(selectedProject.id)
+        .then((res) => {
+          setPageDimensions(res.pages || []);
+        })
+        .catch(() => setPageDimensions([]));
+    } else {
+      setPageDimensions([]);
+    }
+  }, [selectedProject?.id, selectedProject?.status, pdfRefreshKey]);
+
+  // Sync editWidthInput and editHeightInput whenever previewPage, pageDimensions or dimensionUnit changes
+  useEffect(() => {
+    if (pageDimensions.length === 0) return;
+    const activePg = previewPage ?? 1;
+    const match = pageDimensions.find((p) => p.page === activePg) || pageDimensions[0];
+    if (match) {
+      if (dimensionUnit === 'in') {
+        setEditWidthInput(String(match.width_in));
+        setEditHeightInput(String(match.height_in));
+      } else if (dimensionUnit === 'mm') {
+        setEditWidthInput(String(match.width_mm));
+        setEditHeightInput(String(match.height_mm));
+      } else {
+        setEditWidthInput(String(match.width_pt));
+        setEditHeightInput(String(match.height_pt));
+      }
+    }
+  }, [previewPage, pageDimensions, dimensionUnit]);
+
+  const handleSavePageDimensions = async (scope: 'page' | 'all') => {
+    if (!selectedProject) return;
+    const w = parseFloat(editWidthInput);
+    const h = parseFloat(editHeightInput);
+    if (isNaN(w) || isNaN(h) || w <= 0 || h <= 0) {
+      toast.error('Please enter valid positive width and height numbers');
+      return;
+    }
+    const targetPage = previewPage ?? 1;
+    setSavingDimensions(true);
+    try {
+      await updatePageDimensions(selectedProject.id, {
+        page: scope === 'page' ? targetPage : undefined,
+        width: w,
+        height: h,
+        unit: dimensionUnit,
+        mode: dimMode,
+        crop_rect: dimMode === 'crop' && pendingCropRect?.page === targetPage ? pendingCropRect.rect : undefined,
+      });
+      toast.success(
+        scope === 'page'
+          ? `${dimMode === 'crop' ? 'Cropped' : 'Scaled'} page ${targetPage} to ${w} × ${h} ${dimensionUnit}`
+          : `${dimMode === 'crop' ? 'Cropped' : 'Scaled'} all pages to ${w} × ${h} ${dimensionUnit}`
+      );
+      if (dimMode === 'crop') {
+        setDimMode('scale');
+        setPendingCropRect(null);
+      }
+      setPdfRefreshKey((prev) => prev + 1);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update page dimensions');
+    } finally {
+      setSavingDimensions(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedProject || !PDF_AVAILABLE_STATUSES.includes(selectedProject.status)) {
+      setCanUndoPdf(false);
+      setCanRedoPdf(false);
+      return;
+    }
+    getPdfHistoryStatus(selectedProject.id)
+      .then((st) => {
+        setCanUndoPdf(st.can_undo);
+        setCanRedoPdf(st.can_redo);
+      })
+      .catch(() => {});
+  }, [selectedProject?.id, selectedProject?.status, pdfRefreshKey, linkOverlayNonce]);
+
+  const handleUndoPdf = useCallback(async () => {
+    if (!selectedProject || !canUndoPdf || undoRedoBusy) return;
+    setUndoRedoBusy(true);
+    try {
+      const res = await undoPdfEdit(selectedProject.id);
+      setCanUndoPdf(res.can_undo);
+      setCanRedoPdf(res.can_redo);
+      pageLinksCacheRef.current.clear();
+      setPdfRefreshKey((k) => k + 1);
+      toast.success(res.message || 'Undid last PDF edit');
+    } catch (err: any) {
+      toast.error(err?.message || 'Nothing to undo');
+    } finally {
+      setUndoRedoBusy(false);
+    }
+  }, [selectedProject, canUndoPdf, undoRedoBusy]);
+
+  const handleRedoPdf = useCallback(async () => {
+    if (!selectedProject || !canRedoPdf || undoRedoBusy) return;
+    setUndoRedoBusy(true);
+    try {
+      const res = await redoPdfEdit(selectedProject.id);
+      setCanUndoPdf(res.can_undo);
+      setCanRedoPdf(res.can_redo);
+      pageLinksCacheRef.current.clear();
+      setPdfRefreshKey((k) => k + 1);
+      toast.success(res.message || 'Redid PDF edit');
+    } catch (err: any) {
+      toast.error(err?.message || 'Nothing to redo');
+    } finally {
+      setUndoRedoBusy(false);
+    }
+  }, [selectedProject, canRedoPdf, undoRedoBusy]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) {
+        if (canUndoPdf) {
+          e.preventDefault();
+          handleUndoPdf();
+        }
+      } else if (k === 'y' || (k === 'z' && e.shiftKey)) {
+        if (canRedoPdf) {
+          e.preventDefault();
+          handleRedoPdf();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canUndoPdf, canRedoPdf, handleUndoPdf, handleRedoPdf]);
 
   // Reset step inputs and state when selected project changes
   useEffect(() => {
+    setPreviewPage(null);
     setLinkType('one_way');
     setPreserveExistingLinks(true);
     setLinksStatus(null);
@@ -1489,6 +2619,41 @@ export function PostProdWebPdfProcessor() {
     }
   };
 
+  const handleAnalyzeCitationLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingCitationLinks(true);
+    setCitationLinksAnalysis(null);
+    try {
+      const result = await generateReferenceCitationLinks(selectedProject.id, true);
+      setCitationLinksAnalysis(result);
+      if (result.not_linked === 0) {
+        setSelectedProject(prev => prev ? { ...prev, status: 'Endnote Linked' } : prev);
+        setActiveStep(10);
+      }
+      toast.success('Author-Year reference scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze citations');
+    } finally {
+      setAnalyzingCitationLinks(false);
+    }
+  };
+
+  const handleApplyCitationLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingCitationLinks(true);
+    try {
+      const result = await generateReferenceCitationLinks(selectedProject.id, false);
+      setCitationLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      setSelectedProject(prev => prev ? { ...prev, status: 'Endnote Linked' } : prev);
+      toast.success(`Created reference citation link(s) successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply citation links');
+    } finally {
+      setApplyingCitationLinks(false);
+    }
+  };
+
   const handleAnalyzeCrossrefLinks = async () => {
     if (!selectedProject) return;
     setAnalyzingCrossrefLinks(true);
@@ -1699,87 +2864,380 @@ export function PostProdWebPdfProcessor() {
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
-      {/* Header */}
-      <header className="px-6 py-4 border-b border-border/80 flex items-center justify-between bg-card shrink-0 shadow-sm">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            onClick={() => {
-              if (selectedProject) {
-                navigate('/post-production/web-pdf-processor');
-                setFontsStatus(null);
-                setActiveStep(1);
-              } else {
-                navigate('/post-production');
-              }
-            }}
-            className="p-1.5 h-auto rounded-lg text-muted hover:text-text hover:bg-border/60 shrink-0"
-          >
-            <ArrowLeft size={16} />
-          </Button>
-          <div>
-            <h1 className="text-base font-semibold m-0 text-text">
-              {selectedProject ? selectedProject.project_name : 'Web PDF Processor'}
-            </h1>
-            <p className="text-xs text-muted m-0 mt-0.5">
-              {selectedProject
-                ? `${selectedProject.client}${selectedProject.client_code ? ` (${selectedProject.client_code})` : ''} • Step 1: Merge PDFs`
-                : 'Upload, extract and audit Web PDF projects and configurations'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {!selectedProject && isTeamLead && (
+      {/* Header (shown only on project list view; project workspace renders its header inside the left panel) */}
+      {!selectedProject && (
+        <header className="px-6 py-4 border-b border-border/80 flex items-center justify-between bg-card shrink-0 shadow-sm">
+          <div className="flex items-center gap-3">
             <Button
-              onClick={() => setShowAddModal(true)}
-              leftIcon={<Plus size={15} />}
+              variant="ghost"
+              onClick={() => navigate('/post-production')}
+              className="p-1.5 h-auto rounded-lg text-muted hover:text-text hover:bg-border/60 shrink-0"
             >
-              Create Project
+              <ArrowLeft size={16} />
             </Button>
-          )}
-        </div>
-      </header>
+            <div>
+              <h1 className="text-base font-semibold m-0 text-text">
+                Web PDF Processor
+              </h1>
+              <p className="text-xs text-muted m-0 mt-0.5">
+                Upload, extract and audit Web PDF projects and configurations
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isTeamLead && (
+              <Button
+                onClick={() => setShowAddModal(true)}
+                leftIcon={<Plus size={15} />}
+              >
+                Create Project
+              </Button>
+            )}
+          </div>
+        </header>
+      )}
 
       {/* ── WORKSPACE (split-screen) ───────────────────────────────────────── */}
       {selectedProject ? (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-[420px_1fr] divide-y lg:divide-y-0 lg:divide-x divide-border overflow-hidden">
 
           {/* RIGHT — PDF Preview */}
-          <div className="flex flex-col p-6 overflow-hidden bg-background order-1 lg:order-2">
-            <h2 className="text-sm font-bold text-text mb-3 flex items-center gap-2 shrink-0">
-              <FileText size={16} className="text-primary" />
-              {selectedProject ? `${selectedProject.status === 'Bookmarked' ? 'Bookmarked' : selectedProject.status === 'Trimmed' ? 'Trimmed' : selectedProject.status === 'Fonts Checked' ? 'Fonts Checked' : selectedProject.status === 'Security Checked' ? 'Security Checked' : 'Merged'} PDF Preview` : 'PDF Preview'}
-              {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) && (
-                <>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+          <div className="flex flex-col px-3 pt-2 pb-3 overflow-hidden bg-background order-1 lg:order-2">
+            <div className="mb-2 flex items-center justify-between gap-2 flex-wrap shrink-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <FileText size={15} className="text-primary shrink-0" />
+                <span className="text-xs font-bold text-text whitespace-nowrap">
+                  PDF Preview
+                </span>
+                {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 whitespace-nowrap">
                     ✓ {selectedProject.status}
                   </span>
-                  <div className="ml-auto flex items-center gap-3">
+                )}
+              </div>
+
+              {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {pageDimensions.length > 0 && (
+                    <div className="flex items-center gap-1 bg-card px-2 py-0.5 rounded-lg border border-border text-[11px] font-mono text-muted-foreground shadow-sm">
+                      <span className="font-semibold text-text flex items-center gap-0.5 whitespace-nowrap">
+                        p.
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur = previewPage ?? 1;
+                            if (cur > 1) setPreviewPage(cur - 1);
+                          }}
+                          disabled={(previewPage ?? 1) <= 1}
+                          className="px-1 rounded hover:bg-muted text-muted hover:text-text font-bold disabled:opacity-30"
+                          title="Previous Page"
+                        >
+                          ‹
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          max={pageDimensions.length}
+                          value={previewPage ?? 1}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val) && val >= 1 && val <= pageDimensions.length) {
+                              setPreviewPage(val);
+                            }
+                          }}
+                          className="w-10 bg-background text-text font-bold text-center rounded border border-border px-1 py-0.2 outline-none focus:border-primary text-[11px]"
+                          title="Enter page number"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur = previewPage ?? 1;
+                            if (cur < pageDimensions.length) setPreviewPage(cur + 1);
+                          }}
+                          disabled={(previewPage ?? 1) >= pageDimensions.length}
+                          className="px-1 rounded hover:bg-muted text-muted hover:text-text font-bold disabled:opacity-30"
+                          title="Next Page"
+                        >
+                          ›
+                        </button>
+                        <span className="text-muted text-[10px] mr-0.5">/{pageDimensions.length}</span>
+                      </span>
+
+                      {/* Editable Width × Height Inputs + Aspect Lock */}
+                      <div className="flex items-center gap-1 bg-background px-1.5 py-0.2 rounded border border-border">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editWidthInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditWidthInput(val);
+                            if (lockAspectRatio) {
+                              const curW = parseFloat(editWidthInput);
+                              const curH = parseFloat(editHeightInput);
+                              const nw = parseFloat(val);
+                              if (!isNaN(curW) && curW > 0 && !isNaN(curH) && !isNaN(nw) && nw > 0) {
+                                setEditHeightInput((nw * (curH / curW)).toFixed(dimensionUnit === 'pt' ? 0 : 2));
+                              }
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSavePageDimensions('page');
+                          }}
+                          className="w-11 bg-transparent text-text font-bold text-center outline-none focus:text-primary text-[11px]"
+                          title="Width — press Enter to apply"
+                        />
+                        <span className="text-muted text-[10px]">×</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editHeightInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditHeightInput(val);
+                            if (lockAspectRatio) {
+                              const curW = parseFloat(editWidthInput);
+                              const curH = parseFloat(editHeightInput);
+                              const nh = parseFloat(val);
+                              if (!isNaN(curH) && curH > 0 && !isNaN(curW) && !isNaN(nh) && nh > 0) {
+                                setEditWidthInput((nh * (curW / curH)).toFixed(dimensionUnit === 'pt' ? 0 : 2));
+                              }
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSavePageDimensions('page');
+                          }}
+                          className="w-11 bg-transparent text-text font-bold text-center outline-none focus:text-primary text-[11px]"
+                          title="Height — press Enter to apply"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setLockAspectRatio((v) => !v)}
+                          className={`p-0.5 rounded transition-colors ${lockAspectRatio ? 'text-primary bg-primary/10' : 'text-muted hover:text-text'}`}
+                          title={lockAspectRatio ? 'Aspect ratio locked' : 'Lock aspect ratio'}
+                        >
+                          {lockAspectRatio ? <Lock size={10} /> : <Unlock size={10} />}
+                        </button>
+                      </div>
+
+                      {/* Mode Switcher: Scale vs Crop */}
+                      <div className="flex items-center border-l border-border pl-1 gap-0.5 text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDimMode('scale');
+                            setPendingCropRect(null);
+                          }}
+                          className={`px-1.5 py-0.5 rounded font-semibold whitespace-nowrap ${
+                            dimMode === 'scale' ? 'bg-primary text-primary-foreground' : 'hover:text-text'
+                          }`}
+                          title="Scale / compress page content proportionally to Width × Height"
+                        >
+                          Scale
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditLinksMode(false);
+                            setDimMode('crop');
+                          }}
+                          className={`px-1.5 py-0.5 rounded font-semibold flex items-center gap-0.5 whitespace-nowrap ${
+                            dimMode === 'crop' ? 'bg-emerald-600 text-white' : 'hover:text-text'
+                          }`}
+                          title="Adjust all 4 sides / corners on the page to crop"
+                        >
+                          <Crop size={10} />
+                          Crop
+                        </button>
+                      </div>
+
+                      {/* Apply buttons */}
+                      <button
+                        type="button"
+                        onClick={() => handleSavePageDimensions('page')}
+                        disabled={savingDimensions}
+                        className="px-1.5 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 font-bold text-[10px] border border-emerald-500/20 disabled:opacity-50 whitespace-nowrap"
+                        title={dimMode === 'scale' ? 'Scale this page' : 'Crop this page'}
+                      >
+                        Apply
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSavePageDimensions('all')}
+                        disabled={savingDimensions}
+                        className="px-1.5 py-0.5 rounded bg-primary/15 hover:bg-primary/25 text-primary font-bold text-[10px] border border-primary/20 disabled:opacity-50 whitespace-nowrap"
+                        title={dimMode === 'scale' ? 'Scale ALL pages' : 'Crop ALL pages'}
+                      >
+                        All
+                      </button>
+
+                      {/* Unit Switcher */}
+                      <div className="flex items-center border-l border-border pl-1 gap-0.5 text-[10px]">
+                        {(['in', 'mm', 'pt'] as const).map((u) => (
+                          <button
+                            key={u}
+                            type="button"
+                            onClick={() => setDimensionUnit(u)}
+                            className={`px-1 rounded ${
+                              dimensionUnit === u ? 'bg-primary text-primary-foreground font-bold' : 'hover:text-text'
+                            }`}
+                          >
+                            {u}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Undo / Redo */}
+                  <div className="flex items-center gap-0.5 bg-card p-0.5 rounded-lg border border-border shadow-sm">
                     <button
                       type="button"
-                      onClick={() => {
-                        setActiveStep(5);
-                        handleOpenEditBookmarks();
-                      }}
-                      className="text-xs text-primary hover:text-primary/80 font-semibold flex items-center gap-1 bg-primary/10 hover:bg-primary/20 px-2 py-0.5 rounded border border-primary/20 transition-colors"
-                      title="Open Drag & Drop Bookmark Level Manager"
+                      onClick={handleUndoPdf}
+                      disabled={!canUndoPdf || undoRedoBusy}
+                      className="p-1 rounded hover:bg-muted/60 text-text disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+                      title="Undo last PDF edit (Ctrl+Z)"
                     >
-                      <Bookmark size={12} />
-                      Edit Bookmarks
+                      <Undo2 size={13} />
                     </button>
-                    <a
-                      href={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-primary hover:text-primary/80 font-semibold"
+                    <button
+                      type="button"
+                      onClick={handleRedoPdf}
+                      disabled={!canRedoPdf || undoRedoBusy}
+                      className="p-1 rounded hover:bg-muted/60 text-text disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+                      title="Redo PDF edit (Ctrl+Y)"
                     >
-                      ↗ Open
-                    </a>
+                      <Redo2 size={13} />
+                    </button>
                   </div>
-                </>
+
+                  {/* Edit Links / Edit Bookmarks / Tools Dropdown / Open */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditLinksMode((prev) => {
+                        if (prev && linksDirtyRef.current) {
+                          linksDirtyRef.current = false;
+                          setPdfRefreshKey((k) => k + 1);
+                        }
+                        return !prev;
+                      });
+                    }}
+                    className={`text-[11px] font-semibold flex items-center gap-1 px-2 py-1 rounded-lg border transition-colors whitespace-nowrap ${
+                      editLinksMode
+                        ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                        : 'text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 border-primary/20'
+                    }`}
+                    title="Resize, move, add, or delete clickable link areas directly on the PDF"
+                  >
+                    <Link2 size={12} />
+                    {editLinksMode ? 'Done Links' : 'Edit Links'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveStep(5);
+                      handleOpenEditBookmarks();
+                    }}
+                    className="text-[11px] text-primary hover:text-primary/80 font-semibold flex items-center gap-1 bg-primary/10 hover:bg-primary/20 px-2 py-1 rounded-lg border border-primary/20 transition-colors whitespace-nowrap"
+                    title="Open Drag & Drop Bookmark Level Manager"
+                  >
+                    <Bookmark size={12} />
+                    Bookmarks
+                  </button>
+
+                  {/* Advanced Tools Dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowToolsMenu((v) => !v)}
+                      className="text-[11px] font-semibold flex items-center gap-1 px-2 py-1 rounded-lg border border-border bg-card hover:bg-muted/40 text-text transition-colors whitespace-nowrap"
+                      title="Page size presets, Page Labels, and Document Properties"
+                    >
+                      <SlidersHorizontal size={12} />
+                      Tools
+                      <ChevronDown size={11} />
+                    </button>
+                    {showToolsMenu && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowToolsMenu(false)} />
+                        <div className="absolute right-0 mt-1.5 w-56 rounded-xl border border-border bg-card shadow-xl py-1.5 z-50 text-xs text-text">
+                          <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                            Page Size Presets
+                          </div>
+                          {[
+                            { label: 'Trade (6 × 9 in)', wIn: 6, hIn: 9 },
+                            { label: 'Letter (8.5 × 11 in)', wIn: 8.5, hIn: 11 },
+                            { label: 'Digest (5.5 × 8.5 in)', wIn: 5.5, hIn: 8.5 },
+                            { label: 'A4 (8.27 × 11.69 in)', wIn: 8.27, hIn: 11.69 },
+                            { label: 'A5 (5.83 × 8.27 in)', wIn: 5.83, hIn: 8.27 },
+                          ].map((preset) => (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={() => {
+                                const factor = dimensionUnit === 'in' ? 1 : dimensionUnit === 'mm' ? 25.4 : 72;
+                                const dec = dimensionUnit === 'pt' ? 0 : 2;
+                                setEditWidthInput((preset.wIn * factor).toFixed(dec));
+                                setEditHeightInput((preset.hIn * factor).toFixed(dec));
+                                setShowToolsMenu(false);
+                                toast.success(`Preset ${preset.label} loaded — click Apply or All`);
+                              }}
+                              className="w-full px-3 py-1.5 text-left hover:bg-primary/10 hover:text-primary transition-colors flex items-center justify-between"
+                            >
+                              <span>{preset.label}</span>
+                            </button>
+                          ))}
+                          <div className="my-1 border-t border-border/70" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowToolsMenu(false);
+                              const pg = previewPage ?? 1;
+                              setLabelTargetPage(pg);
+                              setLabelTotalPages(pageDimensions.length || 1);
+                              setLabelSubset('selected');
+                              setLabelPagesInput(String(pg));
+                              setLabelStyle('D');
+                              setLabelPrefix('');
+                              setLabelStart(1);
+                              setShowLabelPagesModal(true);
+                            }}
+                            className="w-full px-3 py-1.5 text-left hover:bg-primary/10 hover:text-primary transition-colors flex items-center gap-2"
+                          >
+                            <Tag size={12} />
+                            <span>Page Labels...</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowToolsMenu(false);
+                              openDocPropsRef.current();
+                            }}
+                            className="w-full px-3 py-1.5 text-left hover:bg-primary/10 hover:text-primary transition-colors flex items-center gap-2"
+                          >
+                            <FileText size={12} />
+                            <span>Document Properties...</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <a
+                    href={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-primary hover:text-primary/80 font-semibold whitespace-nowrap px-1.5 py-1"
+                    title="Open PDF in new browser tab"
+                  >
+                    ↗ Open
+                  </a>
+                </div>
               )}
-            </h2>
+            </div>
 
             <div className="flex-1 rounded-xl overflow-hidden bg-card border border-border relative flex">
               {/* SLIDE-OUT INTERACTIVE BOOKMARK SIDEBAR OVER THE PREVIEW */}
@@ -1980,12 +3438,15 @@ export function PostProdWebPdfProcessor() {
                 </div>
               )}
 
-              {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) ? (
-                <iframe
-                  key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}-${previewPage ?? 'root'}-${highlightSearch ?? 'none'}`}
-                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf?t=${pdfRefreshKey}#page=${previewPage ?? 1}${highlightSearch ? `&search=${encodeURIComponent(highlightSearch)}` : ''}${(!previewPage && selectedProject.status === 'Bookmarked' && !showEditBookmarksModal) ? '&pagemode=bookmarks' : ''}`}
-                  className="w-full h-full border-0 flex-1"
-                  title={`${selectedProject.status} PDF Preview`}
+              {PDF_AVAILABLE_STATUSES.includes(selectedProject.status) && pdfViewerUrl ? (
+                <pdfjs-viewer-element
+                  ref={iframeRef}
+                  key={`${selectedProject.id}-${pdfRefreshKey}`}
+                  zoom="page-actual"
+                  pagemode={(!previewPage && selectedProject.status === 'Bookmarked' && !showEditBookmarksModal) ? 'bookmarks' : 'none'}
+                  viewer-css-theme="DARK"
+                  iframe-title={`${selectedProject.status} PDF Preview`}
+                  style={{ width: '100%', height: '100%', display: 'block', border: 0, flex: 1 }}
                 />
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
@@ -2001,7 +3462,28 @@ export function PostProdWebPdfProcessor() {
 
           {/* LEFT — Stepper Panel */}
           <div className="flex flex-col overflow-hidden bg-card order-2 lg:order-1">
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="px-5 py-3 border-b border-border/80 flex items-center gap-3 bg-card shrink-0">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  navigate('/post-production/web-pdf-processor');
+                  setFontsStatus(null);
+                  setActiveStep(1);
+                }}
+                className="p-1.5 h-auto rounded-lg text-muted hover:text-text hover:bg-border/60 shrink-0"
+              >
+                <ArrowLeft size={16} />
+              </Button>
+              <div className="min-w-0">
+                <h1 className="text-base font-semibold m-0 text-text truncate">
+                  {selectedProject.project_name}
+                </h1>
+                <p className="text-xs text-muted m-0 mt-0.5 truncate">
+                  {selectedProject.client}{selectedProject.client_code ? ` (${selectedProject.client_code})` : ''} • Step 1: Merge PDFs
+                </p>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
 
               {/* Step 1: Merge PDFs */}
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 1 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
@@ -2707,8 +4189,26 @@ export function PostProdWebPdfProcessor() {
                                   <tr key={i} className="border-b border-blue-500/10 last:border-0">
                                     <td className="py-1 truncate max-w-[150px] pr-2" title={link.title}>{link.title}</td>
                                     <td className="py-1">{link.type === 'one_way' ? 'TOC→Ch' : 'Ch→TOC'}</td>
-                                    <td className="py-1 text-center">{link.source_page}</td>
-                                    <td className="py-1 text-center">{link.target_page}</td>
+                                    <td className="py-1 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => link.source_page && setPreviewPage(link.source_page)}
+                                        className="hover:underline hover:text-primary cursor-pointer font-medium"
+                                        title="Go to TOC page in preview"
+                                      >
+                                        {link.source_page || '-'}
+                                      </button>
+                                    </td>
+                                    <td className="py-1 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => link.target_page && setPreviewPage(link.target_page)}
+                                        className="hover:underline hover:text-emerald-700 cursor-pointer font-semibold"
+                                        title="Go to target chapter page in preview"
+                                      >
+                                        {link.target_page || '-'}
+                                      </button>
+                                    </td>
                                     <td className="py-1 text-center">
                                       {link.is_linked ? (
                                         <span className="text-emerald-600 font-bold" title="Already linked">✓</span>
@@ -2794,48 +4294,104 @@ export function PostProdWebPdfProcessor() {
                       </p>
                     )}
 
-                    {/* Filter Tabs & Search Bar & URL Card List */}
-                    {urlLinksAnalysis?.details?.length > 0 && (
-                      <div className="space-y-2">
-                        {/* Filter Tabs */}
-                        <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+                    {/* Link Health Summary + Filter Tabs & Search Bar & URL Card List */}
+                    {urlLinksAnalysis?.details?.length > 0 && (() => {
+                      const isUrlWorking = (d: UrlLinkDetail) => Boolean(d.http_ok) || ['Valid', 'Redirected'].includes(d.validation_status || '');
+                      const isUrlBroken = (d: UrlLinkDetail) => ['Broken', 'Invalid', 'Timeout', 'SSL Error', 'Unreachable'].includes(d.validation_status || '');
+                      const isUrlRestricted = (d: UrlLinkDetail) => !isUrlWorking(d) && !isUrlBroken(d) && (d.validation_status === 'Restricted' || d.http_status === 403);
+                      const workingCount = urlLinksAnalysis.details.filter(isUrlWorking).length;
+                      const brokenCount = urlLinksAnalysis.details.filter(isUrlBroken).length;
+                      const restrictedCount = urlLinksAnalysis.details.filter(isUrlRestricted).length;
+                      const unlinkedCount = urlLinksAnalysis.details.filter((d: UrlLinkDetail) => !d.is_linked).length;
+                      const multilineCount = urlLinksAnalysis.details.filter((d: UrlLinkDetail) => d.is_multiline).length;
+                      const mismatchCount = urlLinksAnalysis.details.filter((d: UrlLinkDetail) => d.issue_type === 'destination_mismatch').length;
+
+                      return (
+                      <div className="space-y-2.5">
+                        {/* Link Health Summary Cards */}
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setUrlFilterTab(urlFilterTab === 'valid' ? 'all' : 'valid')}
+                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                              urlFilterTab === 'valid'
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                                : 'bg-emerald-500/10 border-emerald-500/25 hover:bg-emerald-500/15'
+                            }`}
+                          >
+                            <div className={`text-[10px] font-semibold flex items-center gap-1 ${urlFilterTab === 'valid' ? 'text-emerald-50' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                              <CheckCircle2 size={11} /> Working
+                            </div>
+                            <div className={`text-sm font-bold mt-0.5 ${urlFilterTab === 'valid' ? 'text-white' : 'text-emerald-800 dark:text-emerald-300'}`}>
+                              {workingCount}
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setUrlFilterTab(urlFilterTab === 'broken' ? 'all' : 'broken')}
+                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                              urlFilterTab === 'broken'
+                                ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                                : 'bg-red-500/10 border-red-500/25 hover:bg-red-500/15'
+                            }`}
+                          >
+                            <div className={`text-[10px] font-semibold flex items-center gap-1 ${urlFilterTab === 'broken' ? 'text-red-50' : 'text-red-700 dark:text-red-400'}`}>
+                              <XCircle size={11} /> Not Working
+                            </div>
+                            <div className={`text-sm font-bold mt-0.5 ${urlFilterTab === 'broken' ? 'text-white' : 'text-red-800 dark:text-red-300'}`}>
+                              {brokenCount}
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setUrlFilterTab(urlFilterTab === 'restricted' ? 'all' : 'restricted')}
+                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                              urlFilterTab === 'restricted'
+                                ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                                : 'bg-amber-500/10 border-amber-500/25 hover:bg-amber-500/15'
+                            }`}
+                          >
+                            <div className={`text-[10px] font-semibold flex items-center gap-1 ${urlFilterTab === 'restricted' ? 'text-amber-50' : 'text-amber-700 dark:text-amber-400'}`}>
+                              <AlertTriangle size={11} /> Restricted
+                            </div>
+                            <div className={`text-sm font-bold mt-0.5 ${urlFilterTab === 'restricted' ? 'text-white' : 'text-amber-800 dark:text-amber-300'}`}>
+                              {restrictedCount}
+                            </div>
+                          </button>
+                        </div>
+
+                        {/* Filter Tabs (wrapped cleanly so all pills are visible) */}
+                        <div className="flex items-center flex-wrap gap-1 text-[11px]">
                           <button
                             type="button"
                             onClick={() => setUrlFilterTab('all')}
-                            className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'all' ? 'bg-primary text-white' : 'bg-muted/15 text-muted hover:bg-muted/25'}`}
+                            className={`px-2 py-0.5 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'all' ? 'bg-primary text-white' : 'bg-muted/15 text-muted hover:bg-muted/25'}`}
                           >
                             All ({urlLinksAnalysis.details.length})
                           </button>
                           <button
                             type="button"
                             onClick={() => setUrlFilterTab('unlinked')}
-                            className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'unlinked' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20'}`}
+                            className={`px-2 py-0.5 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'unlinked' ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20'}`}
                           >
-                            Needs Fix ({urlLinksAnalysis.details.filter((d: UrlLinkDetail) => !d.is_linked).length})
+                            Needs Fix ({unlinkedCount})
                           </button>
                           <button
                             type="button"
                             onClick={() => setUrlFilterTab('multiline')}
-                            className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'multiline' ? 'bg-purple-600 text-white' : 'bg-purple-500/10 text-purple-700 dark:text-purple-400 hover:bg-purple-500/20'}`}
+                            className={`px-2 py-0.5 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'multiline' ? 'bg-purple-600 text-white' : 'bg-purple-500/10 text-purple-700 dark:text-purple-400 hover:bg-purple-500/20'}`}
                           >
-                            Multi-line ({urlLinksAnalysis.details.filter((d: UrlLinkDetail) => d.is_multiline).length})
+                            Multi-line ({multilineCount})
                           </button>
-                          {urlLinksAnalysis.details.some((d: UrlLinkDetail) => d.issue_type === 'destination_mismatch') && (
+                          {mismatchCount > 0 && (
                             <button
                               type="button"
                               onClick={() => setUrlFilterTab('mismatch')}
-                              className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'mismatch' ? 'bg-orange-600 text-white' : 'bg-orange-500/10 text-orange-700 dark:text-orange-400 hover:bg-orange-500/20'}`}
+                              className={`px-2 py-0.5 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'mismatch' ? 'bg-orange-600 text-white' : 'bg-orange-500/10 text-orange-700 dark:text-orange-400 hover:bg-orange-500/20'}`}
                             >
-                              Mismatches ({urlLinksAnalysis.details.filter((d: UrlLinkDetail) => d.issue_type === 'destination_mismatch').length})
-                            </button>
-                          )}
-                          {urlLinksAnalysis.details.some((d: UrlLinkDetail) => ['Broken', 'Invalid', 'Timeout', 'SSL Error'].includes(d.validation_status || '')) && (
-                            <button
-                              type="button"
-                              onClick={() => setUrlFilterTab('broken')}
-                              className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${urlFilterTab === 'broken' ? 'bg-red-600 text-white' : 'bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20'}`}
-                            >
-                              Broken ({urlLinksAnalysis.details.filter((d: UrlLinkDetail) => ['Broken', 'Invalid', 'Timeout', 'SSL Error'].includes(d.validation_status || '')).length})
+                              Mismatches ({mismatchCount})
                             </button>
                           )}
                         </div>
@@ -2867,9 +4423,10 @@ export function PostProdWebPdfProcessor() {
                             const filteredList = urlLinksAnalysis.details.filter((item: UrlLinkDetail) => {
                               if (urlFilterTab === 'unlinked' && item.is_linked) return false;
                               if (urlFilterTab === 'multiline' && !item.is_multiline) return false;
-                              if (urlFilterTab === 'broken' && !['Broken', 'Invalid', 'Timeout', 'SSL Error'].includes(item.validation_status || '')) return false;
+                              if (urlFilterTab === 'broken' && !isUrlBroken(item)) return false;
+                              if (urlFilterTab === 'restricted' && !isUrlRestricted(item)) return false;
                               if (urlFilterTab === 'mismatch' && item.issue_type !== 'destination_mismatch') return false;
-                              if (urlFilterTab === 'valid' && item.validation_status !== 'Valid' && !item.http_ok) return false;
+                              if (urlFilterTab === 'valid' && !isUrlWorking(item)) return false;
 
                               if (urlSearchQuery.trim()) {
                                 const q = urlSearchQuery.toLowerCase();
@@ -2894,37 +4451,43 @@ export function PostProdWebPdfProcessor() {
                               const originalIndex = urlLinksAnalysis.details.indexOf(item);
                               const isEditingThis = editingUrlIdx === originalIndex;
                               const isSelected = previewPage === item.page && highlightSearch === (item.display_text || item.original_text);
+                              const healthAccent = isUrlBroken(item)
+                                ? 'border-l-4 border-l-red-500'
+                                : isUrlWorking(item)
+                                ? 'border-l-4 border-l-emerald-500'
+                                : isUrlRestricted(item)
+                                ? 'border-l-4 border-l-amber-500'
+                                : '';
 
                               return (
                                 <div
                                   key={i}
-                                  className={`rounded-lg border transition-all text-xs ${
+                                  className={`rounded-lg border transition-all text-xs overflow-hidden ${healthAccent} ${
                                     isSelected
                                       ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
-                                      : 'border-border/60 bg-surface hover:border-border hover:bg-muted/5'
+                                      : 'border-border/60 bg-surface hover:border-border hover:shadow-xs'
                                   }`}
                                 >
-                                  {/* Card Header */}
-                                  <div className="p-2.5 pb-1 flex items-center justify-between gap-1.5">
+                                  {/* Card Header Bar */}
+                                  <div className="px-2.5 py-1.5 bg-muted/20 border-b border-border/40 flex items-center justify-between gap-1.5">
                                     <div className="flex items-center gap-1.5 min-w-0">
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          setPreviewPage(item.page);
-                                          setHighlightSearch(item.display_text || item.original_text || item.url);
+                                          triggerTemporaryHighlight(item.page, item.display_text || item.original_text || item.url);
                                         }}
-                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
-                                        title="Click to jump to this page in PDF preview"
+                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
+                                        title="Click to jump to page in preview"
                                       >
                                         Page {item.page}
                                       </button>
                                       {item.is_multiline && (
-                                        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20 shrink-0" title={`Stitched from ${item.line_count || 2} lines`}>
+                                        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20 shrink-0" title={`Stitched from ${item.line_count || 2} lines`}>
                                           {item.line_count || 2}L
                                         </span>
                                       )}
                                       {item.is_edited && (
-                                        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 shrink-0">
+                                        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 shrink-0">
                                           Edited
                                         </span>
                                       )}
@@ -2932,12 +4495,12 @@ export function PostProdWebPdfProcessor() {
 
                                     <div className="flex items-center gap-1.5 shrink-0">
                                       {item.is_linked ? (
-                                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full" title="Active hyperlink annotation in PDF">
-                                          <CheckCircle2 size={11} /> Linked
+                                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded" title="Active hyperlink in PDF">
+                                          <CheckCircle2 size={10} /> Linked
                                         </span>
                                       ) : (
-                                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-500/10 px-2 py-0.5 rounded-full" title="Plain-text URL without link annotation">
-                                          <AlertCircle size={11} /> Needs link
+                                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded" title="Plain-text URL, needs link annotation">
+                                          <AlertCircle size={10} /> Needs link
                                         </span>
                                       )}
                                       {!isEditingThis && (
@@ -2948,25 +4511,25 @@ export function PostProdWebPdfProcessor() {
                                             setEditingUrlIdx(originalIndex);
                                             setEditingUrlValue(item.reconstructed_url || item.url || '');
                                           }}
-                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-muted hover:text-primary hover:bg-primary/10 border border-border/70 transition-colors"
+                                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-muted hover:text-primary hover:bg-primary/10 border border-border/70 transition-colors"
                                           title="Edit target URL manually"
                                         >
-                                          <Edit2 size={11} /> Edit
+                                          <Edit2 size={10} /> Edit
                                         </button>
                                       )}
                                     </div>
                                   </div>
 
                                   {/* Card Body */}
-                                  <div className="px-2.5 pb-2.5 pt-1 space-y-1.5">
+                                  <div className="p-2.5 space-y-1.5">
                                     {isEditingThis ? (
-                                      <div className="space-y-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
+                                      <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
                                         <label className="text-[10px] font-semibold text-text uppercase tracking-wider block">Target Web URL</label>
                                         <input
                                           type="text"
                                           value={editingUrlValue}
                                           onChange={(e) => setEditingUrlValue(e.target.value)}
-                                          className="w-full text-xs font-mono px-2.5 py-1.5 border border-primary rounded-md bg-surface text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                                          className="w-full text-xs font-mono px-2 py-1 border border-primary rounded bg-surface text-text focus:outline-none focus:ring-1 focus:ring-primary"
                                           placeholder="https://..."
                                           autoFocus
                                           onKeyDown={(e) => {
@@ -2980,34 +4543,33 @@ export function PostProdWebPdfProcessor() {
                                             <button
                                               type="button"
                                               onClick={() => setEditingUrlIdx(null)}
-                                              className="px-2 py-0.5 text-[11px] rounded border border-border text-muted hover:bg-muted/20"
+                                              className="px-2 py-0.5 text-[10px] rounded border border-border text-muted hover:bg-muted/20"
                                             >
                                               Cancel
                                             </button>
                                             <button
                                               type="button"
                                               onClick={() => handleSaveEditedUrl(originalIndex)}
-                                              className="px-2.5 py-0.5 text-[11px] font-medium rounded bg-primary text-white hover:bg-primary/90 flex items-center gap-1"
+                                              className="px-2.5 py-0.5 text-[10px] font-medium rounded bg-primary text-white hover:bg-primary/90 flex items-center gap-1"
                                             >
-                                              <Check size={11} /> Save
+                                              <Check size={10} /> Save
                                             </button>
                                           </div>
                                         </div>
                                       </div>
                                     ) : (
                                       <div
-                                        className="cursor-pointer"
+                                        className="cursor-pointer space-y-1.5"
                                         onClick={() => {
-                                          setPreviewPage(item.page);
-                                          setHighlightSearch(item.display_text || item.original_text || item.url);
+                                          triggerTemporaryHighlight(item.page, item.display_text || item.original_text || item.url);
                                         }}
                                       >
-                                        {/* Reconstructed URL with external link */}
-                                        <div className="flex items-start justify-between gap-1.5">
-                                          <div className="flex items-center gap-1.5 min-w-0">
-                                            <Globe size={12} className="text-primary shrink-0 mt-0.5" />
+                                        {/* URL Target Link */}
+                                        <div className="flex items-start justify-between gap-2 bg-primary/5 hover:bg-primary/10 rounded p-1.5 border border-primary/15 transition-colors">
+                                          <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                                            <Globe size={13} className="text-primary shrink-0 mt-0.5" />
                                             <span
-                                              className="font-mono text-xs text-primary font-medium break-all hover:underline"
+                                              className="font-mono text-xs text-primary font-medium break-all select-all"
                                               title={item.reconstructed_url || item.url}
                                             >
                                               {item.reconstructed_url || item.url}
@@ -3018,7 +4580,7 @@ export function PostProdWebPdfProcessor() {
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             onClick={(e) => e.stopPropagation()}
-                                            className="text-muted hover:text-primary p-0.5 rounded transition-colors shrink-0"
+                                            className="text-primary/70 hover:text-primary p-0.5 rounded transition-colors shrink-0"
                                             title="Open link in browser"
                                           >
                                             <ExternalLink size={12} />
@@ -3027,7 +4589,7 @@ export function PostProdWebPdfProcessor() {
 
                                         {/* Mismatch Warning */}
                                         {item.issue_type === 'destination_mismatch' && item.annotation_dest && (
-                                          <div className="mt-1.5 p-1.5 bg-amber-500/10 border border-amber-500/20 rounded text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-1.5">
+                                          <div className="p-1.5 bg-amber-500/10 border border-amber-500/20 rounded text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-1.5">
                                             <AlertTriangle size={12} className="shrink-0 text-amber-600 mt-0.5" />
                                             <div className="min-w-0 flex-1">
                                               <span className="font-medium">Current PDF target:</span>
@@ -3038,16 +4600,20 @@ export function PostProdWebPdfProcessor() {
                                           </div>
                                         )}
 
-                                        {/* Raw Extracted Text */}
-                                        <div className="mt-1 pt-1 border-t border-border/30 flex items-center justify-between text-[10px] text-muted">
-                                          <span className="truncate max-w-[220px] font-mono" title={item.original_text || item.display_text}>
-                                            Text: {item.original_text || item.display_text}
-                                          </span>
+                                        {/* Details row: In-Text representation + HTTP status badge */}
+                                        <div className="flex items-center justify-between gap-2 text-[10px] pt-0.5">
+                                          <div className="flex items-center gap-1 min-w-0 text-muted">
+                                            <span className="font-semibold shrink-0">Text:</span>
+                                            <span className="truncate font-mono text-text/80" title={item.original_text || item.display_text}>
+                                              {item.original_text || item.display_text}
+                                            </span>
+                                          </div>
                                           {item.validation_status && (
-                                            <span className={`shrink-0 font-medium ${
-                                              item.validation_status === 'Valid' ? 'text-emerald-600' :
-                                              item.validation_status === 'Broken' ? 'text-red-500' :
-                                              item.validation_status === 'Redirected' ? 'text-blue-500' : 'text-muted'
+                                            <span className={`shrink-0 px-1.5 py-0.2 rounded font-semibold text-[9px] ${
+                                              item.validation_status === 'Valid' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' :
+                                              item.validation_status === 'Broken' ? 'bg-red-500/10 text-red-600 border border-red-500/20' :
+                                              item.validation_status === 'Redirected' ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20' :
+                                              'bg-muted/20 text-muted border border-border/50'
                                             }`}>
                                               {item.http_status ? `${item.http_status} ` : ''}{item.validation_status}
                                             </span>
@@ -3062,7 +4628,8 @@ export function PostProdWebPdfProcessor() {
                           })()}
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
 
                     {urlLinksAnalysis?.total_urls === 0 && (
                       <p className="text-sm text-muted text-center py-2">No plain-text URLs found in the PDF.</p>
@@ -3249,11 +4816,25 @@ export function PostProdWebPdfProcessor() {
                           </thead>
                           <tbody>
                             {emailLinksAnalysis.details.map((item: EmailLinkDetail, i: number) => (
-                              <tr key={i} className="border-b border-purple-100 last:border-0 hover:bg-purple-50/30">
+                              <tr
+                                key={i}
+                                onClick={() => item.page && triggerTemporaryHighlight(item.page, item.email)}
+                                className="border-b border-purple-100 last:border-0 hover:bg-purple-50/50 cursor-pointer transition-colors"
+                                title={`Click to jump to page ${item.page} and highlight email`}
+                              >
                                 <td className="p-2 max-w-[200px]">
-                                  <span className="truncate block text-purple-700" title={item.email}>{item.email}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <Mail size={12} className="text-purple-600 shrink-0" />
+                                    <span className="truncate block font-mono text-purple-700 font-medium select-all" title={item.email}>{item.email}</span>
+                                  </div>
                                 </td>
-                                <td className="p-2 text-center text-muted">{item.page}</td>
+                                <td className="p-2 text-center">
+                                  <span
+                                    className="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold bg-purple-100/70 text-purple-700 hover:bg-purple-200"
+                                  >
+                                    p. {item.page}
+                                  </span>
+                                </td>
                                 <td className="p-2 text-center">
                                   {item.is_linked ? (
                                     <div className="flex flex-col items-center gap-0.5">
@@ -3327,7 +4908,7 @@ export function PostProdWebPdfProcessor() {
                 )}
               </div>
 
-              {/* Step 9: Endnote Links */}
+              {/* Step 9: References & Endnotes */}
               <div className="border border-border/40 rounded-xl overflow-hidden">
                 <button
                   className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
@@ -3337,10 +4918,10 @@ export function PostProdWebPdfProcessor() {
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${['Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? 'bg-emerald-500/20 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
                       {['Endnote Linked', 'Crossref Linked', 'Index Linked', 'Glossary Linked'].includes(selectedProject.status) ? <CheckCircle2 size={14} /> : '9'}
                     </div>
-                    <span className="font-medium text-sm">Endnote Links</span>
+                    <span className="font-medium text-sm">References & Endnotes</span>
                     {endnoteLinksAnalysis && (
                       <span className="text-xs bg-blue-500/10 text-blue-600 px-2 py-0.5 rounded-full">
-                        {endnoteLinksAnalysis.total_notes} Notes · {endnoteLinksAnalysis.not_linked} unlinked
+                        {endnoteLinksAnalysis.total_notes} {endnoteLinksAnalysis.ref_type === 'author_year' ? 'Citations' : 'Notes'} · {endnoteLinksAnalysis.not_linked} unlinked
                       </span>
                     )}
                   </div>
@@ -3350,20 +4931,22 @@ export function PostProdWebPdfProcessor() {
                 {activeStep === 9 && (
                   <div className="p-4 border-t border-border/30 space-y-4">
                     <p className="text-xs text-muted">
-                      Create bidirectional links between superscript note references and their corresponding endnotes.
+                      Automatically detects and creates bidirectional links for both <strong>Numbered Endnotes</strong> and <strong>Author-Year (APA) Citations</strong> to the References section.
                     </p>
 
                     {/* Status Legend */}
                     <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg text-xs space-y-1">
-                      <p className="font-semibold text-blue-800">Link Status:</p>
+                      <p className="font-semibold text-blue-800">
+                        {endnoteLinksAnalysis?.ref_type === 'author_year' ? 'Author-Year (APA) Guide:' : 'Reference Link Status Guide:'}
+                      </p>
                       <div className="space-y-1 ml-2">
                         <div className="flex items-center gap-2">
                           <span className="text-emerald-600 font-bold">✓ Linked</span>
-                          <span className="text-muted">= Bidirectional links created (ref ↔ endnote)</span>
+                          <span className="text-muted">= Clickable link created between text reference and definition</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-red-500 font-bold">✗ Not linked</span>
-                          <span className="text-muted">= Missing links, needs "Apply/Fix"</span>
+                          <span className="text-muted">= Unlinked or missing from references, needs "Apply/Fix"</span>
                         </div>
                       </div>
                     </div>
@@ -3371,24 +4954,31 @@ export function PostProdWebPdfProcessor() {
                     {/* Summary */}
                     {endnoteLinksAnalysis && (
                       <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1 text-sm text-blue-800">
-                        <p className="font-semibold">Endnote Report:</p>
-                        <ul className="list-disc list-inside space-y-0.5">
-                          <li>Total notes found: <strong>{endnoteLinksAnalysis.total_notes}</strong></li>
-                          <li className="text-emerald-700">Already linked: <strong>{endnoteLinksAnalysis.linked}</strong></li>
-                          <li className="text-red-600">Not linked (needs fix): <strong>{endnoteLinksAnalysis.not_linked}</strong></li>
+                        <div className="flex items-center justify-between">
+                          <p className="font-semibold m-0">Reference Report:</p>
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                            {endnoteLinksAnalysis.ref_type === 'author_year' ? 'Author-Year (APA)' : 'Numbered / Superscript'}
+                          </span>
+                        </div>
+                        <ul className="list-disc list-inside space-y-0.5 pt-1">
+                          <li>Total references found: <strong>{endnoteLinksAnalysis.total_notes}</strong></li>
+                          <li className="text-emerald-700">Matched to References: <strong>{endnoteLinksAnalysis.linked}</strong></li>
+                          <li className="text-red-600">Unlinked / Needs fix: <strong>{endnoteLinksAnalysis.not_linked}</strong></li>
                         </ul>
                       </div>
                     )}
 
-                    {/* Endnote Table */}
+                    {/* Unified Reference / Endnote Table */}
                     {endnoteLinksAnalysis?.details?.length > 0 && (
                       <div className="max-h-72 overflow-y-auto rounded border border-blue-200 text-xs">
                         <table className="w-full border-collapse">
                           <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
                             <tr>
-                              <th className="p-2 border-b border-blue-200 w-12 text-center">Note#</th>
-                              <th className="p-2 border-b border-blue-200 w-16 text-center">Ref Page</th>
-                              <th className="p-2 border-b border-blue-200 w-16 text-center">Def Page</th>
+                              <th className="p-2 border-b border-blue-200 text-left">
+                                {endnoteLinksAnalysis.ref_type === 'author_year' ? 'In-Text Citation' : 'Note#'}
+                              </th>
+                              <th className="p-2 border-b border-blue-200 w-16 text-center">Cite P.</th>
+                              <th className="p-2 border-b border-blue-200 w-16 text-center">Def P.</th>
                               <th className="p-2 border-b border-blue-200 text-center">
                                 <div className="flex flex-col items-center gap-0.5">
                                   <span>Link Status</span>
@@ -3399,31 +4989,42 @@ export function PostProdWebPdfProcessor() {
                             </tr>
                           </thead>
                           <tbody>
-                            {endnoteLinksAnalysis.details.map((item: EndnoteDetail, i: number) => (
-                              <tr key={i} className="border-b border-blue-100 last:border-0 hover:bg-blue-50/30">
-                                <td className="p-2 text-center font-bold text-blue-700">{item.note_number}</td>
-                                <td className="p-2 text-center text-muted">
-                                  <button
-                                    type="button"
-                                    onClick={() => item.reference_page && setPreviewPage(item.reference_page)}
-                                    className="hover:underline hover:text-primary cursor-pointer font-medium"
-                                    title="Go to reference page in preview"
-                                  >
-                                    {item.reference_page || '-'}
-                                  </button>
-                                </td>
-                                <td className="p-2 text-center text-muted">
-                                  <button
-                                    type="button"
-                                    onClick={() => item.definition_page && setPreviewPage(item.definition_page)}
-                                    className="hover:underline hover:text-primary cursor-pointer font-medium"
-                                    title="Go to definition page in preview"
-                                  >
-                                    {item.definition_page || '-'}
-                                  </button>
+                            {endnoteLinksAnalysis.details.map((item: any, i: number) => (
+                              <tr
+                                key={i}
+                                onClick={() => item.reference_page && triggerTemporaryHighlight(item.reference_page, String(item.note_number))}
+                                className="border-b border-blue-100 last:border-0 hover:bg-blue-50/50 cursor-pointer transition-colors"
+                                title="Click to jump to citation in preview"
+                              >
+                                <td className="p-2 font-mono text-blue-900 font-medium max-w-[200px] truncate" title={String(item.note_number)}>
+                                  {item.note_number}
                                 </td>
                                 <td className="p-2 text-center">
-                                  {item.is_linked ? (
+                                  {item.reference_page ? (
+                                    <span className="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold bg-blue-100/70 text-blue-800">
+                                      p. {item.reference_page}
+                                    </span>
+                                  ) : '-'}
+                                </td>
+                                <td className="p-2 text-center text-muted">
+                                  {item.definition_page ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        triggerTemporaryHighlight(item.definition_page, item.target_text || String(item.note_number));
+                                      }}
+                                      className="inline-block px-1.5 py-0.5 rounded text-[11px] font-bold bg-emerald-100/80 text-emerald-800 hover:bg-emerald-200 cursor-pointer"
+                                      title="Jump to reference definition page"
+                                    >
+                                      p. {item.definition_page}
+                                    </button>
+                                  ) : (
+                                    <span className="text-muted text-[11px]">-</span>
+                                  )}
+                                </td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked || (item.definition_page && endnoteLinksAnalysis.ref_type === 'author_year') ? (
                                     <div className="flex flex-col items-center gap-0.5">
                                       <span className="text-emerald-600 font-bold">✓ Linked</span>
                                       <span className="text-[9px] text-emerald-600/70">Active</span>
@@ -3438,7 +5039,10 @@ export function PostProdWebPdfProcessor() {
                                 <td className="p-2 text-center">
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteEndnote(i)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteEndnote(i);
+                                    }}
                                     className="p-1 rounded text-muted hover:text-red-600 hover:bg-red-50 transition-colors mx-auto inline-flex items-center justify-center"
                                     title="Delete / Exclude this reference"
                                   >
@@ -3453,7 +5057,7 @@ export function PostProdWebPdfProcessor() {
                     )}
 
                     {endnoteLinksAnalysis?.total_notes === 0 && (
-                      <p className="text-sm text-muted text-center py-2">No endnotes found in the PDF.</p>
+                      <p className="text-sm text-muted text-center py-2">No references or endnotes found in the PDF.</p>
                     )}
 
                     {/* Buttons */}
@@ -3465,7 +5069,7 @@ export function PostProdWebPdfProcessor() {
                         leftIcon={analyzingEndnoteLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
                         className="flex-1"
                       >
-                        {analyzingEndnoteLinks ? 'Analyzing...' : 'Analyze Notes'}
+                        {analyzingEndnoteLinks ? 'Analyzing...' : 'Analyze References'}
                       </Button>
 
                       <Button
@@ -3557,9 +5161,27 @@ export function PostProdWebPdfProcessor() {
                                   </span>
                                 </td>
                                 <td className="p-2 text-muted truncate">{item.reference_text}</td>
-                                <td className="p-2 text-center text-muted">{item.reference_page || '-'}</td>
+                                <td className="p-2 text-center text-muted">
+                                  <button
+                                    type="button"
+                                    onClick={() => item.reference_page && triggerTemporaryHighlight(item.reference_page, item.reference_text)}
+                                    className="hover:underline hover:text-primary cursor-pointer font-medium"
+                                    title="Go to reference page in preview"
+                                  >
+                                    {item.reference_page || '-'}
+                                  </button>
+                                </td>
                                 <td className="p-2 text-muted truncate">{item.target_identifier}</td>
-                                <td className="p-2 text-center text-muted">{item.target_page || '-'}</td>
+                                <td className="p-2 text-center text-muted">
+                                  <button
+                                    type="button"
+                                    onClick={() => item.target_page && triggerTemporaryHighlight(item.target_page, item.target_identifier)}
+                                    className="hover:underline hover:text-emerald-700 cursor-pointer font-semibold"
+                                    title="Go to target page in preview"
+                                  >
+                                    {item.target_page || '-'}
+                                  </button>
+                                </td>
                                 <td className="p-2 text-center">
                                   {item.is_linked ? (
                                     <div className="flex flex-col items-center gap-0.5">
@@ -3683,8 +5305,26 @@ export function PostProdWebPdfProcessor() {
                               <tr key={i} className="border-b border-indigo-100 last:border-0 hover:bg-indigo-50/30">
                                 <td className="p-2 text-text font-medium truncate max-w-[180px]">{item.term}</td>
                                 <td className="p-2 text-center text-indigo-700 font-semibold">{item.page_reference}</td>
-                                <td className="p-2 text-center text-muted">{item.source_page}</td>
-                                <td className="p-2 text-center text-emerald-700 font-semibold">{item.target_page}</td>
+                                <td className="p-2 text-center text-muted">
+                                  <button
+                                    type="button"
+                                    onClick={() => item.source_page && triggerTemporaryHighlight(item.source_page, item.term)}
+                                    className="hover:underline hover:text-primary cursor-pointer font-medium"
+                                    title="Go to Index page in preview"
+                                  >
+                                    {item.source_page || '-'}
+                                  </button>
+                                </td>
+                                <td className="p-2 text-center text-emerald-700 font-semibold">
+                                  <button
+                                    type="button"
+                                    onClick={() => item.target_page && triggerTemporaryHighlight(item.target_page, item.term)}
+                                    className="hover:underline hover:text-emerald-800 cursor-pointer font-semibold"
+                                    title="Go to target reference page in preview"
+                                  >
+                                    {item.target_page || '-'}
+                                  </button>
+                                </td>
                                 <td className="p-2 text-center">
                                   {item.is_linked ? (
                                     <span className="text-emerald-600 font-bold">✓ Linked</span>
@@ -3802,8 +5442,26 @@ export function PostProdWebPdfProcessor() {
                                 <td className="p-2 text-text font-medium truncate max-w-[200px]" title={item.term}>
                                   {item.body_term || item.term}
                                 </td>
-                                <td className="p-2 text-center text-teal-700 font-semibold">{item.body_page}</td>
-                                <td className="p-2 text-center text-emerald-700 font-semibold">{item.glossary_page}</td>
+                                <td className="p-2 text-center text-teal-700 font-semibold">
+                                  <button
+                                    type="button"
+                                    onClick={() => item.body_page && triggerTemporaryHighlight(item.body_page, item.body_term || item.term)}
+                                    className="hover:underline hover:text-teal-800 cursor-pointer font-semibold"
+                                    title="Go to body page in preview"
+                                  >
+                                    {item.body_page || '-'}
+                                  </button>
+                                </td>
+                                <td className="p-2 text-center text-emerald-700 font-semibold">
+                                  <button
+                                    type="button"
+                                    onClick={() => item.glossary_page && triggerTemporaryHighlight(item.glossary_page, item.term)}
+                                    className="hover:underline hover:text-emerald-800 cursor-pointer font-semibold"
+                                    title="Go to glossary page in preview"
+                                  >
+                                    {item.glossary_page || '-'}
+                                  </button>
+                                </td>
                                 <td className="p-2 text-center">
                                   {item.is_linked ? (
                                     <span className="text-emerald-600 font-bold">✓ Linked</span>
@@ -4229,6 +5887,503 @@ export function PostProdWebPdfProcessor() {
       </Modal>
 
 
+
+      {/* ── DOCUMENT PROPERTIES MODAL ───────────────────────────────────── */}
+      <Modal
+        isOpen={showDocPropsModal}
+        onClose={() => !savingDocProps && setShowDocPropsModal(false)}
+        title="Document Properties"
+        size="md"
+      >
+        {loadingDocProps ? (
+          <div className="py-8 text-center text-xs text-muted">Loading document properties...</div>
+        ) : (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!selectedProject) return;
+              setSavingDocProps(true);
+              try {
+                await updateDocumentProperties(selectedProject.id, docPropsForm);
+                toast.success('Document properties updated');
+                setShowDocPropsModal(false);
+                setPdfRefreshKey((k) => k + 1);
+              } catch (err: any) {
+                toast.error(err?.message || 'Failed to update document properties');
+              } finally {
+                setSavingDocProps(false);
+              }
+            }}
+            className="space-y-3 pt-1"
+          >
+            <div className="grid grid-cols-[110px_1fr] items-center gap-2.5 text-xs">
+              <label className="font-medium text-text">Title:</label>
+              <input
+                type="text"
+                value={docPropsForm.title}
+                onChange={(e) => setDocPropsForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="Document title"
+                className="w-full px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <label className="font-medium text-text">Author:</label>
+              <input
+                type="text"
+                value={docPropsForm.author}
+                onChange={(e) => setDocPropsForm((f) => ({ ...f, author: e.target.value }))}
+                placeholder="Author name"
+                className="w-full px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <label className="font-medium text-text">Subject:</label>
+              <input
+                type="text"
+                value={docPropsForm.subject}
+                onChange={(e) => setDocPropsForm((f) => ({ ...f, subject: e.target.value }))}
+                placeholder="Subject"
+                className="w-full px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <label className="font-medium text-text">Keywords:</label>
+              <input
+                type="text"
+                value={docPropsForm.keywords}
+                onChange={(e) => setDocPropsForm((f) => ({ ...f, keywords: e.target.value }))}
+                placeholder="Comma-separated keywords"
+                className="w-full px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <label className="font-medium text-text">Creator:</label>
+              <input
+                type="text"
+                value={docPropsForm.creator}
+                onChange={(e) => setDocPropsForm((f) => ({ ...f, creator: e.target.value }))}
+                placeholder="Creator application"
+                className="w-full px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <label className="font-medium text-text">PDF Producer:</label>
+              <input
+                type="text"
+                value={docPropsForm.producer}
+                onChange={(e) => setDocPropsForm((f) => ({ ...f, producer: e.target.value }))}
+                placeholder="PDF producer"
+                className="w-full px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+
+            {docPropsMeta && (
+              <div className="border-t border-border/70 pt-2.5 grid grid-cols-[110px_1fr] gap-y-1.5 gap-x-2.5 text-xs text-muted">
+                <span>File Size:</span>
+                <span className="text-text">{(docPropsMeta.file_size_bytes / (1024 * 1024)).toFixed(1)} MB ({docPropsMeta.file_size_bytes.toLocaleString()} bytes)</span>
+                <span>PDF Version:</span>
+                <span className="text-text">{docPropsMeta.pdf_version}</span>
+                <span>Page Count:</span>
+                <span className="text-text">{docPropsMeta.page_count}</span>
+                <span>Page Size:</span>
+                <span className="text-text">{docPropsMeta.page_size}</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" type="button" disabled={savingDocProps} onClick={() => setShowDocPropsModal(false)} className="text-xs font-semibold">
+                Cancel
+              </Button>
+              <Button type="submit" disabled={savingDocProps} className="text-xs font-semibold">
+                {savingDocProps ? 'Saving...' : 'Save Properties'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ── OVERLAPPING LINKS LAYER MENU ────────────────────────────────── */}
+      {overlapLinksMenu && selectedProject && (
+        <div
+          className="fixed inset-0 z-[75]"
+          onClick={() => setOverlapLinksMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setOverlapLinksMenu(null);
+          }}
+        >
+          <div
+            style={{ top: overlapLinksMenu.y, left: overlapLinksMenu.x }}
+            onClick={(e) => e.stopPropagation()}
+            className="fixed w-64 rounded-lg border border-border bg-card shadow-xl py-1.5 text-xs text-text"
+          >
+            <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted border-b border-border/60">
+              Link Layers Here ({overlapLinksMenu.links.length})
+            </div>
+            <div className="max-h-56 overflow-y-auto divide-y divide-border/40">
+              {overlapLinksMenu.links.map((lnk, idx) => {
+                const w = Math.round(Math.abs(lnk.rect[2] - lnk.rect[0]));
+                const h = Math.round(Math.abs(lnk.rect[3] - lnk.rect[1]));
+                const dest = lnk.kind === 'uri' ? (lnk.uri || 'URL') : `Page ${lnk.target_page ?? '?'}`;
+                return (
+                  <div key={`${lnk.xref ?? lnk.link_index}-${idx}`} className="px-2.5 py-1.5 flex items-center justify-between gap-2 hover:bg-muted/30">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">
+                        #{idx + 1} · {dest}
+                      </div>
+                      <div className="text-[10px] text-muted">
+                        {w}×{h} pt
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOverlapLinksMenu(null);
+                        setEditLinkModal({
+                          mode: 'edit',
+                          page: overlapLinksMenu.page,
+                          rect: lnk.rect,
+                          xref: lnk.xref,
+                          link_index: lnk.link_index,
+                          kind: lnk.kind === 'uri' ? 'uri' : 'goto',
+                          target_page: lnk.target_page || 1,
+                          uri: lnk.uri || '',
+                        });
+                      }}
+                      className="px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 text-[10px] font-semibold cursor-pointer"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const updated = await updatePageLink(selectedProject.id, {
+                            action: 'delete',
+                            page: overlapLinksMenu.page,
+                            xref: lnk.xref,
+                            link_index: lnk.link_index,
+                          });
+                          const cacheKey = `${selectedProject.id}-${pdfRefreshKey}-${overlapLinksMenu.page}`;
+                          const existingCache = pageLinksCacheRef.current.get(cacheKey);
+                          if (existingCache) {
+                            pageLinksCacheRef.current.set(cacheKey, { ...existingCache, links: updated.links });
+                          }
+                          linksDirtyRef.current = true;
+                          toast.success('Link layer deleted');
+                          setOverlapLinksMenu((prev) => {
+                            if (!prev) return null;
+                            const remaining = prev.links.filter((x) => (x.xref ?? x.link_index) !== (lnk.xref ?? lnk.link_index));
+                            return remaining.length > 0 ? { ...prev, links: remaining } : null;
+                          });
+                          setLinkOverlayNonce((n) => n + 1);
+                        } catch (err: any) {
+                          toast.error(err?.message || 'Failed to delete link');
+                        }
+                      }}
+                      className="p-1 rounded text-red-500 hover:bg-red-500/15 cursor-pointer"
+                      title="Delete this link layer"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── THUMBNAIL CONTEXT MENU ──────────────────────────────────────── */}
+      {pageLabelMenu && (
+        <div
+          className="fixed inset-0 z-[70]"
+          onClick={() => setPageLabelMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setPageLabelMenu(null);
+          }}
+        >
+          <div
+            style={{ top: pageLabelMenu.y, left: pageLabelMenu.x }}
+            onClick={(e) => e.stopPropagation()}
+            className="fixed w-44 rounded-lg border border-border bg-card shadow-xl py-1 text-xs text-text"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                const pg = pageLabelMenu.page;
+                setPageLabelMenu(null);
+                setLabelTargetPage(pg);
+                setLabelSubset('selected');
+                setLabelPagesInput(String(pg));
+                setLabelStyle('D');
+                setLabelPrefix('');
+                setLabelStart(1);
+                setShowLabelPagesModal(true);
+              }}
+              className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
+            >
+              <Tag size={13} />
+              <span>Page Labels...</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT / CREATE LINK MODAL ────────────────────────────────────── */}
+      <Modal
+        isOpen={!!editLinkModal}
+        onClose={() => !savingLinkEdit && setEditLinkModal(null)}
+        title={editLinkModal?.mode === 'create' ? 'Add Clickable Link' : 'Edit Link Target'}
+        size="sm"
+      >
+        {editLinkModal && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!selectedProject) return;
+              setSavingLinkEdit(true);
+              try {
+                const updated = await updatePageLink(selectedProject.id, {
+                  action: editLinkModal.mode === 'create' ? 'create' : 'update',
+                  page: editLinkModal.page,
+                  xref: editLinkModal.xref,
+                  link_index: editLinkModal.link_index,
+                  rect: editLinkModal.rect,
+                  kind: editLinkModal.kind,
+                  target_page: editLinkModal.kind === 'goto' ? Math.max(1, Number(editLinkModal.target_page) || 1) : undefined,
+                  uri: editLinkModal.kind === 'uri' ? editLinkModal.uri.trim() : undefined,
+                });
+                const cacheKey = `${selectedProject.id}-${pdfRefreshKey}-${editLinkModal.page}`;
+                const existingCache = pageLinksCacheRef.current.get(cacheKey);
+                if (existingCache) {
+                  pageLinksCacheRef.current.set(cacheKey, { ...existingCache, links: updated.links });
+                }
+                linksDirtyRef.current = true;
+                toast.success(editLinkModal.mode === 'create' ? 'Link created' : 'Link updated');
+                setEditLinkModal(null);
+                setLinkOverlayNonce((n) => n + 1);
+              } catch (err: any) {
+                toast.error(err?.message || 'Failed to save link');
+              } finally {
+                setSavingLinkEdit(false);
+              }
+            }}
+            className="space-y-3 pt-1"
+          >
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-text block">Link Type</label>
+              <select
+                value={editLinkModal.kind}
+                onChange={(e) => setEditLinkModal({ ...editLinkModal, kind: e.target.value as 'goto' | 'uri' })}
+                className="w-full text-xs px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="goto">Go to Page</option>
+                <option value="uri">External URL</option>
+              </select>
+            </div>
+            {editLinkModal.kind === 'goto' ? (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-text block">Target Page (1-based PDF page)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={editLinkModal.target_page}
+                  onChange={(e) => setEditLinkModal({ ...editLinkModal, target_page: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                  className="w-full text-xs px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-text block">URL</label>
+                <input
+                  type="text"
+                  value={editLinkModal.uri}
+                  onChange={(e) => setEditLinkModal({ ...editLinkModal, uri: e.target.value })}
+                  placeholder="https://example.com"
+                  className="w-full text-xs px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" type="button" disabled={savingLinkEdit} onClick={() => setEditLinkModal(null)} className="text-xs font-semibold">
+                Cancel
+              </Button>
+              <Button type="submit" disabled={savingLinkEdit} className="text-xs font-semibold">
+                {savingLinkEdit ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ── LABEL PAGES MODAL ───────────────────────────────────────────── */}
+      <Modal
+        isOpen={showLabelPagesModal}
+        onClose={() => !savingPageLabels && setShowLabelPagesModal(false)}
+        title="Label Pages"
+        size="sm"
+      >
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!selectedProject) return;
+            const pagesPayload =
+              labelSubset === 'selected'
+                ? String(labelTargetPage)
+                : labelSubset === 'range'
+                ? labelPagesInput.trim()
+                : undefined;
+            if (labelSubset === 'range' && !pagesPayload) {
+              toast.error('Please enter a page range (e.g. 1-12).');
+              return;
+            }
+            setSavingPageLabels(true);
+            try {
+              const res = await updatePageLabels(selectedProject.id, {
+                subset: labelSubset,
+                pages: pagesPayload,
+                style: labelStyle,
+                prefix: labelPrefix,
+                start: Math.max(1, Number(labelStart) || 1),
+              });
+              toast.success(res.message || 'Page labels updated');
+              setShowLabelPagesModal(false);
+              setPreviewPage(labelTargetPage);
+              setNavNonce((n) => n + 1);
+              setPdfRefreshKey((k) => k + 1);
+            } catch (err: any) {
+              toast.error(err?.message || 'Failed to update page labels');
+            } finally {
+              setSavingPageLabels(false);
+            }
+          }}
+          className="space-y-4 pt-1"
+        >
+          {/* Page Range */}
+          <fieldset className="rounded-lg border border-border p-3 space-y-2.5">
+            <legend className="px-1.5 text-[11px] font-semibold text-muted">Page Range</legend>
+            <div className="grid grid-cols-[72px_1fr] items-center gap-2">
+              <label className="text-xs font-medium text-text">Subset:</label>
+              <select
+                value={labelSubset}
+                onChange={(e) => {
+                  const val = e.target.value as 'all' | 'selected' | 'range';
+                  setLabelSubset(val);
+                  if (val === 'selected') {
+                    setLabelPagesInput(String(labelTargetPage));
+                  } else if (val === 'range' && (!labelPagesInput || labelPagesInput === String(labelTargetPage))) {
+                    setLabelPagesInput(`${labelTargetPage}-${labelTotalPages}`);
+                  }
+                }}
+                className="w-full text-xs px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="all">All pages (1-{labelTotalPages})</option>
+                <option value="selected">Selected page ({labelTargetPage})</option>
+                <option value="range">Pages</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-[72px_1fr] items-center gap-2">
+              <label className="text-xs font-medium text-text">Pages:</label>
+              <input
+                type="text"
+                disabled={labelSubset !== 'range'}
+                value={
+                  labelSubset === 'all'
+                    ? `1-${labelTotalPages}`
+                    : labelSubset === 'selected'
+                    ? String(labelTargetPage)
+                    : labelPagesInput
+                }
+                onChange={(e) => setLabelPagesInput(e.target.value)}
+                placeholder="e.g. 1-12 or 5, 7-10"
+                className="w-full text-xs px-2.5 py-1.5 rounded-md border border-border bg-background text-text disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          </fieldset>
+
+          {/* Label */}
+          <fieldset className="rounded-lg border border-border p-3 space-y-2.5">
+            <legend className="px-1.5 text-[11px] font-semibold text-muted">Label</legend>
+            <div className="grid grid-cols-[72px_1fr] items-center gap-2">
+              <label className="text-xs font-medium text-text">Style:</label>
+              <select
+                value={labelStyle}
+                onChange={(e) => setLabelStyle(e.target.value as 'D' | 'r' | 'R' | 'a' | 'A' | '')}
+                className="w-full text-xs px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="D">1, 2, 3, ...</option>
+                <option value="r">i, ii, iii, ...</option>
+                <option value="R">I, II, III, ...</option>
+                <option value="a">a, b, c, ...</option>
+                <option value="A">A, B, C, ...</option>
+                <option value="">None</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-[72px_1fr] items-center gap-2">
+              <label className="text-xs font-medium text-text">Prefix:</label>
+              <input
+                type="text"
+                value={labelPrefix}
+                onChange={(e) => setLabelPrefix(e.target.value)}
+                placeholder="Optional prefix (e.g. Cover, A-)"
+                className="w-full text-xs px-2.5 py-1.5 rounded-md border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            <div className="grid grid-cols-[72px_1fr] items-center gap-2">
+              <label className="text-xs font-medium text-text">Start:</label>
+              <input
+                type="number"
+                min={1}
+                disabled={labelStyle === ''}
+                value={labelStart}
+                onChange={(e) => setLabelStart(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className="w-28 text-xs px-2.5 py-1.5 rounded-md border border-border bg-background text-text disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            <div className="grid grid-cols-[72px_1fr] items-center gap-2">
+              <span />
+              <span className="text-[11px] text-muted">
+                {(() => {
+                  const p = labelPrefix || '';
+                  const s = Math.max(1, labelStart || 1);
+                  const toRoman = (n: number, upper: boolean) => {
+                    const vals = [1000,900,500,400,100,90,50,40,10,9,5,4,1];
+                    const syms = ['m','cm','d','cd','c','xc','l','xl','x','ix','v','iv','i'];
+                    let out = '';
+                    let rem = Math.min(n, 3999);
+                    for (let idx = 0; idx < vals.length; idx++) {
+                      while (rem >= vals[idx]) { out += syms[idx]; rem -= vals[idx]; }
+                    }
+                    return upper ? out.toUpperCase() : out;
+                  };
+                  const toAlpha = (n: number, upper: boolean) => {
+                    const code = ((n - 1) % 26) + (upper ? 65 : 97);
+                    return String.fromCharCode(code);
+                  };
+                  const fmt = (n: number) => {
+                    if (labelStyle === 'D') return `${p}${n}`;
+                    if (labelStyle === 'r') return `${p}${toRoman(n, false)}`;
+                    if (labelStyle === 'R') return `${p}${toRoman(n, true)}`;
+                    if (labelStyle === 'a') return `${p}${toAlpha(n, false)}`;
+                    if (labelStyle === 'A') return `${p}${toAlpha(n, true)}`;
+                    return p || '(none)';
+                  };
+                  return labelStyle === ''
+                    ? `(${fmt(1)})`
+                    : `(${fmt(s)}, ${fmt(s + 1)}, ${fmt(s + 2)}, ...)`;
+                })()}
+              </span>
+            </div>
+          </fieldset>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="ghost"
+              type="button"
+              disabled={savingPageLabels}
+              onClick={() => setShowLabelPagesModal(false)}
+              className="text-xs font-semibold"
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={savingPageLabels} className="text-xs font-semibold">
+              {savingPageLabels ? 'Applying...' : 'OK'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
     </div>
   );

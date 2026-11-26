@@ -42,23 +42,37 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
     # ------------------------------------------------------------------
     toc = doc.get_toc()
 
-    # Detect all references/notes TOC entries
+    # Detect all endnote / references TOC entries (e.g. Chapter References / Endnotes)
     ref_toc_entries = []
     for lvl, title, page_1based in toc:
-        if re.search(r'^(?:References?|Notes?|Endnotes?|Bibliography|Works\s+Cited)(?:\s*[:\-–].*)?$', title.strip(), re.IGNORECASE):
+        if re.search(r'^(?:Notes?|Endnotes?|References?)(?:\s*[:\-–—].*)?$', title.strip(), re.IGNORECASE):
             ref_toc_entries.append((lvl, page_1based - 1))
 
-    is_chapter_based = len(ref_toc_entries) > 1 or any(lvl > 1 for lvl, _ in ref_toc_entries)
     chapter_page_ranges = _get_chapter_ranges_from_toc(doc)
+
+    # Check for in-text end-of-chapter Notes/References sections if TOC has no sub-entries
+    in_text_notes_pages = []
+    if not ref_toc_entries and chapter_page_ranges:
+        for p_idx in range(len(doc)):
+            page_text = doc[p_idx].get_text()
+            if re.search(r'^(?:Notes?|Endnotes?|References?)\s*$', page_text, re.MULTILINE):
+                for m in re.finditer(r'^(?:Notes?|Endnotes?|References?)\s*$', page_text, re.MULTILINE):
+                    after = page_text[m.end():m.end()+250]
+                    if re.search(r'^\s*(?:\[\d+\]|\d+[\.\)\t])', after, re.MULTILINE):
+                        in_text_notes_pages.append((2, p_idx))
+                        break
+
+    all_ref_entries = ref_toc_entries or in_text_notes_pages
+    is_chapter_based = len(all_ref_entries) > 1 or any(lvl > 1 for lvl, _ in all_ref_entries)
 
     ref_pages_set = set()
     if is_chapter_based:
         # Each chapter has its own references section page(s)
-        for _, p_idx in ref_toc_entries:
+        for _, p_idx in all_ref_entries:
             ref_pages_set.add(p_idx)
         # Also check page following ref_start if it continues references
         for p_idx in list(ref_pages_set):
-            if p_idx + 1 < len(doc):
+            if p_idx + 1 < len(doc) and p_idx + 1 not in [cr[1] for cr in chapter_page_ranges]:
                 next_p = doc[p_idx + 1]
                 t_sample = next_p.get_text()[:300]
                 if re.search(r'^\s*(?:\[\d+\]|\d+[\.\)])', t_sample, re.MULTILINE):
@@ -74,13 +88,13 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
 
         notes_section_end = len(doc)
         for _lvl, title, page_1based in toc:
-            if re.search(r'\bIndex\b', title, re.IGNORECASE):
+            if re.search(r'^(?:Index|Bibliography|References|Works\s+Cited|Back\s+Cover)\b', title.strip(), re.IGNORECASE):
                 p_idx = page_1based - 1
                 if p_idx > notes_section_start:
-                    notes_section_end = p_idx
-                    break
+                    notes_section_end = min(notes_section_end, p_idx)
 
-        body_pages = list(range(notes_section_start))
+        first_body_page = chapter_page_ranges[0][1] if chapter_page_ranges else 0
+        body_pages = list(range(first_body_page, notes_section_start))
         ref_pages = list(range(notes_section_start, notes_section_end))
         ref_pages_set = set(ref_pages)
 
@@ -107,22 +121,20 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
                     text = span.get("text", "").strip()
                     is_superscript = bool(flags & 1) or (span.get("size", 10.0) < 7.0 and re.match(r'^\d+(?:[,\-–]\d+)*$', text))
 
-                    if is_superscript and re.match(r'^\d+(?:[,\-–]\d+)*$', text):
-                        # Extract all numbers from range or list (e.g. "1,2" -> [1, 2], "3-5" -> [3, 4, 5])
-                        nums = []
-                        for part in re.split(r'[,;]', text):
-                            m_rng = re.match(r'^(\d+)[–\-](\d+)$', part.strip())
-                            if m_rng:
-                                s_n, e_n = int(m_rng.group(1)), int(m_rng.group(2))
-                                nums.extend(range(s_n, min(s_n + 10, e_n + 1)))
-                            elif part.strip().isdigit():
-                                nums.append(int(part.strip()))
-
+                    if is_superscript and re.match(r'^\d+(?:[,\-–;]\d+)*$', text):
                         r = fitz.Rect(span["bbox"])
-                        r_click = fitz.Rect(r.x0 - 1.5, r.y0 - 1.5, r.x1 + 1.5, r.y1 + 1.5)
-                        for note_num in nums:
-                            if note_num >= 1900:
+                        span_len = max(1, len(text))
+                        for num_m in re.finditer(r'\d+', text):
+                            note_num = int(num_m.group(0))
+                            if note_num <= 0 or note_num >= 1900:
                                 continue
+                            if span_len == len(num_m.group(0)):
+                                sub_r = r
+                            else:
+                                x0 = r.x0 + r.width * (num_m.start() / span_len)
+                                x1 = r.x0 + r.width * (num_m.end() / span_len)
+                                sub_r = fitz.Rect(x0, r.y0, x1, r.y1)
+                            r_click = fitz.Rect(sub_r.x0 - 1.5, sub_r.y0 - 1.5, sub_r.x1 + 1.5, sub_r.y1 + 1.5)
                             key = (chapter_num, note_num)
                             note_references[key].append({
                                 "page_idx": page_idx,
@@ -153,7 +165,7 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
                     # Fast-path for single numbers like [1] or (2) without calling heavy rawdict
                     if content.isdigit():
                         val = int(content)
-                        if val >= 1900:  # Skip 4-digit years
+                        if val <= 0 or val >= 1900:  # Skip 0 and 4-digit years
                             continue
                         r_click = fitz.Rect(target_bracket_rect.x0 - 1.5, target_bracket_rect.y0 - 1.5, target_bracket_rect.x1 + 1.5, target_bracket_rect.y1 + 1.5)
                         key = (chapter_num, val)
@@ -208,7 +220,7 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
                     item_idx = 0
                     while item_idx < len(parsed_items):
                         val, r_box, sep = parsed_items[item_idx]
-                        if val >= 1900:  # Skip 4-digit years
+                        if val <= 0 or val >= 1900:  # Skip 0 and 4-digit years
                             item_idx += 1
                             continue
 
@@ -216,24 +228,20 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
 
                         if sep == "-" and item_idx + 1 < len(parsed_items):
                             next_val, next_r_box, _ = parsed_items[item_idx + 1]
-                            if 0 < next_val - val <= 10:
-                                # First number in range links to val
-                                key = (chapter_num, val)
-                                note_references[key].append({
-                                    "page_idx": page_idx,
-                                    "page": page_idx + 1,
-                                    "rect": r_click,
-                                    "chapter_num": chapter_num,
-                                })
-                                # Last number in range links to next_val
+                            if 0 < next_val - val <= 15:
+                                # Expand full range so all numbers [val .. next_val] get mapped to the citation box
                                 next_r_click = fitz.Rect(next_r_box.x0 - 1.5, next_r_box.y0 - 1.5, next_r_box.x1 + 1.5, next_r_box.y1 + 1.5)
-                                next_key = (chapter_num, next_val)
-                                note_references[next_key].append({
-                                    "page_idx": page_idx,
-                                    "page": page_idx + 1,
-                                    "rect": next_r_click,
-                                    "chapter_num": chapter_num,
-                                })
+                                full_range_box = r_click | next_r_click
+                                for r_num in range(val, next_val + 1):
+                                    key = (chapter_num, r_num)
+                                    # First note links to its own click box, last to next_r_click, intermediate share full_range_box
+                                    c_box = r_click if r_num == val else (next_r_click if r_num == next_val else full_range_box)
+                                    note_references[key].append({
+                                        "page_idx": page_idx,
+                                        "page": page_idx + 1,
+                                        "rect": c_box,
+                                        "chapter_num": chapter_num,
+                                    })
                                 item_idx += 2
                                 continue
 
@@ -252,6 +260,38 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
     # ------------------------------------------------------------------
     # Step 3 – Parse note definitions from the references/notes section
     # ------------------------------------------------------------------
+    # First pass: collect common left margins (x0) of potential numbered lines to distinguish
+    # true note definition starts from wrapped citation lines (hanging indents)
+    raw_x0_counts = defaultdict(int)
+    for p_idx in ref_pages:
+        p_obj = doc[p_idx]
+        p_h = p_obj.rect.height
+        for b in p_obj.get_text("dict").get("blocks", []):
+            if b.get("type") != 0:
+                continue
+            for l in b.get("lines", []):
+                if l.get("bbox", [0, 0, 0, 0])[1] < 45 or l.get("bbox", [0, 0, 0, 0])[1] > p_h - 40:
+                    continue
+                lt = "".join(s.get("text", "") for s in l.get("spans", [])).strip()
+                if re.match(r'^(?:\[\d{1,4}\]|\d{1,4}[\.\)\:\-]?)(\t|\s+|$)', lt) and l.get("spans"):
+                    raw_x0_counts[round(l["spans"][0]["bbox"][0], 1)] += 1
+
+    primary_note_margins = [m for m, cnt in raw_x0_counts.items() if cnt >= 5]
+    if primary_note_margins and raw_x0_counts:
+        max_cnt = max(raw_x0_counts.values())
+        # Filter out hanging-indent false positives slightly right of a dominant column margin
+        # (keep true multi-column margins separated by > 100pt or with substantial counts)
+        filtered_margins = []
+        for m in sorted(primary_note_margins):
+            cnt = raw_x0_counts[m]
+            is_hanging_indent = any(
+                (5.0 < m - prev_m < 60.0) and cnt < raw_x0_counts[prev_m] * 0.25
+                for prev_m in filtered_margins
+            )
+            if not is_hanging_indent and (cnt >= 5 or cnt >= max_cnt * 0.1):
+                filtered_margins.append(m)
+        primary_note_margins = filtered_margins
+
     note_definitions: dict[tuple, list] = defaultdict(list)
     curr_chapter_num = 0
 
@@ -261,13 +301,22 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
             curr_chapter_num = _page_to_chapter(page_idx, chapter_page_ranges)
 
         raw_blocks = [b for b in page.get_text("dict")["blocks"] if b["type"] == 0]
-        # Skip header (<45 pt) and footer (>740 pt)
-        content_blocks = [b for b in raw_blocks if not (b["bbox"][1] < 45 or b["bbox"][1] > 740)]
-        # Sort blocks multi-column aware (x-column first, then y-coordinate)
-        sorted_blocks = sorted(content_blocks, key=lambda b: (round(b["bbox"][0] / 200.0), b["bbox"][1]))
+        # Skip header (<45 pt) and footer (> height - 40 pt)
+        page_h = page.rect.height
+        content_blocks = [b for b in raw_blocks if not (b["bbox"][1] < 45 or b["bbox"][1] > page_h - 40)]
 
-        for block in sorted_blocks:
+        # Collect lines with their vertical coordinate to preserve natural reading order
+        page_lines = []
+        for block in content_blocks:
             for line in block.get("lines", []):
+                if line.get("bbox", [0, 0, 0, 0])[1] < 45 or line.get("bbox", [0, 0, 0, 0])[1] > page_h - 40:
+                    continue
+                page_lines.append(line)
+
+        # Sort lines top-to-bottom within the page
+        sorted_lines = sorted(page_lines, key=lambda l: l["bbox"][1])
+
+        for line in sorted_lines:
                 line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
                 if not line_text:
                     continue
@@ -277,16 +326,19 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
                 if re.match(r'^(?:Introduction(?::.*)?|The Wolf of Time and \(Hi\)story)$', line_text, re.IGNORECASE):
                     curr_chapter_num = 0
                     continue
-                m_chap = re.match(r'^(?:Chapter|CHAPTER)\s+(\d{1,3})(?:\s*[:\-–].*)?$', line_text, re.IGNORECASE)
+                m_chap = re.match(r'^(?:Chapter|CHAPTER)\s+(\d{1,3})(?:\s*[:\-–—].*)?$', line_text, re.IGNORECASE)
                 if m_chap:
                     curr_chapter_num = int(m_chap.group(1))
+                    continue
+                if re.match(r'^(?:Conclusion(?:[:\-–—].*)?)$', line_text, re.IGNORECASE):
+                    curr_chapter_num = 6
                     continue
                 if re.match(r'^(?:Postscript(?::.*)?)$', line_text, re.IGNORECASE):
                     curr_chapter_num = 99
                     continue
 
                 # Match numbered note definitions: "[1]", "1.", "1.\t", "1) ", "10.\t Marvin..."
-                defn_match = re.match(r'^(?:\[(\d{1,4})\]|(\d{1,4})[\.\)\:\-])(?:\t|\s+|$)', line_text)
+                defn_match = re.match(r'^(?:\[(\d{1,4})\]|(\d{1,4})[\.\)\:\-]?)(\t|\s+|$)', line_text)
                 if defn_match and line.get("spans"):
                     note_num = int(defn_match.group(1) or defn_match.group(2))
                     if note_num >= 1900:  # Skip years that wrap to line start
@@ -295,14 +347,27 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
                     span = line["spans"][0]
                     # Filter out hanging indent false positives
                     x0 = span["bbox"][0]
-                    is_valid_margin = (x0 < 160) or (220 < x0 < 380)
+                    x0_round = round(x0, 1)
+                    if primary_note_margins:
+                        # Allow up to 12pt left shift for right-aligned 2-digit/3-digit note numbers (e.g. '10.', '100.')
+                        is_valid_margin = any(-12.0 <= (x0_round - pm) <= 3.0 for pm in primary_note_margins)
+                    else:
+                        is_valid_margin = (x0 < 160) or (220 < x0 < 380)
+
                     if not is_valid_margin:
                         continue
 
                     r_span = fitz.Rect(span["bbox"])
-                    r_line = fitz.Rect(line["bbox"])
-                    # Make rect generous enough to hover and click (e.g. width at least 35pt)
-                    r_click = fitz.Rect(r_span.x0 - 1.0, r_span.y0 - 1.0, max(r_span.x0 + 35.0, min(r_span.x1 + 10.0, r_line.x1)), r_span.y1 + 1.0)
+                    num_prefix = defn_match.group(0).strip()
+                    span_txt_stripped = span.get("text", "").strip()
+                    if span_txt_stripped == num_prefix or len(span_txt_stripped) <= len(num_prefix) + 1:
+                        # Span contains only the note number (e.g. "40\t" or "40.")
+                        r_click = fitz.Rect(r_span.x0 - 1.0, r_span.y0 - 1.0, r_span.x1 + 1.5, r_span.y1 + 1.0)
+                    else:
+                        # Span includes both note number and following text; bound rect to the number prefix only
+                        fsize = max(float(span.get("size", 9.0)), 6.0)
+                        est_w = min(r_span.width, max(10.0, len(num_prefix) * fsize * 0.65))
+                        r_click = fitz.Rect(r_span.x0 - 1.0, r_span.y0 - 1.0, r_span.x0 + est_w + 1.5, r_span.y1 + 1.0)
 
                     key = (curr_chapter_num, note_num)
                     note_definitions[key].append({
@@ -321,8 +386,12 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
     for key, refs in note_references.items():
         chapter_num, note_num = key
 
-        # Prefer exact chapter match, fall back to chapter=0 (global section)
-        defs = note_definitions.get(key) or note_definitions.get((0, note_num)) or []
+        # Prefer exact chapter match; only fall back to chapter 0 if no multi-chapter structure was detected
+        defs = note_definitions.get(key)
+        if not defs and not chapter_page_ranges:
+            defs = note_definitions.get((0, note_num)) or []
+        if not defs:
+            defs = []
 
         if not defs:
             continue
@@ -391,8 +460,10 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
                 if not analyze_only:
                     _create_endnote_link(doc, ref["page_idx"], ref["rect"],
                                          def_info["page_idx"], note_num)
-                    _create_reference_link(doc, def_info["page_idx"], def_info["rect"],
-                                           ref["page_idx"], note_num)
+                    # Always link back to the FIRST occurrence in the chapter
+                    if ref_idx == 0:
+                        _create_reference_link(doc, def_info['page_idx'], def_info['rect'],
+                                               ref['page_idx'], note_num)
                     both_linked = True
                 else:
                     ref_linked = _check_link_exists(doc, ref["page_idx"], ref["rect"])
@@ -447,11 +518,51 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
 
     linked_count = sum(1 for n in note_entries if n.get("is_linked", False))
     not_linked_count = len(note_entries) - linked_count
+    valid_defs_count = sum(1 for n in note_entries if n.get("definition_page") is not None)
+
+    # If numeric endnotes found genuine definitions (e.g. at least 5 or > 20% matched), it is a numeric book!
+    # Otherwise, check for Author-Year (APA/Harvard) citations.
+    if valid_defs_count >= 5 or (len(note_entries) > 0 and valid_defs_count / len(note_entries) > 0.2):
+        return {
+            "total_notes": len(note_entries),
+            "linked": linked_count,
+            "not_linked": not_linked_count,
+            "ref_type": "numeric",
+            "details": note_entries,
+        }
+
+    # Automatically scan for Author-Year (APA/Harvard) citations!
+    try:
+        from .reference_citation_service import find_reference_citations_in_pdf
+        cite_res = find_reference_citations_in_pdf(pdf_path, analyze_only)
+        if cite_res.get("matched", 0) > valid_defs_count:
+            normalized_details = []
+            for d in cite_res.get("details", []):
+                normalized_details.append({
+                    "note_number": d.get("citation"),
+                    "chapter": 1,
+                    "reference_page": d.get("page"),
+                    "definition_page": d.get("def_page"),
+                    "target_text": d.get("target_author") or d.get("target_preview") or "",
+                    "is_linked": d.get("is_linked", False),
+                    "status": d.get("status") or ("Active" if d.get("def_page") else "missing_definition"),
+                    "is_author_year": True,
+                })
+            return {
+                "total_notes": cite_res.get("total_citations", 0),
+                "linked": cite_res.get("linked", 0),
+                "not_linked": cite_res.get("not_linked", 0),
+                "ref_type": "author_year",
+                "details": normalized_details,
+            }
+    except Exception as e:
+        logger.warning(f"Author-year fallback error: {e}")
 
     return {
         "total_notes": len(note_entries),
         "linked": linked_count,
         "not_linked": not_linked_count,
+        "ref_type": "numeric",
         "details": note_entries,
     }
 
@@ -543,11 +654,11 @@ def _find_notes_section_start(doc, chapter_page_ranges: list) -> int | None:
     try:
         toc = doc.get_toc()
         keywords = re.compile(
-            r'\b(Notes?|Endnotes?|References?|Bibliography|Works\s+Cited)\b',
+            r'^(?:Notes?|Endnotes?|References?|Bibliography|Works\s+Cited)(?:\s*[:\-–—].*)?$',
             re.IGNORECASE)
         for item in toc:
             _lvl, title, page_1based = item
-            if keywords.search(title):
+            if keywords.match(title.strip()):
                 page_idx = page_1based - 1
                 if 0 <= page_idx < len(doc):
                     logger.debug(f"Notes section from TOC: '{title}' at page {page_1based}")
@@ -557,7 +668,7 @@ def _find_notes_section_start(doc, chapter_page_ranges: list) -> int | None:
 
     # 2. Text-scan fallback
     keywords_re = re.compile(
-        r'^(Notes?|Endnotes?|Notes?\s+and\s+References?|Bibliography|Works\s+Cited)',
+        r'^(?:Notes?|Endnotes?|Notes?\s+and\s+References?|Bibliography|Works\s+Cited)\s*$',
         re.IGNORECASE)
     for page_idx in range(len(doc)):
         page = doc[page_idx]
@@ -598,12 +709,19 @@ def _get_chapter_ranges_from_toc(doc) -> list:
             elif re.search(r'\bIntroduction\b', t, re.IGNORECASE) and lvl == 1:
                 chap_num = 0
                 sections.append((chap_num, p_idx))
+            elif re.search(r'\bConclusion\b', t, re.IGNORECASE) and lvl == 1:
+                chap_num = 6
+                sections.append((chap_num, p_idx))
+            elif re.search(r'\b(?:Notes?|References?|Bibliography|Index|Back\s+Cover)\b', t, re.IGNORECASE) and lvl == 1:
+                sections.append((999, p_idx))
             elif re.search(r'\bPostscript\b', t, re.IGNORECASE) and lvl == 1:
                 chap_num = 99
                 sections.append((chap_num, p_idx))
 
         sections.sort(key=lambda x: x[1])
         for i, (chap_num, start_idx) in enumerate(sections):
+            if chap_num == 999:
+                break
             end_idx = sections[i + 1][1] - 1 if i + 1 < len(sections) else len(doc) - 1
             chapter_ranges.append((chap_num, start_idx, end_idx))
     except Exception as e:
@@ -625,15 +743,23 @@ def _page_to_chapter(page_idx: int, chapter_ranges: list) -> int:
 # ---------------------------------------------------------------------------
 
 def _check_link_exists(doc, page_idx: int, rect) -> bool:
-    """Return True if any GOTO link already covers rect on the page."""
+    """Return True if any GOTO link significantly covers rect on the page."""
     try:
         page = doc[page_idx]
         r = fitz.Rect(rect)
+        r_area = r.get_area()
+        if r_area <= 0:
+            return False
         for link in page.get_links():
             if link.get('kind') == fitz.LINK_GOTO:
                 lr = link.get('from')
-                if lr and fitz.Rect(lr).intersects(r):
-                    return True
+                if lr:
+                    lr_rect = fitz.Rect(lr)
+                    inter = lr_rect & r
+                    if not inter.is_empty:
+                        min_area = min(r_area, lr_rect.get_area())
+                        if min_area > 0 and (inter.get_area() / min_area) >= 0.4:
+                            return True
     except Exception:
         pass
     return False
@@ -643,13 +769,28 @@ def _check_link_exists(doc, page_idx: int, rect) -> bool:
 # Helper: link insertion
 # ---------------------------------------------------------------------------
 
+def _rects_significantly_overlap(r1: fitz.Rect, r2: fitz.Rect, threshold: float = 0.4) -> bool:
+    inter = r1 & r2
+    if inter.is_empty:
+        return False
+    min_area = min(r1.get_area(), r2.get_area())
+    return min_area > 0 and (inter.get_area() / min_area) >= threshold
+
+
 def _create_endnote_link(doc, ref_page_idx: int, ref_rect,
                           def_page_idx: int, note_num: int):
     """Insert a GOTO link from the in-body superscript to its definition."""
     try:
-        doc[ref_page_idx].insert_link({
+        page = doc[ref_page_idx]
+        r = fitz.Rect(ref_rect)
+        for l in page.get_links():
+            if l.get("kind") == fitz.LINK_GOTO:
+                lr = l.get("from")
+                if lr and _rects_significantly_overlap(fitz.Rect(lr), r):
+                    page.delete_link(l)
+        page.insert_link({
             "kind": fitz.LINK_GOTO,
-            "from": fitz.Rect(ref_rect),
+            "from": r,
             "page": def_page_idx,
         })
         logger.debug(f"Created forward link for note {note_num}")
@@ -661,9 +802,16 @@ def _create_reference_link(doc, def_page_idx: int, def_rect,
                             ref_page_idx: int, note_num: int):
     """Insert a GOTO link from the definition back to the in-body superscript."""
     try:
-        doc[def_page_idx].insert_link({
+        page = doc[def_page_idx]
+        r = fitz.Rect(def_rect)
+        for l in page.get_links():
+            if l.get("kind") == fitz.LINK_GOTO:
+                lr = l.get("from")
+                if lr and _rects_significantly_overlap(fitz.Rect(lr), r):
+                    page.delete_link(l)
+        page.insert_link({
             "kind": fitz.LINK_GOTO,
-            "from": fitz.Rect(def_rect),
+            "from": r,
             "page": ref_page_idx,
         })
         logger.debug(f"Created backlink for note {note_num}")

@@ -2,7 +2,7 @@ import fitz
 import re
 import os
 import logging
-from .toc_service import build_page_map
+from .toc_service import build_page_map, get_toc_page_indices, roman_to_int
 
 logger = logging.getLogger(__name__)
 
@@ -94,52 +94,89 @@ def find_index_links_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
             "index_pages": []
         }
 
-    page_map = build_page_map(doc)
-    
-    # Pattern to match page numbers, ranges, and note references
+    toc_pages = get_toc_page_indices(doc)
+    page_map = build_page_map(doc, toc_pages)
+    roman_map = page_map.get('_roman', {})
+
+    # Pattern to match Arabic page numbers, ranges, and note references
     # e.g. '157–8', '155', '238n129', '40–1'
     PAGE_REF_PAT = re.compile(r'^(\d+)(?:[–\-](\d+))?(?:n(\d+))?[,;]?$')
+    # Pattern to match lowercase Roman numeral page references, ranges, and note references
+    # e.g. 'viii', 'x', 'xi', 'xii', 'vii–viii', 'xn1'
+    ROMAN_REF_PAT = re.compile(r'^([ivxlcdm]+)(?:[–\-]([ivxlcdm]+|\d+))?(?:n(\d+))?[,;]?$')
+    STRICT_ROMAN_PAT = re.compile(r'^(?=[ivxlcdm]+$)(?:m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$')
 
     details = []
     linked_count = 0
     not_linked_count = 0
+    links_modified = False
 
     for p_idx in index_pages:
         page = doc[p_idx]
         words = page.get_text('words')
+        if not words:
+            continue
         existing_links = page.get_links()
-        
+        min_y = min(w[1] for w in words)
+        max_y = max(w[3] for w in words)
+
         for i, w in enumerate(words):
             raw_token = w[4].rstrip('.,;:!?')
 
-            # Check if this word ends with a trailing hyphen indicating a broken page range across lines (e.g. "373-" + "374,")
+            # Check if this word ends with a trailing hyphen indicating a broken page range across lines (e.g. "373-" + "374," or "vii-" + "viii,")
             word_rect = fitz.Rect(w[:4])
             if raw_token.endswith(('-', '–')) and i + 1 < len(words):
                 next_raw = words[i + 1][4].rstrip('.,;:!?')
-                if next_raw.isdigit():
+                if next_raw.isdigit() or STRICT_ROMAN_PAT.match(next_raw):
                     raw_token = raw_token.rstrip('-–') + '-' + next_raw
                     word_rect = word_rect | fitz.Rect(words[i + 1][:4])
 
+            p_val = None
+            target_p_idx = None
+
             m = PAGE_REF_PAT.match(raw_token)
-            if not m:
-                continue
+            if m:
+                p_val = int(m.group(1))
+                if p_val <= 0 or p_val >= len(doc):
+                    continue
+                target_p_idx = page_map.get(p_val)
+            else:
+                m_rom = ROMAN_REF_PAT.match(raw_token)
+                if m_rom:
+                    rom_str = m_rom.group(1)
+                    if STRICT_ROMAN_PAT.match(rom_str):
+                        target_p_idx = roman_map.get(rom_str)
+                        if target_p_idx is None:
+                            rv = roman_to_int(rom_str)
+                            if rv is not None:
+                                target_p_idx = roman_map.get(rv)
+                        p_val = rom_str
 
-            first_p_str = m.group(1)
-            p_val = int(first_p_str)
-            if p_val <= 0 or p_val >= len(doc):
-                continue
-
-            target_p_idx = page_map.get(p_val)
             if target_p_idx is None:
                 continue
-            
+
+            # Exclude running header/footer print page numbers (folios) on index pages
+            is_header_or_footer = (w[1] <= min_y + 10.0) or (w[3] >= max_y - 10.0)
+            if is_header_or_footer and target_p_idx == p_idx:
+                if not analyze_only:
+                    for l in existing_links:
+                        if l.get('kind') == fitz.LINK_GOTO and _rects_overlap(word_rect, fitz.Rect(l.get('from')), threshold=0.5):
+                            page.delete_link(l)
+                            links_modified = True
+                continue
+
             # Determine term context (words preceding this page number on the entry line)
             term_words = []
             for prev_idx in range(max(0, i - 1), max(-1, i - 12), -1):
                 prev_w = words[prev_idx]
                 prev_txt = prev_w[4].strip()
-                # Stop if we hit previous page number or another entry
-                if re.search(r'\d+[,;]?$', prev_txt) or abs(prev_w[1] - w[1]) > 5:
+                prev_core = prev_txt.rstrip('.,;:!?')
+                # Stop if we hit previous page number (Arabic or Roman) or another entry line
+                if (
+                    re.search(r'\d+[,;]?$', prev_txt)
+                    or (STRICT_ROMAN_PAT.match(prev_core) and (prev_core in roman_map or roman_to_int(prev_core) in roman_map))
+                    or abs(prev_w[1] - w[1]) > 5
+                ):
                     if abs(prev_w[1] - w[1]) > 5 and term_words:
                         break
                     continue
@@ -168,6 +205,7 @@ def find_index_links_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                         "page": target_p_idx,
                         "to": fitz.Point(72, 72)
                     })
+                    links_modified = True
                     already_linked = True
 
             details.append({
@@ -180,7 +218,7 @@ def find_index_links_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                 "rect": [word_rect.x0, word_rect.y0, word_rect.x1, word_rect.y1]
             })
 
-    if not analyze_only and (not_linked_count > 0 or details):
+    if not analyze_only and (not_linked_count > 0 or links_modified):
         temp_path = pdf_path.replace('.pdf', '_temp.pdf')
         doc.save(temp_path, incremental=False, garbage=0, deflate=True)
         doc.close()

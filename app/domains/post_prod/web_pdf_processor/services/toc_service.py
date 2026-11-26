@@ -89,6 +89,7 @@ def build_page_map(doc, toc_pages=None):
         toc_pages = []
     offsets = []
     roman_map = {}  # roman numeral printed string / int -> physical idx
+    roman_offsets = []  # (p_idx - roman_val) from non-TOC front-matter pages
     
     for p_idx in range(len(doc)):
         page = doc[p_idx]
@@ -128,11 +129,13 @@ def build_page_map(doc, toc_pages=None):
                     if p_idx not in toc_pages:
                         roman_map[rv] = p_idx
                         roman_map[cand_rom_str] = p_idx
+                        roman_offsets.append(p_idx - rv)
                     elif rv not in roman_map:
                         roman_map[rv] = p_idx
                         roman_map[cand_rom_str] = p_idx
                             
     page_map = {}
+    first_arabic_p_idx = len(doc)
     if offsets:
         counter = collections.Counter(offsets)
         most_common_offset = counter.most_common(1)[0][0]
@@ -141,6 +144,31 @@ def build_page_map(doc, toc_pages=None):
             printed_page = p_idx - most_common_offset
             if printed_page > 0:
                 page_map[printed_page] = p_idx
+                if printed_page == 1:
+                    first_arabic_p_idx = p_idx
+
+    # Fill in unnumbered front-matter Roman pages (e.g. chapter/preface opening page) using the Roman offset
+    if roman_offsets:
+        rom_offset = collections.Counter(roman_offsets).most_common(1)[0][0]
+        max_rom = max((k for k in roman_map if isinstance(k, int)), default=0)
+        rom_symbols = [
+            (100, 'c'), (90, 'xc'), (50, 'l'), (40, 'xl'),
+            (10, 'x'), (9, 'ix'), (5, 'v'), (4, 'iv'), (1, 'i')
+        ]
+        def _int_to_roman(n: int) -> str:
+            res = []
+            for val, sym in rom_symbols:
+                while n >= val:
+                    res.append(sym)
+                    n -= val
+            return ''.join(res)
+
+        for rv in range(1, max_rom + 1):
+            cand_p_idx = rv + rom_offset
+            if 0 <= cand_p_idx < first_arabic_p_idx:
+                if rv not in roman_map or roman_map[rv] in toc_pages:
+                    roman_map[rv] = cand_p_idx
+                    roman_map[_int_to_roman(rv)] = cand_p_idx
     
     # Also store roman numeral mappings
     page_map['_roman'] = roman_map
@@ -280,7 +308,7 @@ def get_toc_page_indices(doc) -> list[int]:
         standalone_digits = sum(1 for l in lines if re.match(r'^\d+$', l))
         toc_end_numbers = sum(1 for l in lines if re.search(r'\s+([ivxlcdm]+|\d+)$', l, re.IGNORECASE))
         numbered_sections = sum(1 for l in lines if re.match(r'^\d+(\.\d+)+\b', l))
-        chapter_headings = sum(1 for l in lines if re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+)\b', l, re.IGNORECASE))
+        chapter_headings = sum(1 for l in lines if re.match(rf'^(chapter\s+(?:\d+|{WORD_NUMBERS_RE})|part\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE}))\b', l, re.IGNORECASE))
 
         is_toc_pattern = (
             dot_leaders >= 3 or
@@ -381,6 +409,8 @@ WORD_NUMBERS_SET = {
     'twenty-nine', 'thirty'
 }
 
+WORD_NUMBERS_RE = '(?:' + '|'.join(sorted(WORD_NUMBERS_SET, key=len, reverse=True)) + ')'
+
 def get_toc_entry_level(title: str, is_roman: bool = False, prev_letter: str = None) -> int:
     """
     Determines logical hierarchical level based on standard book styling:
@@ -403,7 +433,7 @@ def get_toc_entry_level(title: str, is_roman: bool = False, prev_letter: str = N
         return min(6, m_sec.group(1).count('.') + 1)
 
     # 2. Numbered chapters with word "CHAPTER" or "PART", or chapter-level features like "POETIC INTERRUPTION"
-    if re.match(r'^(?:chapter\s+\d+|part\s+[ivxlcdm]+|poetic interruption\b)\b', tl):
+    if re.match(rf'^(?:chapter\s+(?:\d+|{WORD_NUMBERS_RE})|part\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE})|poetic interruption\b)\b', tl):
         return 1
 
     # 3. Roman numerals at start of title: "I. Statutory...", "II. History...", "III. Purpose..." -> Level 2 (H2)
@@ -528,47 +558,57 @@ def find_toc_entries(doc):
             # Also supports multi-line PART headings where title wraps to the next line with or without page number:
             # line 1: 'PART I: STORYING HISTORICAL EXPERIENCES'
             # line 2: 'OF PRECARITY 11'
-            m_sec_header = re.match(r'^(?:(?:SECTION|PART)\s*([IVXLCDM\d]+[:\s\-–—]?)\s*(.*)|([IVXLCDM]+)\.\s+([A-Z\s,\-–—\(\)]+))$', lt, re.IGNORECASE)
-            m_has_trailing_pg = bool(re.search(r'(?:(?:\s*[\.·_]){2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', lt, re.IGNORECASE))
-            if m_sec_header and not m_has_trailing_pg:
-                # Check if the PART heading wraps onto line i+1
+            m_sec_header = re.match(
+                rf'^(?:(?:SECTION|PART)\s*((?:[IVXLCDM\d]+|{WORD_NUMBERS_RE})[:\s\-–—]?)\s*(.*)|([IVXLCDM]+)\.\s+([A-Z\s,\-–—\(\)]+))$',
+                lt, re.IGNORECASE
+            )
+            m_has_trailing_pg = re.search(r'^(.*?)(?:(?:\s*[\.·_]){2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', lt, re.IGNORECASE)
+            is_explicit_sec_part = bool(re.match(r'^(?:SECTION|PART)\b', lt, re.IGNORECASE))
+            if m_sec_header and (not m_has_trailing_pg or is_explicit_sec_part):
+                # Check if the PART heading has a trailing page number on line i or wraps onto line i+1
                 comb_sec_rect = rect
                 clean_sec_title = clean_toc_title(lt)
                 sec_printed_page = -1
                 is_roman = False
                 lines_consumed = 1
 
-                # Assemble multi-line Part / Section titles (including centered / indented lines)
-                while i + lines_consumed < len(lines):
-                    nxt_obj = lines[i + lines_consumed]
-                    nxt_line = nxt_obj['text'].strip()
-                    nxt_rect = nxt_obj['rect']
-                    if nxt_rect.y0 - comb_sec_rect.y1 > 25:
-                        break
-                    # Stop if next line is a new chapter/part/author heading
-                    if re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|section\b|\d{1,3}[\.\s]|[ivxlcdm]+\.\s+[A-Z]|appendix\b|index\b)', nxt_line, re.IGNORECASE):
-                        break
-                    m_nxt_pg = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', nxt_line, re.IGNORECASE)
-                    if m_nxt_pg:
-                        nxt_rem = m_nxt_pg.group(1).strip()
-                        clean_sec_title = clean_toc_title(clean_sec_title + ' ' + nxt_rem)
-                        pg_str = m_nxt_pg.group(2).strip()
-                        is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
-                        sec_printed_page = roman_to_int(pg_str) if is_roman else int(pg_str)
-                        comb_sec_rect |= nxt_rect
-                        lines_consumed += 1
-                        break
-                    elif (nxt_rect.y0 - comb_sec_rect.y1 <= 25) and (abs(nxt_rect.x0 - x0) <= 80 or nxt_rect.x0 >= x0 - 15):
-                        # Skip if it is an author line with credentials
-                        if any(re.search(r'\b(PhD|EdD|ATC|LAT|MS|RDN|MD|PT|RRT|RCP|FAARC|MAACVPR)\b', s['text']) for s in nxt_obj.get('spans', [])):
+                if m_has_trailing_pg:
+                    clean_sec_title = clean_toc_title(m_has_trailing_pg.group(1).strip())
+                    pg_str = m_has_trailing_pg.group(2).strip()
+                    is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                    sec_printed_page = roman_to_int(pg_str) if is_roman else int(pg_str)
+                else:
+                    # Assemble multi-line Part / Section titles (including centered / indented lines)
+                    while i + lines_consumed < len(lines):
+                        nxt_obj = lines[i + lines_consumed]
+                        nxt_line = nxt_obj['text'].strip()
+                        nxt_rect = nxt_obj['rect']
+                        if nxt_rect.y0 - comb_sec_rect.y1 > 25:
                             break
-                        clean_sec_title = clean_toc_title(clean_sec_title + ' ' + nxt_line)
-                        comb_sec_rect |= nxt_rect
-                        lines_consumed += 1
-                        if lines_consumed >= 4:
+                        # Stop if next line is a new chapter/part/author heading
+                        if re.match(rf'^(chapter\s+(?:\d+|{WORD_NUMBERS_RE})|part\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE})|section\b|\d{{1,3}}[\.\s]|[ivxlcdm]+\.\s+[A-Z]|appendix\b|index\b)', nxt_line, re.IGNORECASE):
                             break
-                    else:
-                        break
+                        m_nxt_pg = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', nxt_line, re.IGNORECASE)
+                        if m_nxt_pg:
+                            nxt_rem = m_nxt_pg.group(1).strip()
+                            clean_sec_title = clean_toc_title(clean_sec_title + ' ' + nxt_rem)
+                            pg_str = m_nxt_pg.group(2).strip()
+                            is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
+                            sec_printed_page = roman_to_int(pg_str) if is_roman else int(pg_str)
+                            comb_sec_rect |= nxt_rect
+                            lines_consumed += 1
+                            break
+                        elif (nxt_rect.y0 - comb_sec_rect.y1 <= 25) and (abs(nxt_rect.x0 - x0) <= 80 or nxt_rect.x0 >= x0 - 15):
+                            # Skip if it is an author line with credentials
+                            if any(re.search(r'\b(PhD|EdD|ATC|LAT|MS|RDN|MD|PT|RRT|RCP|FAARC|MAACVPR)\b', s['text']) for s in nxt_obj.get('spans', [])):
+                                break
+                            clean_sec_title = clean_toc_title(clean_sec_title + ' ' + nxt_line)
+                            comb_sec_rect |= nxt_rect
+                            lines_consumed += 1
+                            if lines_consumed >= 4:
+                                break
+                        else:
+                            break
 
                 last_title = clean_sec_title
                 last_letter = None
@@ -641,7 +681,7 @@ def find_toc_entries(doc):
                         nxt_line = lines[i+1]['text'].strip()
                         nxt_rect = lines[i+1]['rect']
                         m_next_end_pg = re.search(r'^(.*?)(?:\s*\.{2,}|\s{2,}|\s+)([ivxlcdm]+|\d+)$', nxt_line, re.IGNORECASE)
-                        if m_next_end_pg and not re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm]+|section\b|\d{1,3}[\.\s])', nxt_line, re.IGNORECASE):
+                        if m_next_end_pg and not re.match(rf'^(chapter\s+(?:\d+|{WORD_NUMBERS_RE})|part\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE})|section\b|\d{{1,3}}[\.\s])', nxt_line, re.IGNORECASE):
                             clean_ch_title = clean_toc_title(ch_num_str + ' ' + rem_text + ' ' + m_next_end_pg.group(1).strip())
                             pg_str = m_next_end_pg.group(2)
                             is_roman = bool(re.match(r'^[ivxlcdm]+$', pg_str.lower()))
@@ -745,7 +785,7 @@ def find_toc_entries(doc):
                         continue
 
             # 3. CHAPTER, PART, SECTION, or APPENDIX heading (supports single or multi-line)
-            m_ch = re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm\d]+|section\s+[ivxlcdm\d]+|appendix(?:\s+[a-z\d]+)?|annex(?:\s+[a-z\d]+)?)\b(.*)$', lt, re.IGNORECASE)
+            m_ch = re.match(rf'^(chapter\s+(?:\d+|{WORD_NUMBERS_RE})|part\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE})|section\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE})|appendix(?:\s+[a-z\d]+)?|annex(?:\s+[a-z\d]+)?)\b(.*)$', lt, re.IGNORECASE)
             if m_ch:
                 raw_prefix = m_ch.group(1).strip()
                 if raw_prefix.upper().startswith(('CHAPTER', 'PART')):
@@ -770,7 +810,7 @@ def find_toc_entries(doc):
                         next_text = lines[j]['text'].strip()
                         next_rect = lines[j]['rect']
                         # Do NOT swallow the next Chapter, Part, Section, Poetic Interruption, or major heading
-                        if re.match(r'^(chapter\s+\d+|part\s+[ivxlcdm\d]+|section\s+[ivxlcdm\d]+|poetic interruption\b|appendix\b|index\b)', next_text, re.IGNORECASE):
+                        if re.match(rf'^(chapter\s+(?:\d+|{WORD_NUMBERS_RE})|part\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE})|section\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE})|poetic interruption\b|appendix\b|index\b)', next_text, re.IGNORECASE):
                             break
                         if re.match(r'^\d+$', next_text):
                             found_page = int(next_text)
@@ -2353,7 +2393,7 @@ def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only:
                     or bool(re.match(r'^\d+\.\d+', entry['title'].strip()))
                 )
                 is_chapter_title = not is_subheading and bool(re.match(
-                    rf'^(?:chapter\s+\d+|part\s+[ivxlcdm]+|appendix\b|index\b|conclusion\b|notes\b|bibliography\b|references\b|glossary\b|\d{{1,3}}[\.\s]|[IVXLCDM]+\.\s+[A-Z]|{word_num_pat}\b)',
+                    rf'^(?:chapter\s+(?:\d+|{WORD_NUMBERS_RE})|part\s+(?:[ivxlcdm\d]+|{WORD_NUMBERS_RE})|appendix\b|index\b|conclusion\b|notes\b|bibliography\b|references\b|glossary\b|\d{{1,3}}[\.\s]|[IVXLCDM]+\.\s+[A-Z]|{word_num_pat}\b)',
                     entry['title'].strip(),
                     re.IGNORECASE
                 ))
