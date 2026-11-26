@@ -194,4 +194,5 @@ class ProcessingJob(Base):
 from app.domains.processing.language_edit_models import LanguageEditJob, LanguageEditFinding, ProjectLanguageRules, ProjectLanguageRulesHistory
 from app.domains.term_lists.models import TermList, Term, ProjectTermList  # noqa: F401
 from app.domains.journals.models import JournalClient, Journal, JournalArticle, JournalStageDetail, JournalStylesheet, JournalGrammarsheet, JournalFile, JournalDelivery, JournalCheckRun, JournalIssue, JournalWorkflow, JournalAsset
+from app.domains.post_prod.figure_pdf.models import ArtAssessment, ArtAssessmentRow  # noqa: F401
 

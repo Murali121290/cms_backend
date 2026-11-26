@@ -19,7 +19,8 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Optional, Tuple
 
 try:
     import pymupdf as fitz
@@ -1180,50 +1181,529 @@ def _assessment_row_values(src: "_ImageSource", chapter_prefix: str) -> list[str
     ]
 
 
-def generate_figure_assessment(
-    db: Session,
-    *,
-    project_id: int,
-    chapter_id: int,
-    actor_user_id: Optional[int],
-    upload_dir: str,
-    source_file_id: Optional[int] = None,
-) -> Tuple[Optional[models.File], int, Optional[str]]:
-    """Generate a Figure Assessment xlsx for the chapter.
+@dataclass
+class AssessmentGenerationResult:
+    """Structured return for the Generate Assessment dispatcher.
 
-    Layout matches the team's "Information Management" template — 15 columns,
-    plain Calibri 12 with no header styling, no frozen panes, empty strings for
-    blank cells. Auto-fills what can be derived from image metadata (ART NAME,
-    FIGURE NO., TYPE, SUPPLIED IMAGE COLOR/MODE/TYPE, SUPPLIED SIZE, RESOLUTION
-    for images with a real DPI) and leaves the manually-managed columns blank.
+    ``source`` is ``"excel"`` when an uploaded client workbook drove the output,
+    ``"images"`` when the legacy image-scanning fallback ran. The latter four
+    fields are only populated on the Excel path; on the images path they stay
+    empty so the HTTP response can advertise them uniformly.
+    """
+
+    file: Optional[models.File]
+    figures_included: int
+    error: Optional[str] = None
+    source: str = "images"
+    parsed_row_count: int = 0
+    unmapped_columns: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    assessment_id: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Excel-source detection
+# ---------------------------------------------------------------------------
+
+
+def _is_excel_assessment_source(f: "models.File") -> bool:
+    """A chapter file qualifies as an uploaded client Art Assessment when it:
+
+    * sits under the Art folder (``category == "Art"``),
+    * is an ``.xlsx`` workbook,
+    * is flagged ``is_original=True`` (uploads; generator writes False),
+    * and its filename does not match this module's own output suffix.
+    """
+    if (f.category or "").strip().lower() != "art":
+        return False
+    filename = (f.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        return False
+    if filename.endswith("_artassessment.xlsx") or filename.endswith("_artassessment_generated.xlsx"):
+        return False  # our own output
+    # ``is_original`` is NOT NULL with a server default of True, so missing /
+    # legacy rows are treated as uploads.
+    if f.is_original is False:
+        return False
+    return True
+
+
+def _find_assessment_excel_candidates(db: Session, chapter_id: int) -> list[models.File]:
+    rows = (
+        db.query(models.File)
+        .filter(models.File.chapter_id == chapter_id)
+        .order_by(models.File.uploaded_at.desc())
+        .all()
+    )
+    return [r for r in rows if _is_excel_assessment_source(r)]
+
+
+# ---------------------------------------------------------------------------
+# Image metadata for Excel-path enrichment
+# ---------------------------------------------------------------------------
+
+
+def _probe_image_meta(file_record: "models.File") -> Optional[dict]:
+    """Open an image file and return a metadata dict, or None on any failure.
+
+    Deliberately best-effort: a broken file quietly yields None so enrichment
+    just stays empty — it never raises. The returned dict uses stable keys so
+    downstream code (DB, UI) can rely on the shape.
+    """
+    if not file_record.path:
+        return None
+    try:
+        size_bytes = os.path.getsize(file_record.path)
+    except OSError:
+        return None
+
+    width = height = None
+    dpi_x = dpi_y = None
+    pil_mode = fmt = color_space = None
+    try:
+        with Image.open(file_record.path) as im:
+            width, height = im.size
+            fmt = im.format
+            pil_mode = im.mode
+            color_space = _COLOR_SPACE_ONLY.get(im.mode, im.mode)
+            dpi_val = im.info.get("dpi") or im.info.get("jfif_density")
+            if dpi_val and isinstance(dpi_val, (tuple, list)) and len(dpi_val) >= 2:
+                try:
+                    dx, dy = float(dpi_val[0]), float(dpi_val[1])
+                    if dx > 0:
+                        dpi_x = int(round(dx))
+                    if dy > 0:
+                        dpi_y = int(round(dy))
+                except (TypeError, ValueError):
+                    pass
+    except Exception:
+        # Not a valid image or unsupported format — leave as whatever we got.
+        pass
+
+    return {
+        "supplied_file_id": file_record.id,
+        "filename": file_record.filename,
+        "pil_mode": pil_mode,
+        "color_space": color_space,
+        "format": fmt,
+        "size_bytes": size_bytes,
+        "width_px": width,
+        "height_px": height,
+        "dpi_x": dpi_x,
+        "dpi_y": dpi_y,
+    }
+
+
+def _build_chapter_image_index(db: Session, chapter_id: int) -> dict[str, dict]:
+    """Index of lowered-filename -> image metadata for every Art image in the chapter."""
+    files = (
+        db.query(models.File)
+        .filter(
+            models.File.chapter_id == chapter_id,
+            models.File.category == "Art",
+        )
+        .all()
+    )
+    index: dict[str, dict] = {}
+    for f in files:
+        filename = f.filename or ""
+        ext = Path(filename).suffix.lower()
+        if ext not in IMAGE_EXTS:
+            continue
+        meta = _probe_image_meta(f)
+        if meta is None:
+            continue
+        index[filename.lower()] = meta
+    return index
+
+
+def _match_image_meta_for_row(
+    row_canonical: dict[str, Optional[str]],
+    index: dict[str, dict],
+) -> Optional[dict]:
+    """Best-effort match of a parsed Excel row to an image file.
+
+    Order of attempts:
+      1. ``art_name`` (Murphy's ``Original File Name`` column)
+      2. ``figure_no`` (Lancaster puts a filename-shaped value here)
+    Never raises; returns None when no filename-style match exists.
+    """
+    for field_name in ("art_name", "figure_no"):
+        value = row_canonical.get(field_name)
+        if not value:
+            continue
+        key = value.strip().lower()
+        if key in index:
+            return index[key]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Output workbook writer (Excel path)
+# ---------------------------------------------------------------------------
+
+
+# Headers appended after the client's columns when enrichment is available.
+# Kept lowercase/mixed-case so they're visually distinct from the client's
+# original header style and clearly identifiable as system-added.
+_IMAGE_META_HEADERS: tuple[str, ...] = (
+    "Supplied File",
+    "Supplied Image Mode",
+    "Supplied Image Color",
+    "Supplied Image Format",
+    "Supplied Size (bytes)",
+    "Supplied Dimensions (px)",
+    "Supplied Resolution",
+)
+
+
+def _image_meta_row_values(meta: Optional[dict]) -> list[Any]:
+    """Format one image's metadata into the _IMAGE_META_HEADERS column order."""
+    if meta is None:
+        return [""] * len(_IMAGE_META_HEADERS)
+
+    width = meta.get("width_px")
+    height = meta.get("height_px")
+    dims = f"{width} × {height}" if width and height else ""
+
+    dpi_x = meta.get("dpi_x")
+    dpi_y = meta.get("dpi_y")
+    if dpi_x and dpi_y and dpi_x == dpi_y:
+        res = f"{dpi_x} DPI"
+    elif dpi_x and dpi_y:
+        res = f"{dpi_x} × {dpi_y} DPI"
+    elif dpi_x or dpi_y:
+        res = f"{dpi_x or dpi_y} DPI"
+    else:
+        res = ""
+
+    return [
+        meta.get("filename") or "",
+        meta.get("pil_mode") or "",
+        meta.get("color_space") or "",
+        meta.get("format") or "",
+        meta.get("size_bytes") if meta.get("size_bytes") is not None else "",
+        dims,
+        res,
+    ]
+
+
+def _sanitize_sheet_title(raw: str) -> str:
+    # Excel sheet titles: max 31 chars, no ``[]:*?/\``.
+    cleaned = re.sub(r"[\[\]:*?/\\]", "", raw or "").strip()
+    return (cleaned or "Art Assessment")[:31]
+
+
+def _write_output_xlsx_from_excel(
+    parsed,
+    enriched_metas: list[Optional[dict]],
+    unmatched_metas: list[dict] | None,
+    source_xlsx: "models.File",
+    chapter: "models.ChapterInfo",
+    project: "Project",
+    upload_dir: str,
+) -> str:
+    """Write the Excel-path output xlsx and return its absolute path.
+
+    Preserves the client's column order and raw header strings exactly. Image
+    metadata, when available for any row, is appended as additional columns
+    after the client's columns — never mixed in so a reader can always tell
+    client-provided data from system-derived enrichment.
+
+    F2: ``unmatched_metas`` (images in the Art folder not referenced by any
+    Excel row) are appended as additional rows below the Excel data, with a
+    ``Match Status`` column flagging them. Client-column cells on those rows
+    stay empty — the row represents an image, not an assessment entry.
     """
     from openpyxl import Workbook
 
-    project = db.query(Project).filter(Project.id == project_id).first()
-    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
-    if not project or not chapter:
-        return None, 0, "Project or chapter not found."
+    wb = Workbook()
+    wb.remove(wb.active)  # drop the auto-created empty sheet
 
-    source_file: Optional[models.File] = None
-    if source_file_id is not None:
-        source_file = db.query(models.File).filter(
-            models.File.id == source_file_id,
-            models.File.chapter_id == chapter_id,
-        ).first()
-        if not source_file:
-            return None, 0, "Source file not found in this chapter."
+    # Mirror the project-info sheet when the client supplied one.
+    if parsed.project_info:
+        info_title = _sanitize_sheet_title(parsed.project_info_sheet or "Project Info")
+        info_ws = wb.create_sheet(title=info_title)
+        for label, value in parsed.project_info.items():
+            info_ws.append([label, ":", "" if value is None else value])
+
+    data_title = _sanitize_sheet_title(parsed.data_sheet_name or "Art Assessment")
+    data_ws = wb.create_sheet(title=data_title)
+
+    client_headers = [raw for raw, _ in parsed.source_columns]
+    unmatched_metas = unmatched_metas or []
+    include_image_cols = (
+        any(m is not None for m in enriched_metas) or bool(unmatched_metas)
+    )
+
+    header_row = list(client_headers)
+    if include_image_cols:
+        header_row.append("Match Status")
+        header_row.extend(_IMAGE_META_HEADERS)
+    data_ws.append(header_row)
+
+    # Track the widest value per column so we can give each column a width
+    # proportional to its contents. Start from the header width.
+    col_widths = [len(str(h)) if h is not None else 0 for h in header_row]
+
+    for parsed_row, meta in zip(parsed.rows, enriched_metas):
+        values: list[Any] = []
+        for raw_header, canon_field in parsed.source_columns:
+            if canon_field is None:
+                v = parsed_row.unmapped.get(raw_header)
+            else:
+                v = parsed_row.canonical.get(canon_field)
+            # Keep NULLs as empty cells rather than literal "None".
+            values.append("" if v is None else v)
+        if include_image_cols:
+            # Match Status: empty for Excel-sourced rows that happened to be
+            # matched (or that nobody tried to match); "matched" only when we
+            # successfully attached an image file; "unmatched" rows come
+            # later, below.
+            values.append("matched" if meta is not None else "")
+            values.extend(_image_meta_row_values(meta))
+        for idx, v in enumerate(values):
+            col_widths[idx] = max(col_widths[idx], len(str(v)) if v is not None else 0)
+        data_ws.append(values)
+
+    # F2 — synthetic rows for images not referenced by any Excel row.
+    # Canonical columns stay empty; Match Status is "unmatched".
+    for meta in unmatched_metas:
+        values = ["" for _ in client_headers]
+        values.append("unmatched")
+        values.extend(_image_meta_row_values(meta))
+        for idx, v in enumerate(values):
+            col_widths[idx] = max(col_widths[idx], len(str(v)) if v is not None else 0)
+        data_ws.append(values)
+
+    # Usability polish: freeze the header row, bold it, and give each column a
+    # sensible width (clamped to avoid runaway wide columns from long editorial
+    # notes). Purely visual — the data is unchanged.
+    data_ws.freeze_panes = "A2"
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    bold = Font(bold=True)
+    for cell in next(data_ws.iter_rows(min_row=1, max_row=1)):
+        cell.font = bold
+    for i, width in enumerate(col_widths, start=1):
+        # +2 padding, clamp to [10, 60] so editorial-instructions columns don't
+        # push the sheet absurdly wide.
+        data_ws.column_dimensions[get_column_letter(i)].width = min(max(width + 2, 10), 60)
+
+    base_path = (
+        f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}"
+        f"/{chapter.chapters}/Art"
+    )
+    os.makedirs(base_path, exist_ok=True)
+    source_stem = Path(source_xlsx.filename or "source").stem or "source"
+    out_filename = f"{source_stem}_ArtAssessment_generated.xlsx"
+    out_path = os.path.join(base_path, out_filename)
+    wb.save(out_path)
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Excel path
+# ---------------------------------------------------------------------------
+
+
+def _generate_from_excel(
+    db: Session,
+    *,
+    project: "Project",
+    chapter: "models.ChapterInfo",
+    actor_user_id: Optional[int],
+    upload_dir: str,
+    source_xlsx: "models.File",
+) -> AssessmentGenerationResult:
+    """Produce an output xlsx from an uploaded client workbook.
+
+    Parses the workbook, best-effort enriches each row with image metadata
+    (without overwriting any Excel-provided value), writes the output xlsx
+    preserving the client's column order, and persists a normalized
+    ``art_assessments`` + ``art_assessment_rows`` record set.
+    """
+    from app.domains.post_prod.figure_pdf.assessment_parser import (
+        AssessmentParseError,
+        parse_assessment_workbook,
+    )
+    from app.models import ArtAssessment, ArtAssessmentRow
+
+    if not source_xlsx.path or not os.path.exists(source_xlsx.path):
+        return AssessmentGenerationResult(
+            file=None,
+            figures_included=0,
+            error="The uploaded Art Assessment workbook is missing on disk.",
+            source="excel",
+        )
+
+    try:
+        parsed = parse_assessment_workbook(source_xlsx.path)
+    except AssessmentParseError as exc:
+        return AssessmentGenerationResult(
+            file=None,
+            figures_included=0,
+            error=f"Failed to parse Art Assessment workbook: {exc}",
+            source="excel",
+        )
+
+    # Build a chapter-wide image index once, then match per row. Rows with no
+    # matching image file simply end up with ``image_meta_json = NULL``.
+    image_index = _build_chapter_image_index(db, chapter.id)
+    enriched_metas: list[Optional[dict]] = [
+        _match_image_meta_for_row(row.canonical, image_index) for row in parsed.rows
+    ]
+
+    # F2: images that live in the Art folder but did not match any Excel row
+    # must not vanish. Collect them here; they are appended to the output
+    # xlsx and persisted as synthetic rows with match_status='unmatched'.
+    matched_file_ids = {
+        m["supplied_file_id"] for m in enriched_metas if m and m.get("supplied_file_id")
+    }
+    unmatched_metas: list[dict] = [
+        m for m in image_index.values()
+        if m.get("supplied_file_id") not in matched_file_ids
+    ]
+
+    out_path = _write_output_xlsx_from_excel(
+        parsed=parsed,
+        enriched_metas=enriched_metas,
+        unmatched_metas=unmatched_metas,
+        source_xlsx=source_xlsx,
+        chapter=chapter,
+        project=project,
+        upload_dir=upload_dir,
+    )
+
+    out_file = models.File(
+        project_id=project.id,
+        chapter_id=chapter.id,
+        filename=os.path.basename(out_path),
+        file_type="xlsx",
+        category="Art",
+        path=out_path,
+        version=1,
+        is_original=False,
+        uploaded_by_id=actor_user_id,
+        source_file_id=source_xlsx.id,
+    )
+    db.add(out_file)
+    db.flush()  # need out_file.id for the assessment FK
+
+    assessment = ArtAssessment(
+        project_id=project.id,
+        chapter_id=chapter.id,
+        source_excel_file_id=source_xlsx.id,
+        output_excel_file_id=out_file.id,
+        source_mode="excel",
+        data_sheet_name=parsed.data_sheet_name,
+        header_row_index=parsed.header_row_index,
+        project_info_json=parsed.project_info,
+        canonical_columns_json=parsed.canonical_columns,
+        unmapped_columns_json=list(parsed.unmapped_columns),
+        warnings_json=list(parsed.warnings),
+        created_by_id=actor_user_id,
+    )
+    db.add(assessment)
+    db.flush()
+
+    # Only columns that exist on the model — defensive in case the alias
+    # registry grows a field without a matching DB column.
+    row_cols = {c.name for c in ArtAssessmentRow.__table__.columns}
+    for parsed_row, meta in zip(parsed.rows, enriched_metas):
+        canon_kwargs = {
+            k: v for k, v in parsed_row.canonical.items() if k in row_cols
+        }
+        db.add(
+            ArtAssessmentRow(
+                assessment_id=assessment.id,
+                row_index=parsed_row.row_index,
+                **canon_kwargs,
+                extras_json=dict(parsed_row.unmapped),
+                image_meta_json=meta,
+                match_status=None,
+            )
+        )
+
+    # F2 — persist synthetic rows for every unmatched image. row_index
+    # continues past the Excel's last row so client rows and image-only rows
+    # never clash on the unique (assessment_id, row_index) constraint.
+    next_row = len(parsed.rows) + 1
+    for offset, meta in enumerate(unmatched_metas):
+        db.add(
+            ArtAssessmentRow(
+                assessment_id=assessment.id,
+                row_index=next_row + offset,
+                # Canonical columns stay NULL — this row did not come from
+                # the client workbook.
+                extras_json={},
+                image_meta_json=meta,
+                match_status="unmatched",
+            )
+        )
+
+    db.commit()
+    db.refresh(out_file)
+
+    return AssessmentGenerationResult(
+        file=out_file,
+        figures_included=len(parsed.rows) + len(unmatched_metas),
+        source="excel",
+        parsed_row_count=len(parsed.rows),
+        unmapped_columns=list(parsed.unmapped_columns),
+        warnings=list(parsed.warnings),
+        assessment_id=assessment.id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Images path (byte-identical to the pre-dispatcher behavior)
+# ---------------------------------------------------------------------------
+
+
+def _generate_from_images(
+    db: Session,
+    *,
+    project: "Project",
+    chapter: "models.ChapterInfo",
+    actor_user_id: Optional[int],
+    upload_dir: str,
+    source_file: Optional["models.File"],
+) -> AssessmentGenerationResult:
+    """Legacy images-only output — 15-column Information Management template.
+
+    Behavior intentionally preserved: when a chapter has no uploaded client
+    Excel (or the user picked a DOCX/image as ``source_file_id``), this is
+    exactly what the system produced before Phase 4.
+    """
+    from openpyxl import Workbook
+
+    if source_file is not None:
         sources = _collect_images_from_file(source_file)
         if not sources:
-            return None, 0, (
-                f"No figures found in {source_file.filename}. The file must be a DOCX "
-                "with embedded images or an image file."
+            return AssessmentGenerationResult(
+                file=None,
+                figures_included=0,
+                error=(
+                    f"No figures found in {source_file.filename}. The file must be a DOCX "
+                    "with embedded images or an image file."
+                ),
+                source="images",
             )
     else:
-        sources = _collect_images_from_chapter(db, chapter_id)
+        sources = _collect_images_from_chapter(db, chapter.id)
         if not sources:
-            return None, 0, (
-                "No figures found. Upload images to the Art folder or add a DOCX "
-                "containing embedded figures to this chapter."
+            return AssessmentGenerationResult(
+                file=None,
+                figures_included=0,
+                error=(
+                    "No Art Assessment source found. Upload an Art Assessment "
+                    "Excel (.xlsx) to this chapter's Art folder — or add image "
+                    "files / a DOCX with embedded figures if you want the legacy "
+                    "image-scan output."
+                ),
+                source="images",
             )
 
     chapter_num_match = re.search(r"(\d+)", chapter.chapters or "")
@@ -1234,7 +1714,6 @@ def generate_figure_assessment(
         if chapter_prefix and chapter.chapter_title
         else (chapter.chapter_title or chapter.chapters or "Figure Assessment")
     )
-    # Excel sheet titles: max 31 chars, no []:*?/\
     sheet_title = re.sub(r"[\[\]:*?/\\]", "", sheet_title_raw)[:31]
 
     wb = Workbook()
@@ -1245,10 +1724,15 @@ def generate_figure_assessment(
         ws.cell(row=1, column=col_idx, value=header)
 
     for row_idx, src in enumerate(sources, start=2):
-        for col_idx, value in enumerate(_assessment_row_values(src, chapter_prefix), start=1):
+        for col_idx, value in enumerate(
+            _assessment_row_values(src, chapter_prefix), start=1
+        ):
             ws.cell(row=row_idx, column=col_idx, value=value)
 
-    base_path = f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}/{chapter.chapters}/Art"
+    base_path = (
+        f"{upload_dir}/{project.client_name or 'unknown'}/{project.code}"
+        f"/{chapter.chapters}/Art"
+    )
     os.makedirs(base_path, exist_ok=True)
 
     if source_file is not None:
@@ -1260,8 +1744,8 @@ def generate_figure_assessment(
     wb.save(out_path)
 
     db_file = models.File(
-        project_id=project_id,
-        chapter_id=chapter_id,
+        project_id=project.id,
+        chapter_id=chapter.id,
         filename=filename,
         file_type="xlsx",
         category="Art",
@@ -1274,4 +1758,121 @@ def generate_figure_assessment(
     db.add(db_file)
     db.commit()
     db.refresh(db_file)
-    return db_file, len(sources), None
+
+    return AssessmentGenerationResult(
+        file=db_file,
+        figures_included=len(sources),
+        source="images",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public dispatcher
+# ---------------------------------------------------------------------------
+
+
+def generate_figure_assessment(
+    db: Session,
+    *,
+    project_id: int,
+    chapter_id: int,
+    actor_user_id: Optional[int],
+    upload_dir: str,
+    source_file_id: Optional[int] = None,
+) -> AssessmentGenerationResult:
+    """Generate (or regenerate) the Art Assessment xlsx for a chapter.
+
+    Selection rules:
+
+    * ``source_file_id`` points at an uploaded client xlsx under Art →
+      Excel path (the Excel is the source of truth).
+    * ``source_file_id`` points at a DOCX or image → legacy images-only
+      path, scoped to that single file.
+    * ``source_file_id`` is omitted and the chapter's Art folder contains
+      exactly one uploaded xlsx → Excel path, that workbook is the source.
+    * ``source_file_id`` is omitted and there is no uploaded xlsx → legacy
+      images-only path, chapter-wide.
+    * ``source_file_id`` is omitted and there are two or more uploaded
+      xlsx → error asking the caller to pass ``source_file_id``.
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+    chapter = (
+        db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
+    )
+    if not project or not chapter:
+        return AssessmentGenerationResult(
+            file=None,
+            figures_included=0,
+            error="Project or chapter not found.",
+        )
+
+    source_xlsx: Optional[models.File] = None
+    source_imagefile: Optional[models.File] = None
+
+    # F1 (per docs/art-assessment/ART_ASSESSMENT_FINALIZATION.md §4 G1):
+    # An uploaded assessment Excel is always the source of truth. We scan
+    # the chapter first so a user-clicked image row can never suppress it.
+    # Precedence:
+    #   1. source_file_id explicitly names an xlsx → that xlsx wins.
+    #   2. Exactly one uploaded xlsx exists in the chapter → that xlsx wins
+    #      (the file_id, if any, becomes an enrichment hint — see F2).
+    #   3. Multiple uploaded xlsx, no source_file_id → error (pick one).
+    #   4. No uploaded xlsx → images-only path, optionally scoped to the
+    #      passed file_id if it's a DOCX or image.
+    selected_file: Optional[models.File] = None
+    if source_file_id is not None:
+        selected_file = (
+            db.query(models.File)
+            .filter(
+                models.File.id == source_file_id,
+                models.File.chapter_id == chapter_id,
+            )
+            .first()
+        )
+        if not selected_file:
+            return AssessmentGenerationResult(
+                file=None,
+                figures_included=0,
+                error="Source file not found in this chapter.",
+            )
+
+    if selected_file is not None and _is_excel_assessment_source(selected_file):
+        # (1) Explicit pick — honour it.
+        source_xlsx = selected_file
+    else:
+        # (2) / (3) / (4) — look at the chapter.
+        candidates = _find_assessment_excel_candidates(db, chapter_id)
+        if len(candidates) == 1:
+            source_xlsx = candidates[0]
+        elif len(candidates) > 1:
+            names = ", ".join(c.filename or "<unnamed>" for c in candidates)
+            return AssessmentGenerationResult(
+                file=None,
+                figures_included=0,
+                error=(
+                    "Multiple uploaded Art Assessment workbooks found in this chapter "
+                    f"({names}). Pass file_id to pick one."
+                ),
+            )
+        # else: no xlsx — fall through to images-only path.
+        # The user's selection (if a DOCX/image) carries forward there.
+        if source_xlsx is None and selected_file is not None:
+            source_imagefile = selected_file
+
+    if source_xlsx is not None:
+        return _generate_from_excel(
+            db,
+            project=project,
+            chapter=chapter,
+            actor_user_id=actor_user_id,
+            upload_dir=upload_dir,
+            source_xlsx=source_xlsx,
+        )
+    return _generate_from_images(
+        db,
+        project=project,
+        chapter=chapter,
+        actor_user_id=actor_user_id,
+        upload_dir=upload_dir,
+        source_file=source_imagefile,
+    )

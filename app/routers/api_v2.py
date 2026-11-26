@@ -4156,7 +4156,7 @@ def api_v2_generate_figure_assessment(
     from app.domains.post_prod.figure_pdf.service import generate_figure_assessment
 
     try:
-        db_file, figures_included, error = generate_figure_assessment(
+        result = generate_figure_assessment(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
@@ -4172,24 +4172,139 @@ def api_v2_generate_figure_assessment(
             message=f"Failed to generate Figure Assessment: {exc}",
         )
 
-    if error or not db_file:
+    if result.error or not result.file:
+        message = result.error or "Failed to generate Figure Assessment."
+        msg_lower = message.lower()
         return _error_response(
             status_code=(
                 status.HTTP_404_NOT_FOUND
-                if error and ("not found" in error.lower())
+                if "not found" in msg_lower
                 else status.HTTP_400_BAD_REQUEST
             ),
             code=(
                 "FIGURE_ASSESSMENT_EMPTY"
-                if error and ("no figures" in error.lower() or "no images" in error.lower())
+                if (
+                    "no figures" in msg_lower
+                    or "no images" in msg_lower
+                    or "no art assessment source" in msg_lower
+                )
                 else "FIGURE_ASSESSMENT_FAILED"
             ),
-            message=error or "Failed to generate Figure Assessment.",
+            message=message,
         )
 
     return schemas_v2.GenerateFigureAssessmentResponse(
-        file=_serialize_file_record(db_file, viewer=viewer, db=db),
-        figures_included=figures_included,
+        file=_serialize_file_record(result.file, viewer=viewer, db=db),
+        figures_included=result.figures_included,
+        source=result.source,
+        parsed_row_count=result.parsed_row_count,
+        unmapped_columns=result.unmapped_columns,
+        warnings=result.warnings,
+        assessment_id=result.assessment_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/chapters/{chapter_id}/parse-assessment-excel",
+    response_model=schemas_v2.ParseAssessmentExcelResponse,
+)
+def api_v2_parse_assessment_excel(
+    project_id: int,
+    chapter_id: int,
+    file_id: int = Query(..., description="ID of the uploaded Art Assessment xlsx"),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Parse an uploaded Art Assessment workbook and return its contents.
+
+    Read-only: the file on disk and the DB are unchanged. Intended for the
+    review step before the user clicks Generate Assessment — the UI can show
+    the detected sheet, column mapping, warnings, and every figure row with
+    its values preserved verbatim (no RGB/CMYK coercion, no default fills).
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    file_record = (
+        db.query(models.File)
+        .filter(
+            models.File.id == file_id,
+            models.File.project_id == project_id,
+            models.File.chapter_id == chapter_id,
+        )
+        .first()
+    )
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found in this chapter.",
+        )
+
+    filename = file_record.filename or ""
+    if not filename.lower().endswith(".xlsx"):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="ASSESSMENT_PARSE_INVALID_FORMAT",
+            message="Only .xlsx workbooks can be parsed as Art Assessment files.",
+        )
+
+    file_path = file_record.path
+    if not file_path or not os.path.exists(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_ON_DISK",
+            message="The workbook record exists but its file is missing on disk.",
+        )
+
+    from app.domains.post_prod.figure_pdf.assessment_parser import (
+        AssessmentParseError,
+        parse_assessment_workbook,
+    )
+
+    try:
+        parsed = parse_assessment_workbook(file_path)
+    except AssessmentParseError as exc:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="ASSESSMENT_PARSE_FAILED",
+            message=str(exc),
+        )
+    except Exception as exc:  # noqa: BLE001 — surface any lower-level failure uniformly
+        logger.exception(
+            "Art Assessment parse failed for file %s (chapter %s)",
+            file_id,
+            chapter_id,
+        )
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="ASSESSMENT_PARSE_FAILED",
+            message=f"Failed to parse Art Assessment workbook: {exc}",
+        )
+
+    return schemas_v2.ParseAssessmentExcelResponse(
+        file_id=file_record.id,
+        filename=filename,
+        project_info_sheet=parsed.project_info_sheet,
+        project_info=parsed.project_info,
+        data_sheet_name=parsed.data_sheet_name,
+        header_row_index=parsed.header_row_index,
+        canonical_columns=parsed.canonical_columns,
+        unmapped_columns=parsed.unmapped_columns,
+        rows=[
+            schemas_v2.ParsedAssessmentRowResponse(
+                row_index=row.row_index,
+                canonical=row.canonical,
+                unmapped=row.unmapped,
+            )
+            for row in parsed.rows
+        ],
+        warnings=parsed.warnings,
     )
 
 
