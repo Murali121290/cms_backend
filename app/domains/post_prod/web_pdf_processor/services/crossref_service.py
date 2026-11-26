@@ -120,28 +120,55 @@ def _identify_toc_section(doc) -> set:
     Returns set of page indices to exclude from cross-reference detection.
     """
     toc_pages = set()
+
+    # 1. First preference: use PDF outline/bookmarks if available
+    try:
+        toc = doc.get_toc()
+        for idx, item in enumerate(toc):
+            title = item[1].strip()
+            if re.match(r'^(?:Table\s+of\s+Contents|Contents|Brief\s+Contents|TOC)\b', title, re.IGNORECASE):
+                start = max(0, item[2] - 1)
+                end = toc[idx + 1][2] - 1 if idx + 1 < len(toc) else min(start + 15, len(doc))
+                if end <= start:
+                    end = start + 1
+                end = min(end, start + 25, len(doc))
+                for p in range(start, end):
+                    toc_pages.add(p)
+                logger.debug(f"Identified TOC pages from bookmarks: {[p + 1 for p in sorted(toc_pages)]}")
+                return toc_pages
+    except Exception as e:
+        logger.debug(f"TOC bookmark check error in _identify_toc_section: {e}")
+
+    # 2. Text scan fallback: require standalone heading line
     toc_start = None
-
-    # Find TOC start page
-    for page_idx in range(min(20, len(doc))):  # TOC is usually in first 20 pages
-        page = doc[page_idx]
-        text = page.get_text()
-
-        # Look for Table of Contents header
-        if re.search(r'\b(Table\s+of\s+Contents|Contents|TOC)\b', text, re.IGNORECASE):
+    for page_idx in range(min(25, len(doc))):  # TOC is usually in first 25 pages
+        text = doc[page_idx].get_text()
+        if re.search(r'^\s*(?:Table\s+of\s+Contents|Contents|Brief\s+Contents|TOC)\s*$', text, re.IGNORECASE | re.MULTILINE):
             toc_start = page_idx
             logger.debug(f"Table of Contents found at page {page_idx + 1}")
             break
 
-    # If TOC found, mark pages until main content starts (usually first chapter)
+    # If TOC found, mark pages until TOC layout ends or main content starts
     if toc_start is not None:
-        for page_idx in range(toc_start, min(toc_start + 15, len(doc))):  # TOC typically 1-15 pages
-            page = doc[page_idx]
-            text = page.get_text()
+        for page_idx in range(toc_start, min(toc_start + 20, len(doc))):
+            text = doc[page_idx].get_text()
 
-            # Stop when we hit actual chapter content (Chapter 1, Chapter 2, etc. as main header)
-            if re.match(r'^\s*(?:CHAPTER|Chapter)\s+1\b', text, re.IGNORECASE):
-                break
+            if page_idx > toc_start:
+                # Stop on any front-matter/body section heading
+                if re.search(
+                    r'^\s*(?:(?:CHAPTER|Chapter|PART|Part)\s+(?:1|I|One)\b|(?:Preface|Foreword|Acknowledgements?|Introduction|Prologue|List\s+of\s+(?:Figures|Tables)|Abbreviations)\s*$)',
+                    text,
+                    re.IGNORECASE | re.MULTILINE,
+                ):
+                    break
+                # Stop if page no longer looks like a TOC (fewer than 2 lines ending with a page number)
+                lines_nonempty = [ln.strip() for ln in text.splitlines() if ln.strip()]
+                toc_entry_lines = sum(
+                    1 for ln in lines_nonempty
+                    if re.search(r'(?:\.\s*|\s{2,}|\t)(?:\d{1,4}|[ivxlcdm]+)\s*$', ln, re.IGNORECASE)
+                )
+                if toc_entry_lines < 2:
+                    break
 
             toc_pages.add(page_idx)
 
@@ -161,7 +188,7 @@ def _identify_bibliography_sections(doc) -> set:
         toc = doc.get_toc()
         for idx, item in enumerate(toc):
             title = item[1].strip().lower()
-            if re.search(r'\b(?:references|bibliography|works\s+cited|notes\s+and\s+references)\b', title):
+            if re.match(r'^(?:references|bibliography|works\s+cited|notes\s+and\s+references)\b', title):
                 start = max(0, item[2] - 1)
                 # Next section determines end
                 end = max(start + 1, toc[idx + 1][2] - 1) if idx + 1 < len(toc) else min(start + 15, len(doc))
@@ -173,17 +200,27 @@ def _identify_bibliography_sections(doc) -> set:
     except Exception as e:
         logger.debug(f"TOC check error in _identify_bibliography_sections: {e}")
 
-    # 2. Text scan fallback (per-chapter aware: stops when a new chapter begins)
+    # 2. Text scan fallback (per-chapter aware: stops when a new chapter or prose body begins)
     in_ref = False
     for page_idx in range(len(doc)):
         page = doc[page_idx]
         text = page.get_text()
         first_few = ' '.join([l.strip() for l in text.split('\n')[:4] if l.strip()])
 
-        if re.search(r'^(?:CHAPTER|PART|APPENDIX)\s+\d+', first_few, re.I):
+        if re.search(r'^(?:CHAPTER|PART|APPENDIX|SECTION|UNIT|INDEX|GLOSSARY)\b', first_few, re.I):
             in_ref = False
         elif re.search(r'^(?:References|Bibliography|Works\s+Cited|Notes\s+and\s+References)\b', first_few, re.I):
             in_ref = True
+        elif in_ref:
+            # Stop if this page has substantial prose without citation/year/numbered-entry markers
+            lines_ne = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            long_prose = sum(1 for ln in lines_ne if len(ln) > 75)
+            ref_markers = sum(
+                1 for ln in lines_ne
+                if re.match(r'^(?:\[\d+\]|\d{1,4}[\.\)])\s+', ln) or re.search(r'\b(?:19|20)\d{2}\b', ln)
+            )
+            if long_prose >= 4 and ref_markers < 2:
+                in_ref = False
 
         if in_ref:
             bibliography_pages.add(page_idx)
@@ -227,6 +264,25 @@ def _find_targets(doc) -> dict:
     """
     targets = {}
     target_scores = {}
+
+    # Seed chapter targets from PDF outline/TOC bookmarks when available
+    try:
+        for lvl, title, page_1based in doc.get_toc():
+            t = title.strip()
+            m_ch = re.match(r'^Chapter\s+(\d+)\b', t, re.IGNORECASE)
+            if not m_ch and lvl == 1:
+                m_ch = re.match(r'^(\d+)\s+[A-Z]', t)
+            if m_ch and 1 <= int(m_ch.group(1)) <= 50 and 1 <= page_1based <= len(doc):
+                ch_id = f"chapter_{m_ch.group(1)}"
+                if ch_id not in targets:
+                    targets[ch_id] = {
+                        "page_idx": page_1based - 1,
+                        "page": page_1based,
+                        "type": "chapter",
+                        "identifier": m_ch.group(1),
+                    }
+    except Exception as e:
+        logger.debug(f"TOC chapter seed error: {e}")
 
     def _consider_target(key: str, entry: dict, line_dict: dict, line_str: str):
         if _PROSE_AFTER_RE.match(line_str):
@@ -286,9 +342,9 @@ def _find_targets(doc) -> dict:
                         "identifier": box_match.group(1),
                     }, line, line_text)
 
-                # Detect chapter headers: "Chapter 4", "CHAPTER 4", "Ch. 4"
-                chapter_match = re.search(r'(?:Chapter|Ch\.?|CHAPTER|CH\.?)\s+(\d+)', line_text, re.IGNORECASE)
-                if chapter_match:
+                # Detect standalone chapter headers: "Chapter 4", "CHAPTER 4", "Chapter 4: Title"
+                chapter_match = re.match(r'^(?:Chapter|CHAPTER)\s+(\d+)\s*(?:[:.\-–—].*)?$', line_text)
+                if chapter_match and len(line_text) < 80 and not line_text.endswith('.') and not _PROSE_AFTER_RE.match(line_text):
                     ch_id = f"chapter_{chapter_match.group(1)}"
                     if ch_id not in targets:
                         targets[ch_id] = {
@@ -355,12 +411,14 @@ def _resolve_match_rects(page, check_item: dict, matched_str: str, raw_id: str, 
             res.append(r2[0])
         return res if res else [line1_rect, line2_rect]
     else:
-        # Space split (e.g. "Table" on line 1, "1.1" on line 2)
-        r1 = page.search_for(keyword, clip=clip1)
+        # Space split (e.g. "Table" on line 1, "1.1" on line 2, or "Fig." / "1.2")
+        m_kw = re.search(r'(Figures?|Figs?\.?|Tables?|Tabs?\.?|Chapters?|Chs?\.?|Box(?:es)?|Cases?)', matched_str, re.I)
+        kw_actual = m_kw.group(1) if m_kw else keyword
+        r1 = page.search_for(kw_actual, clip=clip1)
         r2 = page.search_for(raw_id, clip=clip2)
         res = []
         if r1:
-            res.append(r1[0])
+            res.append(r1[-1])
         if r2:
             res.append(r2[0])
         return res if res else [line1_rect, line2_rect]
@@ -445,14 +503,15 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                             "next_text": next_l["text"]
                         })
 
-                def _collect_plural_refs(item_dict, kw_pat: str, ref_type: str, num_pat: str, require_long_line: bool = False):
-                    if require_long_line and len(line_text) < 50:
-                        return
+                def _collect_plural_refs(item_dict, kw_pat: str, ref_type: str, num_pat: str):
                     full_pat = rf'\b(?:see|refer\s+to|read|look\s+at|in)?\s*(?:{kw_pat})\s+({num_pat}(?:\s*(?:,|and|&|through|to|-|–|—)\s*{num_pat})+)'
                     for list_match in re.finditer(full_pat, item_dict["text"], re.I):
                         list_str = list_match.group(1)
                         line_b = item_dict["r_primary"]
+                        r_sec = item_dict.get("r_secondary")
                         pad_line = fitz.Rect(line_b.x0 - 2, line_b.y0 - 2, line_b.x1 + 2, line_b.y1 + 2)
+                        if r_sec is not None:
+                            pad_line |= fitz.Rect(r_sec.x0 - 2, r_sec.y0 - 2, r_sec.x1 + 2, r_sec.y1 + 2)
                         phrase_rects = page.search_for(list_match.group(0).strip(), clip=pad_line)
                         phrase_clip = fitz.Rect()
                         for pr in phrase_rects:
@@ -482,10 +541,10 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
 
                 for item in check_items:
                     text_to_check = item["text"]
-                    _collect_plural_refs(item, r'Figures|Figs\.?', "figure", r'\d+(?:[\.\-–]\d+)?[a-z]?')
-                    _collect_plural_refs(item, r'Tables|Tabs\.?', "table", r'\d+(?:[\.\-–]\d+)?[a-z]?')
-                    _collect_plural_refs(item, r'Chapters|Chs\.?', "chapter", r'\d+', require_long_line=True)
-                    _collect_plural_refs(item, r'Boxes|Cases', "box", r'\d+(?:[\.\-–]\d+)?[a-z]?')
+                    _collect_plural_refs(item, r'Figures?|Figs?\.?', "figure", r'\d+(?:[\.\-–]\d+)?[a-z]?')
+                    _collect_plural_refs(item, r'Tables?|Tabs?\.?', "table", r'\d+(?:[\.\-–]\d+)?[a-z]?')
+                    _collect_plural_refs(item, r'Chapters?|Chs?\.?', "chapter", r'\d+')
+                    _collect_plural_refs(item, r'Box(?:es)?|Cases?', "box", r'\d+(?:[\.\-–]\d+)?[a-z]?')
 
                     # 1. Figure references
                     for fig_match in re.finditer(r'\b(?:see|refer\s+to|look\s+at)?\s*(?:Figures?|Figs?\.?)\s+(\d+(?:[\.\-–]\d+)?[a-z]?)', text_to_check, re.I):
@@ -533,7 +592,12 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                         if ch_id in targets:
                             target_chapter = targets[ch_id]
                             is_chapter_header = (page_idx == target_chapter["page_idx"] and line_text.startswith(ch_match.group(0).lstrip()))
-                            is_section_header = len(line_text) < 50
+                            is_section_header = (
+                                not item.get("is_split")
+                                and bool(re.match(r'^(?:Chapter|Ch\.?)\s+\d+(?:\s*[:.\-–—].*)?$', line_text, re.I))
+                                and len(line_text) < 50
+                                and not line_text.endswith('.')
+                            )
                             if not is_chapter_header and not is_section_header:
                                 exact_rect = _resolve_match_rects(page, item, ch_match.group(0), raw_id, "Chapter")
                                 if not any(_any_rect_overlap(exact_rect, existing_ref["rect"]) for existing_ref in references if existing_ref["page_idx"] == page_idx):

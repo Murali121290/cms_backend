@@ -98,6 +98,24 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
         ref_pages = list(range(notes_section_start, notes_section_end))
         ref_pages_set = set(ref_pages)
 
+    # Detect if any ref_page starts mid-page with a Notes/References heading
+    # so body text above that heading is still scanned for citations.
+    ref_section_start_y: dict[int, float] = {}
+    for p_idx in ref_pages_set:
+        p_obj = doc[p_idx]
+        p_h = p_obj.rect.height
+        for b in p_obj.get_text("dict").get("blocks", []):
+            if b.get("type") != 0:
+                continue
+            for l in b.get("lines", []):
+                ly = l.get("bbox", [0, 0, 0, 0])[1]
+                if ly < 45 or ly > p_h - 40:
+                    continue
+                lt = "".join(s.get("text", "") for s in l.get("spans", [])).strip()
+                if re.match(r'^(?:Notes?|Endnotes?|References?)(?:\s*[:\-–—].*)?$', lt, re.IGNORECASE):
+                    if p_idx not in ref_section_start_y or ly < ref_section_start_y[p_idx]:
+                        ref_section_start_y[p_idx] = ly
+
     # ------------------------------------------------------------------
     # Step 2 – Collect note references in body text
     # Supports:
@@ -106,15 +124,19 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
     # ------------------------------------------------------------------
     note_references: dict[tuple, list] = defaultdict(list)
 
-    for page_idx in body_pages:
+    body_scan_pages = sorted(set(body_pages) | set(ref_section_start_y.keys()))
+    for page_idx in body_scan_pages:
         page = doc[page_idx]
         chapter_num = _page_to_chapter(page_idx, chapter_page_ranges)
+        ref_y_limit = ref_section_start_y.get(page_idx)
 
         page_blocks = page.get_text("dict")["blocks"]
         for block in page_blocks:
             if block["type"] != 0:
                 continue
             for line in block.get("lines", []):
+                if ref_y_limit is not None and line.get("bbox", [0, 0, 0, 0])[1] >= ref_y_limit:
+                    continue
                 # (a) Check superscript spans (single digit or comma/hyphen separated like "1,2", "3-5")
                 for span in line.get("spans", []):
                     flags = span.get("flags", 0)
@@ -266,11 +288,15 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
     for p_idx in ref_pages:
         p_obj = doc[p_idx]
         p_h = p_obj.rect.height
+        ref_y_start = ref_section_start_y.get(p_idx)
         for b in p_obj.get_text("dict").get("blocks", []):
             if b.get("type") != 0:
                 continue
             for l in b.get("lines", []):
-                if l.get("bbox", [0, 0, 0, 0])[1] < 45 or l.get("bbox", [0, 0, 0, 0])[1] > p_h - 40:
+                ly = l.get("bbox", [0, 0, 0, 0])[1]
+                if ly < 45 or ly > p_h - 40:
+                    continue
+                if ref_y_start is not None and ly < ref_y_start:
                     continue
                 lt = "".join(s.get("text", "") for s in l.get("spans", [])).strip()
                 if re.match(r'^(?:\[\d{1,4}\]|\d{1,4}[\.\)\:\-]?)(\t|\s+|$)', lt) and l.get("spans"):
@@ -306,10 +332,14 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True, custom_detail
         content_blocks = [b for b in raw_blocks if not (b["bbox"][1] < 45 or b["bbox"][1] > page_h - 40)]
 
         # Collect lines with their vertical coordinate to preserve natural reading order
+        ref_y_start = ref_section_start_y.get(page_idx)
         page_lines = []
         for block in content_blocks:
             for line in block.get("lines", []):
-                if line.get("bbox", [0, 0, 0, 0])[1] < 45 or line.get("bbox", [0, 0, 0, 0])[1] > page_h - 40:
+                ly = line.get("bbox", [0, 0, 0, 0])[1]
+                if ly < 45 or ly > page_h - 40:
+                    continue
+                if ref_y_start is not None and ly < ref_y_start:
                     continue
                 page_lines.append(line)
 
