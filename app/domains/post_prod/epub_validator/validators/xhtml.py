@@ -1522,6 +1522,11 @@ def validate_punctuation_spaces(file_details, rule_config=None):
                 snippet = text[start_idx:end_idx].strip()
                 line_num = _get_line_number(el, snippet[:20] if snippet else matched)
 
+                # Faulty word + space + punctuation token (e.g. "wo ?") for exact code highlighting
+                pre_text = text[:m.start()]
+                pre_word = pre_text.split()[-1] if pre_text.split() else ""
+                faulty_token = f"{pre_word}{m.group(0)}" if pre_word else matched
+
                 issues.append({
                     "rule_name": rule_name,
                     "type": "unexpected_space_before_punctuation",
@@ -1533,7 +1538,7 @@ def validate_punctuation_spaces(file_details, rule_config=None):
                     "file_path": rel_path,
                     "line_number": line_num,
                     "snippet": snippet,
-                    "extract": str(el)[:150],
+                    "extract": faulty_token,
                 })
         else:
             # French texts:
@@ -1544,6 +1549,10 @@ def validate_punctuation_spaces(file_details, rule_config=None):
                 end_idx = min(len(text), m.end() + 25)
                 snippet = text[start_idx:end_idx].strip()
                 line_num = _get_line_number(el, snippet[:20] if snippet else punct)
+
+                pre_text = text[:m.start()]
+                pre_word = pre_text.split()[-1] if pre_text.split() else ""
+                faulty_token = f"{pre_word}{m.group(0)}" if pre_word else m.group(0)
 
                 issues.append({
                     "rule_name": rule_name,
@@ -1557,7 +1566,7 @@ def validate_punctuation_spaces(file_details, rule_config=None):
                     "file_path": rel_path,
                     "line_number": line_num,
                     "snippet": snippet,
-                    "extract": str(el)[:150],
+                    "extract": faulty_token,
                 })
 
             # 2. In French titles / headings:

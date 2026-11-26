@@ -898,6 +898,18 @@ def validate_copyright_isbn_from_db(file_details, rule_config=None):
     matched_exact = False
     found_unhyphenated_for_swedish = False
     found_hyphenated_for_others = False
+    found_line_num = 1
+    found_node = None
+
+    lines = content.splitlines()
+
+    def get_line_num_from_str(s):
+        if not s:
+            return 1
+        for idx, l in enumerate(lines, 1):
+            if s in l:
+                return idx
+        return 1
 
     # Also detect if opposite hyphenation format was used
     alt_hyphen_pattern = re.compile(r'\bISBN\s*:\s*(\d+-\d+-\d+-\d+-\d+)\b', re.IGNORECASE)
@@ -910,6 +922,8 @@ def validate_copyright_isbn_from_db(file_details, rule_config=None):
             raw_matched = m.group(1)
             digits = "".join(ch for ch in raw_matched if ch.isdigit())
             found_isbns.append((digits, raw_matched, txt))
+            found_line_num = getattr(p, "sourceline", None) or get_line_num_from_str(raw_matched)
+            found_node = p
             if digits == expected_digits:
                 matched_exact = True
                 break
@@ -918,35 +932,43 @@ def validate_copyright_isbn_from_db(file_details, rule_config=None):
                 m_plain = alt_plain_pattern.search(txt)
                 if m_plain and m_plain.group(1) == expected_digits:
                     found_unhyphenated_for_swedish = True
+                    found_line_num = getattr(p, "sourceline", None) or get_line_num_from_str(m_plain.group(1))
             else:
                 m_hyphen = alt_hyphen_pattern.search(txt)
                 if m_hyphen and "".join(ch for ch in m_hyphen.group(1) if ch.isdigit()) == expected_digits:
                     found_hyphenated_for_others = True
+                    found_line_num = getattr(p, "sourceline", None) or get_line_num_from_str(m_hyphen.group(1))
 
     if not matched_exact:
+        extract_token = None
         if is_swedish and found_unhyphenated_for_swedish:
             msg = f"Swedish copyright requires hyphenated ISBN format (e.g. 'ISBN: 978-XX-XXXX-XXX-X'). Found unhyphenated: 'ISBN: {expected_digits}'"
             snippet = f"Found: ISBN: {expected_digits}"
+            extract_token = expected_digits
         elif not is_swedish and found_hyphenated_for_others:
             msg = f"Copyright ISBN must be 13 digits without hyphens ('ISBN: {expected_digits}'). Hyphens are only allowed for Swedish."
             snippet = f"Expected: ISBN: {expected_digits}"
+            extract_token = expected_digits
         elif found_isbns:
             found_str = ", ".join(f"'{f[1]}'" for f in found_isbns)
             msg = f"Copyright page ISBN does not match the expected eISBN '{expected_digits}'. Found: {found_str}"
             snippet = found_isbns[0][2]
+            extract_token = found_isbns[0][1]
         else:
             msg = f"Copyright page is missing the expected {expected_format_desc}"
             snippet = f"Expected: ISBN: {expected_digits}"
+            extract_token = f"Expected eISBN: {expected_digits}"
 
         issues.append({
             "type": "copyright_isbn_mismatch",
             "message": msg,
             "category": "Error",
             "file_path": rel_path,
-            "line_number": 1,
+            "line_number": found_line_num,
             "snippet": snippet,
             "expected_text": f"ISBN: {expected_digits}",
-            "extract": f"Expected eISBN: {expected_digits}",
+            "actual_text": f"ISBN: {found_isbns[0][1]}" if found_isbns else "",
+            "extract": extract_token,
         })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -1258,7 +1280,6 @@ def validate_no_price_symbols(file_details, rule_config=None):
             start_ctx = max(0, m.start() - 25)
             end_ctx = min(len(node_str), m.end() + 25)
             snippet = node_str[start_ctx:end_ctx].strip()
-            parent_extract = str(parent)[:150] if parent else matched
 
             issues.append({
                 "rule_name": (rule_config.get("name") if rule_config and isinstance(rule_config, dict) else None) or "Price Symbol Check",
@@ -1268,7 +1289,7 @@ def validate_no_price_symbols(file_details, rule_config=None):
                 "file_path": rel_path,
                 "line_number": line_num,
                 "snippet": snippet,
-                "extract": parent_extract,
+                "extract": matched,
             })
 
     return {"issues_count": len(issues), "issues": issues}

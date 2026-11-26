@@ -2186,41 +2186,6 @@ def validate_bod_landmarks(file_details, rule_config=None):
                 return idx
         return 1
 
-    # Locate landmarks nav: <nav epub:type="landmarks">
-    landmarks_nav = soup.find(
-        lambda t: t.name == "nav" and "landmarks" in (t.get("epub:type") or "").lower()
-    )
-
-    issues = []
-
-    if not landmarks_nav:
-        issues.append({
-            "type": "landmarks_nav_missing",
-            "message": 'Landmarks navigation (<nav epub:type="landmarks">) is missing in navigation document.',
-            "category": "Error",
-            "file_path": rel_path,
-            "line_number": 1,
-            "snippet": '<nav epub:type="landmarks">',
-            "extract": '<nav epub:type="landmarks">',
-        })
-        return {"issues_count": len(issues), "issues": issues}
-
-    # Extract all landmark items <a> inside <nav epub:type="landmarks">
-    landmark_links = landmarks_nav.find_all("a")
-
-    if not landmark_links:
-        line_no = find_tag_line(landmarks_nav)
-        issues.append({
-            "type": "landmarks_empty",
-            "message": 'Landmarks navigation (<nav epub:type="landmarks">) contains no landmark entries.',
-            "category": "Error",
-            "file_path": rel_path,
-            "line_number": line_no,
-            "snippet": str(landmarks_nav)[:200],
-            "extract": str(landmarks_nav)[:200],
-        })
-        return {"issues_count": len(issues), "issues": issues}
-
     # Read configuration
     cfg = (rule_config.get("rule_config") if rule_config and isinstance(rule_config, dict) and "rule_config" in rule_config else rule_config) or {}
 
@@ -2248,6 +2213,124 @@ def validate_bod_landmarks(file_details, rule_config=None):
 
     # Resolve expected TOC title and allowed variants for this language from config
     allowed_toc_titles = toc_titles_map.get(norm_lang) or toc_titles_map.get("en")
+    if not allowed_toc_titles:
+        # Fallback to first configured language list in config if language code not directly matched
+        allowed_toc_titles = list(toc_titles_map.values())[0] if toc_titles_map else []
+    if isinstance(allowed_toc_titles, str):
+        allowed_toc_titles = [allowed_toc_titles]
+    allowed_toc_lower = {t.lower().replace(" ", "") for t in allowed_toc_titles}
+    expected_toc_title = allowed_toc_titles[0]
+
+    # Resolve expected Bodymatter title from config if provided
+    bm_titles_map = cfg.get("bodymatter_titles_by_language") or {}
+    allowed_bm_titles = bm_titles_map.get(norm_lang) or bm_titles_map.get("en") or []
+    if isinstance(allowed_bm_titles, str):
+        allowed_bm_titles = [allowed_bm_titles]
+    allowed_bm_lower = {t.lower().replace(" ", "") for t in allowed_bm_titles}
+    expected_bm_title = allowed_bm_titles[0] if allowed_bm_titles else ("Textbeginn" if norm_lang == "de" else "Start of Text")
+
+    # Discover actual files in the EPUB so hrefs in the expected template match this exact book
+    actual_cover_href = "xhtml/A_Cover.xhtml"
+    actual_toc_href = "xhtml/D_inhalt.xhtml"
+    actual_bm_href = "xhtml/01_Kapitel.xhtml"
+
+    # Check if nav.xhtml already has a TOC link in <nav epub:type="toc"> to replicate exact href & title
+    toc_nav_el = soup.find(lambda t: t.name == "nav" and "toc" in (t.get("epub:type") or "").lower())
+    if toc_nav_el:
+        first_toc_a = toc_nav_el.find("a")
+        if first_toc_a and first_toc_a.get("href"):
+            candidate_href = first_toc_a.get("href").strip()
+            candidate_txt = first_toc_a.get_text(strip=True)
+            if re.search(r'(inhalt|toc|contents|sommaire)', candidate_href, re.IGNORECASE):
+                actual_toc_href = candidate_href
+                if candidate_txt:
+                    expected_toc_title = candidate_txt
+
+    if epub_root and os.path.isdir(epub_root):
+        all_epub_files = []
+        for r, _d, files in os.walk(epub_root):
+            for f in files:
+                if f.lower().endswith((".xhtml", ".html")):
+                    rel_to_nav = os.path.relpath(os.path.join(r, f), os.path.dirname(file_path)).replace("\\", "/")
+                    all_epub_files.append((f, rel_to_nav))
+
+        # 1. Match cover file (A_Cover... or cover...)
+        for fn_candidate, rel_candidate in all_epub_files:
+            if re.search(r'(^|/)a_cover', fn_candidate, re.IGNORECASE) or fn_candidate.lower() in ("cover.xhtml", "cover.html"):
+                actual_cover_href = rel_candidate
+                break
+
+        # 2. Match TOC file if not found from toc nav
+        if actual_toc_href == "xhtml/D_inhalt.xhtml":
+            for fn_candidate, rel_candidate in all_epub_files:
+                if fn_candidate.lower() not in ("nav.xhtml", "nav.html") and re.search(r'(inhalt|toc|contents|sommaire|inhaltsverzeichnis|indice|indholdsforteg|innehall|sisallys|inhoud|sommario|sumario)', fn_candidate, re.IGNORECASE):
+                    actual_toc_href = rel_candidate
+                    break
+            else:
+                actual_toc_href = "nav.xhtml#toc"
+
+        # 3. Match first bodymatter chapter file (01_...)
+        for fn_candidate, rel_candidate in all_epub_files:
+            if re.search(r'(^|/)(01_|01[\s\-_]|ch(apter)?0?1[\s\-_]?|c0?1[\s\-_]?|part0?1[\s\-_]?|kapitel0?1[\s\-_]?)', fn_candidate, re.IGNORECASE) or fn_candidate.startswith("01"):
+                actual_bm_href = rel_candidate
+                break
+
+    # Construct the clear, dynamic expected landmarks template matching this exact book's files
+    expected_landmarks_template = (
+        '<nav epub:type="landmarks" id="landmarks" hidden="hidden">\n'
+        '  <h2>Landmarks</h2>\n'
+        '  <ol>\n'
+        f'    <li><a epub:type="cover" href="{actual_cover_href}">Cover</a></li>\n'
+        f'    <li><a epub:type="toc" href="{actual_toc_href}">{expected_toc_title}</a></li>\n'
+        f'    <li><a epub:type="bodymatter" href="{actual_bm_href}">{expected_bm_title}</a></li>\n'
+        '  </ol>\n'
+        '</nav>'
+    )
+
+    # Locate landmarks nav: <nav epub:type="landmarks">
+    landmarks_nav = soup.find(
+        lambda t: t.name == "nav" and "landmarks" in (t.get("epub:type") or "").lower()
+    )
+
+    issues = []
+
+    if not landmarks_nav:
+        issues.append({
+            "type": "landmarks_nav_missing",
+            "message": (
+                'Landmarks navigation (<nav epub:type="landmarks">) is missing in nav.xhtml. '
+                'Please add the <nav epub:type="landmarks"> section with Cover, Table of Contents, and Bodymatter links.'
+            ),
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": 1,
+            "snippet": '<nav epub:type="landmarks">',
+            "extract": '<nav epub:type="landmarks">',
+            "expected_text": expected_landmarks_template,
+            "actual_text": "Missing <nav epub:type=\"landmarks\">",
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+    # Extract all landmark items <a> inside <nav epub:type="landmarks">
+    landmark_links = landmarks_nav.find_all("a")
+
+    if not landmark_links:
+        line_no = find_tag_line(landmarks_nav)
+        issues.append({
+            "type": "landmarks_empty",
+            "message": (
+                'Landmarks navigation (<nav epub:type="landmarks">) is empty. '
+                'It must contain 3 ordered links: 1. Cover, 2. Table of Contents, 3. Bodymatter.'
+            ),
+            "category": "Error",
+            "file_path": rel_path,
+            "line_number": line_no,
+            "snippet": str(landmarks_nav)[:200],
+            "extract": str(landmarks_nav)[:200],
+            "expected_text": expected_landmarks_template,
+            "actual_text": str(landmarks_nav),
+        })
+        return {"issues_count": len(issues), "issues": issues}
     if not allowed_toc_titles:
         # Fallback to first configured language list in config if language code not directly matched
         allowed_toc_titles = list(toc_titles_map.values())[0] if toc_titles_map else []
