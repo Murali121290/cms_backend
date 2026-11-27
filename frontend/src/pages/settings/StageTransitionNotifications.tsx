@@ -26,6 +26,7 @@ import {
   SlidersHorizontal,
   Sliders,
   Check,
+  ChevronDown,
   ExternalLink,
   Database,
   User,
@@ -33,6 +34,7 @@ import {
   UserCheck
 } from 'lucide-react'
 import { useUsersStore } from '@/stores/usersStore'
+import { clientsApi, type Client } from '@/api/clients'
 import {
   transitionNotificationsApi,
   type CustomerSummary,
@@ -63,7 +65,27 @@ export function StageTransitionNotifications() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [customers, setCustomers] = useState<CustomerSummary[]>([])
+  const [clientsList, setClientsList] = useState<Client[]>([])
   const [variables, setVariables] = useState<TemplateVariable[]>([])
+
+  // User Lead Searchable Dropdown state
+  const [isOwnerDropdownOpen, setIsOwnerDropdownOpen] = useState(false)
+  const [ownerSearchQuery, setOwnerSearchQuery] = useState('')
+  const ownerDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ownerDropdownRef.current && !ownerDropdownRef.current.contains(e.target as Node)) {
+        setIsOwnerDropdownOpen(false)
+      }
+    }
+    if (isOwnerDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isOwnerDropdownOpen])
 
   // Selected customer
   const [selectedClientCode, setSelectedClientCode] = useState<string>('default')
@@ -144,12 +166,14 @@ export function StageTransitionNotifications() {
     async function loadInitial() {
       setLoading(true)
       try {
-        const [custList, vars] = await Promise.all([
+        const [custList, vars, cList] = await Promise.all([
           transitionNotificationsApi.listCustomers(),
           transitionNotificationsApi.getVariables(),
+          clientsApi.list().catch(() => [] as Client[]),
         ])
         setCustomers(custList)
         setVariables(vars)
+        setClientsList(cList)
         if (custList.length > 0) {
           setSelectedClientCode('default')
         }
@@ -580,7 +604,60 @@ export function StageTransitionNotifications() {
     toast.success(`Removed "${stageName}" from configuration. Click "Save Changes" to apply.`)
   }
 
-  // Helper to resolve user first name from username/email/loaded users
+  // ── Eligible Users for Current Customer ────────────────────────────────────
+  const eligibleUsers = useMemo(() => {
+    // If viewing the global default template, all active users can be picked
+    if (!selectedClientCode || selectedClientCode === 'default') {
+      return users.filter(u => u.active_status !== false)
+    }
+
+    // Match client details: division code, client name, company name
+    const foundClient = clientsList.find(
+      c => c.division?.toLowerCase() === selectedClientCode.toLowerCase()
+    )
+    const clientSummary = customers.find(
+      c => c.client_code.toLowerCase() === selectedClientCode.toLowerCase()
+    )
+
+    const allowedTokens = new Set<string>()
+    allowedTokens.add(selectedClientCode.toLowerCase())
+    if (clientConfig?.client_code) allowedTokens.add(clientConfig.client_code.toLowerCase())
+    if (clientConfig?.client_name) allowedTokens.add(clientConfig.client_name.toLowerCase())
+    if (clientSummary?.client_name) allowedTokens.add(clientSummary.client_name.toLowerCase())
+    if (foundClient?.division) allowedTokens.add(foundClient.division.toLowerCase())
+    if (foundClient?.company) allowedTokens.add(foundClient.company.toLowerCase())
+    if (foundClient?.name_company) allowedTokens.add(foundClient.name_company.toLowerCase())
+
+    const result = users.filter(u => {
+      if (u.active_status === false) return false
+
+      if (!selectedClientCode || selectedClientCode === 'default') {
+        return true
+      }
+
+      // Admin or users with admin access levels always have global customer permissions
+      const roleLower = (u.role || '').toLowerCase()
+      const accessLvl = (u.access_level || '').toLowerCase()
+      if (roleLower.includes('admin') || accessLvl.includes('admin')) {
+        return true
+      }
+
+      // Check customer_access list
+      const userCustomerAccess = u.customer_access || []
+      return userCustomerAccess.some(cust => {
+        if (!cust || typeof cust !== 'string') return false
+        const clean = cust.trim().toLowerCase()
+        return allowedTokens.has(clean)
+      })
+    })
+
+    // Sort alphabetically by Display Name (first name, last name, or username)
+    return result.sort((a, b) => {
+      const nameA = ([a.first_name, a.last_name].filter(Boolean).join(' ').trim() || a.user_name).toLowerCase()
+      const nameB = ([b.first_name, b.last_name].filter(Boolean).join(' ').trim() || b.user_name).toLowerCase()
+      return nameA.localeCompare(nameB)
+    })
+  }, [users, selectedClientCode, clientConfig, customers, clientsList])
   const getOwnerDisplayName = useCallback((stageCfg: StageEmailConfig | undefined): string => {
     if (!stageCfg) return ''
     if (stageCfg.stage_owner_first_name && stageCfg.stage_owner_first_name.trim()) {
@@ -1254,34 +1331,159 @@ export function StageTransitionNotifications() {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {/* Individual Stage Owner */}
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-semibold text-text flex items-center gap-1">
-                          <User size={12} className="text-muted" /> Individual Stage Owner (Lead)
-                        </label>
-                        <select
-                          value={currentStageConfig.stage_owner_username || ''}
-                          onChange={e => {
-                            const val = e.target.value
-                            const found = users.find(u => u.user_name === val || (u as any).username === val)
-                            const displayFn = found ? (found.first_name?.trim() || found.last_name?.trim() || null) : null
-                            updateCurrentStageFields({
-                              stage_owner_username: val || null,
-                              stage_owner_first_name: displayFn,
-                              stage_owner_email: found ? found.email : null
-                            })
+                      <div className="space-y-1 relative" ref={ownerDropdownRef}>
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-text flex items-center gap-1">
+                            <User size={12} className="text-muted" /> Individual Stage Owner (Lead)
+                          </label>
+                          {selectedClientCode !== 'default' && (
+                            <span className="text-[10px] text-muted font-normal">
+                              Filtered by customer access ({eligibleUsers.length})
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Searchable Custom Trigger Button */}
+                        <div
+                          onClick={() => {
+                            setIsOwnerDropdownOpen(prev => !prev)
+                            setOwnerSearchQuery('')
                           }}
-                          className="w-full px-2.5 py-1.5 text-xs bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          className={`w-full px-2.5 py-1.5 text-xs bg-surface border rounded-lg text-text flex items-center justify-between cursor-pointer transition-colors shadow-sm hover:border-primary/50 ${
+                            isOwnerDropdownOpen ? 'border-primary ring-1 ring-primary/40' : 'border-border'
+                          }`}
                         >
-                          <option value="">-- Select user lead (Optional) --</option>
-                          {users.map(u => {
-                            const displayName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim() || u.user_name
-                            return (
-                              <option key={u.user_name} value={u.user_name}>
-                                {displayName} ({u.user_name})
-                              </option>
-                            )
-                          })}
-                        </select>
+                          <span className={`truncate ${!currentStageConfig.stage_owner_username ? 'text-muted' : 'text-text font-medium'}`}>
+                            {(() => {
+                              const selectedUname = currentStageConfig.stage_owner_username
+                              if (!selectedUname) return '-- Select user lead (Optional) --'
+                              const found = users.find(u => u.user_name === selectedUname || (u as any).username === selectedUname)
+                              if (!found) return selectedUname
+                              const displayName = [found.first_name, found.last_name].filter(Boolean).join(' ').trim() || found.user_name
+                              return `${displayName} (${found.user_name})`
+                            })()}
+                          </span>
+                          <div className="flex items-center gap-1 ml-1 text-muted shrink-0">
+                            {currentStageConfig.stage_owner_username && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  updateCurrentStageFields({
+                                    stage_owner_username: null,
+                                    stage_owner_first_name: null,
+                                    stage_owner_email: null,
+                                  })
+                                }}
+                                className="p-0.5 hover:text-rose-500 rounded hover:bg-muted/20 transition-colors"
+                                title="Clear selected owner"
+                              >
+                                <X size={12} />
+                              </button>
+                            )}
+                            <ChevronDown size={13} className={`transition-transform duration-200 ${isOwnerDropdownOpen ? 'rotate-180' : ''}`} />
+                          </div>
+                        </div>
+
+                        {/* Searchable Options Popover */}
+                        {isOwnerDropdownOpen && (
+                          <div className="absolute top-[calc(100%+4px)] left-0 w-full min-w-[260px] bg-card border border-border shadow-xl rounded-xl py-1 z-[120] max-h-72 flex flex-col backdrop-blur-3xl animate-in fade-in slide-in-from-top-1 duration-150">
+                            {/* Search input */}
+                            <div className="p-1.5 border-b border-border/50 shrink-0">
+                              <div className="relative">
+                                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  placeholder="Search by name, username or email..."
+                                  value={ownerSearchQuery}
+                                  onChange={e => setOwnerSearchQuery(e.target.value)}
+                                  onClick={e => e.stopPropagation()}
+                                  className="w-full bg-surface border border-border/70 text-xs rounded-md pl-7 pr-2 py-1.5 text-text placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+                                />
+                              </div>
+                            </div>
+
+                            {/* User Options list */}
+                            <div className="p-1 overflow-y-auto max-h-52 space-y-0.5">
+                              {/* None / Clear option */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  updateCurrentStageFields({
+                                    stage_owner_username: null,
+                                    stage_owner_first_name: null,
+                                    stage_owner_email: null,
+                                  })
+                                  setIsOwnerDropdownOpen(false)
+                                }}
+                                className={`w-full text-left px-2.5 py-1.5 text-xs rounded-md flex items-center justify-between transition-colors ${
+                                  !currentStageConfig.stage_owner_username ? 'bg-primary/10 text-primary font-medium' : 'text-muted hover:bg-surface'
+                                }`}
+                              >
+                                <span>-- Select user lead (Optional) --</span>
+                                {!currentStageConfig.stage_owner_username && <Check size={12} />}
+                              </button>
+
+                              {(() => {
+                                const q = ownerSearchQuery.trim().toLowerCase()
+                                const filtered = eligibleUsers.filter(u => {
+                                  if (!q) return true
+                                  const name = [u.first_name, u.last_name].filter(Boolean).join(' ').toLowerCase()
+                                  const username = (u.user_name || '').toLowerCase()
+                                  const email = (u.email || '').toLowerCase()
+                                  const role = (u.role || '').toLowerCase()
+                                  return name.includes(q) || username.includes(q) || email.includes(q) || role.includes(q)
+                                })
+
+                                if (filtered.length === 0) {
+                                  return (
+                                    <div className="px-3 py-4 text-center text-xs text-muted">
+                                      {eligibleUsers.length === 0
+                                        ? 'No users have access configured for this customer.'
+                                        : 'No matching users found.'}
+                                    </div>
+                                  )
+                                }
+
+                                return filtered.map(u => {
+                                  const displayName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim() || u.user_name
+                                  const isSelected = currentStageConfig.stage_owner_username === u.user_name
+
+                                  return (
+                                    <button
+                                      key={u.user_name}
+                                      type="button"
+                                      onClick={() => {
+                                        const displayFn = (u.first_name?.trim() || u.last_name?.trim() || null)
+                                        updateCurrentStageFields({
+                                          stage_owner_username: u.user_name,
+                                          stage_owner_first_name: displayFn,
+                                          stage_owner_email: u.email || null,
+                                        })
+                                        setIsOwnerDropdownOpen(false)
+                                      }}
+                                      className={`w-full text-left px-2.5 py-1.5 text-xs rounded-md flex items-center justify-between transition-colors ${
+                                        isSelected ? 'bg-primary/10 text-primary font-medium' : 'text-text hover:bg-surface'
+                                      }`}
+                                    >
+                                      <div className="flex flex-col min-w-0 pr-2">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-medium truncate">{displayName}</span>
+                                          <span className="text-[10px] text-muted font-mono">({u.user_name})</span>
+                                        </div>
+                                        <span className="text-[10px] text-muted truncate">
+                                          {u.email || 'No email'}{u.role ? ` • ${u.role}` : ''}
+                                        </span>
+                                      </div>
+                                      {isSelected && <Check size={12} className="text-primary shrink-0" />}
+                                    </button>
+                                  )
+                                })
+                              })()}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Group Mail ID / Team DL */}
