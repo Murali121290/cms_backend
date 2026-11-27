@@ -694,34 +694,104 @@ export function StageTransitionNotifications() {
 
   // Live rendered preview
   const renderedPreview = useMemo(() => {
+    // 1. Determine the actual next stage in workflow
+    const allStageKeys = Object.keys(workingStages)
+    const currentIndex = selectedStage ? allStageKeys.indexOf(selectedStage) : -1
+    let nextStageName = 'Pre-editing'
+
+    if (currentIndex >= 0 && currentIndex < allStageKeys.length - 1) {
+      nextStageName = allStageKeys[currentIndex + 1]
+    } else if (allStageKeys.length > 0) {
+      // If last stage or not found, look for another stage or fallback
+      const other = allStageKeys.find(k => k !== selectedStage)
+      if (other) nextStageName = other
+    }
+
+    // 2. Fetch the actual configuration of that next stage
+    const nextStageCfg = workingStages[nextStageName]
+
+    // 3. Resolve next stage owner real email, lead name, and group email
+    let nextOwnerEmail = ''
+    let nextLeadName = ''
+    if (nextStageCfg?.stage_owner_username) {
+      const u = users.find(
+        usr => usr.user_name === nextStageCfg.stage_owner_username || (usr as any).username === nextStageCfg.stage_owner_username
+      )
+      if (u) {
+        nextOwnerEmail = u.email || ''
+        nextLeadName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim() || u.user_name
+      } else {
+        nextOwnerEmail = nextStageCfg.stage_owner_email || ''
+        nextLeadName = nextStageCfg.stage_owner_first_name || nextStageCfg.stage_owner_username || ''
+      }
+    } else if (nextStageCfg?.stage_owner_email) {
+      nextOwnerEmail = nextStageCfg.stage_owner_email
+      nextLeadName = nextStageCfg.stage_owner_first_name || nextStageCfg.stage_owner_email
+    }
+
+    const nextGroupEmail = (nextStageCfg?.stage_group_email || '').trim()
+    const nextOwnerMode = nextStageCfg?.stage_owner_mode || 'both'
+
+    const resolvedNextOwnerEmailsList: string[] = []
+    if (nextOwnerMode !== 'group_only' && nextOwnerEmail) {
+      resolvedNextOwnerEmailsList.push(nextOwnerEmail)
+    }
+    if (nextOwnerMode !== 'user_only' && nextGroupEmail) {
+      resolvedNextOwnerEmailsList.push(nextGroupEmail)
+    }
+
+    // If next stage doesn't have owners configured, fall back to current stage owner or descriptive label
+    const fallbackNextOwner = currentStageConfig.stage_owner_email || ''
+    const fallbackNextGroup = currentStageConfig.stage_group_email || ''
+
+    const finalNextOwnerEmails = resolvedNextOwnerEmailsList.length > 0
+      ? resolvedNextOwnerEmailsList.join(', ')
+      : (fallbackNextOwner && fallbackNextGroup
+          ? `${fallbackNextOwner}, ${fallbackNextGroup}`
+          : (fallbackNextOwner || fallbackNextGroup || `${nextStageName} Team (Not assigned)`))
+
+    const finalNextOwnerEmail = nextOwnerEmail || fallbackNextOwner || '(No lead user assigned)'
+    const finalNextGroupEmail = nextGroupEmail || fallbackNextGroup || '(No group email assigned)'
+    const finalNextOwnerName = nextLeadName || getOwnerDisplayName(nextStageCfg) || `${nextStageName} Lead`
+
+    // Current stage actual owner details
+    const currLeadEmail = currentStageConfig.stage_owner_email || ''
+    const currGroupEmail = currentStageConfig.stage_group_email || ''
+    const currOwnerMode = currentStageConfig.stage_owner_mode || 'both'
+    const currEmailsList: string[] = []
+    if (currOwnerMode !== 'group_only' && currLeadEmail) currEmailsList.push(currLeadEmail)
+    if (currOwnerMode !== 'user_only' && currGroupEmail) currEmailsList.push(currGroupEmail)
+
+    const finalCurrOwnerEmails = currEmailsList.length > 0
+      ? currEmailsList.join(', ')
+      : (currLeadEmail && currGroupEmail ? `${currLeadEmail}, ${currGroupEmail}` : currLeadEmail || currGroupEmail || '(Not configured)')
+
     const sampleMap: Record<string, string> = {
       '{chapter_name}': '03',
       '{chapter_title}': 'Foundations of Modern Publishing & Digital Workflows',
       '{current_stage}': selectedStage || 'Manuscript Analysis',
-      '{next_stage}': 'Pre-editing',
-      '{stage}': `${selectedStage || 'Manuscript Analysis'} → Pre-editing`,
-      '{stage_transition}': `${selectedStage || 'Manuscript Analysis'} → Pre-editing`,
+      '{next_stage}': nextStageName,
+      '{stage}': `${selectedStage || 'Manuscript Analysis'} → ${nextStageName}`,
+      '{stage_transition}': `${selectedStage || 'Manuscript Analysis'} → ${nextStageName}`,
       '{due_date}': '04-Nov-2026',
       '{shipment_notes}': '—',
       '{project_code}': clientConfig?.client_code === 'default' ? 'Gabbard_190377' : `PRJ-${clientConfig?.client_code}-01`,
       '{client_name}': clientConfig?.client_name || 'Wolters Kluwer Health',
       '{customer_name}': clientConfig?.client_name || 'Wolters Kluwer Health',
-      '{current stage}': selectedStage || 'Pre-editing',
+      '{current stage}': selectedStage || 'Manuscript Analysis',
       '{author_email}': 'lead_author@university.edu',
       '{client_email}': 'editorial_desk@publisher.org',
       '{languageediting_team_email}': 'languageediting_team@example.com',
       '{pre_editing_team_email}': 'pre_editing_team@example.com',
-      '{next_stage_team_email}': 'pre_editing_team@example.com',
-      '{next_stage_owner_emails}': 'sarah.jenkins@example.com, preediting-dept@example.com',
-      '{next_stage_owner_email}': 'sarah.jenkins@example.com',
-      '{next_stage_group_email}': 'preediting-dept@example.com',
-      '{next_stage_owner_name}': 'Sarah Jenkins',
-      '{stage_owner_emails}': currentStageConfig.stage_owner_email && currentStageConfig.stage_group_email
-        ? `${currentStageConfig.stage_owner_email}, ${currentStageConfig.stage_group_email}`
-        : currentStageConfig.stage_owner_email || currentStageConfig.stage_group_email || 'david.ross@example.com',
-      '{stage_owner_email}': currentStageConfig.stage_owner_email || 'david.ross@example.com',
-      '{stage_group_email}': currentStageConfig.stage_group_email || 'analysis-team@example.com',
-      '{stage_owner_name}': getOwnerDisplayName(currentStageConfig) || 'David Ross',
+      '{next_stage_team_email}': finalNextGroupEmail !== '(No group email assigned)' ? finalNextGroupEmail : 'team@example.com',
+      '{next_stage_owner_emails}': finalNextOwnerEmails,
+      '{next_stage_owner_email}': finalNextOwnerEmail,
+      '{next_stage_group_email}': finalNextGroupEmail,
+      '{next_stage_owner_name}': finalNextOwnerName,
+      '{stage_owner_emails}': finalCurrOwnerEmails,
+      '{stage_owner_email}': currLeadEmail || '(No lead user assigned)',
+      '{stage_group_email}': currGroupEmail || '(No group email assigned)',
+      '{stage_owner_name}': getOwnerDisplayName(currentStageConfig) || (currentStageConfig.stage_owner_username ? currentStageConfig.stage_owner_username : `${selectedStage || 'Current'} Lead`),
       '{project_manager_email}': 'john.pm@example.com',
       '{project_manager_name}': 'John Smith (PM)',
     }
@@ -756,7 +826,7 @@ export function StageTransitionNotifications() {
       to: renderedTo,
       cc: renderedCc,
     }
-  }, [currentStageConfig, selectedStage, clientConfig])
+  }, [currentStageConfig, selectedStage, clientConfig, workingStages, users, getOwnerDisplayName])
 
   // Test email dispatch
   const handleSendTestEmail = async () => {
