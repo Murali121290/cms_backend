@@ -21,13 +21,22 @@ def _parse_and_store_csv_entries(db, csv_content: str, source_csv_filename: str)
     """
     Parses CSV content and stores all rows/ISBNs into bod_csv_entries table.
     Preserves ISBNs whether or not their PDF has arrived yet.
+    Supports comma, tab, and semicolon delimited files.
     """
     try:
         lines = csv_content.strip().splitlines()
         if not lines:
             return
 
-        reader = csv.DictReader(lines)
+        # Determine delimiter automatically (supports comma, tab, semicolon)
+        first_line = lines[0]
+        delimiter = ','
+        if '\t' in first_line:
+            delimiter = '\t'
+        elif ';' in first_line and ',' not in first_line:
+            delimiter = ';'
+
+        reader = csv.DictReader(lines, delimiter=delimiter)
         if reader.fieldnames:
             isbn_col = None
             filename_col = None
@@ -103,24 +112,13 @@ def _parse_and_store_csv_entries(db, csv_content: str, source_csv_filename: str)
                 else:
                     if isbn_digits:
                         existing.isbn = isbn_digits
-                    if raw_fn and not existing.raw_filename:
+                    if raw_fn:
                         existing.raw_filename = raw_fn
-                    if pages_val and not existing.pages:
+                    if pages_val is not None:
                         existing.pages = pages_val
-                    if ptype_val and not existing.pdf_type:
+                    if ptype_val:
                         existing.pdf_type = ptype_val
-                    if lang_val and not existing.language:
-                        existing.language = lang_val
-                    existing.source_csv_filename = source_csv_filename
-                    existing.extra_data = dict(row)
-                    # Update metadata if newer info is available
-                    if raw_fn and not existing.raw_filename:
-                        existing.raw_filename = raw_fn
-                    if pages_val and not existing.pages:
-                        existing.pages = pages_val
-                    if ptype_val and not existing.pdf_type:
-                        existing.pdf_type = ptype_val
-                    if lang_val and not existing.language:
+                    if lang_val:
                         existing.language = lang_val
                     existing.source_csv_filename = source_csv_filename
                     existing.extra_data = dict(row)
@@ -225,6 +223,11 @@ def watch_ftp_for_new_pdfs():
                         try:
                             remote_src = f"/{target_dir.strip('/')}/{csv_name}"
                             remote_dest = f"/Production/{csv_name}"
+                            # If remote_dest exists, delete it first to prevent 553 file exists error
+                            try:
+                                ftp.ftp.delete(remote_dest)
+                            except Exception:
+                                pass
                             ftp.ftp.rename(remote_src, remote_dest)
                             logger.info(f"Moved CSV on FTP from {remote_src} to {remote_dest}")
                         except Exception as mv_err:

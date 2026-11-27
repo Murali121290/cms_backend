@@ -1268,8 +1268,8 @@ def update_job_analysis(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if job.current_stage_name != "Add job":
-        raise HTTPException(status_code=400, detail="Job analysis can only be updated in 'Add job' stage")
+    if job.current_stage_name != "Job Analysis":
+        raise HTTPException(status_code=400, detail="Job analysis can only be updated in 'Job Analysis' stage")
 
     changes = []
 

@@ -441,25 +441,25 @@ export function StageTransitionNotifications() {
   }
 
   // ── Sync All JSON files to PostgreSQL Database ─────────────────────────────
-  const handleSyncAllToDb = async () => {
-    setSyncingAll(true)
-    try {
-      const res = await transitionNotificationsApi.syncAllToDb()
-      toast.success(res.message || 'All JSON templates successfully saved to PostgreSQL database!')
-      const [updatedConfig, updatedCustList] = await Promise.all([
-        transitionNotificationsApi.getCustomerConfig(selectedClientCode),
-        transitionNotificationsApi.listCustomers(),
-      ])
-      setClientConfig(updatedConfig)
-      setWorkingStages(JSON.parse(JSON.stringify(updatedConfig.stages || {})))
-      setCustomers(updatedCustList)
-      setHasUnsavedChanges(false)
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Failed to sync configurations to database.')
-    } finally {
-      setSyncingAll(false)
-    }
-  }
+  // const handleSyncAllToDb = async () => {
+  //   setSyncingAll(true)
+  //   try {
+  //     const res = await transitionNotificationsApi.syncAllToDb()
+  //     toast.success(res.message || 'All JSON templates successfully saved to PostgreSQL database!')
+  //     const [updatedConfig, updatedCustList] = await Promise.all([
+  //       transitionNotificationsApi.getCustomerConfig(selectedClientCode),
+  //       transitionNotificationsApi.listCustomers(),
+  //     ])
+  //     setClientConfig(updatedConfig)
+  //     setWorkingStages(JSON.parse(JSON.stringify(updatedConfig.stages || {})))
+  //     setCustomers(updatedCustList)
+  //     setHasUnsavedChanges(false)
+  //   } catch (err: any) {
+  //     toast.error(err.response?.data?.detail || 'Failed to sync configurations to database.')
+  //   } finally {
+  //     setSyncingAll(false)
+  //   }
+  // }
 
   // Create custom override from default
   const handleCreateCustomOverride = async () => {
@@ -747,8 +747,8 @@ export function StageTransitionNotifications() {
     const finalNextOwnerEmails = resolvedNextOwnerEmailsList.length > 0
       ? resolvedNextOwnerEmailsList.join(', ')
       : (fallbackNextOwner && fallbackNextGroup
-          ? `${fallbackNextOwner}, ${fallbackNextGroup}`
-          : (fallbackNextOwner || fallbackNextGroup || `${nextStageName} Team (Not assigned)`))
+        ? `${fallbackNextOwner}, ${fallbackNextGroup}`
+        : (fallbackNextOwner || fallbackNextGroup || `${nextStageName} Team (Not assigned)`))
 
     const finalNextOwnerEmail = nextOwnerEmail || fallbackNextOwner || '(No lead user assigned)'
     const finalNextGroupEmail = nextGroupEmail || fallbackNextGroup || '(No group email assigned)'
@@ -911,7 +911,7 @@ export function StageTransitionNotifications() {
           >
             Add Stage
           </Button>
-
+          {/* 
           <Button
             variant="outline"
             size="sm"
@@ -923,7 +923,7 @@ export function StageTransitionNotifications() {
             title="Import and save all JSON templates from disk directly into PostgreSQL database"
           >
             Sync All JSON to DB
-          </Button>
+          </Button> */}
 
           <Button
             size="sm"
@@ -1351,8 +1351,8 @@ export function StageTransitionNotifications() {
               <button
                 onClick={() => setDrawerTab('editor')}
                 className={`py-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${drawerTab === 'editor'
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-muted hover:text-text'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted hover:text-text'
                   }`}
               >
                 <Sliders size={14} />
@@ -1361,8 +1361,8 @@ export function StageTransitionNotifications() {
               <button
                 onClick={() => setDrawerTab('preview')}
                 className={`py-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${drawerTab === 'preview'
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-muted hover:text-text'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted hover:text-text'
                   }`}
               >
                 <Eye size={14} />
@@ -1419,9 +1419,8 @@ export function StageTransitionNotifications() {
                             setIsOwnerDropdownOpen(prev => !prev)
                             setOwnerSearchQuery('')
                           }}
-                          className={`w-full px-2.5 py-1.5 text-xs bg-surface border rounded-lg text-text flex items-center justify-between cursor-pointer transition-colors shadow-sm hover:border-primary/50 ${
-                            isOwnerDropdownOpen ? 'border-primary ring-1 ring-primary/40' : 'border-border'
-                          }`}
+                          className={`w-full px-2.5 py-1.5 text-xs bg-surface border rounded-lg text-text flex items-center justify-between cursor-pointer transition-colors shadow-sm hover:border-primary/50 ${isOwnerDropdownOpen ? 'border-primary ring-1 ring-primary/40' : 'border-border'
+                            }`}
                         >
                           <span className={`truncate ${!currentStageConfig.stage_owner_username ? 'text-muted' : 'text-text font-medium'}`}>
                             {(() => {
@@ -1487,9 +1486,8 @@ export function StageTransitionNotifications() {
                                   })
                                   setIsOwnerDropdownOpen(false)
                                 }}
-                                className={`w-full text-left px-2.5 py-1.5 text-xs rounded-md flex items-center justify-between transition-colors ${
-                                  !currentStageConfig.stage_owner_username ? 'bg-primary/10 text-primary font-medium' : 'text-muted hover:bg-surface'
-                                }`}
+                                className={`w-full text-left px-2.5 py-1.5 text-xs rounded-md flex items-center justify-between transition-colors ${!currentStageConfig.stage_owner_username ? 'bg-primary/10 text-primary font-medium' : 'text-muted hover:bg-surface'
+                                  }`}
                               >
                                 <span>-- Select user lead (Optional) --</span>
                                 {!currentStageConfig.stage_owner_username && <Check size={12} />}
@@ -1533,9 +1531,8 @@ export function StageTransitionNotifications() {
                                         })
                                         setIsOwnerDropdownOpen(false)
                                       }}
-                                      className={`w-full text-left px-2.5 py-1.5 text-xs rounded-md flex items-center justify-between transition-colors ${
-                                        isSelected ? 'bg-primary/10 text-primary font-medium' : 'text-text hover:bg-surface'
-                                      }`}
+                                      className={`w-full text-left px-2.5 py-1.5 text-xs rounded-md flex items-center justify-between transition-colors ${isSelected ? 'bg-primary/10 text-primary font-medium' : 'text-text hover:bg-surface'
+                                        }`}
                                     >
                                       <div className="flex flex-col min-w-0 pr-2">
                                         <div className="flex items-center gap-1.5">
@@ -1973,8 +1970,8 @@ export function StageTransitionNotifications() {
                     {testResult && (
                       <div
                         className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${testResult.success
-                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                            : 'bg-rose-50 text-rose-800 border border-rose-200'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          : 'bg-rose-50 text-rose-800 border border-rose-200'
                           }`}
                       >
                         {testResult.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
