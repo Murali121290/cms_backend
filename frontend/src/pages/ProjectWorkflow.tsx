@@ -1514,11 +1514,28 @@ export function ProjectWorkflow() {
     setAddChapterError(null)
     try {
       if (activeTab === 'design') {
-        const designChapter = designChapters[0]
+        let designChapter = designChapters[0]
+        const targetWf = selectedTrackWf || activeWorkflowName
         if (!designChapter) {
-          setAddChapterError('Design track is not enabled for this project.')
-          return
+          // If the Design chapter was deleted, create it automatically with the selected/locked workflow
+          const created = await projectsApi.createChapter(id, {
+            number: 'Design',
+            title: 'Design'
+          })
+          if (targetWf) {
+            await chaptersApi.updateTrackWorkflow(id, 'design', targetWf).catch(() => {})
+          }
+          designChapter = {
+            id: created.chapter.id,
+            chapters: 'Design',
+            chapter_title: 'Design',
+            project: project?.code || project?.project_code || '',
+            workflow: targetWf || '',
+          } as Chapter
+        } else if (selectedTrackWf && selectedTrackWf !== activeWorkflowName) {
+          await chaptersApi.updateTrackWorkflow(id, 'design', selectedTrackWf).catch(() => {})
         }
+
         await uploadChapterFiles({
           projectId: id,
           chapterId: designChapter.id,
@@ -3082,7 +3099,12 @@ export function ProjectWorkflow() {
             </button>
             <button
               onClick={handleCreateChapter}
-              disabled={addingChapter || !newChapterFile || (activeTab === 'design' && !designChapters[0])}
+              disabled={
+                addingChapter ||
+                !newChapterFile ||
+                (activeTab === 'design' && !designChapters[0] && !activeWorkflowName && !selectedTrackWf) ||
+                ((activeTab === 'manuscript' || activeTab === 'art') && !activeWorkflowName && !selectedTrackWf)
+              }
               className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
             >
               {addingChapter && <Spinner size="sm" />}
@@ -3106,44 +3128,37 @@ export function ProjectWorkflow() {
                   <option key={cat.key} value={cat.key}>{cat.label}</option>
                 ))}
               </select>
-              {!designChapters[0] && (
-                <p className="text-[11px] text-danger mt-1">
-                  Design track is not enabled for this project.
-                </p>
-              )}
             </div>
           )}
 
-          {(activeTab === 'manuscript' || activeTab === 'art') && (
-            <div>
-              <label className="block text-xs font-semibold text-text mb-1">
-                {activeTab === 'manuscript' ? 'Manuscript Track Workflow' : 'Art Track Workflow'}
-              </label>
-              {activeWorkflowName ? (
-                <div className="w-full text-sm bg-surface border border-border rounded-lg px-3 py-2 text-text font-semibold flex items-center justify-between">
-                  <span>{activeWorkflowName}</span>
-                  <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-semibold uppercase tracking-wider">
-                    🔒 Locked
-                  </span>
-                </div>
-              ) : (
-                <select
-                  value={selectedTrackWf}
-                  onChange={e => setSelectedTrackWf(e.target.value)}
-                  disabled={addingChapter}
-                  className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 font-medium"
-                >
-                  <option value="">-- Select Workflow --</option>
-                  {(allWorkflowNames || []).map(name => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-              )}
-              <p className="text-[11px] text-muted mt-1">
-                This workflow is locked and assigned to all newly uploaded {activeTab === 'manuscript' ? 'manuscript' : 'art'} chapters.
-              </p>
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-semibold text-text mb-1">
+              {activeTab === 'manuscript' ? 'Manuscript Track Workflow' : activeTab === 'art' ? 'Art Track Workflow' : 'Design Track Workflow'}
+            </label>
+            {activeWorkflowName ? (
+              <div className="w-full text-sm bg-surface border border-border rounded-lg px-3 py-2 text-text font-semibold flex items-center justify-between">
+                <span>{activeWorkflowName}</span>
+                <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-semibold uppercase tracking-wider">
+                  🔒 Locked
+                </span>
+              </div>
+            ) : (
+              <select
+                value={selectedTrackWf}
+                onChange={e => setSelectedTrackWf(e.target.value)}
+                disabled={addingChapter}
+                className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 font-medium"
+              >
+                <option value="">-- Select Workflow --</option>
+                {(allWorkflowNames || []).map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            )}
+            <p className="text-[11px] text-muted mt-1">
+              This workflow is locked and assigned to all newly uploaded {activeTab === 'manuscript' ? 'manuscript' : activeTab === 'art' ? 'art' : 'design'} chapters.
+            </p>
+          </div>
 
           <div>
             <label className="block text-xs font-medium text-muted mb-1">
