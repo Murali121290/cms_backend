@@ -841,6 +841,15 @@ def api_v2_session_active_locks(
     return response
 
 
+@router.get("/calendar/holidays")
+def api_v2_calendar_holidays():
+    """
+    Returns published holidays and holiday_overrides from PeopleHub DB.
+    """
+    from app.db.peoplehub_db import get_peoplehub_holidays_and_overrides
+    return get_peoplehub_holidays_and_overrides()
+
+
 @router.get("/dashboard", response_model=schemas_v2.DashboardResponse)
 def api_v2_dashboard(
     include_projects: bool = True,

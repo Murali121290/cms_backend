@@ -114,25 +114,166 @@ function toLocalISOString(date: Date): string {
   return `${localISOTime}${sign}${hours}:${minutes}`;
 }
 
+// ── Calendar & Working Days ───────────────────────────────────────────────────
+
+export interface HolidayItem {
+  date: string
+  name: string
+  holiday_type?: string
+}
+
+export interface OverrideItem {
+  date: string
+  override_type: 'Holiday' | 'Working Day' | string
+  name?: string
+  holiday_type?: string
+}
+
+export interface CalendarData {
+  holidays: HolidayItem[]
+  overrides: OverrideItem[]
+}
+
+/**
+ * Returns true if a date is a holiday/weekend based on company policy:
+ * 1. All Sundays are OFF.
+ * 2. 2nd and 4th Saturdays of the month are OFF (1st, 3rd, and 5th Saturdays are working).
+ * 3. Dates in PeopleHub `holidays` (published) are OFF.
+ * 4. `holiday_overrides`:
+ *    - If override_type is "Working Day" -> force working (NOT off)
+ *    - If override_type is "Holiday" -> force holiday (OFF)
+ */
+export function isDayOff(date: Date, calendarData?: CalendarData): boolean {
+  const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+  // Check holiday_overrides first (highest priority)
+  // If override_type says "Holiday" -> strictly do NOT plan (it is OFF)
+  // If override_type says "Working Day" / "Working" -> plan it (it is a working day, NOT off)
+  if (calendarData?.overrides?.length) {
+    const override = calendarData.overrides.find(o => {
+      const oDate = String(o.date).split('T')[0].trim()
+      return oDate === dateStr
+    })
+    if (override && override.override_type) {
+      const typeStr = override.override_type.trim().toLowerCase()
+      if (typeStr === 'working day' || typeStr === 'working') {
+        return false // Explicitly a Working Day -> DO NOT exclude, plan it!
+      }
+      if (typeStr === 'holiday') {
+        return true // Explicitly a Holiday -> Exclude, do NOT plan it!
+      }
+    }
+  }
+
+  // Check published holidays (do NOT plan)
+  if (calendarData?.holidays?.length) {
+    const isHoliday = calendarData.holidays.some(h => {
+      const hDate = String(h.date).split('T')[0].trim()
+      return hDate === dateStr
+    })
+    if (isHoliday) return true
+  }
+
+  const dayOfWeek = date.getDay() // 0 = Sunday, 6 = Saturday
+
+  // All Sundays are off
+  if (dayOfWeek === 0) return true
+
+  // 2nd and 4th Saturdays are off
+  if (dayOfWeek === 6) {
+    const dayOfMonth = date.getDate()
+    const saturdayIndex = Math.ceil(dayOfMonth / 7)
+    if (saturdayIndex === 2 || saturdayIndex === 4) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * If the given date is a non-working day, advance it to the next working day.
+ */
+export function ensureWorkingDay(date: Date, calendarData?: CalendarData): Date {
+  const d = new Date(date)
+  while (isDayOff(d, calendarData)) {
+    d.setDate(d.getDate() + 1)
+  }
+  return d
+}
+
+/**
+ * Add N working business days to a date, skipping all non-working days.
+ */
+export function addWorkingDays(startDate: Date, days: number, calendarData?: CalendarData): Date {
+  const current = new Date(startDate)
+  // Ensure we start on a valid working day
+  if (isDayOff(current, calendarData)) {
+    const adjusted = ensureWorkingDay(current, calendarData)
+    current.setTime(adjusted.getTime())
+  }
+  let added = 0
+  while (added < days) {
+    current.setDate(current.getDate() + 1)
+    if (!isDayOff(current, calendarData)) {
+      added++
+    }
+  }
+  return current
+}
+
+/**
+ * Get next working day after a date (for stage transitions).
+ */
+export function getNextWorkingDay(date: Date, calendarData?: CalendarData): Date {
+  const next = new Date(date)
+  next.setDate(next.getDate() + 1)
+  return ensureWorkingDay(next, calendarData)
+}
+
+/**
+ * Count working days between start (exclusive) and end (inclusive).
+ */
+export function countWorkingDays(start: Date, end: Date, calendarData?: CalendarData): number {
+  const cur = new Date(start)
+  cur.setHours(0, 0, 0, 0)
+  const target = new Date(end)
+  target.setHours(0, 0, 0, 0)
+  if (target <= cur) return 0
+  let count = 0
+  while (cur < target) {
+    cur.setDate(cur.getDate() + 1)
+    if (!isDayOff(cur, calendarData)) {
+      count++
+    }
+  }
+  return count
+}
+
 function buildBaseSchedule(
   orderedStages: WorkflowStage[],
   masterMap: Map<string, Stage>,
   composition: string | null,
   projectCreatedAt: string,
+  calendarData?: CalendarData,
 ): StageSchedule[] {
   const result: StageSchedule[] = []
-  const cursor = validDate(projectCreatedAt)
+  const initialDate = validDate(projectCreatedAt)
+  let cursor = ensureWorkingDay(initialDate, calendarData)
   for (const ws of orderedStages) {
     const master = masterMap.get(ws.stage_name)
     const slaDays = master ? pickSla(master, composition) : null
     const pageNorm = master ? pickPages(master, composition) : null
     const start = new Date(cursor)
-    const due = new Date(start)
-    if (slaDays) due.setDate(due.getDate() + slaDays)
+    let due: Date
+    if (slaDays && slaDays > 0) {
+      due = addWorkingDays(start, slaDays, calendarData)
+    } else {
+      due = new Date(start)
+    }
     result.push({ stageName: ws.stage_name, start, due, slaDays, pageNorm })
-    // Next stage starts the day after this one is due, not on the same day.
-    cursor.setTime(due.getTime())
-    cursor.setDate(cursor.getDate() + 1)
+    // Next stage starts the next working day after this one is due
+    cursor = getNextWorkingDay(due, calendarData)
   }
   return result
 }
@@ -151,6 +292,7 @@ function buildTrackSchedules(
   isAdjusting?: boolean,
   plannedChapterNumbers?: Set<string>,
   cellStarts?: Record<number, Record<string, string>>,
+  calendarData?: CalendarData,
 ): Map<number, StageSchedule[]> {
   const result = new Map<number, StageSchedule[]>()
   if (trackChapters.length === 0 || orderedStages.length === 0) return result
@@ -209,22 +351,20 @@ function buildTrackSchedules(
         // Determine start date:
         // If user explicitly overrode start date for this cell, use it.
         // Otherwise:
-        // For Stage 0, starts on the project anchor date.
-        // For Stage > 0, starts the day after this chapter's preceding stage is due.
+        // For Stage 0, starts on the project anchor date (adjusted to working day).
+        // For Stage > 0, starts the next working day after this chapter's preceding stage is due.
         if (chStartOverrides[ws.stage_name]) {
           start = new Date(chStartOverrides[ws.stage_name] + 'T00:00:00')
         } else if (stageIdx === 0) {
-          start = validDate(anchor)
+          start = ensureWorkingDay(validDate(anchor), calendarData)
         } else {
           const prevDue = chapterPrevStageDue.get(ch.id) ?? validDate(anchor)
-          start = new Date(prevDue)
-          start.setDate(start.getDate() + 1)
+          start = getNextWorkingDay(prevDue, calendarData)
         }
 
         if (ws.stage_name in chOverrides) {
           // Manual override explicitly set by user for this cell
-          due = new Date(start)
-          if (slaDays != null) due.setDate(due.getDate() + slaDays)
+          due = slaDays != null && slaDays > 0 ? addWorkingDays(start, slaDays, calendarData) : new Date(start)
           stageTracker.set(ws.stage_name, new Date(due))
         } else if (pageNorm != null && pageNorm > 0 && chPages != null && chPages > 0) {
           // Continuous cumulative page pooling:
@@ -237,9 +377,8 @@ function buildTrackSchedules(
           
           // Stage 0 calculates directly from the anchor start
           // Subsequent stages also ensure due date is >= start date + chapter's minimal days
-          const baseAnchor = stageIdx === 0 ? validDate(anchor) : start
-          const calculatedDue = new Date(baseAnchor)
-          calculatedDue.setDate(calculatedDue.getDate() + totalDaysNeeded)
+          const baseAnchor = stageIdx === 0 ? ensureWorkingDay(validDate(anchor), calendarData) : start
+          const calculatedDue = addWorkingDays(baseAnchor, totalDaysNeeded, calendarData)
 
           const prevDue = stageTracker.get(ws.stage_name)
           if (prevDue && calculatedDue < prevDue) {
@@ -252,9 +391,8 @@ function buildTrackSchedules(
           stageTracker.set(ws.stage_name, new Date(due))
         } else {
           // Standard SLA calculation (no pageNorm or no page count, e.g. Job Initiation with default 1d SLA)
-          // Every chapter simply starts at 'start' and finishes after slaDays (start + slaDays)
-          due = new Date(start)
-          if (slaDays != null) due.setDate(due.getDate() + slaDays)
+          // Every chapter simply starts at 'start' and finishes after slaDays (excluding non-working days)
+          due = slaDays != null && slaDays > 0 ? addWorkingDays(start, slaDays, calendarData) : new Date(start)
           stageTracker.set(ws.stage_name, new Date(due))
         }
       }
@@ -390,6 +528,7 @@ export function ProjectPlanningPage() {
   const [isAdjusting, setIsAdjusting] = useState(false)
   const [previewComposition, setPreviewComposition] = useState<string | null>(null)
   const [planningStartDate, setPlanningStartDate] = useState<string | null>(null)
+  const [calendarData, setCalendarData] = useState<CalendarData>({ holidays: [], overrides: [] })
   const [cellSlas, setCellSlas] = useState<Record<number, Record<string, number | null>>>({})
   const [cellStarts, setCellStarts] = useState<Record<number, Record<string, string>>>({})
   const [delayMap, setDelayMap] = useState<Map<string, { days: number; isOverdue: boolean }>>(new Map())
@@ -420,7 +559,7 @@ export function ProjectPlanningPage() {
       // Ensure WMS chapter_details are in sync with CMS chapters
       await import('@/api/client').then(m => m.default.post(`/projects/${id}/sync-chapters`)).catch(() => undefined)
 
-      const [chsRaw, masters, stageDetails] = await Promise.all([
+      const [chsRaw, masters, stageDetails, calData] = await Promise.all([
         chaptersApi.getByProject(projectCode)
           .then(list => list.filter(c => c.chapters !== 'CE support'))
           .catch(() => [] as Chapter[]),
@@ -428,7 +567,9 @@ export function ProjectPlanningPage() {
         projectCode
           ? stageDetailsApi.listByProject(projectCode).catch(() => [])
           : Promise.resolve([]),
+        import('@/api/client').then(m => m.default.get<CalendarData>('/calendar/holidays')).then(r => r.data).catch(() => ({ holidays: [], overrides: [] })),
       ])
+      if (calData) setCalendarData(calData)
 
       // Only redirect to mapping if project is still in Planning status AND has no chapters.
       // If the project is already Active or Completed and chapters were deleted, stay on the planning page.
@@ -627,8 +768,8 @@ export function ProjectPlanningPage() {
 
   const baseSchedule = useMemo((): StageSchedule[] => {
     if (!project || currentOrderedStages.length === 0) return []
-    return buildBaseSchedule(currentOrderedStages, masterMap, previewComposition, planningStartDate || project.created_at || '')
-  }, [project, currentOrderedStages, masterMap, previewComposition, planningStartDate])
+    return buildBaseSchedule(currentOrderedStages, masterMap, previewComposition, planningStartDate || project.created_at || '', calendarData)
+  }, [project, currentOrderedStages, masterMap, previewComposition, planningStartDate, calendarData])
 
   const baseSlaMap = useMemo(() => {
     const m = new Map<string, number | null>()
@@ -671,7 +812,7 @@ export function ProjectPlanningPage() {
     const rawMsStages = wfStagesMap[manuscriptChapters[0]?.workflow || project.workflow_name || ''] ?? []
     const msSkipped = new Set(localSkippedStages['manuscript'] || [])
     const msStages = rawMsStages.filter(s => !msSkipped.has(s.stage_name))
-    const msBase = buildBaseSchedule(msStages, masterMap, previewComposition, anchor)
+    const msBase = buildBaseSchedule(msStages, masterMap, previewComposition, anchor, calendarData)
     const msBaseSla = new Map<string, number | null>()
     const msPageNorm = new Map<string, number | null>()
     msBase.forEach(s => {
@@ -692,6 +833,7 @@ export function ProjectPlanningPage() {
       isAdjusting,
       plannedChapterNumbers,
       cellStarts,
+      calendarData,
     )
     msScheds.forEach((v, k) => resultMap.set(k, v))
 
@@ -700,7 +842,7 @@ export function ProjectPlanningPage() {
       const rawArtStages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
       const artSkipped = new Set(localSkippedStages['art'] || [])
       const artStages = rawArtStages.filter(s => !artSkipped.has(s.stage_name))
-      const artBase = buildBaseSchedule(artStages, masterMap, previewComposition, anchor)
+      const artBase = buildBaseSchedule(artStages, masterMap, previewComposition, anchor, calendarData)
       const artBaseSla = new Map<string, number | null>()
       const artPageNorm = new Map<string, number | null>()
       artBase.forEach(s => {
@@ -721,6 +863,7 @@ export function ProjectPlanningPage() {
         isAdjusting,
         plannedChapterNumbers,
         cellStarts,
+        calendarData,
       )
       artScheds.forEach((v, k) => resultMap.set(k, v))
     }
@@ -730,7 +873,7 @@ export function ProjectPlanningPage() {
       const rawDesignStages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
       const designSkipped = new Set(localSkippedStages['design'] || [])
       const designStages = rawDesignStages.filter(s => !designSkipped.has(s.stage_name))
-      const designBase = buildBaseSchedule(designStages, masterMap, previewComposition, anchor)
+      const designBase = buildBaseSchedule(designStages, masterMap, previewComposition, anchor, calendarData)
       const designBaseSla = new Map<string, number | null>()
       const designPageNorm = new Map<string, number | null>()
       designBase.forEach(s => {
@@ -751,12 +894,13 @@ export function ProjectPlanningPage() {
         isAdjusting,
         plannedChapterNumbers,
         cellStarts,
+        calendarData,
       )
       designScheds.forEach((v, k) => resultMap.set(k, v))
     }
 
     return resultMap
-  }, [project, chapters, manuscriptChapters, artChapters, designChapters, wfStagesMap, masterMap, previewComposition, planningStartDate, cellSlas, cellStarts, dbDates, isStageCompleted, alreadyApproved, isAdjusting, plannedChapterNumbers])
+  }, [project, chapters, manuscriptChapters, artChapters, designChapters, wfStagesMap, masterMap, previewComposition, planningStartDate, cellSlas, cellStarts, dbDates, isStageCompleted, alreadyApproved, isAdjusting, plannedChapterNumbers, calendarData])
 
   const chapterSchedules = allTrackSchedules
 
@@ -801,8 +945,7 @@ export function ProjectPlanningPage() {
     const newDue = new Date(newDateStr + 'T00:00:00')
     const startZero = new Date(startDate)
     startZero.setHours(0, 0, 0, 0)
-    const diffTime = newDue.getTime() - startZero.getTime()
-    const diffDays = Math.max(0, Math.round(diffTime / (1000 * 60 * 60 * 24)))
+    const diffDays = countWorkingDays(startZero, newDue, calendarData)
 
     if (projectDueDateStr && newDateStr > projectDueDateStr) {
       toast.error(`Date cannot be above the project due date (${fmt(new Date(projectDueDateStr + 'T00:00:00'))})`)

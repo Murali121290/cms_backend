@@ -23,10 +23,12 @@ def get_peoplehub_engine():
                 candidates.append(db_url.replace("vBr", "%24%24vBr").replace("172.17.0.1", "10.1.1.18").replace("peoplehub_postgres:5432", "10.1.1.18:5435"))
 
         candidates.extend([
+            "postgresql://postgres:%24vBr%402150@host.docker.internal:5435/peoplehub_db",
             "postgresql://postgres:%24vBr%402150@10.1.1.18:5435/peoplehub_db",
             "postgresql://postgres:%24%24vBr%402150@10.1.1.18:5435/peoplehub_db",
             "postgresql://postgres:vBr%402150@10.1.1.18:5435/peoplehub_db",
             "postgresql://postgres:%24vBr%402150@peoplehub_postgres:5432/peoplehub_db",
+            "postgresql://postgres:%24vBr%402150@172.18.0.4:5432/peoplehub_db",
         ])
 
         last_error = None
@@ -186,5 +188,58 @@ def get_all_peoplehub_users() -> list[dict]:
     except Exception as exc:
         logger.warning(f"Error querying all PeopleHub users: {exc}")
         return []
+    finally:
+        session.close()
+
+def get_peoplehub_holidays_and_overrides() -> dict:
+    """
+    Fetch published holidays and holiday_overrides from PeopleHub DB.
+    Strictly READ-ONLY query.
+    Returns:
+        {
+            "holidays": [{"date": "2026-01-15", "name": "Pongal", "type": "Festival Holiday"}],
+            "overrides": [{"date": "2026-11-07", "override_type": "Holiday", "name": "Diwali Holiday"}]
+        }
+    """
+    holidays_query = text("""
+        SELECT date, name, holiday_type
+        FROM holidays
+        WHERE is_published = true
+        ORDER BY date ASC
+    """)
+    overrides_query = text("""
+        SELECT date, override_type, name, holiday_type
+        FROM holiday_overrides
+        ORDER BY date ASC
+    """)
+    session = get_peoplehub_session()
+    try:
+        h_rows = session.execute(holidays_query).fetchall()
+        o_rows = session.execute(overrides_query).fetchall()
+
+        holidays = [
+            {
+                "date": str(r.date),
+                "name": r.name,
+                "holiday_type": r.holiday_type
+            }
+            for r in h_rows
+        ]
+        overrides = [
+            {
+                "date": str(r.date),
+                "override_type": r.override_type,
+                "name": r.name,
+                "holiday_type": r.holiday_type
+            }
+            for r in o_rows
+        ]
+        return {
+            "holidays": holidays,
+            "overrides": overrides
+        }
+    except Exception as exc:
+        logger.warning(f"Error querying PeopleHub holidays/overrides: {exc}")
+        return {"holidays": [], "overrides": []}
     finally:
         session.close()
