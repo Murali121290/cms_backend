@@ -150,6 +150,7 @@ function buildTrackSchedules(
   alreadyApproved?: boolean,
   isAdjusting?: boolean,
   plannedChapterNumbers?: Set<string>,
+  cellStarts?: Record<number, Record<string, string>>,
 ): Map<number, StageSchedule[]> {
   const result = new Map<number, StageSchedule[]>()
   if (trackChapters.length === 0 || orderedStages.length === 0) return result
@@ -184,6 +185,7 @@ function buildTrackSchedules(
       const dbKey = `${ch.chapters}||${ws.stage_name}`
 
       const chOverrides = cellSlas[ch.id] ?? {}
+      const chStartOverrides = cellStarts?.[ch.id] ?? {}
       const chPages = ch.manuscript_pages != null
         ? ch.manuscript_pages
         : (ch.word_count ? Math.ceil(ch.word_count / 250) : null)
@@ -205,9 +207,13 @@ function buildTrackSchedules(
         due = new Date(dbDates[dbKey].due)
       } else {
         // Determine start date:
+        // If user explicitly overrode start date for this cell, use it.
+        // Otherwise:
         // For Stage 0, starts on the project anchor date.
         // For Stage > 0, starts the day after this chapter's preceding stage is due.
-        if (stageIdx === 0) {
+        if (chStartOverrides[ws.stage_name]) {
+          start = new Date(chStartOverrides[ws.stage_name] + 'T00:00:00')
+        } else if (stageIdx === 0) {
           start = validDate(anchor)
         } else {
           const prevDue = chapterPrevStageDue.get(ch.id) ?? validDate(anchor)
@@ -383,7 +389,9 @@ export function ProjectPlanningPage() {
   const [approvingNew, setApprovingNew] = useState(false)
   const [isAdjusting, setIsAdjusting] = useState(false)
   const [previewComposition, setPreviewComposition] = useState<string | null>(null)
+  const [planningStartDate, setPlanningStartDate] = useState<string | null>(null)
   const [cellSlas, setCellSlas] = useState<Record<number, Record<string, number | null>>>({})
+  const [cellStarts, setCellStarts] = useState<Record<number, Record<string, string>>>({})
   const [delayMap, setDelayMap] = useState<Map<string, { days: number; isOverdue: boolean }>>(new Map())
   const [actualFinalDue, setActualFinalDue] = useState<Date | null>(null)
   const [dbDates, setDbDates] = useState<Record<string, { start: Date; due: Date }>>({})
@@ -619,8 +627,8 @@ export function ProjectPlanningPage() {
 
   const baseSchedule = useMemo((): StageSchedule[] => {
     if (!project || currentOrderedStages.length === 0) return []
-    return buildBaseSchedule(currentOrderedStages, masterMap, previewComposition, project.created_at || '')
-  }, [project, currentOrderedStages, masterMap, previewComposition])
+    return buildBaseSchedule(currentOrderedStages, masterMap, previewComposition, planningStartDate || project.created_at || '')
+  }, [project, currentOrderedStages, masterMap, previewComposition, planningStartDate])
 
   const baseSlaMap = useMemo(() => {
     const m = new Map<string, number | null>()
@@ -657,7 +665,7 @@ export function ProjectPlanningPage() {
   const allTrackSchedules = useMemo(() => {
     if (!project || chapters.length === 0) return new Map<number, StageSchedule[]>()
     const resultMap = new Map<number, StageSchedule[]>()
-    const anchor = project.created_at || new Date().toISOString()
+    const anchor = planningStartDate || project.created_at || new Date().toISOString()
 
     // Manuscript track
     const rawMsStages = wfStagesMap[manuscriptChapters[0]?.workflow || project.workflow_name || ''] ?? []
@@ -677,12 +685,13 @@ export function ProjectPlanningPage() {
       cellSlas,
       anchor,
       msPageNorm,
-      project.created_at,
+      planningStartDate || project.created_at,
       dbDates,
       isStageCompleted,
       alreadyApproved,
       isAdjusting,
       plannedChapterNumbers,
+      cellStarts,
     )
     msScheds.forEach((v, k) => resultMap.set(k, v))
 
@@ -705,12 +714,13 @@ export function ProjectPlanningPage() {
         cellSlas,
         anchor,
         artPageNorm,
-        project.created_at,
+        planningStartDate || project.created_at,
         dbDates,
         isStageCompleted,
         alreadyApproved,
         isAdjusting,
         plannedChapterNumbers,
+        cellStarts,
       )
       artScheds.forEach((v, k) => resultMap.set(k, v))
     }
@@ -734,18 +744,19 @@ export function ProjectPlanningPage() {
         cellSlas,
         anchor,
         designPageNorm,
-        project.created_at,
+        planningStartDate || project.created_at,
         dbDates,
         isStageCompleted,
         alreadyApproved,
         isAdjusting,
         plannedChapterNumbers,
+        cellStarts,
       )
       designScheds.forEach((v, k) => resultMap.set(k, v))
     }
 
     return resultMap
-  }, [project, chapters, manuscriptChapters, artChapters, designChapters, wfStagesMap, masterMap, previewComposition, cellSlas, dbDates, isStageCompleted, alreadyApproved, isAdjusting, plannedChapterNumbers])
+  }, [project, chapters, manuscriptChapters, artChapters, designChapters, wfStagesMap, masterMap, previewComposition, planningStartDate, cellSlas, cellStarts, dbDates, isStageCompleted, alreadyApproved, isAdjusting, plannedChapterNumbers])
 
   const chapterSchedules = allTrackSchedules
 
@@ -762,6 +773,27 @@ export function ProjectPlanningPage() {
         setCellSlas(prev => ({ ...prev, [chId]: { ...(prev[chId] ?? {}), [stageName]: val } }))
       }
     }
+  }
+
+  function handleStartDateChange(chId: number, stageName: string, newDateStr: string, currentSla: number | null) {
+    if (!newDateStr) {
+      setCellStarts(prev => {
+        const next = { ...prev, [chId]: { ...(prev[chId] ?? {}) } }
+        delete next[chId][stageName]
+        return next
+      })
+      return
+    }
+
+    if (projectDueDateStr && newDateStr > projectDueDateStr) {
+      toast.error(`Start date cannot be after the project due date (${fmt(new Date(projectDueDateStr + 'T00:00:00'))})`)
+      return
+    }
+
+    setCellStarts(prev => ({
+      ...prev,
+      [chId]: { ...(prev[chId] ?? {}), [stageName]: newDateStr }
+    }))
   }
 
   function handleDueDateChange(chId: number, stageName: string, startDate: Date, newDateStr: string) {
@@ -1062,7 +1094,8 @@ export function ProjectPlanningPage() {
           const isCellEditable = editable && !isCompleted
           const stageHist = stageHistoryMap.get(dbKey)
 
-          const displayStart = dbDates[dbKey] ? dbDates[dbKey].start : s.start
+          const displayStart = dbDates[dbKey] && (!editable || isCompleted) ? dbDates[dbKey].start : s.start
+          const startStr = toLocalDateStr(displayStart)
           const displayDue = dbDates[dbKey] && (!editable || isCompleted) ? dbDates[dbKey].due : s.due
           const dueStr = toLocalDateStr(displayDue)
           const cellExceedsDue = projectDueDateStr ? dueStr > projectDueDateStr : false
@@ -1075,7 +1108,20 @@ export function ProjectPlanningPage() {
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-xs">
                   <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Start</span>
-                  <span className="text-text font-medium">{fmt(displayStart)}</span>
+                  {isCompleted || !isCellEditable ? (
+                    <span className="text-text font-medium">{fmt(displayStart)}</span>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="date"
+                        value={startStr}
+                        max={projectDueDateStr || undefined}
+                        onChange={e => handleStartDateChange(ch.id, s.stageName, e.target.value, s.slaDays)}
+                        className="w-[124px] text-[11px] border rounded px-1.5 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 bg-background border-border"
+                        title={projectDueDateStr ? `Cannot be above ${projectDueDateStr}` : undefined}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-xs">
                   <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Due</span>
@@ -1242,6 +1288,17 @@ export function ProjectPlanningPage() {
         </div>
 
         <div className="flex items-center gap-2.5 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <label className="text-xs text-muted font-medium whitespace-nowrap">Start Date:</label>
+            <input
+              type="date"
+              value={planningStartDate || (project.created_at ? toLocalDateStr(new Date(project.created_at)) : toLocalDateStr(new Date()))}
+              disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
+              onChange={e => setPlanningStartDate(e.target.value || null)}
+              className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            />
+          </div>
+
           <div className="flex items-center gap-2 flex-shrink-0">
             <label className="text-xs text-muted font-medium whitespace-nowrap">Composition:</label>
             <select
