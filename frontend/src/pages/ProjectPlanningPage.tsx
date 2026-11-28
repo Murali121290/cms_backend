@@ -250,6 +250,16 @@ export function countWorkingDays(start: Date, end: Date, calendarData?: Calendar
   return count
 }
 
+export function matchSampleChapter(chapterStr: string, sampleStr?: string | null): boolean {
+  if (!sampleStr || !chapterStr) return false
+  const cleanSample = String(sampleStr).trim().toLowerCase().replace(/chapter|ch|\.|\s+/g, '').replace(/^0+/, '')
+  const cleanCh = String(chapterStr).trim().toLowerCase().replace(/chapter|ch|\.|\s+/g, '').replace(/^0+/, '')
+  if (cleanSample && cleanCh && cleanSample === cleanCh) return true
+  const sLower = String(sampleStr).trim().toLowerCase()
+  const cLower = String(chapterStr).trim().toLowerCase()
+  return sLower === cLower || cLower.includes(sLower) || sLower.includes(cLower)
+}
+
 function buildBaseSchedule(
   orderedStages: WorkflowStage[],
   masterMap: Map<string, Stage>,
@@ -320,7 +330,7 @@ function buildTrackSchedules(
       const cumPagesTracker = isUnplanned ? unplannedCumulativePages : plannedCumulativePages
 
       const anchor = isUnplanned
-        ? new Date().toISOString()
+        ? (effectiveAnchor || new Date().toISOString())
         : (alreadyApproved && !isAdjusting ? (projectCreatedAt || effectiveAnchor) : effectiveAnchor)
 
       const isCompleted = checkCompleted ? checkCompleted(ch, ws.stage_name) : false
@@ -414,18 +424,40 @@ function buildTrackSchedules(
 
 // ── Planning Table Header ────────────────────────────────────────────────────────
 
-function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: StageSchedule[], activeTab?: 'manuscript' | 'art' | 'design' }) {
+function PlanningTableHeader({
+  stages,
+  activeTab = 'manuscript',
+  allSelected,
+  someSelected,
+  onToggleAll,
+}: {
+  stages: StageSchedule[]
+  activeTab?: 'manuscript' | 'art' | 'design'
+  allSelected?: boolean
+  someSelected?: boolean
+  onToggleAll?: () => void
+}) {
   if (activeTab === 'art') {
     return (
       <thead>
         <tr className="bg-background border-b-2 border-border">
-          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
+          <th className="px-3 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[44px] min-w-[44px] max-w-[44px] shadow-[inset_-1px_0_0_var(--color-border)]">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={el => { if (el) el.indeterminate = !!(!allSelected && someSelected) }}
+              onChange={onToggleAll}
+              className="rounded border-border text-primary focus:ring-primary/30 cursor-pointer h-3.5 w-3.5"
+              title="Select all chapters"
+            />
+          </th>
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[44px] z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
             Chapter
           </th>
-          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[188px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
             File Name
           </th>
-          <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)]">
+          <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[364px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)]">
             Art Count
           </th>
           {stages.map(s => (
@@ -450,10 +482,20 @@ function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: Sta
     return (
       <thead>
         <tr className="bg-background border-b-2 border-border">
-          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
+          <th className="px-3 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[44px] min-w-[44px] max-w-[44px] shadow-[inset_-1px_0_0_var(--color-border)]">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={el => { if (el) el.indeterminate = !!(!allSelected && someSelected) }}
+              onChange={onToggleAll}
+              className="rounded border-border text-primary focus:ring-primary/30 cursor-pointer h-3.5 w-3.5"
+              title="Select all chapters"
+            />
+          </th>
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[44px] z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
             Chapter
           </th>
-          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-2px_0_0_var(--color-border)]">
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[188px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-2px_0_0_var(--color-border)]">
             File Name
           </th>
           {stages.map(s => (
@@ -477,16 +519,26 @@ function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: Sta
   return (
     <thead>
       <tr className="bg-background border-b-2 border-border">
-        <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
+        <th className="px-3 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[44px] min-w-[44px] max-w-[44px] shadow-[inset_-1px_0_0_var(--color-border)]">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={el => { if (el) el.indeterminate = !!(!allSelected && someSelected) }}
+            onChange={onToggleAll}
+            className="rounded border-border text-primary focus:ring-primary/30 cursor-pointer h-3.5 w-3.5"
+            title="Select all chapters"
+          />
+        </th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[44px] z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
           Chapter
         </th>
-        <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
+        <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[188px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
           File Name
         </th>
-        <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)]">
+        <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[364px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)]">
           MS Pages
         </th>
-        <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[432px] z-20 bg-background whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)]">
+        <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[476px] z-20 bg-background whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)]">
           CE Pages
         </th>
         {stages.map(s => (
@@ -539,6 +591,7 @@ export function ProjectPlanningPage() {
   const [isReasonModalOpen, setIsReasonModalOpen] = useState(false)
   const [adjustmentReason, setAdjustmentReason] = useState('')
   const [viewingHistory, setViewingHistory] = useState<{ chapter: string; stageName: string; history: StageHistoryEntry[] } | null>(null)
+  const [selectedChapterIds, setSelectedChapterIds] = useState<Set<number>>(new Set())
   const [activeTab, setActiveTab] = useState<'manuscript' | 'art' | 'design'>('manuscript')
   const [isCustomizeStagesOpen, setIsCustomizeStagesOpen] = useState(false)
   const [localSkippedStages, setLocalSkippedStages] = useState<Record<string, string[]>>({})
@@ -765,6 +818,11 @@ export function ProjectPlanningPage() {
     const skippedSet = new Set(skippedList)
     return raw.filter(s => !skippedSet.has(s.stage_name))
   }, [activeWorkflowName, wfStagesMap, localSkippedStages, activeTab])
+
+  const sampleChapterName = useMemo(() => {
+    const fd = project?.file_details as Record<string, unknown> | null
+    return (fd?.sample_chapter as string) || (fd?.sample_chapter_name as string) || null
+  }, [project])
 
   const baseSchedule = useMemo((): StageSchedule[] => {
     if (!project || currentOrderedStages.length === 0) return []
@@ -1026,7 +1084,7 @@ export function ProjectPlanningPage() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   }
 
-  async function handleApprove() {
+  async function handleApprove(targetChaptersParam?: Chapter[]) {
     if (!project || !finalDue) return
 
     // Guard: Final due cannot exceed project due date
@@ -1042,11 +1100,23 @@ export function ProjectPlanningPage() {
       return
     }
 
-    await executeApprove()
+    await executeApprove(undefined, targetChaptersParam)
   }
 
-  async function executeApprove(reason?: string) {
+  async function executeApprove(reason?: string, targetChaptersParam?: Chapter[]) {
     if (!project || !finalDue) return
+
+    // Target chapters to approve: if specified use them, else if selection exists use selection, else all
+    const targetChs = targetChaptersParam || (
+      selectedChapterIds.size > 0
+        ? chapters.filter(c => selectedChapterIds.has(c.id))
+        : chapters
+    )
+
+    if (targetChs.length === 0) {
+      toast.error('No chapters selected to approve.')
+      return
+    }
 
     setApproving(true)
     try {
@@ -1066,17 +1136,18 @@ export function ProjectPlanningPage() {
     const prjCode = project.code || project.project_code
     const wfName = project.workflow_name
     if (prjCode) {
-      chaptersApi.bulkUpdateStatus(prjCode, 'In-progress')
+      // Update only approved chapters to In-progress
+      await Promise.all(targetChs.map(c => chaptersApi.update(c.id, { stage_status: 'In-progress', status: 'In-progress' })))
         .catch(e => console.error('[Planning step 2]', e))
 
-      if (chapters.length > 0) {
+      if (targetChs.length > 0) {
         if (previewComposition) {
-          Promise.all(chapters.map(ch =>
+          Promise.all(targetChs.map(ch =>
             chaptersApi.update(ch.id, { complexity_level: previewComposition })
           )).catch(e => console.error('[Planning step 3]', e))
         }
 
-        const items = chapters.flatMap(ch => {
+        const items = targetChs.flatMap(ch => {
           const chSched = getScheduleForChapter(ch)
           return chSched
             .filter(s => !isStageCompleted(ch, s.stageName))
@@ -1106,7 +1177,7 @@ export function ProjectPlanningPage() {
           toast.error(`Stage details not saved: ${msg}`)
         }
 
-        Promise.all(chapters.map(ch => {
+        Promise.all(targetChs.map(ch => {
           const chSched = getScheduleForChapter(ch)
           const stageSched = ch.stage_name
             ? (chSched.find(s => s.stageName === ch.stage_name) ?? chSched[0])
@@ -1117,19 +1188,16 @@ export function ProjectPlanningPage() {
       }
     }
 
-    toast.success(alreadyApproved ? 'Planning re-approved successfully' : 'Planning approved — project is now Active')
+    toast.success(
+      targetChs.length === chapters.length
+        ? (alreadyApproved ? 'Planning re-approved for all chapters' : 'Planning approved for all chapters — project is now Active')
+        : `Planning approved for ${targetChs.length} chapter(s)`
+    )
     setIsAdjusting(false)
     setIsReasonModalOpen(false)
     setAdjustmentReason('')
-    if (alreadyApproved) {
-      await loadPlanningData({ silent: true })
-    } else {
-      if (project.client_id) {
-        navigate(`/clients/${project.client_id}/projects/${project.id}`)
-      } else {
-        navigate(`/projects/${project.id}`)
-      }
-    }
+    setSelectedChapterIds(new Set())
+    await loadPlanningData({ silent: true })
     setApproving(false)
   }
 
@@ -1193,14 +1261,47 @@ export function ProjectPlanningPage() {
     const chEffectivePages = ch.manuscript_pages != null
       ? ch.manuscript_pages
       : (ch.word_count ? Math.ceil(ch.word_count / 250) : null)
+    const isSample = matchSampleChapter(ch.chapters, sampleChapterName)
+    const isSelected = selectedChapterIds.has(ch.id)
+
     return (
       <tr
         key={ch.id}
-        className="border-b border-border hover:bg-accent transition-colors group bg-card"
+        className={`border-b border-border transition-colors group ${
+          isSample
+            ? 'bg-amber-50/70 hover:bg-amber-100/60'
+            : isSelected
+              ? 'bg-primary/5 hover:bg-primary/10'
+              : 'hover:bg-accent bg-card'
+        }`}
       >
-        <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
-          <div className="flex items-center gap-1.5">
+        <td className={`px-3 py-3 text-center sticky left-0 z-10 whitespace-nowrap w-[44px] min-w-[44px] max-w-[44px] shadow-[inset_-1px_0_0_var(--color-border)] transition-colors ${
+          isSample ? 'bg-amber-50/90' : 'bg-card group-hover:bg-accent'
+        }`}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => {
+              setSelectedChapterIds(prev => {
+                const next = new Set(prev)
+                if (next.has(ch.id)) next.delete(ch.id)
+                else next.add(ch.id)
+                return next
+              })
+            }}
+            className="rounded border-border text-primary focus:ring-primary/30 cursor-pointer h-3.5 w-3.5"
+          />
+        </td>
+        <td className={`px-4 py-3 font-semibold text-text sticky left-[44px] z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] transition-colors ${
+          isSample ? 'bg-amber-50/90' : 'bg-card group-hover:bg-accent'
+        }`}>
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span>{ch.chapters === '00' ? 'Book 00' : ch.chapters === 'FM' ? 'Front matter' : ch.chapters === 'BM' ? 'Back matter' : /^[A-Za-z]$/.test(ch.chapters) ? `Appendix ${ch.chapters}` : /^\d+$/.test(ch.chapters) ? `Chapter ${ch.chapters}` : ch.chapters}</span>
+            {isSample && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shadow-sm" title="Sample Chapter from PO">
+                ★ Sample
+              </span>
+            )}
             {(ch.revision ?? 1) > 1 && (
               <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
                 Rev {ch.revision}
@@ -1208,22 +1309,29 @@ export function ProjectPlanningPage() {
             )}
           </div>
         </td>
-        <td className={`px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors ${activeTab === 'design' ? 'shadow-[inset_-2px_0_0_var(--color-border)]' : 'shadow-[inset_-1px_0_0_var(--color-border)]'
-          }`}>
+        <td className={`px-4 py-3 text-xs text-muted sticky left-[188px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] truncate transition-colors ${
+          activeTab === 'design' ? 'shadow-[inset_-2px_0_0_var(--color-border)]' : 'shadow-[inset_-1px_0_0_var(--color-border)]'
+        } ${isSample ? 'bg-amber-50/90' : 'bg-card group-hover:bg-accent'}`}>
           {ch.chapter_title || '—'}
         </td>
         {activeTab === 'manuscript' && (
           <>
-            <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+            <td className={`px-4 py-3 text-xs text-center sticky left-[364px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text transition-colors ${
+              isSample ? 'bg-amber-50/90' : 'bg-card group-hover:bg-accent'
+            }`}>
               {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
             </td>
-            <td className="px-4 py-3 text-xs text-center sticky left-[432px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+            <td className={`px-4 py-3 text-xs text-center sticky left-[476px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text transition-colors ${
+              isSample ? 'bg-amber-50/90' : 'bg-card group-hover:bg-accent'
+            }`}>
               {ch.word_count != null ? Math.floor(ch.word_count / 250) : '—'}
             </td>
           </>
         )}
         {activeTab === 'art' && (
-          <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+          <td className={`px-4 py-3 text-xs text-center sticky left-[364px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text transition-colors ${
+            isSample ? 'bg-amber-50/90' : 'bg-card group-hover:bg-accent'
+          }`}>
             {ch.art_count != null && ch.art_count > 0 ? ch.art_count : 'no arts'}
           </td>
         )}
@@ -1439,6 +1547,7 @@ export function ProjectPlanningPage() {
               disabled={alreadyApproved && !isAdjusting && unplannedChapters.length === 0}
               onChange={e => setPlanningStartDate(e.target.value || null)}
               className="text-xs bg-surface border border-border rounded-lg px-2.5 h-8 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              title={alreadyApproved && !isAdjusting && unplannedChapters.length > 0 ? "Change start date for pending chapters" : undefined}
             />
           </div>
 
@@ -1528,31 +1637,63 @@ export function ProjectPlanningPage() {
               >
                 Cancel
               </Button>
-              <Button
-                onClick={handleApprove}
-                disabled={isExceedingDueDate || approving || !finalDue}
-                isLoading={approving}
-                size="sm"
-                leftIcon={<CheckCircle2 size={14} />}
-                variant={isExceedingDueDate ? "outline" : "primary"}
-                className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
-                title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
-              >
-                {approving ? "Re-approving…" : "Re-approve Planning"}
-              </Button>
+              {selectedChapterIds.size > 0 && selectedChapterIds.size < chapters.length ? (
+                <Button
+                  onClick={() => handleApprove(chapters.filter(c => selectedChapterIds.has(c.id)))}
+                  disabled={isExceedingDueDate || approving || !finalDue}
+                  isLoading={approving}
+                  size="sm"
+                  variant="primary"
+                  leftIcon={<CheckCircle2 size={14} />}
+                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
+                  title="Re-approve planning only for selected chapter(s)"
+                >
+                  {approving ? "Re-approving…" : `Re-approve Selected (${selectedChapterIds.size})`}
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => handleApprove(chapters)}
+                  disabled={isExceedingDueDate || approving || !finalDue}
+                  isLoading={approving}
+                  size="sm"
+                  leftIcon={<CheckCircle2 size={14} />}
+                  variant={isExceedingDueDate ? "outline" : "primary"}
+                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
+                  title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
+                >
+                  {approving ? "Re-approving…" : "Re-approve Planning"}
+                </Button>
+              )}
             </div>
           ) : (
-            <Button
-              onClick={handleApprove}
-              disabled={isExceedingDueDate || approving || !finalDue || chapters.length === 0}
-              isLoading={approving}
-              size="sm"
-              leftIcon={<CheckCircle2 size={14} />}
-              className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
-              title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
-            >
-              {approving ? "Approving…" : "Approve Planning"}
-            </Button>
+            <div className="flex items-center gap-2">
+              {selectedChapterIds.size > 0 && selectedChapterIds.size < chapters.length ? (
+                <Button
+                  onClick={() => handleApprove(chapters.filter(c => selectedChapterIds.has(c.id)))}
+                  disabled={isExceedingDueDate || approving || !finalDue}
+                  isLoading={approving}
+                  size="sm"
+                  variant="primary"
+                  leftIcon={<CheckCircle2 size={14} />}
+                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
+                  title="Approve planning only for the selected chapter(s)"
+                >
+                  {approving ? "Approving…" : `Approve Selected (${selectedChapterIds.size})`}
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => handleApprove(chapters)}
+                  disabled={isExceedingDueDate || approving || !finalDue || chapters.length === 0}
+                  isLoading={approving}
+                  size="sm"
+                  leftIcon={<CheckCircle2 size={14} />}
+                  className="text-xs whitespace-nowrap flex-shrink-0 h-8 px-3 font-medium"
+                  title={isExceedingDueDate ? `Cannot exceed Project Due Date (${projectDueDateStr})` : undefined}
+                >
+                  {approving ? "Approving…" : "Approve Planning"}
+                </Button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -1610,6 +1751,33 @@ export function ProjectPlanningPage() {
                     {localSkippedStages[activeTab].length} skipped
                   </span>
                 )}
+              </button>
+            )}
+            {sampleChapterName && (
+              <button
+                type="button"
+                onClick={() => {
+                  const sampleCh = activeChapters.find(c => matchSampleChapter(c.chapters, sampleChapterName))
+                  if (sampleCh) {
+                    setSelectedChapterIds(new Set([sampleCh.id]))
+                    toast.info(`Selected Sample Chapter: ${sampleCh.chapters}`)
+                  } else {
+                    toast.warning(`Sample chapter "${sampleChapterName}" not found in this track`)
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-all shadow-sm cursor-pointer"
+                title={`Select sample chapter (${sampleChapterName}) only`}
+              >
+                <span>★ Select Sample Chapter Only ({sampleChapterName})</span>
+              </button>
+            )}
+            {selectedChapterIds.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedChapterIds(new Set())}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted hover:text-text border border-border bg-card hover:bg-surface transition-all cursor-pointer"
+              >
+                Clear Selection ({selectedChapterIds.size})
               </button>
             )}
             {activeTab === 'manuscript' && activeChapters.reduce((sum, ch) => sum + (ch.manuscript_pages || 0), 0) > 0 && (
@@ -1672,11 +1840,24 @@ export function ProjectPlanningPage() {
               </div>
             )}
             <table className="w-full border-collapse text-sm min-w-max">
-              <PlanningTableHeader stages={baseSchedule} activeTab={activeTab} />
+              <PlanningTableHeader
+                stages={baseSchedule}
+                activeTab={activeTab}
+                allSelected={activeChapters.length > 0 && activeChapters.every(ch => selectedChapterIds.has(ch.id))}
+                someSelected={activeChapters.some(ch => selectedChapterIds.has(ch.id))}
+                onToggleAll={() => {
+                  const allSel = activeChapters.every(ch => selectedChapterIds.has(ch.id))
+                  if (allSel) {
+                    setSelectedChapterIds(new Set())
+                  } else {
+                    setSelectedChapterIds(new Set(activeChapters.map(c => c.id)))
+                  }
+                }}
+              />
               <tbody>
                 {activeChapters.filter(ch => !alreadyApproved || plannedChapterNumbers.has(ch.chapters)).length === 0 ? (
                   <tr>
-                    <td colSpan={(activeTab === 'manuscript' ? 4 : activeTab === 'art' ? 3 : 2) + baseSchedule.length} className="px-4 py-16 text-center text-sm text-muted">
+                    <td colSpan={(activeTab === 'manuscript' ? 5 : activeTab === 'art' ? 4 : 3) + baseSchedule.length} className="px-4 py-16 text-center text-sm text-muted">
                       No active chapters found for this track.
                     </td>
                   </tr>
