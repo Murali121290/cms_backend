@@ -8,6 +8,7 @@ from __future__ import annotations
 
 WK_LWW = "wk_lww"
 WK_PROJECT_CHECKLIST = "wk_project_checklist"
+WK_BLF = "wk_blf"
 KENDALL_HUNT = "kendall_hunt"
 ARTECH_HOUSE = "artech_house"
 SPRINGER = "springer"
@@ -17,6 +18,7 @@ UNKNOWN = "unknown"
 TEMPLATE_LABELS = {
     WK_LWW: "Wolters Kluwer / LWW launch form",
     WK_PROJECT_CHECKLIST: "Wolters Kluwer project information checklist",
+    WK_BLF: "Wolters Kluwer Book Launch Form (BLF)",
     KENDALL_HUNT: "Kendall Hunt prepress RFQ",
     ARTECH_HOUSE: "Artech House",
     SPRINGER: "Springer Publishing Assignment Memo",
@@ -41,12 +43,16 @@ def detect_xlsx_template(filename: str, sheet_names: list[str], sample_text: str
     sheet_names_lower = [s.casefold() for s in sheet_names]
 
     # 1. Content-based detection (works for any file name)
+    if "book launch form" in text_lower or ("blf" in sheet_names_lower and "wolters kluwer health" in text_lower):
+        return WK_BLF
     if "business expert press" in text_lower or ("specs" in sheet_names_lower and any(kw in text_lower for kw in ("target final files posted", "bep collection", "collection editor"))):
         return BEP
     if "artech house" in text_lower or "transmittal info" in sheet_names_lower or "frontmatter" in sheet_names_lower:
         return ARTECH_HOUSE
 
     # 2. Filename fallback (for backwards compatibility)
+    if "blf" in fn_lower:
+        return WK_BLF
     if "bep" in fn_lower:
         return BEP
     if "transmittal" in fn_lower or "artech" in fn_lower:

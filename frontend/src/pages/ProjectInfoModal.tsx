@@ -35,12 +35,12 @@ function InfoField({ label, value }: { label: string; value: string | number | n
 
 const PROJECT_TYPE_LABEL_MAP: Record<string, string> = {
   'TX': 'Text-TX',
-  'WB': 'Whole Book-WB',
+  'FB': 'Full Book-FB',
   'ANC': 'Ancillary content - ANC',
   'PPT': 'PPT',
   'ART': 'ART',
   'Text-TX': 'Text-TX',
-  'Whole Book-WB': 'Whole Book-WB',
+  'Full Book-FB': 'Full Book-FB',
   'Ancillary content - ANC': 'Ancillary content - ANC',
 }
 
@@ -306,6 +306,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
               options={[
                 { value: 'yes', label: 'Yes' },
                 { value: 'no', label: 'No' },
+                { value: 'other', label: 'Other' },
               ]}
               placeholder="Select alt text"
             />
@@ -331,7 +332,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
               onChange={e => set('project_type', e.target.value)}
               options={[
                 { value: 'TX', label: 'Text-TX' },
-                { value: 'WB', label: 'Whole Book-WB' },
+                { value: 'FB', label: 'Full Book-FB' },
                 { value: 'ANC', label: 'Ancillary content - ANC' },
                 { value: 'PPT', label: 'PPT' },
                 { value: 'ART', label: 'ART' },
@@ -403,7 +404,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         <InfoField label="Chapter Count" value={project.chapter_count} />
 
         {/* ── Extracted PO Metadata (if available) ── */}
-        {((project.file_details as any)?.author_name || (project.file_details as any)?.author_names?.length || (project.file_details as any)?.ebook_isbn || (project.file_details as any)?.publisher) && (
+        {((project.file_details as any)?.author_name || (project.file_details as any)?.author_names?.length || (project.file_details as any)?.sample_chapter || (project.file_details as any)?.ebook_isbn || (project.file_details as any)?.publisher) && (
           <>
             <Section title="Extracted PO Details" icon={BookOpen} />
             {((project.file_details as any)?.author_name || (project.file_details as any)?.author_names?.length) && (
@@ -411,6 +412,9 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
                 label="Author"
                 value={(project.file_details as any)?.author_name || (Array.isArray((project.file_details as any)?.author_names) ? (project.file_details as any)?.author_names.join(', ') : (project.file_details as any)?.author_names)}
               />
+            )}
+            {(project.file_details as any)?.sample_chapter && (
+              <InfoField label="Sample Chapter" value={(project.file_details as any)?.sample_chapter} />
             )}
             {(project.file_details as any)?.ebook_isbn && (
               <InfoField label="E-Book ISBN" value={(project.file_details as any)?.ebook_isbn} />

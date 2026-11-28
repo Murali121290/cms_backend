@@ -32,6 +32,7 @@ function formatBytes(bytes: number): string {
 // Mirrors app/domains/projects/po_intake/detect.py TEMPLATE_LABELS
 const PO_TEMPLATE_LABELS: Record<string, string> = {
   wk_lww: 'WK / LWW launch form',
+  wk_blf: 'Wolters Kluwer Book Launch Form (BLF)',
   kendall_hunt: 'Kendall Hunt RFQ',
   artech_house: 'Artech House',
   springer: 'Springer Publishing Assignment Memo',
@@ -40,6 +41,7 @@ const PO_TEMPLATE_LABELS: Record<string, string> = {
 
 const PO_VENDOR_HINTS: Record<string, string> = {
   wk_lww: 'Wolters Kluwer',
+  wk_blf: 'Wolters Kluwer',
   kendall_hunt: 'Kendall Hunt',
   artech_house: 'Artech House',
   springer: 'Springer Publishing',
@@ -47,7 +49,7 @@ const PO_VENDOR_HINTS: Record<string, string> = {
 
 const PROJECT_TYPE_OPTIONS = [
   { value: 'TX', label: 'Text-TX' },
-  { value: 'WB', label: 'Whole Book-WB' },
+  { value: 'FB', label: 'Full Book-FB' },
   { value: 'ANC', label: 'Ancillary content - ANC' },
   { value: 'PPT', label: 'PPT' },
   { value: 'ART', label: 'ART' },
@@ -519,6 +521,16 @@ export function CreateProjectPage() {
 
     result.warnings.forEach(w => toast.error(w))
 
+    if (result.template_detected === 'wk_blf') {
+      setForm(f => ({
+        ...f,
+        billing_type: f.billing_type || 'full',
+        billing_location: f.billing_location || 'S4Carlisle Publishing Services-Singapore',
+        accessibility: f.accessibility || 'yes',
+        sales_person: f.sales_person || '550',
+      }))
+    }
+
     const vendorHint = PO_VENDOR_HINTS[result.template_detected]
     if (vendorHint) {
       setForm(f => {
@@ -557,7 +569,9 @@ export function CreateProjectPage() {
   const pmUsers = useMemo(() => pmCandidates(users), [users])
 
   const salesUsers = useMemo(() => users.filter(u => {
-    if (!u.active_status || !u.role) return false
+    if (!u.active_status) return false
+    if (u.user_name === '550' || `${u.first_name || ''} ${u.last_name || ''}`.toLowerCase().includes('nandakumar')) return true
+    if (!u.role) return false
     const r = u.role.toLowerCase().replace(/[\s-]/g, '')
     return r.includes('sales')
   }), [users])
@@ -683,8 +697,12 @@ export function CreateProjectPage() {
       if (form.alt_text) formData.append('alt_text', form.alt_text)
       if (form.accessibility) formData.append('accessibility', form.accessibility)
       if (form.due_date) formData.append('due_date', form.due_date)
-      if (poResult || authorName.trim()) {
-        const fileDetails = { ...(poResult?.extras ?? {}), author_name: authorName.trim() || undefined }
+      if (poResult || authorName.trim() || form.sample_chapter?.trim()) {
+        const fileDetails = {
+          ...(poResult?.extras ?? {}),
+          author_name: authorName.trim() || undefined,
+          sample_chapter: form.sample_chapter?.trim() || undefined,
+        }
         formData.append('extracted_po_data', JSON.stringify(fileDetails))
       }
       if (poFile) formData.append('po_file', poFile)
@@ -952,6 +970,17 @@ export function CreateProjectPage() {
               hint="Not a core project field — saved alongside the other extracted PO details"
             />
 
+            {/* Sample Chapter (for CE & Design) */}
+            <div className="col-span-2">
+              <Input
+                label="Sample Chapter"
+                value={form.sample_chapter ?? ''}
+                onChange={e => set('sample_chapter', e.target.value)}
+                placeholder="e.g. Chapter 18"
+                hint="Sample chapter for CE and Design — auto-filled from PO when available"
+              />
+            </div>
+
             {/* ── Publication Details ─────────────────── */}
             <Section title="Publication Details" icon={Layers} />
 
@@ -1032,6 +1061,7 @@ export function CreateProjectPage() {
               options={[
                 { value: 'yes', label: 'Yes' },
                 { value: 'no', label: 'No' },
+                { value: 'other', label: 'Other' },
               ]}
               placeholder="Select alt text"
             />
