@@ -11,7 +11,15 @@ import openpyxl
 import pdfplumber
 
 from app.domains.projects.po_intake import detect
-from app.domains.projects.po_intake.parsers import artech_house, bep, kendall_hunt, springer, wk_lww, wk_project_checklist
+from app.domains.projects.po_intake.parsers import (
+    artech_house,
+    bep,
+    kendall_hunt,
+    springer,
+    wk_blf,
+    wk_lww,
+    wk_project_checklist,
+)
 
 _UNRECOGNIZED_WARNING = "Unrecognized PO template — please fill in the form manually."
 
@@ -55,12 +63,12 @@ def extract_po(file_path: str, filename: str) -> dict:
         try:
             wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
             sheet_names = wb.sheetnames
-            # Sample text from first 2 sheets / first 30 rows to detect vendor content
+            # Sample text from first 2 sheets / first 50 rows to detect vendor content
             sample_words: list[str] = []
             for sname in sheet_names[:2]:
                 ws = wb[sname]
                 for r_idx, row in enumerate(ws.iter_rows(values_only=True)):
-                    if r_idx > 30:
+                    if r_idx > 50:
                         break
                     for val in row:
                         if val is not None:
@@ -70,11 +78,16 @@ def extract_po(file_path: str, filename: str) -> dict:
             return _empty_result(detect.UNKNOWN, [f"Could not read spreadsheet: {exc}"])
 
         template = detect.detect_xlsx_template(filename, sheet_names, sample_text=sample_text)
-        if template not in (detect.ARTECH_HOUSE, detect.BEP):
+        if template not in (detect.ARTECH_HOUSE, detect.BEP, detect.WK_BLF):
             return _empty_result(detect.UNKNOWN)
 
         try:
-            parser = artech_house if template == detect.ARTECH_HOUSE else bep
+            if template == detect.WK_BLF:
+                parser = wk_blf
+            elif template == detect.ARTECH_HOUSE:
+                parser = artech_house
+            else:
+                parser = bep
             parsed = parser.parse(file_path)
         except Exception as exc:
             return _empty_result(template, [f"Recognized as {detect.TEMPLATE_LABELS[template]} but failed to parse it: {exc}"])

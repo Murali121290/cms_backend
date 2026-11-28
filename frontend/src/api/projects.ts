@@ -113,6 +113,7 @@ export interface ProjectCreate {
   accessibility?: string | null
   due_date?: string | null
   xml_standard?: string | null
+  sample_chapter?: string | null
 }
 
 export interface POExtractionResponse {

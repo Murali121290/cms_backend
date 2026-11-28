@@ -37,12 +37,12 @@ function clientDisplayName(c: Client): string {
 
 const PROJECT_TYPE_LABEL_MAP: Record<string, string> = {
   TX: 'Text-TX',
-  WB: 'Whole Book-WB',
+  FB: 'Full Book-FB',
   ANC: 'Ancillary content - ANC',
   PPT: 'PPT',
   ART: 'ART',
   'Text-TX': 'Text-TX',
-  'Whole Book-WB': 'Whole Book-WB',
+  'Full Book-FB': 'Full Book-FB',
   'Ancillary content - ANC': 'Ancillary content - ANC',
 }
 
@@ -208,7 +208,7 @@ function PremiumPmDropdown({
               <span className="group-hover:translate-x-0.5 transition-transform duration-200">— Unassigned —</span>
             </button>
           </div>
-          
+
           <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
             {filteredOptions.length === 0 ? (
               <div className="text-[11px] text-muted-foreground px-2.5 py-3 text-center">No results found</div>
@@ -216,25 +216,23 @@ function PremiumPmDropdown({
               filteredOptions.map(u => {
                 const label = getUserDisplayName(u.user_name, pmUsers)
                 const isSelected = value === u.user_name
-                
+
                 return (
                   <button
                     key={u.id}
                     type="button"
-                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                      isSelected 
-                        ? 'bg-primary/10 text-primary font-medium' 
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                        ? 'bg-primary/10 text-primary font-medium'
                         : 'text-foreground hover:bg-muted/40'
-                    }`}
+                      }`}
                     onClick={(e) => {
                       e.stopPropagation()
                       setIsOpen(false)
                       if (value !== u.user_name) onChange(u.user_name)
                     }}
                   >
-                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
-                      isSelected ? 'text-primary' : 'text-transparent'
-                    }`}>
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                      }`}>
                       {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
                       {!isSelected && <UserIcon size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
                     </div>
@@ -279,9 +277,9 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
   useEffect(() => {
     if (!project.project_code) { setChLoading(false); return }
     chaptersApi.getByProject(project.project_code)
-      .then(chs => setChapters((chs || []).filter(c => 
-        c.chapters !== 'Design' && 
-        c.chapters !== 'CE support' && 
+      .then(chs => setChapters((chs || []).filter(c =>
+        c.chapters !== 'Design' &&
+        c.chapters !== 'CE support' &&
         !c.chapters.toLowerCase().includes('art')
       )))
       .catch(() => { })
@@ -527,8 +525,8 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
             onClick={e => { e.stopPropagation(); toggleFastTrack() }}
             disabled={ftLoading}
             className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded-full border transition-colors disabled:opacity-60 ${isFastTrack
-                ? 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200'
-                : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200 dark:bg-surface dark:text-muted dark:border-border'
+              ? 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200'
+              : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200 dark:bg-surface dark:text-muted dark:border-border'
               }`}
           >
             {ftLoading
@@ -591,12 +589,12 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
             Chapters
           </span>
           <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${total === 0
-              ? 'bg-surface text-muted border-border'
-              : pct === 100
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : pct > 0
-                  ? 'bg-primary/8 text-primary border-primary/20'
-                  : 'bg-surface text-muted border-border'
+            ? 'bg-surface text-muted border-border'
+            : pct === 100
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              : pct > 0
+                ? 'bg-primary/8 text-primary border-primary/20'
+                : 'bg-surface text-muted border-border'
             }`}>
             {completed}
             <span className="font-normal opacity-60">/</span>
@@ -649,11 +647,10 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
                       <span
                         key={idx}
                         title={`Manuscript - ${st.stageName}:\n${tooltipText}`}
-                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${
-                          hasOverdue
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${hasOverdue
                             ? 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/25 hover:bg-red-500/15'
                             : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/15'
-                        }`}
+                          }`}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasOverdue ? 'bg-red-500' : 'bg-amber-500'}`} />
                         <span>{badgeLabel}</span>
@@ -685,11 +682,10 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
                       <span
                         key={idx}
                         title={`Art Track - ${st.stageName}:\n${tooltipText}`}
-                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${
-                          hasOverdue
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-help transition-colors ${hasOverdue
                             ? 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/25 hover:bg-orange-500/15'
                             : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/15'
-                        }`}
+                          }`}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasOverdue ? 'bg-orange-500' : 'bg-amber-500'}`} />
                         <span>{badgeLabel}</span>
@@ -931,7 +927,7 @@ export function ClientProjects() {
               if (updated?.id) {
                 setProjects(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))
               }
-            }).catch(() => {})
+            }).catch(() => { })
           }}
         />
       )}
