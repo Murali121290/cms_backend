@@ -84,6 +84,7 @@ function validate(f: Partial<ProjectCreate>): Record<string, string> {
   if (!f.workflow_name?.trim()) e.workflow_name = 'Workflow is required'
   if (!f.xml_standard?.trim()) e.xml_standard = 'XML Standard is required'
   if (!f.copyright_year) e.copyright_year = 'Copyright Year is required'
+  if (!f.due_date?.trim()) e.due_date = 'Due Date is required'
   // if (!f.isbn_no?.trim()) {
   //   e.isbn_no = 'ISBN is required'
   // } else if (!/^[0-9]{9}[0-9X]$|^[0-9]{13}$/i.test(f.isbn_no.trim())) {
@@ -1078,6 +1079,8 @@ export function CreateProjectPage() {
             <Input
               label="Due Date"
               type="date"
+              required
+              error={errors.due_date}
               value={form.due_date ?? ''}
               onChange={e => set('due_date', e.target.value || null)}
             />
